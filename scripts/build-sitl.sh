@@ -23,6 +23,8 @@ fi
 # The Makefile initialises submodules on demand; under -j that races on .git/config, so do it first.
 rm -f .git/config.lock
 git submodule update --init --recursive --depth 1
+# Betaflight's make does not rebuild objects after target.h changes; patches change it, so build clean.
+rm -rf obj/main/SITL
 make TARGET=SITL EXTRA_FLAGS="$FLAGS" -j"$(nproc)"
 echo "commit: $(git rev-parse HEAD)"
 ls -l obj/main/betaflight_SITL.elf

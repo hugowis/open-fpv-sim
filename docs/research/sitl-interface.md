@@ -98,7 +98,52 @@ Steady disarmed run on the patched build: 40 s simulated, 0 misses, round trip p
 - The first status line after the first packet reads `t=10001ms` because of the fixed 10 s time base.
 
 ## 5. Feature build (CRSF, ESC sensor, OSD, VTX, Blackbox)
-<filled in Task 5>
+
+The single patch `third_party/betaflight/ofs-sitl.patch` (7 files, +235/−14) now contains the lockstep changes (§4) and the feature changes below. `scripts/build-sitl.sh` builds it by default, always from a clean object directory: Betaflight's make does **not** rebuild objects after `target.h` changes, and stale objects briefly confused these results. Generator scripts: `spikes/m0/patch_ext_time.py`, `spikes/m0/patch_features.py`. Re-verified on the final build: §3 conventions 8/8, §4 reproducibility 3000/3000 bit-identical at 6.4–6.7× real time.
+
+### Results (`spikes/m0/t5_features.py`, clean build)
+
+| Feature | Answer | Evidence |
+|---|---|---|
+| CRSF receiver | **Yes** | CRSF RC frames (500 Hz) written to UART2 (tcp:5762) → `MSP_RC` = 1600 / 1400 / 1500 / 1000 (MSP order roll, pitch, yaw, throttle) for sent AETR 1600 / 1400 / 1000 / 1500; arming via CRSF AUX1 works (no arming-disable flags). |
+| CRSF telemetry | **No** | `telemetry/crsf.c` uses ARM-only `ATOMIC_BLOCK`/`BASEPRI`; SITL excludes it in `SITL.mk`. Needs a SITL atomic-block shim → M2 work if the HUD should show Betaflight's CRSF telemetry. Battery/RPM/link data are available to the simulator anyway (it produces them). |
+| ESC sensor (battery V/I, RPM) | **Yes** | KISS 10-byte frames (CRC-8 poly 0x07) on UART3 (tcp:5763) → `MSP_BATTERY_STATE` 24.59 V for 24.6 V sent, 6 cells detected; `MSP_MOTOR_TELEMETRY` RPM 1714 = 12 000 eRPM / 7 pole pairs. **This answers spec risk 2 without a sensor-packet patch.** |
+| MSP DisplayPort (OSD) | **Yes** | UART4 (tcp:5764) with `serial 3 131073` (VTX_MSP + MSP) and `osd_displayport_device = MSP` → 457 `MSP_DISPLAYPORT` (182) frames in ~1.5 s (clear, write-string, draw subcommands). Needs `USE_CMS` + `USE_OSD_OVER_MSP_DISPLAYPORT` (re-enabled). |
+| SmartAudio | **Partial** | UART5 (tcp:5765) receives Betaflight's SmartAudio `GET_SETTINGS` requests (`aa 55 03 00 9f`, repeated); `MSP_VTX_CONFIG` reports a SmartAudio device. Replying with a SmartAudio settings frame was not attempted (M3). |
+| Blackbox | **Yes** | `set blackbox_device = VIRTUAL` writes `LOG00001.BFL` in SITL's working directory when armed (20 KB for ~2 s), standard header (`H Product:Blackbox flight data recorder…`), so it should open in Blackbox Explorer. |
+
+### Changes the feature build needed (all in the patch)
+- `target.h`: stop `#undef`-ing `USE_SERIALRX`, `USE_SERIALRX_CRSF`, `USE_OSD`, `USE_CMS`, `USE_VTX_COMMON`, `USE_VTX_CONTROL`, `USE_VTX_SMARTAUDIO`, `USE_VTX_TRAMP`; define `USE_ESC_SENSOR`, `USE_MSP_DISPLAYPORT`, `USE_OSD_OVER_MSP_DISPLAYPORT`.
+- `common_post.h`: keep `USE_ESC_SENSOR` without `USE_DSHOT` in `SIMULATOR_BUILD`. `sitl.c` provides `erpmToRpm`, `useDshotTelemetry`, `initDshotTelemetry` (same math as `drivers/dshot.c`), plus `microsISR()`.
+- `serial_tcp.c`:
+  - **Interrupt-driven RX drivers never saw TCP bytes.** `tcpDataIn` only filled the buffer, but CRSF and the ESC sensor register an `rxCallback`, which is now called per byte as a UART ISR would.
+  - `serialSetBaudRate`/`setMode` were NULL, and **SmartAudio crashed SITL** calling them; they're now no-ops.
+- `osd.c`: **upstream bug.** `osdGetBlackboxStatusString` divides by `storageTotal`, which is 0 for the VIRTUAL device. The compiler emits a trap, so SITL died with SIGILL on the post-disarm stats screen. Guarded. Found via the kernel's trap IP and `objdump -l`; worth sending upstream.
+
+### Working CLI config (`spikes/m0/feature.diff`)
+```
+feature -GPS
+feature RX_SERIAL
+feature ESC_SENSOR
+feature OSD
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180
+serial 1 64 115200 57600 0 115200        # UART2 tcp:5762  CRSF receiver
+serial 2 1024 115200 57600 0 115200      # UART3 tcp:5763  ESC sensor (KISS)
+serial 3 131073 115200 57600 0 115200    # UART4 tcp:5764  MSP + VTX_MSP (DisplayPort)
+serial 4 2048 115200 57600 0 115200      # UART5 tcp:5765  SmartAudio
+set serialrx_provider = CRSF
+set battery_meter = ESC
+set current_meter = ESC
+set osd_displayport_device = MSP
+set blackbox_device = VIRTUAL
+```
+(`displayport_msp_serial` no longer exists in 2026.6; the DisplayPort port is the first one with both VTX_MSP and MSP functions.)
+
+### Caveat for determinism (M2/M3)
+TCP UART bytes arrive on SITL's TCP thread asynchronously to the lockstep tick, so CRSF, ESC-sensor and SmartAudio traffic over TCP isn't bit-reproducible. M1 doesn't use them: RC rides in the state packet and the battery comes from the simulator's own models. When M2 moves RC onto CRSF, either carry UART bytes inside the state datagram (applied on the state thread before the tick, the same technique as RC in §4) or accept non-bit-exact runs in that mode.
 
 ## 6. Windows / WSL2
 <filled in Task 6>

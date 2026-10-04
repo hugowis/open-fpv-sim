@@ -1,3 +1,65 @@
+diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
+index a922cc7..a01633c 100644
+--- a/src/main/drivers/serial_tcp.c
++++ b/src/main/drivers/serial_tcp.c
+@@ -255,6 +255,13 @@ void tcpDataOut(tcpPort_t *instance)
+ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+ {
+     tcpPort_t *s = (tcpPort_t *)instance;
++    if (s->port.rxCallback) {
++        while (size--) {
++            s->port.rxCallback(*(ch++), s->port.rxCallbackData);
++        }
++        return;
++    }
++
+     pthread_mutex_lock(&s->rxLock);
+ 
+     while (size--) {
+@@ -270,14 +277,26 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+ //    printf("\n");
+ }
+ 
++// Baud rate and mode are meaningless over TCP, but drivers such as SmartAudio call these
++// unconditionally (a NULL entry crashed SITL), so accept and record them.
++static void tcpSetBaudRate(serialPort_t *instance, uint32_t baudRate)
++{
++    instance->baudRate = baudRate;
++}
++
++static void tcpSetMode(serialPort_t *instance, portMode_e mode)
++{
++    instance->mode = mode;
++}
++
+ static const struct serialPortVTable tcpVTable = {
+         .serialWrite = tcpWrite,
+         .serialTotalRxWaiting = tcpTotalRxBytesWaiting,
+         .serialTotalTxFree = tcpTotalTxBytesFree,
+         .serialRead = tcpRead,
+-        .serialSetBaudRate = NULL,
++        .serialSetBaudRate = tcpSetBaudRate,
+         .isSerialTransmitBufferEmpty = isTcpTransmitBufferEmpty,
+-        .setMode = NULL,
++        .setMode = tcpSetMode,
+         .setCtrlLineStateCb = NULL,
+         .setBaudRateCb = NULL,
+         .writeBuf = NULL,
+diff --git a/src/main/osd/osd.c b/src/main/osd/osd.c
+index c4d877b..bcf3138 100644
+--- a/src/main/osd/osd.c
++++ b/src/main/osd/osd.c
+@@ -777,7 +777,9 @@ static void osdGetBlackboxStatusString(char * buff)
+         break;
+     }
+ 
+-    if (storageDeviceIsWorking) {
++    if (storageDeviceIsWorking && storageTotal == 0) {
++        tfp_sprintf(buff, "OK");
++    } else if (storageDeviceIsWorking) {
+         const uint16_t storageUsedPercent = (storageUsed * 100) / storageTotal;
+         tfp_sprintf(buff, "%d%%", storageUsedPercent);
+     } else {
 diff --git a/src/main/scheduler/scheduler.c b/src/main/scheduler/scheduler.c
 index eace67b..9720a44 100644
 --- a/src/main/scheduler/scheduler.c
@@ -53,6 +115,19 @@ index eace67b..9720a44 100644
  #if defined(UNIT_TEST)
      readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);
      UNUSED(taskExecutionTimeUs);
+diff --git a/src/main/target/common_post.h b/src/main/target/common_post.h
+index 1bdd7fd..2c83972 100644
+--- a/src/main/target/common_post.h
++++ b/src/main/target/common_post.h
+@@ -299,7 +299,7 @@
+ #define USE_VTX_RTC6705
+ #endif
+ 
+-#ifndef USE_DSHOT
++#if !defined(USE_DSHOT) && !defined(SIMULATOR_BUILD)  // SITL: ESC telemetry is simulated over a TCP UART
+ #undef USE_ESC_SENSOR
+ #endif
+ 
 diff --git a/src/platform/SIMULATOR/include/platform/platform.h b/src/platform/SIMULATOR/include/platform/platform.h
 index 3759c26..4a82321 100644
 --- a/src/platform/SIMULATOR/include/platform/platform.h
@@ -70,7 +145,7 @@ index 3759c26..4a82321 100644
  #define GYRO_COUNT 1 // 1 Gyro
  
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..a48eb1d 100644
+index ee216ef..a40ee71 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -101,6 +101,39 @@ static bool fdm_received = false;
@@ -233,7 +308,37 @@ index ee216ef..a48eb1d 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -760,6 +857,12 @@ static void microsleep(uint32_t usec)
+@@ -720,6 +817,29 @@ uint32_t micros(void)
+     return micros64() & 0xFFFFFFFF;
+ }
+ 
++uint32_t microsISR(void)  // used by serial RX drivers (e.g. CRSF frame timing)
++{
++    return micros();
++}
++
++#if defined(USE_ESC_SENSOR) && !defined(USE_DSHOT)
++// ESC telemetry without DShot: the simulator streams KISS telemetry frames to the ESC sensor UART.
++// These stand in for the helpers in drivers/dshot.c (compiled only with USE_DSHOT); same math.
++bool useDshotTelemetry = false;
++static float sitlErpmToHz = 0.0f;
++
++void initDshotTelemetry(const timeUs_t looptimeUs)
++{
++    UNUSED(looptimeUs);
++    sitlErpmToHz = 100.0f / SECONDS_PER_MINUTE / (motorConfig()->motorPoleCount / 2.0f);  // ERPM_PER_LSB = 100
++}
++
++float erpmToRpm(uint32_t erpm)
++{
++    return erpm * sitlErpmToHz * SECONDS_PER_MINUTE;
++}
++#endif
++
+ uint32_t millis(void)
+ {
+     return millis64() & 0xFFFFFFFF;
+@@ -760,6 +880,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -246,7 +351,7 @@ index ee216ef..a48eb1d 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +873,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +896,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -259,7 +364,7 @@ index ee216ef..a48eb1d 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -874,10 +983,41 @@ static void pwmCompleteMotorUpdate(void)
+@@ -874,10 +1006,41 @@ static void pwmCompleteMotorUpdate(void)
  
      // get one "fdm_packet" can only send one "servo_packet"!!
      if (pthread_mutex_trylock(&updateLock) != 0) return;
@@ -301,3 +406,62 @@ index ee216ef..a48eb1d 100644
  void servoWrite(uint8_t index, float value)
  {
      servosPwm[index] = value;
+diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
+index 69d3250..b30809d 100644
+--- a/src/platform/SIMULATOR/target/SITL/target.h
++++ b/src/platform/SIMULATOR/target/SITL/target.h
+@@ -135,11 +135,8 @@
+ #undef USE_TELEMETRY_LTM
+ #undef USE_ADC
+ #undef USE_VCP
+-#undef USE_OSD
+ #undef USE_RX_PPM
+ #undef USE_RX_PWM
+-#undef USE_SERIALRX
+-#undef USE_SERIALRX_CRSF
+ #undef USE_SERIALRX_GHST
+ #undef USE_SERIALRX_IBUS
+ #undef USE_SERIALRX_SBUS
+@@ -152,17 +149,12 @@
+ #undef USE_TELEMETRY_HOTT
+ #undef USE_TELEMETRY_SMARTPORT
+ #undef USE_RESOURCE_MGMT
+-#undef USE_CMS
+ #undef USE_TELEMETRY_CRSF
+ #undef USE_TELEMETRY_GHST
+ #undef USE_TELEMETRY_IBUS
+ #undef USE_TELEMETRY_JETIEXBUS
+ #undef USE_TELEMETRY_SRXL
+ #undef USE_SERIALRX_JETIEXBUS
+-#undef USE_VTX_COMMON
+-#undef USE_VTX_CONTROL
+-#undef USE_VTX_SMARTAUDIO
+-#undef USE_VTX_TRAMP
+ #undef USE_VTX_MSP
+ #undef USE_CAMERA_CONTROL
+ #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
+@@ -171,6 +163,24 @@
+ #undef USE_I2C
+ #undef USE_SPI
+ 
++// Open FPV Sim: peripherals simulated over TCP UARTs (CRSF receiver, ESC telemetry, MSP DisplayPort OSD, VTX control)
++#define USE_SERIALRX
++#define USE_SERIALRX_CRSF
++// USE_TELEMETRY_CRSF stays undefined: telemetry/crsf.c needs an ATOMIC_BLOCK shim for SITL (future work)
++#ifndef USE_ESC_SENSOR
++#define USE_ESC_SENSOR
++#endif
++#define USE_OSD
++#ifndef USE_MSP_DISPLAYPORT
++#define USE_MSP_DISPLAYPORT
++#endif
++#define USE_CMS
++#define USE_OSD_OVER_MSP_DISPLAYPORT
++#define USE_VTX_COMMON
++#define USE_VTX_CONTROL
++#define USE_VTX_SMARTAUDIO
++#define USE_VTX_TRAMP
++
+ #define TARGET_FLASH_SIZE 2048
+ 
+ #define DEFIO_NO_PORTS   // suppress 'no pins defined' warning
