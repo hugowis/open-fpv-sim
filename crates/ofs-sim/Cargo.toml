@@ -1,0 +1,18 @@
+[package]
+name = "ofs-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ofs-core.workspace = true
+ofs-physics.workspace = true
+ofs-electrical.workspace = true
+ofs-sensors.workspace = true
+ofs-config.workspace = true
+ofs-fc.workspace = true
+glam.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
