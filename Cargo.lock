@@ -42,6 +42,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofs-electrical"
+version = "0.1.0"
+dependencies = [
+ "ofs-core",
+]
+
+[[package]]
 name = "ofs-physics"
 version = "0.1.0"
 dependencies = [
