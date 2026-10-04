@@ -64,7 +64,38 @@ set small_angle = 180
 ```
 
 ## 4. Timing and lockstep
-<filled in Task 4>
+
+### Summary
+**Stock SITL cannot run in lockstep. `GYROPID_SYNC` alone doesn't fix it. A ~170-line patch (`third_party/betaflight/ofs-sitl.patch`, enabled with `-DENABLE_SIMULATOR_EXTERNAL_TIME=1`) makes it exact:** every state packet gets exactly one motor reply, at 6–7× real time, and two runs with the same inputs produce bit-identical motor outputs.
+
+### Measurements (`spikes/m0/t4_lockstep.py`)
+Each run boots for 5.5 s and arms for 1 s. It then records 3 s of motor outputs under a 3 Hz gyro sinusoid plus a 1 Hz roll-stick sinusoid at 50 % throttle. Two fresh runs from the same `eeprom.bin` are compared. WSL2, 24 threads, Python harness.
+
+| Build | Exchange | RC transport | Reply ratio | Real-time factor | Identical steps | Max diff |
+|---|---|---|---|---|---|---|
+| stock | 1 kHz | separate (9004) | 1.0 / 0.999 | 0.20–0.26 | 1 / 3000 | 0.361 |
+| `GYROPID_SYNC` only | 1 kHz | separate | ~0.98 | ~0.05 (p50 12 ms/exchange) | not measured | — |
+| **patched** (final) | 1 kHz | **in state packet** | 1.0 | **6.0–6.7** | **3000 / 3000** | **0** |
+| patched (final) | 1 kHz | separate (9004) | 1.0 | 6.2–6.7 | 2124 / 3000 | 0.004 |
+| patched, `-DVIRTUAL_GYRO_SAMPLE_RATE_HZ=8000` | 8 kHz | in state packet | 1.0 | 0.80 (harness-bound) | 24000 / 24000 | 0 |
+
+Steady disarmed run on the patched build: 40 s simulated, 0 misses, round trip p50 0.15 ms, p99 0.25 ms.
+
+### Root causes found (each fixed in the patch)
+1. **SITL's clock is wall time × `simRate`**, and `simRate` is re-estimated from packet spacing. Under request/response pacing it collapses: 3.0 s simulated left SITL's clock at about 0.66 s. → After the first packet, `micros()`/`millis()` follow the packet timestamps, starting from a **fixed** 10 s base (a wall-derived offset made task phases differ between runs). `delay()`/`delayMicroseconds()` sleep in real time, so they can never wait on frozen time.
+2. **The scheduler waits for a cycle-counter target** before running gyro/filter/PID. With frozen time, a target that lands inside the next packet interval is never reached: a deadlock whose onset depends on phase. It was root-caused with a `SIGUSR1` backtrace; the main thread was idling in `run()`. The same frozen budget starved the RX and MSP tasks (`RXLOSS`, dropped MSP connections). → In external-time mode, gyro, filter and PID run **exactly once per state packet**, and the non-realtime tasks always get a full gyro period of budget.
+3. **The motor reply was sent from inside the PID task**, before the tick's other tasks (RX and so on) had run. The simulator's next packet could then advance time mid-tick, shifting when stick input took effect by a few ticks. → The reply is queued and sent from a **scheduler-idle hook**, once every task due at the current instant has run. The idle hook then waits on a condition variable (1 ms bound) for the next packet, and `RUN_LOOP_DELAY_US` is 0, so there's no per-pass sleep.
+4. **RC arrives on its own UDP thread** and races the state packet by up to a tick. → The state port also accepts **`fdm_packet` + `rc_packet` in one 184-byte datagram**; the RC is applied on the state thread before the gyro tick. Separate RC on 9004 still works but isn't bit-reproducible.
+5. **stdout is block-buffered** when piped, so a supervisor sees stale logs and loses them on kill. → `setvbuf(stdout, _IOLBF)` at startup in external-time mode.
+
+### Consequences for M1–M3
+- **Build:** `bash scripts/build-sitl.sh` now builds the patched lockstep binary by default (`OFS_SITL_PATCH=none` builds stock).
+- **Exchange rate must equal Betaflight's gyro rate:** one packet = one gyro sample. The virtual gyro defaults to 1 kHz (`VIRTUAL_GYRO_SAMPLE_RATE_HZ`). M1's `exchange_hz = 1000` matches the default build; an 8 kHz build is possible but about 8× more exchanges.
+- **Protocol:** send one 184-byte datagram (`fdm_packet` ‖ `rc_packet`) to UDP 9003 per exchange; read one 16-byte `servo_packet` from 9002. Don't send to 9004.
+- **Determinism with SITL is achievable:** the spec's "identical logs" can include firmware runs on the patched build (simulator side must be deterministic too).
+- **MSP is only serviced while simulated time advances.** Harnesses and the Configurator need the simulation stepping (real-time mode in M2) while they talk to it. A paused simulation freezes MSP.
+- **Arming config:** unchanged (§3). Boot grace clears by the second simulated status line after the first packet.
+- The first status line after the first packet reads `t=10001ms` because of the fixed 10 s time base.
 
 ## 5. Feature build (CRSF, ESC sensor, OSD, VTX, Blackbox)
 <filled in Task 5>
