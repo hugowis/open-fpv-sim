@@ -1,6 +1,8 @@
 //! Assembles a quad from its config into a scheduler and exposes sticks in, state out.
 use std::f64::consts::PI;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::{FcKind, QuadConfig};
@@ -8,6 +10,10 @@ use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
+use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
+use ofs_fc::sitl::frames::Home;
+use ofs_fc::sitl::net;
+use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody};
 use ofs_sensors::baro::{Baro, BaroParams};
@@ -171,7 +177,37 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     match opts.fc_override.unwrap_or(cfg.fc.kind) {
         FcKind::OpenLoop => models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus))),
-        FcKind::Sitl => return Err(SimError::Other("the Betaflight SITL bridge is added in M1 Task 11".into())),
+        FcKind::Sitl => {
+            let quad_stem = cfg.source_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
+            let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
+            let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
+            if cleanup.is_empty() {
+                cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6)
+            }
+            let sitl_net = net::resolve(&launch_argv, env_ip("OFS_SITL_HOST")?, env_ip("OFS_SITL_REPLY_IP")?)
+                .map_err(|e| SimError::Firmware(e.to_string()))?;
+            let launch = LaunchConfig {
+                launch: launch_argv,
+                cleanup,
+                workdir: opts.data_dir.join(quad_stem),
+                diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
+                startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
+            };
+            let bridge = SitlBridge::start(
+                BridgeConfig {
+                    launch,
+                    net: sitl_net,
+                    rate_divisor: fc_divisor,
+                    first_reply_timeout: Duration::from_millis(cfg.fc.first_reply_timeout_ms),
+                    reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
+                    home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
+                    motor_count: n,
+                },
+                &mut bus,
+            )
+            .map_err(|e| SimError::Firmware(e.to_string()))?;
+            models.push(Box::new(bridge));
+        }
     }
 
     let h = Handles::register(&mut bus, n);
@@ -217,5 +253,22 @@ impl Vehicle {
 
     pub fn digest(&self) -> u64 {
         self.scheduler.bus().digest()
+    }
+}
+
+/// Space-separated argv from an environment variable, if set and non-empty.
+fn env_argv(var: &str) -> Option<Vec<String>> {
+    std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| s.split_whitespace().map(String::from).collect())
+}
+
+/// IPv4 address from an environment variable, if set and non-empty.
+fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, SimError> {
+    match std::env::var(var) {
+        Ok(v) if !v.trim().is_empty() => v
+            .trim()
+            .parse()
+            .map(Some)
+            .map_err(|_| SimError::InvalidArgument(format!("{var}={v} is not an IPv4 address"))),
+        _ => Ok(None),
     }
 }
