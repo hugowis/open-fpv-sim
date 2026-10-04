@@ -61,7 +61,7 @@ index c4d877b..bcf3138 100644
          tfp_sprintf(buff, "%d%%", storageUsedPercent);
      } else {
 diff --git a/src/main/scheduler/scheduler.c b/src/main/scheduler/scheduler.c
-index eace67b..9720a44 100644
+index eace67b..bb2bc79 100644
 --- a/src/main/scheduler/scheduler.c
 +++ b/src/main/scheduler/scheduler.c
 @@ -110,6 +110,10 @@ STATIC_UNIT_TESTED FAST_DATA_ZERO_INIT int taskQueueSize = 0;
@@ -69,13 +69,13 @@ index eace67b..9720a44 100644
  
  static int32_t desiredPeriodCycles;
 +#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
-+bool simulatorTakeGyroTick(void);  // platform/SIMULATOR/sitl.c
++bool simulatorTakeGyroTick(void);   // platform/SIMULATOR/sitl.c
 +void simulatorSchedulerIdle(void);  // platform/SIMULATOR/sitl.c
 +#endif
  static uint32_t lastTargetCycles;
  
  static uint8_t skippedRxAttempts = 0;
-@@ -550,6 +554,16 @@ FAST_CODE void scheduler(void)
+@@ -550,6 +554,17 @@ FAST_CODE void scheduler(void)
              schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
          }
  
@@ -83,6 +83,7 @@ index eace67b..9720a44 100644
 +        // Lockstep with an external simulator: time only advances with FDM packets, so a cycle
 +        // target can never be "waited for". Run the realtime tasks exactly once per packet instead.
 +        if (simulatorTakeGyroTick()) {
++            nowCycles = getCycleCounter();  // the tick just advanced simulated time
 +            nextTargetCycles = nowCycles;
 +            schedLoopRemainingCycles = 0;
 +        } else {
@@ -92,7 +93,7 @@ index eace67b..9720a44 100644
          // Tune out the time lost between completing the last task execution and re-entering the scheduler
          if ((schedLoopRemainingCycles < schedLoopStartMinCycles) &&
              (schedLoopStartCycles < schedLoopStartMaxCycles)) {
-@@ -716,6 +730,9 @@ FAST_CODE void scheduler(void)
+@@ -716,6 +731,9 @@ FAST_CODE void scheduler(void)
  
      nowCycles = getCycleCounter();
      schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
@@ -102,7 +103,7 @@ index eace67b..9720a44 100644
  
      if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {
          currentTimeUs = micros();
-@@ -836,6 +853,12 @@ FAST_CODE void scheduler(void)
+@@ -836,6 +854,12 @@ FAST_CODE void scheduler(void)
          }
      }
  
@@ -145,10 +146,10 @@ index 3759c26..4a82321 100644
  #define GYRO_COUNT 1 // 1 Gyro
  
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..a40ee71 100644
+index ee216ef..dee5766 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
-@@ -101,6 +101,39 @@ static bool fdm_received = false;
+@@ -101,6 +101,77 @@ static bool fdm_received = false;
  
  static struct timespec start_time;
  static double simRate = 1.0;
@@ -159,36 +160,74 @@ index ee216ef..a40ee71 100644
 +
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
 +// Open FPV Sim: simulator-owned time. After the first FDM packet, micros()/millis() follow the
-+// packet timestamps (offset so the clock stays monotonic) instead of wall time scaled by simRate.
-+// This makes SITL a deterministic-time participant in a lockstep simulation.
++// packet timestamps (from a fixed base) instead of wall time scaled by simRate, and the main loop
++// runs gyro/filter/PID exactly once per packet. This makes SITL a deterministic lockstep participant.
 +#define EXT_TIME_START_US 10000000LL
-+static volatile bool extTimeValid = false;
-+static volatile int64_t extTimeOffsetUs = 0;
-+static volatile uint64_t extTimeUs = 0;
++
++// Main loop's view of simulated time: written only by the main thread when it takes a tick.
++static uint64_t extTimeUs = 0;
++static bool extTimeValid = false;  // published with release, read with acquire (other threads read micros())
 +static uint64_t wallScaledMicros64(void);
-+static volatile uint32_t extGyroTicks = 0;
++
++static inline bool extTimeIsValid(void)
++{
++    return __atomic_load_n(&extTimeValid, __ATOMIC_ACQUIRE);
++}
++
++// Staged by the FDM thread, consumed by the main thread (all under extPacketMutex).
 +static pthread_mutex_t extPacketMutex = PTHREAD_MUTEX_INITIALIZER;
 +static pthread_cond_t extPacketCond = PTHREAD_COND_INITIALIZER;
-+static volatile bool extMotorPending = false;          // set by PID motor update, sent when idle
-+static bool extRcPending = false;                       // set and consumed on the FDM thread
-+static uint16_t extRcChannels[SIMULATOR_MAX_RC_CHANNELS];   // one per FDM packet whose sensors were applied
++static uint32_t extGyroTicks = 0;        // one per FDM packet whose sensors were applied
 +static uint32_t extGyroTicksTaken = 0;
++static uint64_t extPendingTimeUs = 0;
++static bool extRcPending = false;
++static uint16_t extRcChannels[SIMULATOR_MAX_RC_CHANNELS];
 +
-+// Called by the scheduler: true once per FDM packet, so gyro/filter/PID run exactly once per packet.
++// FDM thread only.
++static int64_t extTimeOffsetUs = 0;
++static bool extOffsetSet = false;
++static uint64_t extFdmNowUs = 0;
++static bool extFdmRcValid = false;
++static uint16_t extFdmRcChannels[SIMULATOR_MAX_RC_CHANNELS];
++
++// Main thread only: a tick was taken and has not been answered yet.
++static bool extReplyPending = false;
++
++// Called by the scheduler: true once per FDM packet. Applies that packet's time and RC first, so the
++// main loop never sees a new instant before the tick that belongs to it.
 +bool simulatorTakeGyroTick(void)
 +{
-+    const uint32_t ticks = extGyroTicks;
-+    if (ticks != extGyroTicksTaken) {
-+        extGyroTicksTaken = ticks;
-+        return true;
++    uint16_t rc[SIMULATOR_MAX_RC_CHANNELS];
++    bool rcNew = false;
++    pthread_mutex_lock(&extPacketMutex);
++    const bool tick = extGyroTicks != extGyroTicksTaken;
++    if (tick) {
++        extGyroTicksTaken = extGyroTicks;
++        if (extPendingTimeUs > extTimeUs) {
++            __atomic_store_n(&extTimeUs, extPendingTimeUs, __ATOMIC_RELAXED);
++        }
++        rcNew = extRcPending;
++        if (rcNew) {
++            memcpy(rc, extRcChannels, sizeof(rc));
++            extRcPending = false;
++        }
 +    }
-+    return false;
++    pthread_mutex_unlock(&extPacketMutex);
++    if (!tick) {
++        return false;
++    }
++    __atomic_store_n(&extTimeValid, true, __ATOMIC_RELEASE);
++    if (rcNew) {
++        rxUpdateUdpChannels(rc, SIMULATOR_MAX_RC_CHANNELS);
++    }
++    extReplyPending = true;
++    return true;
 +}
 +#endif
  static pthread_t tcpWorker, udpWorker, udpWorkerRC;
  static bool workerRunning = true;
  static udpLink_t stateLink, pwmLink, pwmRawLink, rcLink;
-@@ -205,6 +238,11 @@ static void gpxTrackClose(void)
+@@ -205,6 +276,11 @@ static void gpxTrackClose(void)
  
  int targetParseArgs(int argc, char * argv[])
  {
@@ -200,7 +239,7 @@ index ee216ef..a40ee71 100644
      for (int i = 1; i < argc; i++) {
          if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
              printf("Betaflight SITL\n");
-@@ -282,6 +320,22 @@ static void updateState(const fdm_packet* pkt)
+@@ -282,6 +358,23 @@ static void updateState(const fdm_packet* pkt)
      clock_gettime(CLOCK_MONOTONIC, &now_ts);
  
      const uint64_t realtime_now = micros64_real();
@@ -208,29 +247,30 @@ index ee216ef..a40ee71 100644
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
 +    {
 +        const int64_t pktUs = (int64_t)(pkt->timestamp * 1e6);
-+        if (!extTimeValid) {
++        if (!extOffsetSet) {
 +            // Fixed start (not wall time) so Betaflight's clock is a pure function of the packet
 +            // timestamps and runs are reproducible. Boot normally takes < 1 s of wall time.
 +            const int64_t wallUs = (int64_t)wallScaledMicros64();
++            if (wallUs >= EXT_TIME_START_US) {
++                fprintf(stderr, "[SITL] warning: first FDM packet after %lld us; time base is wall-derived, runs are not reproducible\n", (long long)wallUs);
++            }
 +            extTimeOffsetUs = (wallUs < EXT_TIME_START_US ? EXT_TIME_START_US : wallUs) - pktUs;
-+            extTimeValid = true;
++            extOffsetSet = true;
 +        }
-+        if (pktUs + extTimeOffsetUs > (int64_t)extTimeUs) {
-+            extTimeUs = (uint64_t)(pktUs + extTimeOffsetUs);
-+        }
++        extFdmNowUs = (uint64_t)(pktUs + extTimeOffsetUs);
 +    }
 +#endif
      if (realtime_now > last_realtime + 500*1e3) { // 500ms timeout
          last_timestamp = pkt->timestamp;
          last_realtime = realtime_now;
-@@ -483,8 +537,13 @@ static void updateState(const fdm_packet* pkt)
+@@ -483,8 +576,13 @@ static void updateState(const fdm_packet* pkt)
  
      // Periodic status (about 1 Hz)
      static uint64_t lastDebugTimeUs = 0;
 -    if (realtime_now - lastDebugTimeUs >= 1000000) {
 -        lastDebugTimeUs = realtime_now;
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    const uint64_t debugNowUs = micros64();  // status once per simulated second
++    const uint64_t debugNowUs = extFdmNowUs;  // status once per simulated second (this packet's time)
 +#else
 +    const uint64_t debugNowUs = realtime_now;
 +#endif
@@ -239,17 +279,20 @@ index ee216ef..a40ee71 100644
  
          const armingDisableFlags_e flags = getArmingDisableFlags();
          if (flags) {
-@@ -512,6 +571,17 @@ static void updateState(const fdm_packet* pkt)
+@@ -512,6 +610,20 @@ static void updateState(const fdm_packet* pkt)
      }
  
      pthread_mutex_unlock(&updateLock); // can send PWM output now
-+    // External time: only now (sensors set, updateLock released) may the main loop run this tick.
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    if (extRcPending) {
-+        extRcPending = false;
-+        rxUpdateUdpChannels(extRcChannels, SIMULATOR_MAX_RC_CHANNELS);
-+    }
++    // Sensors are set: stage this packet's time and RC and count the tick. The main loop applies them
++    // in simulatorTakeGyroTick(), so it can never observe the new instant before its tick.
 +    pthread_mutex_lock(&extPacketMutex);
++    extPendingTimeUs = extFdmNowUs;
++    if (extFdmRcValid) {
++        memcpy(extRcChannels, extFdmRcChannels, sizeof(extRcChannels));
++        extRcPending = true;
++        extFdmRcValid = false;
++    }
 +    extGyroTicks++;
 +    pthread_cond_signal(&extPacketCond);
 +    pthread_mutex_unlock(&extPacketMutex);
@@ -257,18 +300,18 @@ index ee216ef..a40ee71 100644
  
  #if ENABLE_SIMULATOR_GYROPID_SYNC
      pthread_mutex_unlock(&mainLoopLock); // can run main loop
-@@ -524,8 +594,21 @@ static void* udpThread(void* data)
+@@ -524,8 +636,21 @@ static void* udpThread(void* data)
      int n = 0;
  
      while (workerRunning) {
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+        // Optionally an rc_packet follows the fdm_packet in the same datagram; it is then applied
-+        // on this thread before the gyro tick, so stick input is deterministic in lockstep.
++        // Optionally an rc_packet follows the fdm_packet in the same datagram; it is applied with that
++        // packet's tick, so stick input is deterministic in lockstep.
 +        static struct { fdm_packet fdm; rc_packet rc; } __attribute__((packed)) fdmRcPkt;
 +        n = udpRecv(&stateLink, &fdmRcPkt, sizeof(fdmRcPkt), 100);
 +        if (n == sizeof(fdmRcPkt)) {
-+            extRcPending = true;
-+            memcpy(extRcChannels, fdmRcPkt.rc.channels, sizeof(extRcChannels));
++            memcpy(extFdmRcChannels, fdmRcPkt.rc.channels, sizeof(extFdmRcChannels));
++            extFdmRcValid = true;
 +        }
 +        if (n == sizeof(fdm_packet) || n == sizeof(fdmRcPkt)) {
 +            fdmPkt = fdmRcPkt.fdm;
@@ -279,14 +322,14 @@ index ee216ef..a40ee71 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -691,7 +774,16 @@ uint64_t millis64_real(void)
+@@ -691,7 +816,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
  uint64_t micros64(void)
 +{
-+    return extTimeValid ? extTimeUs : wallScaledMicros64();
++    return extTimeIsValid() ? __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) : wallScaledMicros64();
 +}
 +
 +static uint64_t wallScaledMicros64(void)
@@ -296,19 +339,19 @@ index ee216ef..a40ee71 100644
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +797,11 @@ uint64_t micros64(void)
+@@ -705,6 +839,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    if (extTimeValid) {
-+        return extTimeUs / 1000;
++    if (extTimeIsValid()) {
++        return __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) / 1000;
 +    }
 +#endif
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +817,29 @@ uint32_t micros(void)
+@@ -720,6 +859,29 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
@@ -338,12 +381,12 @@ index ee216ef..a40ee71 100644
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +880,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +922,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    if (extTimeValid) {  // simulated time only advances with FDM packets; never wait on it
++    if (extTimeIsValid()) {  // simulated time only advances with FDM packets; never wait on it
 +        microsleep(us);
 +        return;
 +    }
@@ -351,12 +394,12 @@ index ee216ef..a40ee71 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +896,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +938,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    if (extTimeValid) {  // simulated time only advances with FDM packets; never wait on it
++    if (extTimeIsValid()) {  // simulated time only advances with FDM packets; never wait on it
 +        microsleep(ms * 1000);
 +        return;
 +    }
@@ -364,25 +407,28 @@ index ee216ef..a40ee71 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -874,10 +1006,41 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1047,44 @@ static void pwmCompleteMotorUpdate(void)
+     }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
-     if (pthread_mutex_trylock(&updateLock) != 0) return;
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+    extMotorPending = true;  // sent by simulatorSchedulerIdle() once every task of this tick has run
-+#else
++    // pwmPkt now holds the latest motor values; simulatorSchedulerIdle() sends one reply per tick.
++    return;
++#endif
+     if (pthread_mutex_trylock(&updateLock) != 0) return;
      udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
      udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
-+#endif
  }
  
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
 +// Called by the scheduler when nothing is due at the current (frozen) simulated instant. Replying
-+// only now guarantees the simulator's next packet cannot advance time in the middle of a tick.
++// only now guarantees the simulator's next packet cannot advance time in the middle of a tick. Every
++// taken tick gets exactly one reply (the latest motor values), even when PID did not run on it
++// (pid_process_denom > 1).
 +void simulatorSchedulerIdle(void)
 +{
-+    if (extMotorPending) {
-+        extMotorPending = false;
++    if (extReplyPending) {
++        extReplyPending = false;
 +        udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
 +        udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
 +    }

@@ -1,10 +1,30 @@
-"""THROWAWAY: apply the external-time change to a Betaflight tree's sitl.c (then `git diff` saves it)."""
-import re, sys
-path = sys.argv[1] + "/src/platform/SIMULATOR/sitl.c"
+"""THROWAWAY generator: apply the Open FPV Sim external-time (lockstep) change to a Betaflight tree.
+
+Edits src/platform/SIMULATOR/sitl.c, src/main/scheduler/scheduler.c and the SIMULATOR platform.h.
+Run on a clean tree, then `git diff` saves the patch.
+
+Threading model (after review):
+- FDM (UDP) thread: applies sensors, then *stages* the packet's time and RC under extPacketMutex and
+  counts a tick. It never changes the time or RC the main loop sees.
+- Main thread: simulatorTakeGyroTick() applies the staged time and RC and returns true once per packet;
+  the scheduler then runs gyro/filter/PID; simulatorSchedulerIdle() replies once per taken tick when
+  every task due at that instant has run, then waits (bounded) for the next packet.
+"""
+import sys
+
+root = sys.argv[1]
+path = root + "/src/platform/SIMULATOR/sitl.c"
 src = open(path).read()
 assert "ENABLE_SIMULATOR_EXTERNAL_TIME" not in src, "already patched"
 
-src = src.replace("static double simRate = 1.0;\n", """static double simRate = 1.0;
+
+def sub(old, new):
+    global src
+    assert old in src, old[:60]
+    src = src.replace(old, new, 1)
+
+
+sub("static double simRate = 1.0;\n", """static double simRate = 1.0;
 
 #ifndef ENABLE_SIMULATOR_EXTERNAL_TIME
 #define ENABLE_SIMULATOR_EXTERNAL_TIME 0
@@ -12,160 +32,203 @@ src = src.replace("static double simRate = 1.0;\n", """static double simRate = 1
 
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
 // Open FPV Sim: simulator-owned time. After the first FDM packet, micros()/millis() follow the
-// packet timestamps (offset so the clock stays monotonic) instead of wall time scaled by simRate.
-// This makes SITL a deterministic-time participant in a lockstep simulation.
+// packet timestamps (from a fixed base) instead of wall time scaled by simRate, and the main loop
+// runs gyro/filter/PID exactly once per packet. This makes SITL a deterministic lockstep participant.
 #define EXT_TIME_START_US 10000000LL
-static volatile bool extTimeValid = false;
-static volatile int64_t extTimeOffsetUs = 0;
-static volatile uint64_t extTimeUs = 0;
-static uint64_t wallScaledMicros64(void);
-static volatile uint32_t extGyroTicks = 0;   // one per FDM packet whose sensors were applied
-static uint32_t extGyroTicksTaken = 0;
 
-// Called by the scheduler: true once per FDM packet, so gyro/filter/PID run exactly once per packet.
+// Main loop's view of simulated time: written only by the main thread when it takes a tick.
+static uint64_t extTimeUs = 0;
+static bool extTimeValid = false;  // published with release, read with acquire (other threads read micros())
+static uint64_t wallScaledMicros64(void);
+
+static inline bool extTimeIsValid(void)
+{
+    return __atomic_load_n(&extTimeValid, __ATOMIC_ACQUIRE);
+}
+
+// Staged by the FDM thread, consumed by the main thread (all under extPacketMutex).
+static pthread_mutex_t extPacketMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t extPacketCond = PTHREAD_COND_INITIALIZER;
+static uint32_t extGyroTicks = 0;        // one per FDM packet whose sensors were applied
+static uint32_t extGyroTicksTaken = 0;
+static uint64_t extPendingTimeUs = 0;
+static bool extRcPending = false;
+static uint16_t extRcChannels[SIMULATOR_MAX_RC_CHANNELS];
+
+// FDM thread only.
+static int64_t extTimeOffsetUs = 0;
+static bool extOffsetSet = false;
+static uint64_t extFdmNowUs = 0;
+static bool extFdmRcValid = false;
+static uint16_t extFdmRcChannels[SIMULATOR_MAX_RC_CHANNELS];
+
+// Main thread only: a tick was taken and has not been answered yet.
+static bool extReplyPending = false;
+
+// Called by the scheduler: true once per FDM packet. Applies that packet's time and RC first, so the
+// main loop never sees a new instant before the tick that belongs to it.
 bool simulatorTakeGyroTick(void)
 {
-    const uint32_t ticks = extGyroTicks;
-    if (ticks != extGyroTicksTaken) {
-        extGyroTicksTaken = ticks;
-        return true;
+    uint16_t rc[SIMULATOR_MAX_RC_CHANNELS];
+    bool rcNew = false;
+    pthread_mutex_lock(&extPacketMutex);
+    const bool tick = extGyroTicks != extGyroTicksTaken;
+    if (tick) {
+        extGyroTicksTaken = extGyroTicks;
+        if (extPendingTimeUs > extTimeUs) {
+            __atomic_store_n(&extTimeUs, extPendingTimeUs, __ATOMIC_RELAXED);
+        }
+        rcNew = extRcPending;
+        if (rcNew) {
+            memcpy(rc, extRcChannels, sizeof(rc));
+            extRcPending = false;
+        }
     }
-    return false;
+    pthread_mutex_unlock(&extPacketMutex);
+    if (!tick) {
+        return false;
+    }
+    __atomic_store_n(&extTimeValid, true, __ATOMIC_RELEASE);
+    if (rcNew) {
+        rxUpdateUdpChannels(rc, SIMULATOR_MAX_RC_CHANNELS);
+    }
+    extReplyPending = true;
+    return true;
 }
 #endif
-""", 1)
+""")
 
-src = src.replace("""    const uint64_t realtime_now = micros64_real();
+sub("""    const uint64_t realtime_now = micros64_real();
 """, """    const uint64_t realtime_now = micros64_real();
 
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
     {
         const int64_t pktUs = (int64_t)(pkt->timestamp * 1e6);
-        if (!extTimeValid) {
+        if (!extOffsetSet) {
             // Fixed start (not wall time) so Betaflight's clock is a pure function of the packet
             // timestamps and runs are reproducible. Boot normally takes < 1 s of wall time.
             const int64_t wallUs = (int64_t)wallScaledMicros64();
+            if (wallUs >= EXT_TIME_START_US) {
+                fprintf(stderr, "[SITL] warning: first FDM packet after %lld us; time base is wall-derived, runs are not reproducible\\n", (long long)wallUs);
+            }
             extTimeOffsetUs = (wallUs < EXT_TIME_START_US ? EXT_TIME_START_US : wallUs) - pktUs;
-            extTimeValid = true;
+            extOffsetSet = true;
         }
-        if (pktUs + extTimeOffsetUs > (int64_t)extTimeUs) {
-            extTimeUs = (uint64_t)(pktUs + extTimeOffsetUs);
-        }
+        extFdmNowUs = (uint64_t)(pktUs + extTimeOffsetUs);
     }
 #endif
-""", 1)
+""")
 
-src = src.replace("""uint64_t micros64(void)
+sub("""uint64_t micros64(void)
 {""", """#if ENABLE_SIMULATOR_EXTERNAL_TIME
 uint64_t micros64(void)
 {
-    return extTimeValid ? extTimeUs : wallScaledMicros64();
+    return extTimeIsValid() ? __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) : wallScaledMicros64();
 }
 
 static uint64_t wallScaledMicros64(void)
 #else
 uint64_t micros64(void)
 #endif
-{""", 1)
+{""")
 
-src = src.replace("""uint64_t millis64(void)
+sub("""uint64_t millis64(void)
 {""", """uint64_t millis64(void)
 {
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
-    if (extTimeValid) {
-        return extTimeUs / 1000;
+    if (extTimeIsValid()) {
+        return __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) / 1000;
     }
-#endif""", 1)
+#endif""")
 
-src = src.replace("""void delayMicroseconds(uint32_t us)
+sub("""void delayMicroseconds(uint32_t us)
 {""", """void delayMicroseconds(uint32_t us)
 {
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
-    if (extTimeValid) {  // simulated time only advances with FDM packets; never wait on it
+    if (extTimeIsValid()) {  // simulated time only advances with FDM packets; never wait on it
         microsleep(us);
         return;
     }
-#endif""", 1)
+#endif""")
 
-src = src.replace("""void delay(uint32_t ms)
+sub("""void delay(uint32_t ms)
 {""", """void delay(uint32_t ms)
 {
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
-    if (extTimeValid) {  // simulated time only advances with FDM packets; never wait on it
+    if (extTimeIsValid()) {  // simulated time only advances with FDM packets; never wait on it
         microsleep(ms * 1000);
         return;
     }
-#endif""", 1)
+#endif""")
 
-src = src.replace("""    static uint64_t lastDebugTimeUs = 0;
+sub("""    static uint64_t lastDebugTimeUs = 0;
     if (realtime_now - lastDebugTimeUs >= 1000000) {
         lastDebugTimeUs = realtime_now;""", """    static uint64_t lastDebugTimeUs = 0;
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
-    const uint64_t debugNowUs = micros64();  // status once per simulated second
+    const uint64_t debugNowUs = extFdmNowUs;  // status once per simulated second (this packet's time)
 #else
     const uint64_t debugNowUs = realtime_now;
 #endif
     if (debugNowUs - lastDebugTimeUs >= 1000000) {
-        lastDebugTimeUs = debugNowUs;""", 1)
+        lastDebugTimeUs = debugNowUs;""")
 
-src = src.replace("""    pthread_mutex_unlock(&updateLock); // can send PWM output now
+sub("""    pthread_mutex_unlock(&updateLock); // can send PWM output now
 """, """    pthread_mutex_unlock(&updateLock); // can send PWM output now
-    // External time: only now (sensors set, updateLock released) may the main loop run this tick.
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
+    // Sensors are set: stage this packet's time and RC and count the tick. The main loop applies them
+    // in simulatorTakeGyroTick(), so it can never observe the new instant before its tick.
+    pthread_mutex_lock(&extPacketMutex);
+    extPendingTimeUs = extFdmNowUs;
+    if (extFdmRcValid) {
+        memcpy(extRcChannels, extFdmRcChannels, sizeof(extRcChannels));
+        extRcPending = true;
+        extFdmRcValid = false;
+    }
     extGyroTicks++;
+    pthread_cond_signal(&extPacketCond);
+    pthread_mutex_unlock(&extPacketMutex);
 #endif
-""", 1)
-src = src.replace("""        n = udpRecv(&stateLink, &fdmPkt, sizeof(fdm_packet), 100);
+""")
+
+sub("""        n = udpRecv(&stateLink, &fdmPkt, sizeof(fdm_packet), 100);
         if (n == sizeof(fdm_packet)) {""", """#if ENABLE_SIMULATOR_EXTERNAL_TIME
-        // Optionally an rc_packet follows the fdm_packet in the same datagram; it is then applied
-        // on this thread before the gyro tick, so stick input is deterministic in lockstep.
+        // Optionally an rc_packet follows the fdm_packet in the same datagram; it is applied with that
+        // packet's tick, so stick input is deterministic in lockstep.
         static struct { fdm_packet fdm; rc_packet rc; } __attribute__((packed)) fdmRcPkt;
         n = udpRecv(&stateLink, &fdmRcPkt, sizeof(fdmRcPkt), 100);
         if (n == sizeof(fdmRcPkt)) {
-            extRcPending = true;
-            memcpy(extRcChannels, fdmRcPkt.rc.channels, sizeof(extRcChannels));
+            memcpy(extFdmRcChannels, fdmRcPkt.rc.channels, sizeof(extFdmRcChannels));
+            extFdmRcValid = true;
         }
         if (n == sizeof(fdm_packet) || n == sizeof(fdmRcPkt)) {
             fdmPkt = fdmRcPkt.fdm;
 #else
         n = udpRecv(&stateLink, &fdmPkt, sizeof(fdm_packet), 100);
         if (n == sizeof(fdm_packet)) {
-#endif""", 1)
-src = src.replace("""#if ENABLE_SIMULATOR_EXTERNAL_TIME
-    extGyroTicks++;
-#endif""", """#if ENABLE_SIMULATOR_EXTERNAL_TIME
-    if (extRcPending) {
-        extRcPending = false;
-        rxUpdateUdpChannels(extRcChannels, SIMULATOR_MAX_RC_CHANNELS);
-    }
-    pthread_mutex_lock(&extPacketMutex);
-    extGyroTicks++;
-    pthread_cond_signal(&extPacketCond);
-    pthread_mutex_unlock(&extPacketMutex);
-#endif""", 1)
-src = src.replace("""static volatile uint32_t extGyroTicks = 0;""", """static volatile uint32_t extGyroTicks = 0;
-static bool extRcPending = false;                       // set and consumed on the FDM thread
-static uint16_t extRcChannels[SIMULATOR_MAX_RC_CHANNELS];""", 1)
-src = src.replace("""    if (pthread_mutex_trylock(&updateLock) != 0) return;
+#endif""")
+
+sub("""    if (pthread_mutex_trylock(&updateLock) != 0) return;
     udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
     udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
 }
-""", """    if (pthread_mutex_trylock(&updateLock) != 0) return;
-#if ENABLE_SIMULATOR_EXTERNAL_TIME
-    extMotorPending = true;  // sent by simulatorSchedulerIdle() once every task of this tick has run
-#else
+""", """#if ENABLE_SIMULATOR_EXTERNAL_TIME
+    // pwmPkt now holds the latest motor values; simulatorSchedulerIdle() sends one reply per tick.
+    return;
+#endif
+    if (pthread_mutex_trylock(&updateLock) != 0) return;
     udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
     udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
-#endif
 }
 
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
 // Called by the scheduler when nothing is due at the current (frozen) simulated instant. Replying
-// only now guarantees the simulator's next packet cannot advance time in the middle of a tick.
+// only now guarantees the simulator's next packet cannot advance time in the middle of a tick. Every
+// taken tick gets exactly one reply (the latest motor values), even when PID did not run on it
+// (pid_process_denom > 1).
 void simulatorSchedulerIdle(void)
 {
-    if (extMotorPending) {
-        extMotorPending = false;
+    if (extReplyPending) {
+        extReplyPending = false;
         udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
         udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
     }
@@ -185,30 +248,37 @@ void simulatorSchedulerIdle(void)
     pthread_mutex_unlock(&extPacketMutex);
 }
 #endif
-""", 1)
-src = src.replace("""static bool extRcPending = false;""", """static pthread_mutex_t extPacketMutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t extPacketCond = PTHREAD_COND_INITIALIZER;
-static volatile bool extMotorPending = false;          // set by PID motor update, sent when idle
-static bool extRcPending = false;""", 1)
-src = src.replace(r"""int targetParseArgs(int argc, char * argv[])
+""")
+
+sub(r"""int targetParseArgs(int argc, char * argv[])
 {""", r"""int targetParseArgs(int argc, char * argv[])
 {
 #if ENABLE_SIMULATOR_EXTERNAL_TIME
     // A supervising simulator reads our output through a pipe: keep it line-buffered.
     // (Must precede the first write to the stream.)
     setvbuf(stdout, NULL, _IOLBF, 0);
-#endif""", 1)
-assert src.count("ENABLE_SIMULATOR_EXTERNAL_TIME") == 14, src.count("ENABLE_SIMULATOR_EXTERNAL_TIME")
+#endif""")
 
-# 2) scheduler.c: realtime tasks once per packet; non-realtime tasks get a full gyro period of budget
-spath = sys.argv[1] + "/src/main/scheduler/scheduler.c"
+open(path, "w").write(src)
+
+# scheduler.c: realtime tasks once per packet; non-realtime tasks get a full gyro period of budget
+spath = root + "/src/main/scheduler/scheduler.c"
 sch = open(spath).read()
 assert "simulatorTakeGyroTick" not in sch
-sch = sch.replace("""        // Tune out the time lost between completing the last task execution and re-entering the scheduler
+
+
+def ssub(old, new):
+    global sch
+    assert old in sch, old[:60]
+    sch = sch.replace(old, new, 1)
+
+
+ssub("""        // Tune out the time lost between completing the last task execution and re-entering the scheduler
 """, """#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
         // Lockstep with an external simulator: time only advances with FDM packets, so a cycle
         // target can never be "waited for". Run the realtime tasks exactly once per packet instead.
         if (simulatorTakeGyroTick()) {
+            nowCycles = getCycleCounter();  // the tick just advanced simulated time
             nextTargetCycles = nowCycles;
             schedLoopRemainingCycles = 0;
         } else {
@@ -216,8 +286,8 @@ sch = sch.replace("""        // Tune out the time lost between completing the la
         }
 #endif
         // Tune out the time lost between completing the last task execution and re-entering the scheduler
-""", 1)
-sch = sch.replace("""    nowCycles = getCycleCounter();
+""")
+ssub("""    nowCycles = getCycleCounter();
     schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
 
     if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {""", """    nowCycles = getCycleCounter();
@@ -226,15 +296,15 @@ sch = sch.replace("""    nowCycles = getCycleCounter();
     schedLoopRemainingCycles = desiredPeriodCycles;  // frozen time: every non-realtime task fits
 #endif
 
-    if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {""", 1)
-sch = sch.replace("""static int32_t desiredPeriodCycles;
+    if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {""")
+ssub("""static int32_t desiredPeriodCycles;
 """, """static int32_t desiredPeriodCycles;
 #if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
-bool simulatorTakeGyroTick(void);  // platform/SIMULATOR/sitl.c
+bool simulatorTakeGyroTick(void);   // platform/SIMULATOR/sitl.c
 void simulatorSchedulerIdle(void);  // platform/SIMULATOR/sitl.c
 #endif
-""", 1)
-sch = sch.replace("""#if defined(UNIT_TEST)
+""")
+ssub("""#if defined(UNIT_TEST)
     readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);""", """#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
     if (!selectedTask && !firstSchedulingOpportunity) {
         simulatorSchedulerIdle();  // every task due at this simulated instant has run
@@ -242,12 +312,11 @@ sch = sch.replace("""#if defined(UNIT_TEST)
 #endif
 
 #if defined(UNIT_TEST)
-    readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);""", 1)
-assert sch.count("ENABLE_SIMULATOR_EXTERNAL_TIME") == 8, sch.count("ENABLE_SIMULATOR_EXTERNAL_TIME")
+    readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);""")
 open(spath, "w").write(sch)
 
-# 3) platform.h: no fixed per-iteration sleep in lockstep (the idle hook waits for packets instead)
-ppath = sys.argv[1] + "/src/platform/SIMULATOR/include/platform/platform.h"
+# platform.h: no fixed per-iteration sleep in lockstep (the idle hook waits for packets instead)
+ppath = root + "/src/platform/SIMULATOR/include/platform/platform.h"
 plat = open(ppath).read()
 old = "#define RUN_LOOP_DELAY_US 50 // max 20khz run loop frequency"
 assert old in plat
@@ -256,6 +325,5 @@ plat = plat.replace(old, """#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABL
 #else
 #define RUN_LOOP_DELAY_US 50 // max 20khz run loop frequency
 #endif""", 1)
-open(ppath, "w").write(plat), src.count("ENABLE_SIMULATOR_EXTERNAL_TIME")
-open(path, "w").write(src)
+open(ppath, "w").write(plat)
 print("patched", path)
