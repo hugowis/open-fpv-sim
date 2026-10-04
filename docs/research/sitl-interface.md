@@ -146,7 +146,37 @@ set blackbox_device = VIRTUAL
 TCP UART bytes arrive on SITL's TCP thread asynchronously to the lockstep tick, so CRSF, ESC-sensor and SmartAudio traffic over TCP isn't bit-reproducible. M1 doesn't use them: RC rides in the state packet and the battery comes from the simulator's own models. When M2 moves RC onto CRSF, either carry UART bytes inside the state datagram (applied on the state thread before the tick, the same technique as RC in §4) or accept non-bit-exact runs in that mode.
 
 ## 6. Windows / WSL2
-<filled in Task 6>
+Host: Windows 11, WSL 2.6.3, kernel 6.6.87.2, Ubuntu 24.04. `.wslconfig` has **no `networkingMode`**, so WSL uses the default NAT networking. Nothing was changed on the machine.
+
+**Default NAT networking, Windows-side harness:**
+- TCP `127.0.0.1:5761` from Windows reaches SITL inside WSL (WSL localhost forwarding), so a Windows-hosted Configurator works.
+- **UDP is not forwarded.** Sending to `127.0.0.1:9003` from Windows gets no replies, because SITL's replies go to `127.0.0.1:9002` *inside* WSL.
+- **Works with explicit addresses:**
+  - Send state packets to the **WSL VM IP** (`wsl -e hostname -I`, first field; here `172.28.26.115`).
+  - Launch SITL with `--ip <Windows host IP as seen from WSL>` (`wsl -e sh -c "ip route | awk '/default/ {print $3}'"`; here `172.28.16.1`).
+  - Bind the motor socket on `0.0.0.0:9002`.
+  
+  Result with combined 184-byte packets: **5000/5000 replies, p50 0.21 ms, p99 0.35 ms, 4.6× real time**. No firewall prompt. With separate RC packets, 8 replies were lost during boot.
+- The WSL VM IP can change after `wsl --shutdown`/reboot, so it must be discovered at launch, not configured.
+
+**Mirrored networking** (`[wsl2] networkingMode=mirrored`) would make `127.0.0.1` work in both directions, but it changes networking for every WSL distribution. It's not needed, so it was not enabled. It's a reasonable opt-in for users who want zero configuration.
+
+**Process lifecycle:**
+- Killing or terminating the `wsl.exe` launcher also ends SITL inside WSL; `pgrep -fa betaflight_SITL` shows nothing afterwards. **No cleanup command is required.**
+- `OFS_SITL_CLEANUP="wsl.exe -e pkill -f betaflight_SITL"` is still a sensible safety net after a crash of the host process.
+
+**Launch values (Windows):**
+```
+OFS_SITL_LAUNCH="wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf"
+# plus, under NAT (default): append "--ip <host IP from WSL>" and send UDP to the WSL VM IP
+OFS_SITL_CLEANUP="wsl.exe -d Ubuntu -e pkill -f betaflight_SITL"   # optional
+```
+
+**Native Windows build:** not attempted. No MinGW/MSYS2/clang toolchain is installed, and installing one is a machine change. The SITL code is POSIX (pthreads, `clock_gettime`, `nanosleep`, BSD sockets; dyad has a `_WIN32` path), so an MSYS2/Cygwin port is plausible future work. **WSL2 is the supported Windows path for v1.**
+
+Caveats:
+- The 9p-mounted `/mnt/c` working directories work for `eeprom.bin`, logs and blackbox files.
+- In a CRLF-converting Windows checkout, the build script and patches need LF endings; enforced via `.gitattributes`.
 
 ## 7. Answers to spec §10 risks and recommendations
 <filled in Task 7>
