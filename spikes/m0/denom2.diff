@@ -1,0 +1,7 @@
+# M0 spike config, applied once with --config
+feature -GPS
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180
+set pid_process_denom = 2

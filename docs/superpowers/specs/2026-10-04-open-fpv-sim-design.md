@@ -213,11 +213,17 @@ Each milestone gets its own implementation plan. The first plan covers M0 and M1
 ## 10. Risks to resolve in M0
 
 1. **SITL lockstep** — whether Betaflight SITL's option to sync its gyro/PID loop to incoming sensor packets works reliably. Fallback: maintain a small, upstreamable SITL patch for externally controlled time. Real-time mode works regardless.
+   **M0 result:** stock sync is not enough; the fallback patch (`third_party/betaflight/ofs-sitl.patch`) gives exact lockstep with bit-identical runs at 6–7× real time (see docs/research/sitl-interface.md §4).
 2. **Battery voltage, current and motor RPM into SITL** — the stock sensor-state packet may not carry them (RPM is needed for RPM filtering). Fallback: small SITL patch.
+   **M0 result:** partial — simulated KISS ESC telemetry on a TCP UART feeds battery voltage (current only as per-motor values); per-motor RPM cannot be attributed and does not reach the RPM filter without DShot-telemetry emulation (future work; see docs/research/sitl-interface.md §5, §7).
 3. **CRSF over a SITL UART** — confirm SITL's TCP-backed UARTs accept CRSF as serial RX with correct timing. Fallback: SITL's UDP RC input for M1 only.
+   **M0 result:** CRSF RX works once TCP bytes are fed to the RX callback; CRSF telemetry needs an atomic-block shim (not done); M1 carries RC inside the state datagram (see docs/research/sitl-interface.md §5).
 4. **MSP DisplayPort and SmartAudio on SITL UARTs** — confirm both work in SITL builds.
+   **M0 result:** DisplayPort works after re-enabling CMS/OSD-over-MSP; SmartAudio requests arrive, reply side untested; required TCP-serial fixes are in the patch (see docs/research/sitl-interface.md §5).
 5. **Blackbox capture from SITL** — confirm the mechanism (file device or MSP).
+   **M0 result:** `blackbox_device = VIRTUAL` writes `LOGnnnnn.BFL` in SITL's working directory (see docs/research/sitl-interface.md §5).
 6. **Windows support** — confirm Betaflight SITL builds and runs natively on Windows; fallback: run SITL under WSL2 with networking to the Windows-hosted sim.
+   **M0 result:** WSL2 works under default NAT networking with WSL-IP + `--ip` addressing (4.6× real time); killing `wsl.exe` ends SITL; native build not attempted (see docs/research/sitl-interface.md §6).
 
 ## 11. Project conventions
 - **Platforms (v1):** Windows and Linux.
