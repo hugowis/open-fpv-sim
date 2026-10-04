@@ -179,4 +179,27 @@ Caveats:
 - In a CRLF-converting Windows checkout, the build script and patches need LF endings; enforced via `.gitattributes`.
 
 ## 7. Answers to spec §10 risks and recommendations
-<filled in Task 7>
+
+| # | Risk | Answer | Evidence | Recommendation |
+|---|---|---|---|---|
+| 1 | SITL lockstep | **Yes, with our patch** (stock: no) | §4: stock clock collapses (0.2× real time, diverges from step 1); `GYROPID_SYNC` alone still paced by wall time; patched build gives exactly one reply per packet, 6.0–6.7× real time, **bit-identical** runs | Use `third_party/betaflight/ofs-sitl.patch` with `-DENABLE_SIMULATOR_EXTERNAL_TIME=1` (build script default). Exchange rate = virtual gyro rate (1 kHz). Keep the patch small and upstreamable; the `osd.c` fix is upstream-worthy on its own. |
+| 2 | Battery V/I and RPM into SITL | **Yes, without changing the sensor packet** | §5: simulated KISS ESC telemetry on a TCP UART → `MSP_BATTERY_STATE` 24.59 V, `MSP_MOTOR_TELEMETRY` RPM 1714 | M1 doesn't need it (the battery affects physics only). Add an ESC-telemetry UART model when Betaflight-side voltage/RPM matter (battery OSD/warnings, RPM filter); it's async, see the §5 caveat. Bidirectional-DShot RPM at loop rate would need DShot emulation (future). |
+| 3 | CRSF over a SITL UART | **Yes** (RX); **No** (telemetry) | §5: CRSF RC frames on tcp:5762 drive `MSP_RC`, arming works; CRSF telemetry needs an `ATOMIC_BLOCK` shim | M1: RC rides in the state datagram (deterministic). M2: CRSF on UART2 for protocol realism; carry UART bytes in the state datagram if bit-exact runs are wanted; add the telemetry shim if the HUD should show Betaflight's CRSF telemetry. |
+| 4 | MSP DisplayPort and SmartAudio | **DisplayPort yes; SmartAudio partial** | §5: 457 DisplayPort frames; SmartAudio requests seen, replies not yet emulated | M3 implements the SmartAudio reply side (VTX model) and decodes DisplayPort into the OSD grid. |
+| 5 | Blackbox capture | **Yes** | §5: `blackbox_device = VIRTUAL` writes `LOGnnnnn.BFL` in SITL's working directory with a valid header | M4 copies the log into the session's recording. |
+| 6 | Windows support | **Yes via WSL2**; native not attempted | §6: default NAT works with WSL-IP + `--ip`, 4.6× real time; killing `wsl.exe` ends SITL | Support WSL2 in v1; discover addresses at launch; mirrored networking optional. |
+
+Two cross-cutting findings that also affect M2:
+- **MSP is serviced only while simulated time advances.** Real-time mode (M2) keeps the Configurator working; a paused sim freezes it.
+- **SITL stdout is line-buffered** in the patched build, so a supervising process sees logs live.
+
+### M1 plan assumptions
+
+| Assumption | Status | Change needed in M1 |
+|---|---|---|
+| **A1** build script, `ENABLE_GAZEBO_BRIDGE=0`, binary path, `--config` | **Confirmed** (extended) | None to the steps. The script now builds the patched lockstep binary by default (`-DENABLE_SIMULATOR_EXTERNAL_TIME=1`). |
+| **A2** ports 9002/9003/9004, packet sizes, `motor_speed` ∈ [0, 1], 0 disarmed | **Confirmed** | Armed idle is 0.055. **Send one 184-byte datagram (`fdm_packet` ‖ `rc_packet`) to 9003 and don't use 9004** (Task 11 bridge). |
+| **A3** gyro `(x, y, −z)`, accel = FRD specific force | **Refuted** | Task 10: `GYRO_SIGN = [1, 1, 1]` and accel sent as `(−fx, fy, fz)`; update the test vectors (`gyro_rpy_radps == [1, 2, 3]`, `accel_xyz_mps2 == [−0.1, 0.2, −9.8]`). Quaternion mapping confirmed. |
+| **A4** ≤ 1 reply per state packet within 500 ms | **Confirmed on the patched build** (exactly 1); stock refuted | None beyond using the patched build. Optional: add a SITL determinism test (same seed → identical motor trace), now feasible. |
+| **A5** arming diff (ARM AUX1, ANGLE AUX2, PWM, small_angle 180) | **Confirmed** unchanged | None. |
+| **A6** Windows via `wsl.exe` with mirrored networking | **Refuted** (mirrored not enabled and not required) | Task 11: under default NAT the bridge must (a) discover the WSL VM IP and send state packets there, (b) append `--ip <host IP from WSL>` to the launch argv, and (c) bind the motor socket on `0.0.0.0:9002`. Detect WSL when `launch[0]` is `wsl.exe`; allow overrides (`OFS_SITL_HOST`, `OFS_SITL_REPLY_IP`). `OFS_SITL_CLEANUP` is optional. |
