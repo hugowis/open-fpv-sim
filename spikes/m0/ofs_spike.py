@@ -58,13 +58,15 @@ def specific_force_frd(q_ned, accel_ned=(0.0, 0.0, 0.0)):
 
 
 # ---------- SITL packets (candidate legacy-bridge mapping; Task 3 verifies) ----------
-GYRO_SIGN = [1.0, 1.0, -1.0]  # applied to FRD body rates before sending
+GYRO_SIGN = [1.0, 1.0, 1.0]    # applied to FRD body rates before sending (Task 3 result)
+ACCEL_SIGN = [-1.0, 1.0, 1.0]  # applied to FRD specific force before sending (Task 3 result)
 
 
 def fdm_legacy(t, gyro_frd, accel_frd, q_ned, vel_ned=(0.0, 0.0, 0.0),
                alt_m=0.0, pressure_pa=101325.0, lat=50.85, lon=4.35):
     """fdm_packet for SITL built with -DENABLE_GAZEBO_BRIDGE=0."""
     gyro = tuple(s * g for s, g in zip(GYRO_SIGN, gyro_frd))
+    accel_frd = tuple(s * a for s, a in zip(ACCEL_SIGN, accel_frd))
     q = qmul(qmul(QX180, q_ned), QX180)  # FRD->NED  ==>  FLU->NWU
     if q[0] < 0:
         q = tuple(-c for c in q)
@@ -116,8 +118,12 @@ MSP_BATTERY_STATE, MSP_MOTOR_TELEMETRY, MSP_DISPLAYPORT = 130, 139, 182
 
 
 class Msp:
-    def __init__(self, port=5761, host="127.0.0.1", timeout=2.0):
+    """MSP v1 client. With external SITL time, Betaflight only services MSP while simulated time
+    advances, so pass `pump` (e.g. Flight.hold) to keep sending state packets during a request."""
+
+    def __init__(self, port=5761, host="127.0.0.1", timeout=2.0, pump=None):
         self.s = socket.create_connection((host, port), timeout=timeout)
+        self.pump = pump
 
     def request(self, cmd, payload=b""):
         n = len(payload)
@@ -125,6 +131,8 @@ class Msp:
         for b in payload:
             ck ^= b
         self.s.sendall(b"$M<" + bytes([n, cmd]) + payload + bytes([ck]))
+        if self.pump:
+            self.pump()
         return self.read_frame(expect=cmd)[1]
 
     def read_frame(self, expect=None):
@@ -157,6 +165,22 @@ def msp_attitude(msp):
 def msp_raw_imu(msp):
     v = struct.unpack("<9h", msp.request(MSP_RAW_IMU)[:18])
     return v[0:3], v[3:6]
+
+
+ARMING_FLAGS = ["NO_GYRO", "FAILSAFE", "RX_FAILSAFE", "NOT_DISARMED", "BOXFAILSAFE", "RUNAWAY_TAKEOFF",
+                "CRASH_DETECTED", "THROTTLE", "ANGLE", "BOOT_GRACE_TIME", "NOPREARM", "LOAD", "CALIBRATING",
+                "CLI", "CMS_MENU", "BST", "MSP", "PARALYZE", "GPS", "RESC", "DSHOT_TELEM", "REBOOT_REQUIRED",
+                "DSHOT_BITBANG", "ACC_CALIBRATION", "MOTOR_PROTOCOL", "CRASHFLIP", "ALTHOLD", "POSHOLD",
+                "AUTOPILOT", "ARM_SWITCH"]
+
+
+def msp_arming_disabled(msp):
+    """Names of active arming-disable flags, from MSP_STATUS (layout per src/main/msp/msp.c)."""
+    d = msp.request(MSP_STATUS)
+    off = 16 + d[15]
+    count = d[off]
+    flags = struct.unpack_from("<I", d, off + 1)[0]
+    return [ARMING_FLAGS[i] if i < len(ARMING_FLAGS) else f"bit{i}" for i in range(count) if flags >> i & 1]
 
 
 def msp_rc(msp):
@@ -240,10 +264,16 @@ class Flight:
         self.link, self.dt, self.t = link, dt, 0.0
         self.replies = self.sent = self.misses = 0
         self.last = (0.0, 0.0, 0.0, 0.0)
+        self._kw = {}
+
+    def hold(self, seconds=0.05):
+        """Keep sending the most recent state for `seconds` (used to pump MSP)."""
+        return self.run(seconds, **self._kw)
 
     def run(self, seconds, q=None, gyro=(0.0, 0.0, 0.0), sticks=None, timeout=0.5):
         q = q or attitude_ned()
         sticks = sticks or {}
+        self._kw = dict(q=q, gyro=gyro, sticks=sticks)
         for _ in range(int(round(seconds / self.dt))):
             self.t += self.dt
             self.link.send(fdm_legacy(self.t, gyro, specific_force_frd(q), q), rc(self.t, **sticks))

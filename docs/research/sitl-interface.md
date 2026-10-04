@@ -20,7 +20,48 @@
 - Configurator: pending user check (desktop Configurator to `tcp://127.0.0.1:5761`).
 
 ## 3. Sign conventions
-<filled in Task 3>
+Verified on the external-time build (§4) with the legacy bridge (`-DENABLE_GAZEBO_BRIDGE=0`), by motor responses (`spikes/m0/t3_conventions.py`): **8/8 checks pass** (and 8/8 on two repeat runs; one run in between showed 7/8, see §4 on RC/FDM thread ordering).
+
+**Mapping to send** (simulator state in NED world / FRD body):
+
+| `fdm_packet` field | Send | Notes |
+|---|---|---|
+| `imu_angular_velocity_rpy` | `(ωx, ωy, ωz)` FRD, **unchanged** | SITL applies `(x, −y, −z)` → Betaflight gets FLU rates. The plan's candidate `(x, y, −z)` was wrong on yaw. |
+| `imu_linear_acceleration_xyz` | `(−fx, fy, fz)` FRD specific force | SITL negates all axes → Betaflight gets `(fx, −fy, −fz)` = FLU specific force. Level at rest: send `(0, 0, −9.80665)`. |
+| `imu_orientation_quat` | `Rx(π)·q_ned·Rx(π)` (FLU→NWU), w ≥ 0 | Only feeds the virtual compass (attitude comes from Betaflight's own estimator). Heading not verified: with default settings the virtual compass is not fused (yaw stayed at 2–4° for a 90° heading). Irrelevant for acro/angle; revisit for GPS modes. |
+| `velocity_xyz` | ENU `(vE, vN, vU)` | virtual GPS only |
+| `position_xyz` | `(lon°, lat°, alt m)` | virtual GPS only |
+| `pressure` | Pa | used directly by the legacy bridge |
+
+In other words, Betaflight's internal body frame is FLU; gyro and accel must arrive consistently in it.
+
+**Check results** (motor index 0..3 = M1 RR, M2 FR, M3 RL, M4 FL; armed, 50 % throttle):
+
+| Check | Expected group up | Result |
+|---|---|---|
+| gyro +x FRD (rolling right) | right (M1, M2) | PASS Δ=+0.44 |
+| gyro +y FRD (nose rising) | rear (M1, M3) | PASS Δ=+0.46 |
+| gyro +z FRD (yawing right) | CW props (M1, M4) | PASS Δ=+0.62 |
+| roll stick right | left (M3, M4) | PASS Δ=+0.40 |
+| pitch stick forward | rear (M1, M3) | PASS Δ=+0.81 |
+| yaw stick right | CCW props (M2, M3) | PASS Δ=+0.47 |
+| angle mode, rolled right 20° | right (M1, M2) | PASS Δ=+1.62 |
+| angle mode, nose up 20° | rear (M1, M3) | PASS Δ=+0.76 |
+
+This also confirms the Betaflight Quad-X motor order and default spin directions in the plan (M1 CW, M2 CCW, M3 CCW, M4 CW), and the RC channel order AETR + AUX1..4.
+
+**Estimator read-back over MSP** (static attitudes, 6 s each): roll right 20° → `MSP_ATTITUDE` roll +19.9; nose up 10° → pitch **−9.9** (Betaflight's MSP pitch is positive nose-down); combined 20°/10° → (20.0, −9.9). `MSP_RAW_IMU` acc matches the sent values to ±1 count (1 g = 256).
+
+**Motor output:** `servo_packet.motor_speed` is 0 when disarmed, 0.055 at armed idle, 0.50 at 50 % throttle hover-trim, saturating at 1.0.
+
+**Minimal arming config** (the spike diff worked unchanged; boot flags clear by 5 s simulated: `RXLOSS BOOTGRACE` → `BOOTGRACE` → none):
+```
+feature -GPS
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180
+```
 
 ## 4. Timing and lockstep
 <filled in Task 4>
