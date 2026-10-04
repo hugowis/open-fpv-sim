@@ -1,0 +1,7 @@
+/target/
+/.ofs-data/
+/spikes/m0/runs/
+/.superpowers/
+__pycache__/
+*.egg-info/
+.venv/
