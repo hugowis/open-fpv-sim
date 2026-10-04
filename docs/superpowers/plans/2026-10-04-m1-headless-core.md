@@ -24,21 +24,33 @@
 - `SimError` variants are fixed: `Firmware(String)`, `NonFinite(String)`, `InvalidArgument(String)`, `Other(String)`.
 - Not in M1 (later milestones): real-time mode, CRSF/ELRS, Godot, video, MCAP/Rerun, repro bundles, fault injection, motor vibration, wind/turbulence, the MSP API-version CI check (M2, with the Configurator).
 
-## Assumptions from M0
+## M0 results (already applied to Tasks 8, 10 and 11)
 
-Tasks 1–9 do not depend on M0 and may be implemented before or alongside it. Tasks 10–13 assume the following. Before starting Task 10, check `docs/research/sitl-interface.md` §7; if any item is **Refuted**, stop and revise the affected task first.
+M0 is complete; the evidence is in `docs/research/sitl-interface.md` (§7 has the full assumption audit). The SITL facts this plan relies on:
 
-- **A1** SITL builds via `scripts/build-sitl.sh` (flags include `-DENABLE_GAZEBO_BRIDGE=0`); binary `obj/main/betaflight_SITL.elf`; accepts `--config <file>` (writes `eeprom.bin` to the working directory and exits).
-- **A2** UDP: state in on 9003 (`fdm_packet`, 144 bytes), RC in on 9004 (`rc_packet`, 40 bytes), motors out on 9002 (`servo_packet`, 16 bytes, `motor_speed` in [0, 1], 0 when disarmed). MSP on TCP 5761.
-- **A3** Legacy-bridge mapping: gyro sent as FRD `(x, y, −z)`; accel sent as FRD specific force; quaternion sent as `Rx(π)·q_ned·Rx(π)` with w ≥ 0; velocity ENU; `position_xyz` = (lon°, lat°, alt m).
-- **A4** Request/response: each state packet yields at most one motor reply, and a reply arrives within 500 ms while SITL is healthy.
-- **A5** The minimal arming config is the content of `quads/opendrone-5f-freestyle.betaflight.diff` below (ARM on AUX1, ANGLE on AUX2). Replace it with M0's §3 diff if that differs.
-- **A6** Windows: `OFS_SITL_LAUNCH="wsl.exe -e <linux path>"` works with WSL mirrored networking; `OFS_SITL_CLEANUP` (if M0 says it is needed) removes strays.
+- **SITL build:** `bash scripts/build-sitl.sh` (Linux or WSL2) builds Betaflight 2026.6.2, pinned commit `e0b7bb0`, with `third_party/betaflight/ofs-sitl.patch` and `-DENABLE_GAZEBO_BRIDGE=0 -DENABLE_SIMULATOR_EXTERNAL_TIME=1`. Binary: `obj/main/betaflight_SITL.elf`. `--config <file>` writes `eeprom.bin` in the working directory and exits. stdout is line-buffered.
+- **Lockstep protocol:** send **one 184-byte datagram** (`fdm_packet` 144 B ‖ `rc_packet` 40 B) to UDP **9003** per exchange; read exactly **one** 16-byte `servo_packet` from UDP **9002**. Never send to 9004.
+  - Exchange rate = Betaflight's virtual gyro rate = **1000 Hz**.
+  - `motor_speed` ∈ [0, 1]: 0 when disarmed, 0.055 at armed idle.
+  - Same inputs ⇒ bit-identical motor outputs.
+- **Sign mapping** (verified 8/8 by motor responses):
+  - gyro sent as FRD `(ωx, ωy, ωz)` **unchanged**;
+  - accel sent as `(−fx, fy, fz)` of the FRD specific force;
+  - quaternion `Rx(π)·q_ned·Rx(π)` with w ≥ 0 (only feeds the compass; unverified, unused in acro/angle);
+  - velocity ENU; `position_xyz` = (lon°, lat°, alt m); pressure in Pa.
+- **Startup:** TCP 5761 accepting does not mean the main loop is running. The first reply needs a **generous timeout** (default 5 s); later replies use the normal timeout (500 ms). A line containing `bind port` and `failed` in SITL's output means a stale SITL is holding ports: **startup error**.
+- **Arming config:** unchanged. ARM on AUX1, ANGLE on AUX2, `motor_pwm_protocol = PWM`, `small_angle = 180`. Keep `pid_process_denom = 1`.
+- **Windows (WSL2, default NAT networking):**
+  - When `launch[0]` is `wsl.exe`, the bridge discovers the WSL VM IP (`hostname -I`, first field) and the Windows host IP as seen from WSL (default route).
+  - It appends `--ip <host IP>` to SITL's argv, sends state datagrams to the VM IP, and binds the motor socket on the host IP.
+  - **Cleanup is required:** default `<wsl prefix> pkill -x betaflight_SITL`, run before every launch and after stop.
+  - Overrides: `OFS_SITL_HOST` (send address), `OFS_SITL_REPLY_IP` (`--ip` and bind address).
+- **Time origin:** SITL's clock never runs backwards, so every `Load` launches a fresh SITL (already the design).
 
 ## Review Focus
 
 - **SITL launch command wrong or binary missing** (typical on Windows with a WSL path): startup must fail with an error naming the command, not hang. Test: Task 11 `launch_failure_names_the_command`.
-- **UDP ports 9002/9003/9004 held by a stale SITL or a second simulator**: error must name the port. Test: Task 11 `busy_pwm_port_is_reported`.
+- **Ports held by a stale SITL or a second simulator**: a held UDP 9002 must fail with an error naming the port (Test: Task 11 `busy_pwm_port_is_reported`), and a SITL that reports `bind port … failed` must fail startup instead of letting the simulator talk to the stale instance (Test: Task 11 `bind_failure_lines_are_recognised`).
 - **Quad file loaded from a different working directory**: `fc.betaflight_diff` must resolve relative to the quad file. Test: Task 8 `diff_path_resolves_relative_to_quad_file`.
 - **Scripts sending bad values** (negative/NaN run duration, NaN sticks): reject with InvalidArgument and keep the session usable. Tests: Task 12 `invalid_run_durations_do_not_poison_the_session`, `non_finite_sticks_are_rejected`.
 - **Client and server protocol versions differ**: typed ProtocolMismatch error. Tests: Task 12 `handshake_checks_protocol_version`, Task 13 `test_protocol_mismatch_is_typed`.
@@ -2208,10 +2220,12 @@ yaw_deg = 0.0
 kind = "sitl"
 exchange_hz = 1000
 # Overridden by the OFS_SITL_LAUNCH / OFS_SITL_CLEANUP environment variables (space-separated argv).
+# Under WSL (launch[0] = wsl.exe) an empty cleanup defaults to "<wsl prefix> pkill -x betaflight_SITL".
 launch = ["betaflight_SITL.elf"]
 cleanup = []
 betaflight_diff = "opendrone-5f-freestyle.betaflight.diff"
 reply_timeout_ms = 500
+first_reply_timeout_ms = 5000
 startup_timeout_ms = 15000
 ```
 
@@ -2478,12 +2492,19 @@ pub struct FcSection {
     pub betaflight_diff: String,
     #[serde(default = "default_reply_timeout_ms")]
     pub reply_timeout_ms: u64,
+    /// The first exchange waits longer: TCP 5761 accepting does not mean the main loop is running.
+    #[serde(default = "default_first_reply_timeout_ms")]
+    pub first_reply_timeout_ms: u64,
     #[serde(default = "default_startup_timeout_ms")]
     pub startup_timeout_ms: u64,
 }
 
 fn default_reply_timeout_ms() -> u64 {
     500
+}
+
+fn default_first_reply_timeout_ms() -> u64 {
+    5_000
 }
 
 fn default_startup_timeout_ms() -> u64 {
@@ -3090,7 +3111,7 @@ git commit -m "feat(sim): assemble quad from config with open-loop FC stand-in"
 
 ### Task 10: SITL packet codecs and frame conversion
 
-**Before starting:** read `docs/research/sitl-interface.md` §2–§3. If M0 changed the gyro or accel mapping (assumption A3), apply the same change to `GYRO_SIGN` / `fdm_packet` below **and** to the test vectors.
+**M0 mapping (applied below):** gyro sent as FRD rates unchanged, accel as `(−fx, fy, fz)`, verified 8/8 by motor responses (`docs/research/sitl-interface.md` §3). RC travels inside the state datagram (§4).
 
 **Files:**
 - Create: `crates/ofs-fc/src/sitl/mod.rs`, `crates/ofs-fc/src/sitl/codec.rs`, `crates/ofs-fc/src/sitl/frames.rs`
@@ -3099,8 +3120,8 @@ git commit -m "feat(sim): assemble quad from config with open-loop FC stand-in"
 
 **Interfaces:**
 - Produces:
-  - `ofs_fc::sitl::codec::{PORT_PWM_RAW, PORT_PWM, PORT_STATE, PORT_RC, MSP_TCP_PORT, FdmPacket, RcPacket, ServoPacket}` — `FdmPacket { timestamp_s, gyro_rpy_radps: [f64;3], accel_xyz_mps2: [f64;3], quat_wxyz: [f64;4], velocity_xyz_mps: [f64;3], position_xyz: [f64;3], pressure_pa }` with `SIZE = 144`, `encode() -> [u8; 144]`; `RcPacket { timestamp_s, channels: [u16;16] }` with `SIZE = 40`, `encode()`; `ServoPacket { motor_speed: [f32;4] }` with `SIZE = 16`, `decode(&[u8]) -> Option<Self>`.
-  - `ofs_fc::sitl::frames::{Home { lat_deg, lon_deg, alt_m }, SensorFrame { time_s, gyro_frd_radps, accel_frd_mps2, att_ned, vel_ned_mps, pos_ned_m, pressure_pa }, GYRO_SIGN, EARTH_RADIUS_M, fdm_packet(&SensorFrame, &Home) -> FdmPacket, attitude_flu_nwu(DQuat) -> DQuat, stick_us(f64) -> u16, throttle_us(f64) -> u16, rc_channels(roll, pitch, yaw, throttle: f64, aux: &[f64]) -> [u16; 16], motor_commands(&ServoPacket) -> [f64; 4]}`.
+  - `ofs_fc::sitl::codec::{PORT_PWM_RAW, PORT_PWM, PORT_STATE, PORT_RC, MSP_TCP_PORT, FdmPacket, RcPacket, ServoPacket}` — `FdmPacket { timestamp_s, gyro_rpy_radps: [f64;3], accel_xyz_mps2: [f64;3], quat_wxyz: [f64;4], velocity_xyz_mps: [f64;3], position_xyz: [f64;3], pressure_pa }` with `SIZE = 144`, `encode() -> [u8; 144]`; `RcPacket { timestamp_s, channels: [u16;16] }` with `SIZE = 40`, `encode()`; `ServoPacket { motor_speed: [f32;4] }` with `SIZE = 16`, `decode(&[u8]) -> Option<Self>`; `STATE_DATAGRAM_SIZE = 184` and `state_datagram(&FdmPacket, &RcPacket) -> [u8; 184]` (fdm ‖ rc, the only thing the bridge sends, to `PORT_STATE`). `PORT_RC` exists for completeness but the bridge never uses it.
+  - `ofs_fc::sitl::frames::{Home { lat_deg, lon_deg, alt_m }, SensorFrame { time_s, gyro_frd_radps, accel_frd_mps2, att_ned, vel_ned_mps, pos_ned_m, pressure_pa }, GYRO_SIGN, ACCEL_SIGN, EARTH_RADIUS_M, fdm_packet(&SensorFrame, &Home) -> FdmPacket, attitude_flu_nwu(DQuat) -> DQuat, stick_us(f64) -> u16, throttle_us(f64) -> u16, rc_channels(roll, pitch, yaw, throttle: f64, aux: &[f64]) -> [u16; 16], motor_commands(&ServoPacket) -> [f64; 4]}`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3109,7 +3130,7 @@ git commit -m "feat(sim): assemble quad from config with open-loop FC stand-in"
 use std::f64::consts::PI;
 
 use glam::{DQuat, DVec3};
-use ofs_fc::sitl::codec::{FdmPacket, RcPacket, ServoPacket};
+use ofs_fc::sitl::codec::{state_datagram, FdmPacket, RcPacket, ServoPacket, STATE_DATAGRAM_SIZE};
 use ofs_fc::sitl::frames::{attitude_flu_nwu, fdm_packet, motor_commands, rc_channels, Home, SensorFrame, EARTH_RADIUS_M};
 
 fn f64_at(bytes: &[u8], index: usize) -> f64 {
@@ -3143,6 +3164,24 @@ fn rc_packet_is_timestamp_then_16_u16_channels() {
     assert_eq!(f64_at(&bytes, 0), 0.5);
     assert_eq!(u16::from_le_bytes([bytes[12], bytes[13]]), 1000);
     assert_eq!(u16::from_le_bytes([bytes[38], bytes[39]]), 1500);
+}
+
+#[test]
+fn state_datagram_is_fdm_then_rc() {
+    let fdm = FdmPacket {
+        timestamp_s: 1.0,
+        gyro_rpy_radps: [0.0; 3],
+        accel_xyz_mps2: [0.0; 3],
+        quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+        velocity_xyz_mps: [0.0; 3],
+        position_xyz: [0.0; 3],
+        pressure_pa: 101_325.0,
+    };
+    let rc = RcPacket { timestamp_s: 1.0, channels: [1500; 16] };
+    let d = state_datagram(&fdm, &rc);
+    assert_eq!(d.len(), STATE_DATAGRAM_SIZE);
+    assert_eq!(&d[..FdmPacket::SIZE], &fdm.encode()[..]);
+    assert_eq!(&d[FdmPacket::SIZE..], &rc.encode()[..]);
 }
 
 #[test]
@@ -3191,8 +3230,8 @@ fn sensor_frame_maps_to_legacy_bridge_fields() {
     };
     let p = fdm_packet(&frame, &home);
     assert_eq!(p.timestamp_s, 2.5);
-    assert_eq!(p.gyro_rpy_radps, [1.0, 2.0, -3.0]);
-    assert_eq!(p.accel_xyz_mps2, [0.1, 0.2, -9.8]);
+    assert_eq!(p.gyro_rpy_radps, [1.0, 2.0, 3.0]);
+    assert_eq!(p.accel_xyz_mps2, [-0.1, 0.2, -9.8]);
     assert_eq!(p.velocity_xyz_mps, [2.0, 1.0, 3.0]);
     let lat = 50.0 + (100.0 / EARTH_RADIUS_M).to_degrees();
     let lon = 4.0 + (50.0 / (EARTH_RADIUS_M * 50f64.to_radians().cos())).to_degrees();
@@ -3278,6 +3317,17 @@ impl RcPacket {
     }
 }
 
+/// Lockstep datagram: `fdm_packet` followed by `rc_packet`, sent to `PORT_STATE` (patched SITL applies the RC
+/// with the same tick, so stick input is deterministic). See docs/research/sitl-interface.md §4.
+pub const STATE_DATAGRAM_SIZE: usize = FdmPacket::SIZE + RcPacket::SIZE;
+
+pub fn state_datagram(fdm: &FdmPacket, rc: &RcPacket) -> [u8; STATE_DATAGRAM_SIZE] {
+    let mut out = [0u8; STATE_DATAGRAM_SIZE];
+    out[..FdmPacket::SIZE].copy_from_slice(&fdm.encode());
+    out[FdmPacket::SIZE..].copy_from_slice(&rc.encode());
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServoPacket {
     pub motor_speed: [f32; 4],
@@ -3313,8 +3363,10 @@ use super::codec::{FdmPacket, ServoPacket};
 
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
-/// Applied to FRD body rates. SITL then maps (x, -y, -z), giving Betaflight (x, -y, z)_FRD (see sitl_gyro.h).
-pub const GYRO_SIGN: [f64; 3] = [1.0, 1.0, -1.0];
+/// Applied to FRD body rates before sending (SITL then maps (x, -y, -z), so Betaflight gets FLU rates).
+pub const GYRO_SIGN: [f64; 3] = [1.0, 1.0, 1.0];
+/// Applied to the FRD specific force before sending (SITL negates all axes, so Betaflight gets FLU).
+pub const ACCEL_SIGN: [f64; 3] = [-1.0, 1.0, 1.0];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Home {
@@ -3356,7 +3408,10 @@ pub fn fdm_packet(f: &SensorFrame, home: &Home) -> FdmPacket {
     FdmPacket {
         timestamp_s: f.time_s,
         gyro_rpy_radps: [g[0] * GYRO_SIGN[0], g[1] * GYRO_SIGN[1], g[2] * GYRO_SIGN[2]],
-        accel_xyz_mps2: f.accel_frd_mps2.to_array(),
+        accel_xyz_mps2: {
+            let a = f.accel_frd_mps2.to_array();
+            [a[0] * ACCEL_SIGN[0], a[1] * ACCEL_SIGN[1], a[2] * ACCEL_SIGN[2]]
+        },
         quat_wxyz: [q.w, q.x, q.y, q.z],
         velocity_xyz_mps: [f.vel_ned_mps.y, f.vel_ned_mps.x, -f.vel_ned_mps.z],
         position_xyz: [lon, lat, home.alt_m - f.pos_ned_m.z],
@@ -3407,7 +3462,7 @@ pub mod sitl;
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p ofs-fc`
-Expected: 7 passed.
+Expected: 8 passed.
 
 - [ ] **Step 6: Commit**
 
@@ -3420,19 +3475,20 @@ git commit -m "feat(fc): Betaflight SITL packet codecs and frame conversion"
 
 ### Task 11: SITL process supervisor and lockstep bridge
 
-**Before starting:** check M0 §4 for the recommended build flags and `exchange_hz`, and §6 for the Windows launch/cleanup values (A4, A6).
+**M0 results applied:** one 184-byte state datagram to UDP 9003 per exchange, a generous first-reply timeout, `bind … failed` treated as a startup error, and WSL2 addressing and cleanup on Windows (`docs/research/sitl-interface.md` §4, §6, §7).
 
 **Files:**
-- Create: `crates/ofs-fc/src/sitl/process.rs`, `crates/ofs-fc/src/sitl/bridge.rs`
+- Create: `crates/ofs-fc/src/sitl/process.rs`, `crates/ofs-fc/src/sitl/bridge.rs`, `crates/ofs-fc/src/sitl/net.rs`
 - Modify: `crates/ofs-fc/src/sitl/mod.rs`, `crates/ofs-sim/src/vehicle.rs` (the `FcKind::Sitl` arm)
-- Test: `crates/ofs-fc/tests/sitl_errors.rs`, `crates/ofs-fc/tests/sitl_live.rs` (ignored unless SITL is available)
+- Test: `crates/ofs-fc/tests/sitl_errors.rs`, `crates/ofs-fc/tests/sitl_net.rs`, `crates/ofs-fc/tests/sitl_live.rs` (ignored unless SITL is available)
 
 **Interfaces:**
 - Consumes: Task 10 codecs and frames; `names::{IMU_GYRO, IMU_ACCEL, BODY_ATT, BODY_VEL_NED, BODY_POS_NED, BARO_PRESSURE, RC_*, rc_aux, motor_cmd}`.
 - Produces:
   - `ofs_fc::sitl::FcError` — `PortInUse { port: u16, hint: &'static str }`, `Launch { command: String, source: io::Error }`, `Config(String)`, `Startup(String, String)`, `Io(io::Error)`.
-  - `ofs_fc::sitl::process::{LaunchConfig { launch: Vec<String>, cleanup: Vec<String>, workdir: PathBuf, diff_file: PathBuf, startup_timeout: Duration }, SitlProcess}` — `SitlProcess::start(&LaunchConfig) -> Result<Self, FcError>`, `exit_status(&mut self) -> Option<ExitStatus>`, `log_tail(&self) -> String`; writes `<workdir>/sitl.log`; Drop kills the process and runs `cleanup`.
-  - `ofs_fc::sitl::bridge::{BridgeConfig { launch: LaunchConfig, rate_divisor: u32, reply_timeout: Duration, home: Home, motor_count: usize }, SitlBridge}` — `SitlBridge::start(BridgeConfig, &mut Bus) -> Result<Self, FcError>`; model `"fc.sitl"`.
+  - `ofs_fc::sitl::process::{LaunchConfig { launch: Vec<String>, cleanup: Vec<String>, workdir: PathBuf, diff_file: PathBuf, startup_timeout: Duration }, SitlProcess, is_bind_failure(&str) -> bool}` — `SitlProcess::start(&LaunchConfig) -> Result<Self, FcError>` (fails with `FcError::Startup` if SITL prints a `bind port … failed` line), `exit_status(&mut self) -> Option<ExitStatus>`, `log_tail(&self) -> String`; writes `<workdir>/sitl.log`; Drop kills the process and runs `cleanup`.
+  - `ofs_fc::sitl::net::{SitlNet { send_ip: Ipv4Addr, bind_ip: Ipv4Addr, sitl_ip_arg: Option<Ipv4Addr> }, SitlNet::loopback(), wsl_prefix(&[String]) -> Option<Vec<String>>, default_cleanup(&[String]) -> Vec<String>, parse_hostname_ips(&str) -> Option<Ipv4Addr>, parse_default_gateway(&str) -> Option<Ipv4Addr>, resolve(launch: &[String], send_override: Option<Ipv4Addr>, reply_override: Option<Ipv4Addr>) -> Result<SitlNet, FcError>}`.
+  - `ofs_fc::sitl::bridge::{BridgeConfig { launch: LaunchConfig, net: SitlNet, rate_divisor: u32, first_reply_timeout: Duration, reply_timeout: Duration, home: Home, motor_count: usize }, SitlBridge}` — `SitlBridge::start(BridgeConfig, &mut Bus) -> Result<Self, FcError>` (appends `--ip <sitl_ip_arg>` to the launch argv when set); model `"fc.sitl"`.
 
 - [ ] **Step 1: Write the failing error-path tests (no SITL needed)**
 
@@ -3445,10 +3501,11 @@ use std::time::Duration;
 use ofs_core::Bus;
 use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
 use ofs_fc::sitl::frames::Home;
-use ofs_fc::sitl::process::LaunchConfig;
+use ofs_fc::sitl::net::SitlNet;
+use ofs_fc::sitl::process::{is_bind_failure, LaunchConfig};
 use ofs_fc::sitl::FcError;
 
-// Both tests bind the fixed SITL UDP ports, so they must not run concurrently.
+// These tests bind the fixed SITL UDP ports, so they must not run concurrently.
 static PORTS: Mutex<()> = Mutex::new(());
 
 fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
@@ -3462,11 +3519,21 @@ fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
             diff_file: diff,
             startup_timeout: Duration::from_secs(2),
         },
+        net: SitlNet::loopback(),
         rate_divisor: 8,
+        first_reply_timeout: Duration::from_millis(500),
         reply_timeout: Duration::from_millis(200),
         home: Home { lat_deg: 50.0, lon_deg: 4.0, alt_m: 0.0 },
         motor_count: 4,
     }
+}
+
+#[test]
+fn bind_failure_lines_are_recognised() {
+    // A stale SITL keeps the ports; the new one prints this and keeps running (M0 §6).
+    assert!(is_bind_failure("bind port 5761 for UART1 failed!!"));
+    assert!(!is_bind_failure("bind port 5761 for UART1"));
+    assert!(!is_bind_failure("[SITL] init PwmOut UDP link to gazebo 127.0.0.1:9002...0"));
 }
 
 #[test]
@@ -3489,10 +3556,52 @@ fn busy_pwm_port_is_reported() {
 }
 ```
 
+`crates/ofs-fc/tests/sitl_net.rs`:
+```rust
+use std::net::Ipv4Addr;
+
+use ofs_fc::sitl::net::{default_cleanup, parse_default_gateway, parse_hostname_ips, resolve, wsl_prefix, SitlNet};
+
+fn argv(a: &[&str]) -> Vec<String> {
+    a.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn wsl_launches_are_detected_with_their_exec_prefix() {
+    assert_eq!(wsl_prefix(&argv(&["wsl.exe", "-d", "Ubuntu", "-e", "/home/u/sitl.elf"])), Some(argv(&["wsl.exe", "-d", "Ubuntu", "-e"])));
+    assert_eq!(wsl_prefix(&argv(&["C:\\Windows\\System32\\WSL.EXE", "--exec", "/x"])), Some(argv(&["C:\\Windows\\System32\\WSL.EXE", "--exec"])));
+    assert_eq!(wsl_prefix(&argv(&["wsl.exe", "/x"])), Some(argv(&["wsl.exe", "-e"])));
+    assert_eq!(wsl_prefix(&argv(&["/home/u/betaflight_SITL.elf"])), None);
+    assert_eq!(wsl_prefix(&[]), None);
+}
+
+#[test]
+fn wsl_cleanup_matches_the_process_name_not_the_command_line() {
+    assert_eq!(default_cleanup(&argv(&["wsl.exe", "-d", "Ubuntu", "-e", "/x"])), argv(&["wsl.exe", "-d", "Ubuntu", "-e", "pkill", "-x", "betaflight_SITL"]));
+    assert!(default_cleanup(&argv(&["/x/betaflight_SITL.elf"])).is_empty());
+}
+
+#[test]
+fn wsl_addresses_are_parsed() {
+    assert_eq!(parse_hostname_ips("172.28.26.115 10.255.255.254 \n"), Some(Ipv4Addr::new(172, 28, 26, 115)));
+    assert_eq!(parse_hostname_ips(""), None);
+    assert_eq!(parse_default_gateway("default via 172.28.16.1 dev eth0 proto kernel\n"), Some(Ipv4Addr::new(172, 28, 16, 1)));
+    assert_eq!(parse_default_gateway("10.0.0.0/8 dev eth0"), None);
+}
+
+#[test]
+fn native_launch_uses_loopback_and_overrides_win() {
+    let native = argv(&["/home/u/betaflight_SITL.elf"]);
+    assert_eq!(resolve(&native, None, None).unwrap(), SitlNet::loopback());
+    let net = resolve(&native, Some(Ipv4Addr::new(10, 0, 0, 2)), Some(Ipv4Addr::new(10, 0, 0, 1))).unwrap();
+    assert_eq!(net, SitlNet { send_ip: Ipv4Addr::new(10, 0, 0, 2), bind_ip: Ipv4Addr::new(10, 0, 0, 1), sitl_ip_arg: Some(Ipv4Addr::new(10, 0, 0, 1)) });
+}
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p ofs-fc --test sitl_errors`
-Expected: compile error (`bridge`, `process`, `FcError` not found).
+Run: `cargo test -p ofs-fc --test sitl_errors --test sitl_net`
+Expected: compile error (`bridge`, `process`, `net`, `FcError` not found).
 
 - [ ] **Step 3: Implement the error type and process supervisor**
 
@@ -3502,6 +3611,7 @@ Expected: compile error (`bridge`, `process`, `FcError` not found).
 pub mod bridge;
 pub mod codec;
 pub mod frames;
+pub mod net;
 pub mod process;
 
 #[derive(Debug, thiserror::Error)]
@@ -3548,14 +3658,24 @@ pub struct LaunchConfig {
     pub startup_timeout: Duration,
 }
 
+/// A stale SITL still holds the ports: a new instance prints this (e.g. `bind port 5761 for UART1 failed!!`)
+/// and keeps running, and the simulator would talk to the old one. Treated as a startup error.
+pub fn is_bind_failure(line: &str) -> bool {
+    line.contains("bind port") && line.contains("failed")
+}
+
 #[derive(Default)]
 struct LogSink {
     tail: VecDeque<String>,
     file: Option<File>,
+    bind_failed: bool,
 }
 
 impl LogSink {
     fn push(&mut self, line: String) {
+        if is_bind_failure(&line) {
+            self.bind_failed = true;
+        }
         if let Some(f) = self.file.as_mut() {
             let _ = writeln!(f, "{line}");
         }
@@ -3582,7 +3702,7 @@ impl SitlProcess {
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
         }
-        let log: SharedLog = Arc::new(Mutex::new(LogSink { tail: VecDeque::new(), file: File::create(workdir.join("sitl.log")).ok() }));
+        let log: SharedLog = Arc::new(Mutex::new(LogSink { file: File::create(workdir.join("sitl.log")).ok(), ..LogSink::default() }));
         let child = spawn_logged(&cfg.launch, &workdir, &log)?;
         let mut proc = SitlProcess { child, log, cleanup: cfg.cleanup.clone() };
         proc.wait_until_ready(cfg.startup_timeout)?;
@@ -3597,6 +3717,12 @@ impl SitlProcess {
                 return Err(FcError::Startup(format!("exited with {status} during startup"), self.log_tail()));
             }
             if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+                // A stale instance also answers on tcp:5761; give the new one time to report bind failures.
+                std::thread::sleep(Duration::from_millis(300));
+                if self.log.lock().map(|l| l.bind_failed).unwrap_or(false) {
+                    let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
+                    return Err(FcError::Startup(what.into(), self.log_tail()));
+                }
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -3693,11 +3819,114 @@ fn run_cleanup(argv: &[String]) {
 }
 ```
 
+`crates/ofs-fc/src/sitl/net.rs`:
+```rust
+//! Where SITL lives on the network: natively on loopback, or inside WSL2 behind NAT (Windows).
+//! See docs/research/sitl-interface.md §6.
+use std::net::Ipv4Addr;
+use std::process::{Command, Stdio};
+
+use super::FcError;
+
+/// Addresses for the lockstep exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SitlNet {
+    /// Where state datagrams are sent (SITL's UDP 9003).
+    pub send_ip: Ipv4Addr,
+    /// Local address the motor socket binds (SITL sends motor packets to it, UDP 9002).
+    pub bind_ip: Ipv4Addr,
+    /// Passed to SITL as `--ip` when it must reply somewhere other than its own loopback.
+    pub sitl_ip_arg: Option<Ipv4Addr>,
+}
+
+impl SitlNet {
+    pub fn loopback() -> Self {
+        Self { send_ip: Ipv4Addr::LOCALHOST, bind_ip: Ipv4Addr::LOCALHOST, sitl_ip_arg: None }
+    }
+}
+
+/// The `wsl.exe … -e` prefix of a launch argv, if SITL is launched through WSL.
+pub fn wsl_prefix(launch: &[String]) -> Option<Vec<String>> {
+    let first = launch.first()?;
+    let exe = first.rsplit(['/', '\\']).next().unwrap_or(first).to_ascii_lowercase();
+    if exe != "wsl.exe" && exe != "wsl" {
+        return None;
+    }
+    match launch.iter().position(|a| a == "-e" || a == "--exec") {
+        Some(i) => Some(launch[..=i].to_vec()),
+        None => Some(vec![first.clone(), "-e".to_string()]),
+    }
+}
+
+/// Cleanup argv that removes stray SITL processes. Matches the process *name* (`pkill -x`): `pkill -f`
+/// would also match (and kill) any shell whose command line contains the binary path.
+pub fn default_cleanup(launch: &[String]) -> Vec<String> {
+    match wsl_prefix(launch) {
+        Some(mut prefix) => {
+            prefix.extend(["pkill", "-x", "betaflight_SITL"].map(String::from));
+            prefix
+        }
+        None => Vec::new(),
+    }
+}
+
+/// First IPv4 address of `hostname -I` output.
+pub fn parse_hostname_ips(out: &str) -> Option<Ipv4Addr> {
+    out.split_whitespace().find_map(|w| w.parse().ok())
+}
+
+/// Gateway of `ip route show default` output (`default via 172.28.16.1 dev eth0 …`).
+pub fn parse_default_gateway(out: &str) -> Option<Ipv4Addr> {
+    let mut words = out.split_whitespace();
+    while let Some(w) = words.next() {
+        if w == "via" {
+            return words.next()?.parse().ok();
+        }
+    }
+    None
+}
+
+fn run(prefix: &[String], args: &[&str]) -> Result<String, FcError> {
+    let (program, rest) = prefix.split_first().expect("wsl prefix is never empty");
+    let out = Command::new(program)
+        .args(rest)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|source| FcError::Launch { command: format!("{} {}", prefix.join(" "), args.join(" ")), source })?;
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Addresses for a launch argv. Native: loopback. WSL2 (NAT): send to the VM IP, bind and `--ip` the
+/// Windows host IP as seen from WSL. Overrides: `send_override` (OFS_SITL_HOST), `reply_override`
+/// (OFS_SITL_REPLY_IP; also passed as `--ip`).
+pub fn resolve(launch: &[String], send_override: Option<Ipv4Addr>, reply_override: Option<Ipv4Addr>) -> Result<SitlNet, FcError> {
+    let mut net = match wsl_prefix(launch) {
+        None => SitlNet::loopback(),
+        Some(prefix) => {
+            let vm = parse_hostname_ips(&run(&prefix, &["hostname", "-I"])?)
+                .ok_or_else(|| FcError::Config("could not read the WSL VM IP (`hostname -I`)".into()))?;
+            let host = parse_default_gateway(&run(&prefix, &["ip", "route", "show", "default"])?)
+                .ok_or_else(|| FcError::Config("could not read the Windows host IP from WSL (`ip route show default`)".into()))?;
+            SitlNet { send_ip: vm, bind_ip: host, sitl_ip_arg: Some(host) }
+        }
+    };
+    if let Some(ip) = send_override {
+        net.send_ip = ip;
+    }
+    if let Some(ip) = reply_override {
+        net.bind_ip = ip;
+        net.sitl_ip_arg = Some(ip);
+    }
+    Ok(net)
+}
+```
+
 - [ ] **Step 4: Implement the bridge model**
 
 `crates/ofs-fc/src/sitl/bridge.rs`:
 ```rust
-//! Lockstep exchange with Betaflight SITL: send sensors + RC, wait for one motor packet.
+//! Lockstep exchange with Betaflight SITL: send one state datagram (sensors + RC), wait for one motor packet.
 use std::io::ErrorKind;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
@@ -3705,17 +3934,19 @@ use std::time::Duration;
 use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 
-use super::codec::{RcPacket, ServoPacket, PORT_PWM, PORT_RC, PORT_STATE};
+use super::codec::{state_datagram, RcPacket, ServoPacket, PORT_PWM, PORT_STATE};
 use super::frames::{fdm_packet, motor_commands, rc_channels, Home, SensorFrame};
+use super::net::SitlNet;
 use super::process::{LaunchConfig, SitlProcess};
 use super::FcError;
-
-const LOCALHOST: [u8; 4] = [127, 0, 0, 1];
 
 #[derive(Debug, Clone)]
 pub struct BridgeConfig {
     pub launch: LaunchConfig,
+    pub net: SitlNet,
     pub rate_divisor: u32,
+    /// The first exchange can arrive before SITL's main loop runs; allow seconds.
+    pub first_reply_timeout: Duration,
     pub reply_timeout: Duration,
     pub home: Home,
     pub motor_count: usize,
@@ -3743,22 +3974,25 @@ pub struct SitlBridge {
     cmds: Vec<Signal<f64>>,
     proc: SitlProcess,
     first: bool,
+    answered: bool,
 }
 
 impl SitlBridge {
     pub fn start(cfg: BridgeConfig, bus: &mut Bus) -> Result<Self, FcError> {
         assert!(cfg.motor_count <= 4, "Betaflight SITL's servo_packet carries 4 motors");
-        let rx = UdpSocket::bind(SocketAddr::from((LOCALHOST, PORT_PWM)))
+        let net = cfg.net;
+        let rx = UdpSocket::bind(SocketAddr::from((net.bind_ip, PORT_PWM)))
             .map_err(|_| FcError::PortInUse { port: PORT_PWM, hint: "another simulator instance may be running" })?;
-        for port in [PORT_STATE, PORT_RC] {
-            // SITL must be able to bind these; probe and release them now to fail early with a clear message.
-            UdpSocket::bind(SocketAddr::from((LOCALHOST, port))).map_err(|_| FcError::PortInUse {
-                port,
+        if net.send_ip.is_loopback() {
+            // Native SITL must be able to bind its state port; probe and release it to fail early.
+            // (Under WSL the port lives inside the VM; the cleanup command and bind-failure check cover it.)
+            UdpSocket::bind(SocketAddr::from((net.send_ip, PORT_STATE))).map_err(|_| FcError::PortInUse {
+                port: PORT_STATE,
                 hint: "a Betaflight SITL instance may still be running (see fc.cleanup / OFS_SITL_CLEANUP)",
             })?;
         }
-        rx.set_read_timeout(Some(cfg.reply_timeout))?;
-        let tx = UdpSocket::bind(SocketAddr::from((LOCALHOST, 0)))?;
+        rx.set_read_timeout(Some(cfg.first_reply_timeout))?;
+        let tx = UdpSocket::bind(SocketAddr::from((net.bind_ip, 0)))?;
         let inputs = Inputs {
             gyro: bus.signal(names::IMU_GYRO),
             accel: bus.signal(names::IMU_ACCEL),
@@ -3773,8 +4007,12 @@ impl SitlBridge {
             aux: (0..names::RC_AUX_COUNT).map(|i| bus.signal(&names::rc_aux(i))).collect(),
         };
         let cmds = (0..cfg.motor_count).map(|i| bus.signal(&names::motor_cmd(i))).collect();
-        let proc = SitlProcess::start(&cfg.launch)?;
-        Ok(Self { cfg, rx, tx, inputs, cmds, proc, first: true })
+        let mut launch = cfg.launch.clone();
+        if let Some(ip) = net.sitl_ip_arg {
+            launch.launch.extend(["--ip".to_string(), ip.to_string()]);
+        }
+        let proc = SitlProcess::start(&launch)?;
+        Ok(Self { cfg, rx, tx, inputs, cmds, proc, first: true, answered: false })
     }
 
     fn drain(&self) -> std::io::Result<()> {
@@ -3793,10 +4031,10 @@ impl SitlBridge {
     }
 }
 
-fn send(tx: &UdpSocket, bytes: &[u8], port: u16) {
+fn send(tx: &UdpSocket, bytes: &[u8], to: SocketAddr) {
     // Windows reports an earlier ICMP "port unreachable" as an error on a later send; a missing
     // reply is detected on receive instead, so send errors are ignored here.
-    let _ = tx.send_to(bytes, SocketAddr::from((LOCALHOST, port)));
+    let _ = tx.send_to(bytes, to);
 }
 
 impl Model for SitlBridge {
@@ -3825,8 +4063,9 @@ impl Model for SitlBridge {
         };
         let aux: Vec<f64> = i.aux.iter().map(|s| bus.get(*s)).collect();
         let channels = rc_channels(bus.get(i.roll), bus.get(i.pitch), bus.get(i.yaw), bus.get(i.throttle), &aux);
-        send(&self.tx, &fdm_packet(&frame, &self.cfg.home).encode(), PORT_STATE);
-        send(&self.tx, &RcPacket { timestamp_s: ctx.time_s, channels }.encode(), PORT_RC);
+        let rc = RcPacket { timestamp_s: ctx.time_s, channels };
+        let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
+        send(&self.tx, &state_datagram(&fdm_packet(&frame, &self.cfg.home), &rc), to);
 
         let mut buf = [0u8; 128];
         match self.rx.recv_from(&mut buf) {
@@ -3836,10 +4075,17 @@ impl Model for SitlBridge {
                 for (sig, v) in self.cmds.iter().zip(motor_commands(&packet)) {
                     bus.set(*sig, v);
                 }
+                if !self.answered {
+                    self.answered = true;
+                    self.rx
+                        .set_read_timeout(Some(self.cfg.reply_timeout))
+                        .map_err(|e| SimError::Firmware(format!("UDP setup failed: {e}")))?;
+                }
                 Ok(())
             }
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::ConnectionReset) => {
-                let what = format!("no motor output within {} ms", self.cfg.reply_timeout.as_millis());
+                let waited = if self.answered { self.cfg.reply_timeout } else { self.cfg.first_reply_timeout };
+                let what = format!("no motor output within {} ms", waited.as_millis());
                 Err(self.firmware_error(&what))
             }
             Err(e) => Err(SimError::Firmware(format!("UDP receive failed: {e}"))),
@@ -3850,8 +4096,8 @@ impl Model for SitlBridge {
 
 - [ ] **Step 5: Run the error-path tests**
 
-Run: `cargo test -p ofs-fc --test sitl_errors`
-Expected: 2 passed.
+Run: `cargo test -p ofs-fc --test sitl_errors --test sitl_net`
+Expected: sitl_errors 3 passed, sitl_net 4 passed.
 
 - [ ] **Step 6: Wire the bridge into the vehicle**
 
@@ -3859,8 +4105,11 @@ In `crates/ofs-sim/src/vehicle.rs`, add these imports below the existing `use` l
 ```rust
 use std::time::Duration;
 
+use std::net::Ipv4Addr;
+
 use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
 use ofs_fc::sitl::frames::Home;
+use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
 ```
 Replace the line
@@ -3871,9 +4120,16 @@ with:
 ```rust
         FcKind::Sitl => {
             let quad_stem = cfg.source_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
+            let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
+            let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
+            if cleanup.is_empty() {
+                cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6)
+            }
+            let sitl_net = net::resolve(&launch_argv, env_ip("OFS_SITL_HOST")?, env_ip("OFS_SITL_REPLY_IP")?)
+                .map_err(|e| SimError::Firmware(e.to_string()))?;
             let launch = LaunchConfig {
-                launch: env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone()),
-                cleanup: env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone()),
+                launch: launch_argv,
+                cleanup,
                 workdir: opts.data_dir.join(quad_stem),
                 diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
                 startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
@@ -3881,7 +4137,9 @@ with:
             let bridge = SitlBridge::start(
                 BridgeConfig {
                     launch,
+                    net: sitl_net,
                     rate_divisor: fc_divisor,
+                    first_reply_timeout: Duration::from_millis(cfg.fc.first_reply_timeout_ms),
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
@@ -3897,6 +4155,18 @@ and add at the end of the file:
 /// Space-separated argv from an environment variable, if set and non-empty.
 fn env_argv(var: &str) -> Option<Vec<String>> {
     std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| s.split_whitespace().map(String::from).collect())
+}
+
+/// IPv4 address from an environment variable, if set and non-empty.
+fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, SimError> {
+    match std::env::var(var) {
+        Ok(v) if !v.trim().is_empty() => v
+            .trim()
+            .parse()
+            .map(Some)
+            .map_err(|_| SimError::InvalidArgument(format!("{var}={v} is not an IPv4 address"))),
+        _ => Ok(None),
+    }
 }
 ```
 
@@ -3915,6 +4185,7 @@ use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Scheduler};
 use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
 use ofs_fc::sitl::frames::Home;
+use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
 
 const DIFF: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.betaflight.diff");
@@ -3923,7 +4194,11 @@ const DIFF: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5
 #[ignore]
 fn still_quad_exchanges_packets_and_stays_disarmed() {
     let launch: Vec<String> = std::env::var("OFS_SITL_LAUNCH").expect("set OFS_SITL_LAUNCH").split_whitespace().map(String::from).collect();
-    let cleanup: Vec<String> = std::env::var("OFS_SITL_CLEANUP").unwrap_or_default().split_whitespace().map(String::from).collect();
+    let mut cleanup: Vec<String> = std::env::var("OFS_SITL_CLEANUP").unwrap_or_default().split_whitespace().map(String::from).collect();
+    if cleanup.is_empty() {
+        cleanup = net::default_cleanup(&launch);
+    }
+    let sitl_net = net::resolve(&launch, None, None).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let mut bus = Bus::new();
     let accel = bus.signal::<DVec3>(names::IMU_ACCEL);
@@ -3935,7 +4210,9 @@ fn still_quad_exchanges_packets_and_stays_disarmed() {
     let bridge = SitlBridge::start(
         BridgeConfig {
             launch: LaunchConfig { launch, cleanup, workdir: dir.path().join("fc"), diff_file: DIFF.into(), startup_timeout: Duration::from_secs(15) },
+            net: sitl_net,
             rate_divisor: 8,
+            first_reply_timeout: Duration::from_secs(5),
             reply_timeout: Duration::from_millis(500),
             home: Home { lat_deg: 50.85, lon_deg: 4.35, alt_m: 30.0 },
             motor_count: 4,
@@ -3954,8 +4231,9 @@ fn still_quad_exchanges_packets_and_stays_disarmed() {
 
 - [ ] **Step 8: Run the live test**
 
-Build SITL if needed (`bash scripts/build-sitl.sh`, from M0), then run:
+Build SITL if needed (`bash scripts/build-sitl.sh` in Linux/WSL), then run:
 `OFS_SITL_LAUNCH=<launch command> cargo test -p ofs-fc --test sitl_live -- --ignored`
+(Linux: the `.elf` path; Windows: `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf`; addresses and cleanup are resolved automatically.)
 Expected: 1 passed. On failure the error contains SITL's last output; the full log is in the temp `fc/sitl.log`.
 
 - [ ] **Step 9: Commit**
@@ -4561,7 +4839,7 @@ def test_euler_of_identity_is_zero():
 
 `python/tests/test_sitl_hover.py`:
 ```python
-"""M1 exit criterion. Needs Betaflight SITL: set OFS_SITL_LAUNCH (and OFS_SITL_CLEANUP if M0 says so)."""
+"""M1 exit criterion. Needs Betaflight SITL: set OFS_SITL_LAUNCH (cleanup defaults automatically under WSL)."""
 import importlib.util
 import os
 
@@ -4954,8 +5232,9 @@ License: GPL-3.0-or-later.
 ## Environment variables
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
 - `OFS_SITL_LAUNCH` — SITL argv (space-separated), overrides `fc.launch` in quad files.
-  Windows: `wsl.exe -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf` (WSL mirrored networking; see `docs/research/sitl-interface.md` §6).
-- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes (Windows: see findings §6).
+  Windows: `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf`. Works with WSL's default NAT networking: the bridge discovers the WSL VM and host IPs and passes `--ip` (see `docs/research/sitl-interface.md` §6).
+- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes. Under WSL it defaults to `<wsl prefix> pkill -x betaflight_SITL` (required: a stale SITL would otherwise answer instead of the new one).
+- `OFS_SITL_HOST`, `OFS_SITL_REPLY_IP` — override the address state datagrams go to, and the address SITL replies to (`--ip`, motor socket bind).
 
 ## Firmware state
 Each quad gets `<data_dir>/<quad file stem>/` holding `eeprom.bin`, `betaflight.diff` and `sitl.log`.
