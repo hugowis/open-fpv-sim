@@ -1,7 +1,7 @@
 # Open FPV Sim — Architecture & v1 Design
 
 - **Date:** 2026-10-04
-- **Status:** Draft, awaiting review
+- **Status:** Approved 2026-10-04
 - **Short name:** `ofs` (crate/package prefix)
 
 ## 1. Intent
@@ -222,5 +222,5 @@ Each milestone gets its own implementation plan. The first plan covers M0 and M1
 ## 11. Project conventions
 - **Platforms (v1):** Windows and Linux.
 - **Toolchain:** Rust stable (Cargo workspace), Godot 4.x with godot-rust/gdext, Python ≥ 3.10.
-- **License:** GPL-3.0-or-later for code (matches Betaflight and OpenDrone's copyleft spirit); component library data under CC-BY-SA-4.0. *To be confirmed by the project owner at spec review.*
+- **License:** GPL-3.0-or-later for code (matches Betaflight and OpenDrone's copyleft spirit); component library data under CC-BY-SA-4.0.
 - **Repository layout:** `crates/` (Rust workspace), `godot/` (Godot project), `python/` (client package), `library/`, `quads/`, `worlds/`, `docs/`.
