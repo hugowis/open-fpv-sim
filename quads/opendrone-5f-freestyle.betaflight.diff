@@ -1,0 +1,6 @@
+# Applied once, on first boot, with `betaflight_SITL.elf --config`.
+feature -GPS
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180
