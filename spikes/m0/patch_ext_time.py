@@ -63,7 +63,9 @@ static bool extFdmRcValid = false;
 static uint16_t extFdmRcChannels[SIMULATOR_MAX_RC_CHANNELS];
 
 // Main thread only: a tick was taken and has not been answered yet.
+#define EXT_MAX_BUSY_PASSES 100000
 static bool extReplyPending = false;
+static uint32_t extBusyPasses = 0;
 
 // Called by the scheduler: true once per FDM packet. Applies that packet's time and RC first, so the
 // main loop never sees a new instant before the tick that belongs to it.
@@ -225,19 +227,26 @@ sub("""    if (pthread_mutex_trylock(&updateLock) != 0) return;
 // only now guarantees the simulator's next packet cannot advance time in the middle of a tick. Every
 // taken tick gets exactly one reply (the latest motor values), even when PID did not run on it
 // (pid_process_denom > 1).
+static void extSendReply(void)
+{
+    extReplyPending = false;
+    extBusyPasses = 0;
+    udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
+    udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
+}
+
 void simulatorSchedulerIdle(void)
 {
+    extBusyPasses = 0;
     if (extReplyPending) {
-        extReplyPending = false;
-        udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
-        udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
+        extSendReply();
     }
     // Nothing can become due until the next packet advances time: sleep until it arrives (bounded,
     // so wall-time behaviour before the first packet and TCP serial traffic are still serviced).
     pthread_mutex_lock(&extPacketMutex);
     if (extGyroTicks == extGyroTicksTaken) {
         struct timespec until;
-        clock_gettime(CLOCK_REALTIME, &until);
+        clock_gettime(CLOCK_MONOTONIC, &until);  // extPacketCond uses CLOCK_MONOTONIC (systemInit)
         until.tv_nsec += 1000000;
         if (until.tv_nsec >= 1000000000) {
             until.tv_sec += 1;
@@ -247,6 +256,34 @@ void simulatorSchedulerIdle(void)
     }
     pthread_mutex_unlock(&extPacketMutex);
 }
+
+// Called by the scheduler after a pass that ran a task. Liveness guard: if tasks keep being selected
+// at one frozen instant (e.g. an event task whose check never clears), reply anyway rather than stall.
+void simulatorSchedulerBusy(void)
+{
+    if (extReplyPending && ++extBusyPasses > EXT_MAX_BUSY_PASSES) {
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr, "[SITL] warning: tasks still due after %u scheduler passes at one simulated instant; replying anyway\\n", (unsigned)EXT_MAX_BUSY_PASSES);
+            warned = true;
+        }
+        extSendReply();
+    }
+}
+#endif
+""")
+
+sub("""    clock_gettime(CLOCK_MONOTONIC, &start_time);
+""", """    clock_gettime(CLOCK_MONOTONIC, &start_time);
+#if ENABLE_SIMULATOR_EXTERNAL_TIME
+    {
+        // The idle wait must not jump with wall-clock steps (WSL2 resyncs its clock after host sleep).
+        pthread_condattr_t attr;
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&extPacketCond, &attr);
+        pthread_condattr_destroy(&attr);
+    }
 #endif
 """)
 
@@ -297,23 +334,34 @@ ssub("""    nowCycles = getCycleCounter();
 #endif
 
     if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {""")
-ssub("""static int32_t desiredPeriodCycles;
-""", """static int32_t desiredPeriodCycles;
-#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
-bool simulatorTakeGyroTick(void);   // platform/SIMULATOR/sitl.c
-void simulatorSchedulerIdle(void);  // platform/SIMULATOR/sitl.c
-#endif
-""")
 ssub("""#if defined(UNIT_TEST)
     readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);""", """#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
     if (!selectedTask && !firstSchedulingOpportunity) {
         simulatorSchedulerIdle();  // every task due at this simulated instant has run
+    } else {
+        simulatorSchedulerBusy();
     }
 #endif
 
 #if defined(UNIT_TEST)
     readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);""")
 open(spath, "w").write(sch)
+
+# target.h: declare the lockstep hooks the scheduler calls
+tpath = root + "/src/platform/SIMULATOR/target/SITL/target.h"
+tgt = open(tpath).read()
+anchor = "int lockMainPID(void);\n"
+assert anchor in tgt
+tgt = tgt.replace(anchor, anchor + """
+#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
+#include <stdbool.h>
+// Open FPV Sim lockstep hooks, called by the scheduler (implemented in sitl.c)
+bool simulatorTakeGyroTick(void);
+void simulatorSchedulerIdle(void);
+void simulatorSchedulerBusy(void);
+#endif
+""", 1)
+open(tpath, "w").write(tgt)
 
 # platform.h: no fixed per-iteration sleep in lockstep (the idle hook waits for packets instead)
 ppath = root + "/src/platform/SIMULATOR/include/platform/platform.h"

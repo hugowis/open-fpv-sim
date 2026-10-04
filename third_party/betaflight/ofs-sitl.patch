@@ -1,22 +1,24 @@
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
-index a922cc7..a01633c 100644
+index a922cc7..d2ba6b8 100644
 --- a/src/main/drivers/serial_tcp.c
 +++ b/src/main/drivers/serial_tcp.c
-@@ -255,6 +255,13 @@ void tcpDataOut(tcpPort_t *instance)
+@@ -255,6 +255,15 @@ void tcpDataOut(tcpPort_t *instance)
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
++#if !(defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME)
 +    if (s->port.rxCallback) {
 +        while (size--) {
 +            s->port.rxCallback(*(ch++), s->port.rxCallbackData);
 +        }
 +        return;
 +    }
++#endif
 +
      pthread_mutex_lock(&s->rxLock);
  
      while (size--) {
-@@ -270,14 +277,26 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+@@ -270,17 +279,52 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  //    printf("\n");
  }
  
@@ -45,6 +47,44 @@ index a922cc7..a01633c 100644
          .setCtrlLineStateCb = NULL,
          .setBaudRateCb = NULL,
          .writeBuf = NULL,
+         .beginWrite = NULL,
+         .endWrite = NULL,
+ };
++
++// Lockstep builds: deliver buffered bytes of interrupt-driven ports to their RX callbacks. Called on the
++// main thread once per simulator tick, before the realtime tasks run.
++void tcpSerialDispatchRx(void)
++{
++    for (unsigned id = 0; id < ARRAYLEN(tcpSerialPorts); id++) {
++        tcpPort_t *s = &tcpSerialPorts[id];
++        if (!tcpPortInitialized[id] || !s->port.rxCallback) {
++            continue;
++        }
++        for (;;) {
++            pthread_mutex_lock(&s->rxLock);
++            if (s->port.rxBufferTail == s->port.rxBufferHead) {
++                pthread_mutex_unlock(&s->rxLock);
++                break;
++            }
++            const uint8_t ch = s->port.rxBuffer[s->port.rxBufferTail];
++            s->port.rxBufferTail = (s->port.rxBufferTail + 1 >= s->port.rxBufferSize) ? 0 : s->port.rxBufferTail + 1;
++            pthread_mutex_unlock(&s->rxLock);
++            s->port.rxCallback(ch, s->port.rxCallbackData);
++        }
++    }
++}
+diff --git a/src/main/drivers/serial_tcp.h b/src/main/drivers/serial_tcp.h
+index a391e10..760f795 100644
+--- a/src/main/drivers/serial_tcp.h
++++ b/src/main/drivers/serial_tcp.h
+@@ -46,6 +46,7 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
+ 
+ // tcpPort API
+ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size);
++void tcpSerialDispatchRx(void);  // lockstep: deliver buffered RX bytes on the main thread
+ void tcpDataOut(tcpPort_t *instance);
+ 
+ bool tcpIsStart(void);
 diff --git a/src/main/osd/osd.c b/src/main/osd/osd.c
 index c4d877b..bcf3138 100644
 --- a/src/main/osd/osd.c
@@ -61,21 +101,10 @@ index c4d877b..bcf3138 100644
          tfp_sprintf(buff, "%d%%", storageUsedPercent);
      } else {
 diff --git a/src/main/scheduler/scheduler.c b/src/main/scheduler/scheduler.c
-index eace67b..bb2bc79 100644
+index eace67b..afc409a 100644
 --- a/src/main/scheduler/scheduler.c
 +++ b/src/main/scheduler/scheduler.c
-@@ -110,6 +110,10 @@ STATIC_UNIT_TESTED FAST_DATA_ZERO_INIT int taskQueueSize = 0;
- static FAST_DATA_ZERO_INIT bool gyroEnabled;
- 
- static int32_t desiredPeriodCycles;
-+#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
-+bool simulatorTakeGyroTick(void);   // platform/SIMULATOR/sitl.c
-+void simulatorSchedulerIdle(void);  // platform/SIMULATOR/sitl.c
-+#endif
- static uint32_t lastTargetCycles;
- 
- static uint8_t skippedRxAttempts = 0;
-@@ -550,6 +554,17 @@ FAST_CODE void scheduler(void)
+@@ -550,6 +550,17 @@ FAST_CODE void scheduler(void)
              schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
          }
  
@@ -93,7 +122,7 @@ index eace67b..bb2bc79 100644
          // Tune out the time lost between completing the last task execution and re-entering the scheduler
          if ((schedLoopRemainingCycles < schedLoopStartMinCycles) &&
              (schedLoopStartCycles < schedLoopStartMaxCycles)) {
-@@ -716,6 +731,9 @@ FAST_CODE void scheduler(void)
+@@ -716,6 +727,9 @@ FAST_CODE void scheduler(void)
  
      nowCycles = getCycleCounter();
      schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
@@ -103,13 +132,15 @@ index eace67b..bb2bc79 100644
  
      if (!gyroEnabled || (schedLoopRemainingCycles > (int32_t)clockMicrosToCycles(CHECK_GUARD_MARGIN_US))) {
          currentTimeUs = micros();
-@@ -836,6 +854,12 @@ FAST_CODE void scheduler(void)
+@@ -836,6 +850,14 @@ FAST_CODE void scheduler(void)
          }
      }
  
 +#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
 +    if (!selectedTask && !firstSchedulingOpportunity) {
 +        simulatorSchedulerIdle();  // every task due at this simulated instant has run
++    } else {
++        simulatorSchedulerBusy();
 +    }
 +#endif
 +
@@ -146,10 +177,10 @@ index 3759c26..4a82321 100644
  #define GYRO_COUNT 1 // 1 Gyro
  
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..dee5766 100644
+index ee216ef..3e7d435 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
-@@ -101,6 +101,77 @@ static bool fdm_received = false;
+@@ -101,6 +101,80 @@ static bool fdm_received = false;
  
  static struct timespec start_time;
  static double simRate = 1.0;
@@ -191,7 +222,9 @@ index ee216ef..dee5766 100644
 +static uint16_t extFdmRcChannels[SIMULATOR_MAX_RC_CHANNELS];
 +
 +// Main thread only: a tick was taken and has not been answered yet.
++#define EXT_MAX_BUSY_PASSES 100000
 +static bool extReplyPending = false;
++static uint32_t extBusyPasses = 0;
 +
 +// Called by the scheduler: true once per FDM packet. Applies that packet's time and RC first, so the
 +// main loop never sees a new instant before the tick that belongs to it.
@@ -220,6 +253,7 @@ index ee216ef..dee5766 100644
 +    if (rcNew) {
 +        rxUpdateUdpChannels(rc, SIMULATOR_MAX_RC_CHANNELS);
 +    }
++    tcpSerialDispatchRx();
 +    extReplyPending = true;
 +    return true;
 +}
@@ -227,7 +261,7 @@ index ee216ef..dee5766 100644
  static pthread_t tcpWorker, udpWorker, udpWorkerRC;
  static bool workerRunning = true;
  static udpLink_t stateLink, pwmLink, pwmRawLink, rcLink;
-@@ -205,6 +276,11 @@ static void gpxTrackClose(void)
+@@ -205,6 +279,11 @@ static void gpxTrackClose(void)
  
  int targetParseArgs(int argc, char * argv[])
  {
@@ -239,7 +273,7 @@ index ee216ef..dee5766 100644
      for (int i = 1; i < argc; i++) {
          if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
              printf("Betaflight SITL\n");
-@@ -282,6 +358,23 @@ static void updateState(const fdm_packet* pkt)
+@@ -282,6 +361,23 @@ static void updateState(const fdm_packet* pkt)
      clock_gettime(CLOCK_MONOTONIC, &now_ts);
  
      const uint64_t realtime_now = micros64_real();
@@ -263,7 +297,7 @@ index ee216ef..dee5766 100644
      if (realtime_now > last_realtime + 500*1e3) { // 500ms timeout
          last_timestamp = pkt->timestamp;
          last_realtime = realtime_now;
-@@ -483,8 +576,13 @@ static void updateState(const fdm_packet* pkt)
+@@ -483,8 +579,13 @@ static void updateState(const fdm_packet* pkt)
  
      // Periodic status (about 1 Hz)
      static uint64_t lastDebugTimeUs = 0;
@@ -279,7 +313,7 @@ index ee216ef..dee5766 100644
  
          const armingDisableFlags_e flags = getArmingDisableFlags();
          if (flags) {
-@@ -512,6 +610,20 @@ static void updateState(const fdm_packet* pkt)
+@@ -512,6 +613,20 @@ static void updateState(const fdm_packet* pkt)
      }
  
      pthread_mutex_unlock(&updateLock); // can send PWM output now
@@ -300,7 +334,7 @@ index ee216ef..dee5766 100644
  
  #if ENABLE_SIMULATOR_GYROPID_SYNC
      pthread_mutex_unlock(&mainLoopLock); // can run main loop
-@@ -524,8 +636,21 @@ static void* udpThread(void* data)
+@@ -524,8 +639,21 @@ static void* udpThread(void* data)
      int n = 0;
  
      while (workerRunning) {
@@ -322,24 +356,41 @@ index ee216ef..dee5766 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -691,7 +816,16 @@ uint64_t millis64_real(void)
+@@ -584,6 +712,16 @@ void systemInit(void)
+     int ret;
+ 
+     clock_gettime(CLOCK_MONOTONIC, &start_time);
++#if ENABLE_SIMULATOR_EXTERNAL_TIME
++    {
++        // The idle wait must not jump with wall-clock steps (WSL2 resyncs its clock after host sleep).
++        pthread_condattr_t attr;
++        pthread_condattr_init(&attr);
++        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
++        pthread_cond_init(&extPacketCond, &attr);
++        pthread_condattr_destroy(&attr);
++    }
++#endif
+     printf("[system]Init...\n");
+ 
+     // Close the GPX track file cleanly on exit
+@@ -691,7 +829,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
- uint64_t micros64(void)
++uint64_t micros64(void)
 +{
 +    return extTimeIsValid() ? __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) : wallScaledMicros64();
 +}
 +
 +static uint64_t wallScaledMicros64(void)
 +#else
-+uint64_t micros64(void)
+ uint64_t micros64(void)
 +#endif
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +839,11 @@ uint64_t micros64(void)
+@@ -705,6 +852,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
@@ -351,7 +402,7 @@ index ee216ef..dee5766 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +859,29 @@ uint32_t micros(void)
+@@ -720,6 +872,29 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
@@ -381,7 +432,7 @@ index ee216ef..dee5766 100644
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +922,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +935,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -394,7 +445,7 @@ index ee216ef..dee5766 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +938,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +951,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -407,7 +458,7 @@ index ee216ef..dee5766 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1047,44 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1060,65 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
@@ -425,19 +476,26 @@ index ee216ef..dee5766 100644
 +// only now guarantees the simulator's next packet cannot advance time in the middle of a tick. Every
 +// taken tick gets exactly one reply (the latest motor values), even when PID did not run on it
 +// (pid_process_denom > 1).
++static void extSendReply(void)
++{
++    extReplyPending = false;
++    extBusyPasses = 0;
++    udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
++    udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
++}
++
 +void simulatorSchedulerIdle(void)
 +{
++    extBusyPasses = 0;
 +    if (extReplyPending) {
-+        extReplyPending = false;
-+        udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
-+        udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
++        extSendReply();
 +    }
 +    // Nothing can become due until the next packet advances time: sleep until it arrives (bounded,
 +    // so wall-time behaviour before the first packet and TCP serial traffic are still serviced).
 +    pthread_mutex_lock(&extPacketMutex);
 +    if (extGyroTicks == extGyroTicksTaken) {
 +        struct timespec until;
-+        clock_gettime(CLOCK_REALTIME, &until);
++        clock_gettime(CLOCK_MONOTONIC, &until);  // extPacketCond uses CLOCK_MONOTONIC (systemInit)
 +        until.tv_nsec += 1000000;
 +        if (until.tv_nsec >= 1000000000) {
 +            until.tv_sec += 1;
@@ -447,13 +505,27 @@ index ee216ef..dee5766 100644
 +    }
 +    pthread_mutex_unlock(&extPacketMutex);
 +}
++
++// Called by the scheduler after a pass that ran a task. Liveness guard: if tasks keep being selected
++// at one frozen instant (e.g. an event task whose check never clears), reply anyway rather than stall.
++void simulatorSchedulerBusy(void)
++{
++    if (extReplyPending && ++extBusyPasses > EXT_MAX_BUSY_PASSES) {
++        static bool warned = false;
++        if (!warned) {
++            fprintf(stderr, "[SITL] warning: tasks still due after %u scheduler passes at one simulated instant; replying anyway\n", (unsigned)EXT_MAX_BUSY_PASSES);
++            warned = true;
++        }
++        extSendReply();
++    }
++}
 +#endif
 +
  void servoWrite(uint8_t index, float value)
  {
      servosPwm[index] = value;
 diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
-index 69d3250..b30809d 100644
+index 69d3250..af2ddf3 100644
 --- a/src/platform/SIMULATOR/target/SITL/target.h
 +++ b/src/platform/SIMULATOR/target/SITL/target.h
 @@ -135,11 +135,8 @@
@@ -511,3 +583,18 @@ index 69d3250..b30809d 100644
  #define TARGET_FLASH_SIZE 2048
  
  #define DEFIO_NO_PORTS   // suppress 'no pins defined' warning
+@@ -263,6 +273,14 @@ uint64_t millis64(void);
+ 
+ int lockMainPID(void);
+ 
++#if defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME
++#include <stdbool.h>
++// Open FPV Sim lockstep hooks, called by the scheduler (implemented in sitl.c)
++bool simulatorTakeGyroTick(void);
++void simulatorSchedulerIdle(void);
++void simulatorSchedulerBusy(void);
++#endif
++
+ int targetParseArgs(int argc, char * argv[]);
+ #ifdef CONFIG_IN_FILE
+ const char *targetGetConfigFile(void);

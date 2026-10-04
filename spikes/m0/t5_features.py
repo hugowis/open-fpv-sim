@@ -78,15 +78,16 @@ try:
         socks[5764].sendall(b"$M<" + bytes([0, 2, 2]))  # MSP_FC_VARIANT, checksum = 0 ^ 2
         f.run(0.2)
     dp = bytes(captured[5764])
-    print(f"DisplayPort on 5764: {len(dp)} bytes, '$M>' frames: {dp.count(b'$M>')}, MSP 182 frames: {dp.count(bytes([182]))}",
-          dp[:40].hex())
+    frames = msp_frames(dp, MSP_DISPLAYPORT)
+    subcmds = sorted({p[0] for _, p in frames if p})
+    print(f"DisplayPort on 5764: {len(dp)} bytes, valid MSP_DISPLAYPORT frames: {len(frames)}, subcommands: {subcmds}")
     sa = bytes(captured[5765])
     print(f"SmartAudio on 5765: {len(sa)} bytes, 'aa 55' count: {sa.count(bytes([0xAA, 0x55]))}", sa[:24].hex())
     print("MSP_VTX_CONFIG:", msp.request(MSP_VTX_CONFIG).hex())
     # Blackbox: arm for 2 s (CRSF AUX1 high), then disarm.
     f.channels = [1500, 1500, 1000, 1500, 2000, 1000, 1500, 1500]
     f.run(2.0)
-    print("arming disabled while arm switch on:", msp_arming_disabled(msp))
+    print("arming disabled while arm switch on:", msp_arming_disabled(msp), "armed:", msp_armed(msp))
     f.channels = disarmed
     f.run(1.0)
 except BrokenPipeError:

@@ -99,22 +99,64 @@ static void tcpSetMode(serialPort_t *instance, portMode_e mode)
     s = s.replace("        .setMode = NULL,\n", "        .setMode = tcpSetMode,\n", 1)
     assert "tcpSetBaudRate," in s and "tcpSetMode," in s
     # Interrupt-driven RX drivers (CRSF, ESC sensor, ...) register an rxCallback and never poll the
-    # buffer; on hardware the UART ISR calls it per byte. Do the same from the TCP thread.
+    # buffer; on hardware the UART ISR calls it per byte. In lockstep builds the bytes are buffered here
+    # and delivered on the main thread at the next tick (tcpSerialDispatchRx), so drivers never run
+    # concurrently with the main loop. Without external time, call back directly from the TCP thread.
     old_in = """    pthread_mutex_lock(&s->rxLock);
 
     while (size--) {"""
     assert old_in in s
-    s = s.replace(old_in, """    if (s->port.rxCallback) {
+    s = s.replace(old_in, """#if !(defined(ENABLE_SIMULATOR_EXTERNAL_TIME) && ENABLE_SIMULATOR_EXTERNAL_TIME)
+    if (s->port.rxCallback) {
         while (size--) {
             s->port.rxCallback(*(ch++), s->port.rxCallbackData);
         }
         return;
     }
+#endif
 
     pthread_mutex_lock(&s->rxLock);
 
     while (size--) {""", 1)
+    s = s.rstrip("\n") + r"""
+
+// Lockstep builds: deliver buffered bytes of interrupt-driven ports to their RX callbacks. Called on the
+// main thread once per simulator tick, before the realtime tasks run.
+void tcpSerialDispatchRx(void)
+{
+    for (unsigned id = 0; id < ARRAYLEN(tcpSerialPorts); id++) {
+        tcpPort_t *s = &tcpSerialPorts[id];
+        if (!tcpPortInitialized[id] || !s->port.rxCallback) {
+            continue;
+        }
+        for (;;) {
+            pthread_mutex_lock(&s->rxLock);
+            if (s->port.rxBufferTail == s->port.rxBufferHead) {
+                pthread_mutex_unlock(&s->rxLock);
+                break;
+            }
+            const uint8_t ch = s->port.rxBuffer[s->port.rxBufferTail];
+            s->port.rxBufferTail = (s->port.rxBufferTail + 1 >= s->port.rxBufferSize) ? 0 : s->port.rxBufferTail + 1;
+            pthread_mutex_unlock(&s->rxLock);
+            s->port.rxCallback(ch, s->port.rxCallbackData);
+        }
+    }
+}
+"""
     return s
+
+
+def serial_tcp_h(s):
+    anchor = "void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size);\n"
+    assert anchor in s
+    return s.replace(anchor, anchor + "void tcpSerialDispatchRx(void);  // lockstep: deliver buffered RX bytes on the main thread\n", 1)
+
+
+def sitl_dispatch(s):
+    # Deliver TCP serial RX (CRSF, ESC telemetry, ...) on the main thread at each lockstep tick.
+    anchor = "    extReplyPending = true;\n    return true;\n}\n"
+    assert anchor in s
+    return s.replace(anchor, "    tcpSerialDispatchRx();\n" + anchor, 1)
 
 
 def osd_c(s):
@@ -137,6 +179,8 @@ def sitl_mk(s):
 
 edit("src/main/osd/osd.c", osd_c)
 edit("src/main/drivers/serial_tcp.c", serial_tcp_c)
+edit("src/main/drivers/serial_tcp.h", serial_tcp_h)
+edit("src/platform/SIMULATOR/sitl.c", sitl_dispatch)
 edit("src/platform/SIMULATOR/target/SITL/target.h", target_h)
 edit("src/main/target/common_post.h", common_post)
 edit("src/platform/SIMULATOR/sitl.c", sitl_c)

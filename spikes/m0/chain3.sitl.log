@@ -1,0 +1,68 @@
+[SITL] The SITL will output to IP 127.0.0.1:9002 (Gazebo) and 127.0.0.1:9001 (RealFlightBridge)
+[system]Init...
+[SITL] init PwmOut UDP link to gazebo 127.0.0.1:9002...0
+[SITL] init PwmOut UDP link to RF9 127.0.0.1:9001...0
+[SITL] start UDP server @9003...0
+[SITL] start UDP server for RC input @9004...0
+[FLASH_Unlock] loaded 'eeprom.bin', size = 32768 / 32768
+[timer]Init...
+Initialized motor count 4
+bind port 5761 for UART1
+debugInit
+unusedPinsInit
+New connection on UART1, 0
+[NEW]UART1: 1,1
+[SITL] new fdm 144 t:0.001000 from 0.0.0.0:0
+[CLS]UART1: 1,0
+[SITL] new rc 40: t:0.001000 AETR: 1500 1500 1000 1500 AUX1-4: 1000 1000 1000 1000
+[SITL] t=555ms Arming disabled: BOOTGRACE
+[SITL] t=555ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=11000ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=12000ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=13000ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=14000ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=15001ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,0.0)
+[SITL] t=16001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(0.0,0.0,0.0)
+[SITL] t=17001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(0.0,0.0,0.0)
+[SITL] t=18001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(1.3,-1.5,0.0)
+[SITL] t=19001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(1.1,-1.2,1.8)
+[SITL] t=20001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(0.8,-0.9,1.7)
+[SITL] t=21001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(0.7,-0.7,1.7)
+[SITL] t=22001ms  spd=0.00m/s  pos=(0,0)  alt=-0.00m  att=(0.5,-0.6,1.7)
+[SITL] t=23001ms  spd=0.00m/s  pos=(0,0)  alt=-0.07m  att=(4.0,-0.4,1.8)
+[SITL] t=24001ms  spd=0.00m/s  pos=(0,0)  alt=-0.10m  att=(6.0,-0.3,1.8)
+[SITL] t=25001ms  spd=0.00m/s  pos=(0,0)  alt=-0.03m  att=(4.7,-0.3,1.8)
+[SITL] t=26001ms  spd=0.00m/s  pos=(0,0)  alt=-0.02m  att=(3.7,-1.7,1.8)
+[SITL] t=27001ms  spd=0.00m/s  pos=(0,0)  alt=-0.11m  att=(2.9,-5.7,1.7)
+New connection on UART1, 0
+[NEW]UART1: 1,1
+[SITL] t=28001ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=29002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=30002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=31002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=32002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=33002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,1.6)
+[SITL] t=34002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(16.6,0.0,1.6)
+[SITL] t=35002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.7,0.0,1.6)
+[SITL] t=36002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.9,0.0,1.6)
+[SITL] t=37002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.9,0.0,1.6)
+[SITL] t=38002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.9,0.0,1.6)
+[SITL] t=39002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.9,0.0,1.6)
+[SITL] t=40002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(4.3,-7.9,0.5)
+[SITL] t=41002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.3,-9.7,359.9)
+[SITL] t=42002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-9.9,359.8)
+[SITL] t=43002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-9.9,359.8)
+[SITL] t=44002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-9.9,359.8)
+[SITL] t=45002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-9.9,359.8)
+[SITL] t=46002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-2.7,359.8)
+[SITL] t=47002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,-0.2,359.8)
+[SITL] t=48002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,359.8)
+[SITL] t=49002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,359.8)
+[SITL] t=50002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,359.8)
+[SITL] t=51002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(0.0,0.0,359.8)
+[SITL] t=52002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(12.9,-6.5,0.6)
+[SITL] t=53002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(19.5,-9.7,1.5)
+[SITL] t=54002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(20.0,-9.9,1.6)
+[SITL] t=55002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(20.0,-9.9,1.6)
+[SITL] t=56002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(20.0,-9.9,1.6)
+[SITL] t=57002ms  spd=0.00m/s  pos=(0,0)  alt=0.00m  att=(20.0,-9.9,1.6)

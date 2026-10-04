@@ -3,7 +3,7 @@
 ## 1. Pinned version and build
 - Tag: 2026.6.2, commit: e0b7bb01b17b21351057e9ead2d1ab39dd44fa16
 - Build host: WSL2 Ubuntu 24.04, gcc 13.3, GNU make 4.3
-- Build command: `bash scripts/build-sitl.sh` → `make TARGET=SITL EXTRA_FLAGS="-DENABLE_GAZEBO_BRIDGE=0" -j$(nproc)`
+- Build command: `bash scripts/build-sitl.sh`. It applies `third_party/betaflight/ofs-sitl.patch`, builds clean, and runs `make TARGET=SITL EXTRA_FLAGS="-DENABLE_GAZEBO_BRIDGE=0 -DENABLE_SIMULATOR_EXTERNAL_TIME=1" -j$(nproc)`. It refuses to build if the tag doesn't resolve to the pinned commit (`BF_SHA`). `OFS_SITL_PATCH=none` builds stock SITL; with the patch but without `-DENABLE_SIMULATOR_EXTERNAL_TIME=1`, it builds and behaves like stock timing.
 - Binary: `obj/main/betaflight_SITL.elf` (also copied to `obj/betaflight_2026.6.2_SITL`)
 - `EXTRA_FLAGS` is honoured (Makefile line 398 appends it to CFLAGS), so compile-time switches that are tested with `#ifndef`/`#if` (e.g. `ENABLE_GAZEBO_BRIDGE`, `ENABLE_SIMULATOR_GYROPID_SYNC`) can be set without patching. Features that `target.h` explicitly `#undef`s cannot.
 - Deviations from assumptions: none in the source. One build-script fix: the Makefile initialises git submodules on demand, which races on `.git/config` under `-j`; the script now runs `git submodule update --init --recursive --depth 1` first.
@@ -23,7 +23,7 @@
   - The web Betaflight App can't open raw TCP and would need a WebSocket↔TCP bridge.
 
 ## 3. Sign conventions
-Verified on the external-time build (§4) with the legacy bridge (`-DENABLE_GAZEBO_BRIDGE=0`), by motor responses (`spikes/m0/t3_conventions.py`): **8/8 checks pass** (and 8/8 on two repeat runs; one run in between showed 7/8, see §4 on RC/FDM thread ordering).
+Verified on the external-time build (§4) with the legacy bridge (`-DENABLE_GAZEBO_BRIDGE=0`), by motor responses (`spikes/m0/t3_conventions.py`): **8/8 checks pass.** Every later run passed 8/8 too: more than ten, including on the final build. One early run showed 7/8, and which check failed wasn't recorded. Its cause is unknown; a race of at most one tick between RC and state packets seems too small to flip a 30-tick pulse, so that earlier attribution was dropped.
 
 **Mapping to send** (simulator state in NED world / FRD body):
 
@@ -92,6 +92,11 @@ Steady disarmed run on the patched build: 40 s simulated, 0 misses, round trip p
 5. **stdout is block-buffered** when piped, so a supervisor sees stale logs and loses them on kill. → `setvbuf(stdout, _IOLBF)` at startup in external-time mode.
 
 ### Changes after the code review
+- **Hardening (minor findings):**
+  - the idle wait uses a `CLOCK_MONOTONIC` condition variable, so WSL2 clock steps after host sleep can't stretch or skip it;
+  - the hook prototypes moved into the SITL `target.h`;
+  - a liveness cap (`simulatorSchedulerBusy`): if tasks are still being selected after 100 000 scheduler passes at one frozen instant, SITL replies anyway and warns once;
+  - interrupt-driven TCP serial RX is delivered on the main thread at each tick (§5).
 - **Time and RC are now staged, not published, by the state thread.** Before, `updateState()` wrote the new time (and applied RC) before counting the tick. A scheduler pass waking from its 1 ms wait inside that window could see the new instant before its tick. The state thread now only stages time and RC under `extPacketMutex`. The main thread applies them in `simulatorTakeGyroTick()`, then publishes `extTimeValid` with release semantics. The race couldn't be reproduced, even with a debug build that widens the window to 300 µs plus 0–3 ms sender jitter (3000/3000 identical before and after). It was fixed on code reasoning; the widened-window run is kept as a regression check.
 - **One reply per tick, whether or not PID ran.** Before, the reply came from the PID motor update. With `pid_process_denom = 2`, SITL answered only every second packet (reply ratio 0.50, reproduced), which would be fatal in M1. Now every taken tick gets exactly one reply carrying the latest motor values. After the fix: `pid_process_denom = 2` gives reply ratio 1.00 and 3000/3000 identical steps at 6.4–6.6× real time. The plain combined-mode check is still 3000/3000 at 6.7–6.8×, conventions 8/8, the feature probe unchanged, and the stall probe 6000/6000.
 - **Runs that had been left out of the table above** (all from `spikes/m0/runs/t4/results.jsonl`):
@@ -112,18 +117,18 @@ Steady disarmed run on the patched build: 40 s simulated, 0 misses, round trip p
 
 ## 5. Feature build (CRSF, ESC sensor, OSD, VTX, Blackbox)
 
-The single patch `third_party/betaflight/ofs-sitl.patch` (7 files, +280/−14 after the review fixes) now contains the lockstep changes (§4) and the feature changes below. `scripts/build-sitl.sh` builds it by default, always from a clean object directory: Betaflight's make does **not** rebuild objects after `target.h` changes, and stale objects briefly confused these results. Generator scripts: `spikes/m0/patch_ext_time.py`, `spikes/m0/patch_features.py`. Re-verified on the final build: §3 conventions 8/8, §4 reproducibility 3000/3000 bit-identical at 6.4–6.7× real time.
+The single patch `third_party/betaflight/ofs-sitl.patch` (8 files, +346/−14 after the review and minor fixes) now contains the lockstep changes (§4) and the feature changes below. `scripts/build-sitl.sh` builds it by default, always from a clean object directory: Betaflight's make doesn't reliably rebuild objects when `EXTRA_FLAGS` change; `target.h` edits are suspected too. Stale objects briefly confused these results, and building clean covers both. Generator scripts: `spikes/m0/patch_ext_time.py`, `spikes/m0/patch_features.py` (apply to a clean tree, then `git diff`). Re-verified on the final build: §3 conventions 8/8, §4 reproducibility 3000/3000 bit-identical at 6.4–6.7× real time.
 
 ### Results (`spikes/m0/t5_features.py`, clean build)
 
 | Feature | Answer | Evidence |
 |---|---|---|
-| CRSF receiver | **Yes** | CRSF RC frames (500 Hz) written to UART2 (tcp:5762) → `MSP_RC` = 1600 / 1400 / 1500 / 1000 (MSP order roll, pitch, yaw, throttle) for sent AETR 1600 / 1400 / 1000 / 1500; arming via CRSF AUX1 works (no arming-disable flags). |
+| CRSF receiver | **Yes** | CRSF RC frames (500 Hz) written to UART2 (tcp:5762) → `MSP_RC` = 1600 / 1400 / 1500 / 1000 (MSP order roll, pitch, yaw, throttle) for sent AETR 1600 / 1400 / 1000 / 1500; arming via CRSF AUX1 works (no arming-disable flags, and the ARM box is active in `MSP_STATUS`). |
 | CRSF telemetry | **No** | `telemetry/crsf.c` uses ARM-only `ATOMIC_BLOCK`/`BASEPRI`; SITL excludes it in `SITL.mk`. Needs a SITL atomic-block shim → M2 work if the HUD should show Betaflight's CRSF telemetry. Battery/RPM/link data are available to the simulator anyway (it produces them). |
 | ESC sensor (battery V/I, RPM) | **Partial** | KISS 10-byte frames (CRC-8 poly 0x07) on UART3 (tcp:5763) → `MSP_BATTERY_STATE` 24.59 V for 24.6 V sent, 6 cells detected; `MSP_MOTOR_TELEMETRY` RPM 1714 = 12 000 eRPM / 7 pole pairs. Caveats (from review): `esc_sensor.c` **sums current and consumption across motors** (only voltage and RPM are averaged), so the simulator must send per-motor current, not pack current (current was not checked here). Each frame is stored under the motor the FC is currently polling, which the simulator can't observe without DShot telemetry requests, so **per-motor values can't be attributed** (all frames here were identical). **RPM never reaches the RPM filter**, which requires `useDshotTelemetry` (hard-set false). |
-| MSP DisplayPort (OSD) | **Yes** | UART4 (tcp:5764) with `serial 3 131073` (VTX_MSP + MSP) and `osd_displayport_device = MSP` → 457 `MSP_DISPLAYPORT` (182) frames in ~1.5 s (clear, write-string, draw subcommands). Needs `USE_CMS` + `USE_OSD_OVER_MSP_DISPLAYPORT` (re-enabled). |
+| MSP DisplayPort (OSD) | **Yes** | UART4 (tcp:5764) with `serial 3 131073` (VTX_MSP + MSP) and `osd_displayport_device = MSP` → 456 checksum-valid `MSP_DISPLAYPORT` (182) frames in ~1.5 s, subcommands 0 (heartbeat), 2 (clear), 3 (write string), 4 (draw); counted by parsing frames (`msp_frames`). Needs `USE_CMS` + `USE_OSD_OVER_MSP_DISPLAYPORT` (re-enabled). |
 | SmartAudio | **Partial** | UART5 (tcp:5765) receives Betaflight's SmartAudio `GET_SETTINGS` requests (`aa 55 03 00 9f`, repeated); `MSP_VTX_CONFIG` reports a SmartAudio device. Replying with a SmartAudio settings frame was not attempted (M3). |
-| Blackbox | **Yes** | `set blackbox_device = VIRTUAL` writes `LOG00001.BFL` in SITL's working directory when armed (20 KB for ~2 s), standard header (`H Product:Blackbox flight data recorder…`), so it should open in Blackbox Explorer. |
+| Blackbox | **Yes** | `set blackbox_device = VIRTUAL` writes `LOG00001.BFL` in SITL's working directory when armed (20 KB for ~2 s), standard header (`H Product:Blackbox flight data recorder…`). **Decodes with Betaflight's `blackbox_decode`** (blackbox-tools `f832acf`): 451 frames, with the usual `loopIteration, time (us), axisP[0] …` columns. |
 
 ### Changes the feature build needed (all in the patch)
 - `target.h`: stop `#undef`-ing `USE_SERIALRX`, `USE_SERIALRX_CRSF`, `USE_OSD`, `USE_CMS`, `USE_VTX_COMMON`, `USE_VTX_CONTROL`, `USE_VTX_SMARTAUDIO`, `USE_VTX_TRAMP`; define `USE_ESC_SENSOR`, `USE_MSP_DISPLAYPORT`, `USE_OSD_OVER_MSP_DISPLAYPORT`.
@@ -156,12 +161,12 @@ set blackbox_device = VIRTUAL
 (`displayport_msp_serial` no longer exists in 2026.6; the DisplayPort port is the first one with both VTX_MSP and MSP functions.)
 
 ### Caveat for determinism (M2/M3)
-TCP UART bytes arrive on SITL's TCP thread asynchronously to the lockstep tick, so CRSF, ESC-sensor and SmartAudio traffic over TCP isn't bit-reproducible. M1 doesn't use them: RC rides in the state packet and the battery comes from the simulator's own models. When M2 moves RC onto CRSF, either carry UART bytes inside the state datagram (applied on the state thread before the tick, the same technique as RC in §4) or accept non-bit-exact runs in that mode.
+TCP UART bytes arrive on SITL's TCP thread asynchronously to the lockstep tick. On the lockstep build they are now buffered and delivered to the drivers' RX callbacks on the **main thread** at the next tick (`tcpSerialDispatchRx`), so drivers never run concurrently with the main loop, as with a UART interrupt. *Which* tick bytes land on still depends on wall-clock arrival, so CRSF, ESC-sensor and SmartAudio traffic over TCP isn't bit-reproducible. M1 doesn't use them: RC rides in the state packet and the battery comes from the simulator's own models. When M2 moves RC onto CRSF, either carry UART bytes inside the state datagram (applied on the state thread before the tick, the same technique as RC in §4) or accept non-bit-exact runs in that mode.
 
 ## 6. Windows / WSL2
 Host: Windows 11, WSL 2.6.3, kernel 6.6.87.2, Ubuntu 24.04. `.wslconfig` has **no `networkingMode`**, so WSL uses the default NAT networking. Nothing was changed on the machine.
 
-**Default NAT networking, Windows-side harness:**
+**Default NAT networking, Windows-side harness** (reproducible with `spikes/m0/t6_windows.py`, run from Windows):
 - TCP `127.0.0.1:5761` from Windows reaches SITL inside WSL (WSL localhost forwarding), so a Windows-hosted Configurator works.
 - **UDP is not forwarded.** Sending to `127.0.0.1:9003` from Windows gets no replies, because SITL's replies go to `127.0.0.1:9002` *inside* WSL.
 - **Works with explicit addresses:**
@@ -169,7 +174,7 @@ Host: Windows 11, WSL 2.6.3, kernel 6.6.87.2, Ubuntu 24.04. `.wslconfig` has **n
   - Launch SITL with `--ip <Windows host IP as seen from WSL>` (`wsl -e sh -c "ip route | awk '/default/ {print $3}'"`; here `172.28.16.1`).
   - Bind the motor socket on `0.0.0.0:9002`.
   
-  Result with combined 184-byte packets: **5000/5000 replies, p50 0.21 ms, p99 0.35 ms, 4.6× real time**. No firewall prompt. With separate RC packets, 8 replies were lost during boot.
+  Result with combined 184-byte packets: **5000/5000 replies, p50 0.21 ms, p99 0.35 ms, 4.6× real time**. Rerun on the final build with the committed script, which binds the host-side vEthernet IP: 5000/5000, p50 0.20 ms, p99 0.29 ms, 4.9×. No firewall prompt. With separate RC packets, 8 replies were lost during boot.
 - The WSL VM IP can change after `wsl --shutdown`/reboot, so it must be discovered at launch, not configured.
 
 **Mirrored networking** (`[wsl2] networkingMode=mirrored`) would make `127.0.0.1` work in both directions, but it changes networking for every WSL distribution. It's not needed, so it was not enabled. It's a reasonable opt-in for users who want zero configuration.
@@ -214,7 +219,6 @@ Caveats:
 **Open items:**
 - **Configurator connection** (plan Task 2 Step 5) was not run; it needs the user. Implications are listed in §2.
 - **SmartAudio reply side** was not emulated.
-- **The blackbox file** was not opened in Blackbox Explorer or `blackbox_decode`; only its header was checked.
 - **Heading/quaternion** is unverified.
 - **Intermittent MSP timeout:** after the review fixes, one of six Task 3 runs timed out on the trailing pumped `MSP_ATTITUDE` read-back. The motor checks still passed 8/8, and five reruns, three of them right after Task 4 runs, were clean, with no `bind … failed` lines. The cause is unknown; that run's SITL log was overwritten. Watch for it when M2 uses MSP and the Configurator.
 

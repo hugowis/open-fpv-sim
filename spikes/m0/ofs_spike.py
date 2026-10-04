@@ -183,6 +183,31 @@ def msp_arming_disabled(msp):
     return [ARMING_FLAGS[i] if i < len(ARMING_FLAGS) else f"bit{i}" for i in range(count) if flags >> i & 1]
 
 
+def msp_armed(msp):
+    """True when the ARM box is active (bit 0 of MSP_STATUS flight-mode flags)."""
+    return bool(struct.unpack_from("<I", msp.request(MSP_STATUS), 6)[0] & 1)
+
+
+def msp_frames(data, cmd=None):
+    """Parse a byte stream into (cmd, payload) MSP v1 frames with valid checksums."""
+    frames, i = [], 0
+    while True:
+        i = data.find(b"$M", i)
+        if i < 0 or i + 5 > len(data):
+            return frames
+        n, c = data[i + 3], data[i + 4]
+        end = i + 5 + n
+        if end >= len(data):
+            return frames
+        payload = data[i + 5:end]
+        ck = n ^ c
+        for b in payload:
+            ck ^= b
+        if ck == data[end] and (cmd is None or c == cmd):
+            frames.append((c, payload))
+        i = end + 1 if ck == data[end] else i + 2
+
+
 def msp_rc(msp):
     d = msp.request(MSP_RC)
     return struct.unpack(f"<{len(d) // 2}H", d)
@@ -231,7 +256,8 @@ def apply_config(workdir, diff_path, timeout=30):
 
 
 def launch_sitl(workdir, extra=()):
-    log = open(os.path.join(workdir, "sitl.log"), "w")
+    # Append mode: under wsl.exe stdout and stderr arrive separately and would overwrite each other.
+    log = open(os.path.join(workdir, "sitl.log"), "a")
     proc = subprocess.Popen(_launch_argv(extra), cwd=workdir, stdout=log, stderr=subprocess.STDOUT)
     deadline = time.time() + 15
     while time.time() < deadline:
