@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package ofs.v1;
+
+// Headless simulator control. Lockstep only in protocol version 1.
+service Sim {
+  rpc Handshake(HandshakeRequest) returns (HandshakeReply);
+  rpc Load(LoadRequest) returns (LoadReply);
+  rpc SetSticks(Sticks) returns (Empty);
+  rpc Run(RunRequest) returns (State);
+  rpc GetState(Empty) returns (State);
+  rpc Unload(Empty) returns (Empty);
+}
+
+message Empty {}
+
+message HandshakeRequest { uint32 protocol_version = 1; }
+message HandshakeReply {
+  uint32 protocol_version = 1;
+  string server_version = 2;
+}
+
+enum Mode {
+  MODE_UNSPECIFIED = 0;  // treated as lockstep
+  MODE_LOCKSTEP = 1;
+}
+
+message LoadRequest {
+  string quad_path = 1;
+  uint64 seed = 2;
+  Mode mode = 3;
+  bool open_loop_fc = 4;  // testing aid: replace the configured FC with throttle-only open loop
+}
+message LoadReply {
+  string quad_name = 1;
+  uint32 base_hz = 2;
+}
+
+// roll, pitch, yaw, aux in [-1, 1]; throttle in [0, 1]. Up to 4 aux channels; missing ones are -1.
+message Sticks {
+  double roll = 1;
+  double pitch = 2;
+  double yaw = 3;
+  double throttle = 4;
+  repeated double aux = 5;
+}
+
+message RunRequest { double seconds = 1; }
+
+message Vec3 {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+message Quat {
+  double w = 1;
+  double x = 2;
+  double y = 3;
+  double z = 4;
+}
+
+message State {
+  double time_s = 1;
+  Vec3 position_ned_m = 2;
+  Vec3 velocity_ned_mps = 3;
+  Quat attitude = 4;  // FRD body -> NED world
+  Vec3 rate_frd_radps = 5;
+  double battery_voltage_v = 6;
+  double battery_current_a = 7;
+  repeated double motor_rpm = 8;
+  repeated double motor_cmd = 9;
+}
