@@ -42,6 +42,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofs-physics"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "ofs-core",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
