@@ -1,0 +1,10 @@
+[package]
+name = "ofs-physics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ofs-core.workspace = true
+glam.workspace = true

@@ -1,0 +1,47 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo test --workspace --locked
+      - run: cargo build -p ofs-sim --locked
+      - run: python -m pip install -e "python[dev]"
+      - run: python -m pytest python/tests -v
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo test --workspace --locked
+      - run: cargo build -p ofs-sim --locked
+      - run: python -m pip install -e "python[dev]"
+      # Open-loop tests only: the SITL hover test skips without OFS_SITL_LAUNCH (no WSL SITL on the runner).
+      - run: python -m pytest python/tests -v
+
+  sitl:
+    runs-on: ubuntu-24.04
+    env:
+      BF_DIR: ${{ github.workspace }}/../betaflight
+      OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bash scripts/build-sitl.sh
+      - run: cargo test -p ofs-fc --test sitl_live --locked -- --ignored
+      - run: cargo build -p ofs-sim --locked
+      - run: python -m pip install -e "python[dev]"
+      - run: python -m pytest python/tests/test_sitl_hover.py -v
