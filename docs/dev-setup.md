@@ -22,7 +22,7 @@
 
 ## Firmware state
 Each quad gets `<data_dir>/<quad file stem>/` holding `eeprom.bin`, `betaflight.diff` and `sitl.log`.
-The diff is applied only on first boot; delete `eeprom.bin` to re-apply it. Betaflight Configurator can connect to `tcp://127.0.0.1:5761` while a session runs.
+The diff is applied only on first boot; delete `eeprom.bin` to re-apply it. SITL serves MSP on `tcp://127.0.0.1:5761`, but only while simulated time is advancing (i.e. while a client is stepping the sim with `run()`); connecting Betaflight Configurator is untested until real-time mode (M2) — see `docs/research/sitl-interface.md`.
 
 ## Ports
 SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.
