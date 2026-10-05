@@ -17,7 +17,7 @@
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
 - `OFS_SITL_LAUNCH` — SITL argv (space-separated), overrides `fc.launch` in quad files.
   Windows: `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf`. Works with WSL's default NAT networking: the bridge discovers the WSL VM and host IPs and passes `--ip` (see `docs/research/sitl-interface.md` §6).
-- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes. Under WSL it defaults to `<wsl prefix> pkill -x betaflight_SITL` (required: a stale SITL would otherwise answer instead of the new one).
+- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes (also when a native SITL's UDP 9003 is still held). It defaults to `pkill -x betaflight_SITL` on Linux and to `<wsl prefix> pkill -x betaflight_SITL` under WSL (required there: a stale SITL would otherwise answer instead of the new one). It matches the process name: never use `pkill -f`, which also matches the shell running it.
 - `OFS_SITL_HOST`, `OFS_SITL_REPLY_IP` — override the address state datagrams go to, and the address SITL replies to (`--ip`, motor socket bind).
 
 ## Firmware state

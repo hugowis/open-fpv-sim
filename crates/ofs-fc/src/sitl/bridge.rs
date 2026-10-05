@@ -1,6 +1,6 @@
 //! Lockstep exchange with Betaflight SITL: send one state datagram (sensors + RC), wait for one motor packet.
 use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use glam::{DQuat, DVec3};
@@ -9,7 +9,7 @@ use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 use super::codec::{state_datagram, RcPacket, ServoPacket, PORT_PWM, PORT_STATE};
 use super::frames::{fdm_packet, motor_commands, rc_channels, Home, SensorFrame};
 use super::net::SitlNet;
-use super::process::{LaunchConfig, SitlProcess};
+use super::process::{run_cleanup, LaunchConfig, SitlProcess};
 use super::FcError;
 
 #[derive(Debug, Clone)]
@@ -61,10 +61,7 @@ impl SitlBridge {
         if net.send_ip.is_loopback() {
             // Native SITL must be able to bind its state port; probe and release it to fail early.
             // (Under WSL the port lives inside the VM; the cleanup command and bind-failure check cover it.)
-            UdpSocket::bind(SocketAddr::from((net.send_ip, PORT_STATE))).map_err(|_| FcError::PortInUse {
-                port: PORT_STATE,
-                hint: "a Betaflight SITL instance may still be running (see fc.cleanup / OFS_SITL_CLEANUP)",
-            })?;
+            probe_state_port(net.send_ip, &cfg.launch.cleanup)?;
         }
         let tx = UdpSocket::bind(SocketAddr::from((net.bind_ip, 0)))?;
         let inputs = Inputs {
@@ -103,6 +100,29 @@ impl SitlBridge {
         };
         SimError::Firmware(format!("{state}; last output:\n{}", self.proc.log_tail()))
     }
+}
+
+/// Checks that SITL's state port is free. If it is held (typically by a SITL orphaned by a killed
+/// simulator), runs the cleanup command and waits briefly for the port to be released.
+fn probe_state_port(ip: Ipv4Addr, cleanup: &[String]) -> Result<(), FcError> {
+    let free = || UdpSocket::bind(SocketAddr::from((ip, PORT_STATE))).is_ok();
+    if free() {
+        return Ok(());
+    }
+    if !cleanup.is_empty() {
+        run_cleanup(cleanup);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            if free() {
+                return Ok(());
+            }
+        }
+    }
+    Err(FcError::PortInUse {
+        port: PORT_STATE,
+        hint: "a Betaflight SITL instance may still be running (see fc.cleanup / OFS_SITL_CLEANUP)",
+    })
 }
 
 fn send(tx: &UdpSocket, bytes: &[u8], to: SocketAddr) {

@@ -35,14 +35,18 @@ pub fn wsl_prefix(launch: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// Cleanup argv that removes stray SITL processes. Matches the process *name* (`pkill -x`): `pkill -f`
-/// would also match (and kill) any shell whose command line contains the binary path.
+/// Cleanup argv that removes stray SITL processes (e.g. left behind by a simulator that was killed).
+/// Matches the process *name* (`pkill -x`; Linux truncates `betaflight_SITL.elf` to `betaflight_SITL`):
+/// `pkill -f` would also match (and kill) any shell whose command line contains the binary path.
+/// Under WSL it runs inside the VM; natively it needs a unix host, so plain Windows gets none.
 pub fn default_cleanup(launch: &[String]) -> Vec<String> {
+    let pkill = ["pkill", "-x", "betaflight_SITL"].map(String::from);
     match wsl_prefix(launch) {
         Some(mut prefix) => {
-            prefix.extend(["pkill", "-x", "betaflight_SITL"].map(String::from));
+            prefix.extend(pkill);
             prefix
         }
+        None if cfg!(unix) => pkill.to_vec(),
         None => Vec::new(),
     }
 }

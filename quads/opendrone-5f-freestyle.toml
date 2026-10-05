@@ -71,7 +71,8 @@ yaw_deg = 0.0
 kind = "sitl"
 exchange_hz = 1000
 # Overridden by the OFS_SITL_LAUNCH / OFS_SITL_CLEANUP environment variables (space-separated argv).
-# Under WSL (launch[0] = wsl.exe) an empty cleanup defaults to "<wsl prefix> pkill -x betaflight_SITL".
+# An empty cleanup defaults to "pkill -x betaflight_SITL" on Linux, and under WSL (launch[0] = wsl.exe)
+# to "<wsl prefix> pkill -x betaflight_SITL".
 launch = ["betaflight_SITL.elf"]
 cleanup = []
 betaflight_diff = "opendrone-5f-freestyle.betaflight.diff"

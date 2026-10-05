@@ -179,7 +179,7 @@ fn pipe_lines(stream: impl Read + Send + 'static, log: SharedLog) {
     });
 }
 
-fn run_cleanup(argv: &[String]) {
+pub(crate) fn run_cleanup(argv: &[String]) {
     if let Some((program, args)) = argv.split_first() {
         let _ = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }

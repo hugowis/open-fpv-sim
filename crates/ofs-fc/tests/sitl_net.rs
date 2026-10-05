@@ -18,7 +18,16 @@ fn wsl_launches_are_detected_with_their_exec_prefix() {
 #[test]
 fn wsl_cleanup_matches_the_process_name_not_the_command_line() {
     assert_eq!(default_cleanup(&argv(&["wsl.exe", "-d", "Ubuntu", "-e", "/x"])), argv(&["wsl.exe", "-d", "Ubuntu", "-e", "pkill", "-x", "betaflight_SITL"]));
-    assert!(default_cleanup(&argv(&["/x/betaflight_SITL.elf"])).is_empty());
+}
+
+#[test]
+fn native_cleanup_is_pkill_on_unix_and_empty_on_plain_windows() {
+    let native = default_cleanup(&argv(&["/x/betaflight_SITL.elf"]));
+    if cfg!(unix) {
+        assert_eq!(native, argv(&["pkill", "-x", "betaflight_SITL"]));
+    } else {
+        assert!(native.is_empty(), "{native:?}");
+    }
 }
 
 #[test]
