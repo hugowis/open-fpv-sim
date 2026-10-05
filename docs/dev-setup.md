@@ -1,7 +1,7 @@
 # Developer setup
 
 ## Requirements
-- Rust stable ≥ 1.80 (`rustup`), Python ≥ 3.10.
+- Rust stable ≥ 1.85 (`rustup`), Python ≥ 3.10.
 - Betaflight SITL: Linux, or WSL2 (Ubuntu) on Windows. Build with `bash scripts/build-sitl.sh` (see the script for env options).
 
 ## Everyday commands
