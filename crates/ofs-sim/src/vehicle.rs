@@ -215,7 +215,10 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     for m in models {
         scheduler.add(m);
     }
-    Ok(Vehicle { scheduler, h })
+    let mut vehicle = Vehicle { scheduler, h };
+    // The bus starts every signal at zero; aux 0.0 would reach SITL as 1500 us until the first SetSticks.
+    vehicle.set_sticks(&Sticks::default());
+    Ok(vehicle)
 }
 
 impl Vehicle {

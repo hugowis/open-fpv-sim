@@ -52,3 +52,12 @@ fn same_seed_and_inputs_give_identical_runs() {
     assert_eq!(scripted_digest(1), scripted_digest(1));
     assert_ne!(scripted_digest(1), scripted_digest(2));
 }
+
+#[test]
+fn a_new_vehicle_starts_with_default_sticks() {
+    // Aux channels left at 0.0 would reach SITL as 1500 us until the first SetSticks.
+    let built = vehicle(1);
+    let mut explicit = vehicle(1);
+    explicit.set_sticks(&Sticks::default());
+    assert_eq!(built.digest(), explicit.digest());
+}
