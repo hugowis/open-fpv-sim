@@ -64,3 +64,16 @@ pub fn prop_thrust(i: usize) -> String {
 pub fn prop_torque(i: usize) -> String {
     format!("prop.{i}.torque_nm")
 }
+
+/// Transmitter (handset) power: 1 = on, 0 = off (no pilot connected). Read by the radio link.
+pub const RADIO_TX_ENABLED: &str = "radio.tx_enabled";
+/// 1 while the receiver has heard at least one packet in its link-quality window, else 0.
+pub const RADIO_LINK_UP: &str = "radio.link_up";
+/// Uplink link quality: percent of the last 100 packets received.
+pub const RADIO_LQ: &str = "radio.lq_pct";
+/// Uplink RSSI as the receiver reports it.
+pub const RADIO_RSSI: &str = "radio.rssi_dbm";
+/// Fault: 1 = every uplink packet is lost.
+pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
+/// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).
+pub const FC_RESTARTS: &str = "fc.restarts";
