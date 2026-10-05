@@ -75,3 +75,18 @@ fn missing_diff_file_is_reported_for_sitl_quads() {
     let err = load(&path).unwrap_err();
     assert!(err.to_string().contains("fc.betaflight_diff"), "{err}");
 }
+
+#[test]
+fn zero_fc_timeouts_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text()
+        .replace("first_reply_timeout_ms = 5000", "first_reply_timeout_ms = 0")
+        .replace("\nreply_timeout_ms = 500", "\nreply_timeout_ms = 0")
+        .replace("startup_timeout_ms = 15000", "startup_timeout_ms = 0");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    for field in ["fc.reply_timeout_ms", "fc.first_reply_timeout_ms", "fc.startup_timeout_ms"] {
+        assert!(fields.contains(&field), "{field} missing from {fields:?}");
+    }
+}

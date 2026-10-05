@@ -291,6 +291,13 @@ impl QuadConfig {
         c.check((-180.0..=180.0).contains(&self.home.lon_deg), "home.lon_deg", "must be in [-180, 180]");
 
         c.divides(self.sim.base_hz, self.fc.exchange_hz, "fc.exchange_hz");
+        for (ms, field) in [
+            (self.fc.reply_timeout_ms, "fc.reply_timeout_ms"),
+            (self.fc.first_reply_timeout_ms, "fc.first_reply_timeout_ms"),
+            (self.fc.startup_timeout_ms, "fc.startup_timeout_ms"),
+        ] {
+            c.check(ms > 0, field, "must be > 0");
+        }
         if self.fc.kind == FcKind::Sitl {
             c.check(!self.fc.launch.is_empty(), "fc.launch", "must not be empty for kind = \"sitl\"");
             let diff = self.resolve(&self.fc.betaflight_diff);
