@@ -17,6 +17,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 from .errors import ProtocolMismatch, from_rpc_error
 
 PROTOCOL_VERSION = 1
+UNLOAD_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,13 @@ class Sim:
         return reply.quad_name
 
     def set_sticks(self, roll=0.0, pitch=0.0, yaw=0.0, throttle=0.0, aux=(-1.0, -1.0, -1.0, -1.0)) -> None:
+        """Replaces the *whole* stick state: every argument left out goes back to its default.
+
+        Sticks are in [-1, 1] (throttle in [0, 1]); `aux` holds up to 4 channels, missing ones read -1.
+        The defaults include `aux=(-1, -1, -1, -1)`, so after arming, `set_sticks(throttle=0.6)` drops the
+        arm switch and **disarms** the quad. Pass the aux channels on every call, e.g.
+        `sim.set_sticks(throttle=0.6, aux=(1.0, 1.0, -1.0, -1.0))`.
+        """
         self._call(self._stub.SetSticks, pb.Sticks(roll=roll, pitch=pitch, yaw=yaw, throttle=throttle, aux=list(aux)))
 
     def run(self, seconds: float) -> State:
@@ -102,6 +110,16 @@ class Sim:
         return _state(self._call(self._stub.GetState, pb.Empty()))
 
     def close(self) -> None:
+        """Disconnects. For a server started by `launch`, first unloads the quad and then stops the server.
+
+        Unloading stops Betaflight SITL cleanly; terminating the server alone would orphan it (Windows'
+        TerminateProcess and an unhandled SIGTERM both skip the server's cleanup).
+        """
+        if self._process is not None:
+            try:
+                self._stub.Unload(pb.Empty(), timeout=UNLOAD_TIMEOUT_S)
+            except Exception:  # best effort: the server may already be gone or failing
+                pass
         self._channel.close()
         if self._process is not None:
             self._process.terminate()
@@ -153,4 +171,9 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
                     raise RuntimeError(f"ofs-sim did not accept connections on {address} within {timeout_s} s")
     finally:
         channel.close()
-    return Sim(address, proc)
+    try:
+        return Sim(address, proc)
+    except BaseException:  # e.g. ProtocolMismatch: don't leave the server running
+        proc.kill()
+        proc.wait()
+        raise
