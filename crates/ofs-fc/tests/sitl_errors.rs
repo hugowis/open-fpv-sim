@@ -58,3 +58,17 @@ fn busy_pwm_port_is_reported() {
     assert!(matches!(err, FcError::PortInUse { port: 9002, .. }), "{err}");
     assert!(err.to_string().contains("9002"), "{err}");
 }
+
+#[test]
+fn missing_sitl_explains_how_to_fix_it() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let err = SitlBridge::start(config(dir.path(), &["ofs-definitely-missing-binary"]), &mut Bus::new()).err().unwrap();
+    let shown = err.to_string();
+    for hint in ["scripts/build-sitl.sh", "OFS_SITL_LAUNCH", "docs/dev-setup.md"] {
+        assert!(shown.contains(hint), "missing `{hint}` in: {shown}");
+    }
+    if cfg!(windows) {
+        assert!(shown.contains("wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf"), "{shown}");
+    }
+}
