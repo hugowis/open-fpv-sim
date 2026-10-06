@@ -627,6 +627,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofs-client"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "ofs-proto",
+ "ofs-sim",
+ "proptest",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
 name = "ofs-config"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,19 @@
+[package]
+name = "ofs-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust client for the ofs-sim server: session supervisor, pilot link and state interpolation (used by the Godot extension)"
+
+[dependencies]
+ofs-proto.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+tonic.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+
+[dev-dependencies]
+ofs-sim = { path = "../ofs-sim" }
+proptest.workspace = true
