@@ -23,4 +23,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+ofs-client = { path = "../ofs-client" }
 tempfile.workspace = true

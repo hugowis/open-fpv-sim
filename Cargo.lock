@@ -724,6 +724,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "glam",
+ "ofs-client",
  "ofs-config",
  "ofs-core",
  "ofs-electrical",
