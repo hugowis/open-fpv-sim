@@ -2,9 +2,13 @@ use std::time::Duration;
 
 use ofs_sim::pb::sim_client::SimClient;
 use ofs_sim::pb::sim_server::SimServer;
-use ofs_sim::pb::{fault, Empty, EventKind, Fault, HandshakeRequest, LoadRequest, Mode, RadioLinkLoss, RunRequest, Sticks};
+use ofs_sim::pb::{
+    fault, Empty, EventKind, Fault, HandshakeRequest, LoadRequest, Mode, PilotInput, RadioLinkLoss, RunRequest, Sticks,
+    StreamRequest,
+};
 use ofs_sim::server::{SimService, PROTOCOL_VERSION};
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 use tonic::{Code, Request, Status};
 
@@ -176,4 +180,82 @@ async fn faults_drop_the_radio_link_and_events_report_it() {
     assert_eq!(kinds, vec![EventKind::LinkUp, EventKind::LinkDown, EventKind::LinkUp]);
     let err = c.inject_fault(Fault { kind: None }).await.unwrap_err();
     assert_eq!(kind(&err), "invalid_argument");
+}
+
+#[tokio::test]
+async fn state_streams_at_the_requested_rate() {
+    let mut c = start().await;
+    c.load(open_loop(Mode::Realtime)).await.unwrap();
+    c.start(Empty {}).await.unwrap();
+    let err = c.stream_state(StreamRequest { rate_hz: 1000 }).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_argument");
+    let mut stream = c.stream_state(StreamRequest { rate_hz: 50 }).await.unwrap().into_inner();
+    let started = std::time::Instant::now();
+    let mut times = Vec::new();
+    while times.len() < 10 {
+        times.push(stream.next().await.unwrap().unwrap().time_s);
+    }
+    let elapsed = started.elapsed().as_secs_f64();
+    assert!((0.15..=0.6).contains(&elapsed), "10 states at 50 Hz took {elapsed} s");
+    assert!(times.windows(2).all(|w| w[1] >= w[0]), "{times:?}");
+}
+
+#[tokio::test]
+async fn a_vanished_pilot_switches_the_transmitter_off() {
+    let mut c = start().await;
+    c.load(open_loop(Mode::Realtime)).await.unwrap();
+    c.start(Empty {}).await.unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks { throttle: 0.2, ..Default::default() }), state_rate_hz: 50 }).await.unwrap();
+    let mut states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    let s = states.next().await.unwrap().unwrap();
+    assert!(s.radio.unwrap().tx_enabled);
+
+    let (tx2, rx2) = tokio::sync::mpsc::channel(1);
+    tx2.send(PilotInput::default()).await.unwrap();
+    let err = c.pilot(ReceiverStream::new(rx2)).await.unwrap_err();
+    assert_eq!(kind(&err), "pilot_busy");
+
+    drop(tx); // the pilot's input stream ends: the client is gone
+    drop(states);
+    let mut radio = None;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        radio = c.get_state(Empty {}).await.unwrap().into_inner().radio;
+        if !radio.unwrap().tx_enabled && !radio.unwrap().link_up {
+            break;
+        }
+    }
+    let radio = radio.unwrap();
+    assert!(!radio.tx_enabled && !radio.link_up, "{radio:?}");
+    assert!(time_s(&mut c).await > 0.0, "the session keeps running for the pilot to reconnect");
+}
+
+#[tokio::test]
+async fn the_last_watcher_leaving_ends_a_session_unless_keep_alive() {
+    let mut c = start().await;
+    for keep_alive in [false, true] {
+        c.load(LoadRequest { keep_alive, ..open_loop(Mode::Lockstep) }).await.unwrap();
+        let watch = c.watch(Empty {}).await.unwrap().into_inner();
+        drop(watch);
+        let mut loaded = true;
+        for _ in 0..40 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            loaded = c.get_state(Empty {}).await.is_ok();
+            if !loaded {
+                break;
+            }
+        }
+        assert_eq!(loaded, keep_alive, "keep_alive = {keep_alive}");
+    }
+}
+
+#[tokio::test]
+async fn watchers_receive_events() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let mut watch = c.watch(Empty {}).await.unwrap().into_inner();
+    c.run(RunRequest { seconds: 0.1 }).await.unwrap();
+    let e = tokio::time::timeout(Duration::from_secs(5), watch.next()).await.unwrap().unwrap().unwrap();
+    assert_eq!(e.kind(), EventKind::LinkUp);
 }

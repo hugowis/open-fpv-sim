@@ -15,6 +15,7 @@ use crate::pacer::OverrunPolicy;
 use crate::pb::{self, sim_server::Sim};
 use crate::runner;
 use crate::session::{event, RunMode, Session, Shared, Slot};
+use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
 
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -244,21 +245,20 @@ impl Sim for SimService {
     type StreamStateStream = ReceiverStream<Result<pb::State, Status>>;
 
     async fn stream_state(&self, req: Request<pb::StreamRequest>) -> Result<Response<Self::StreamStateStream>, Status> {
-        let _ = req;
-        Err(error("internal", Code::Unimplemented, "StreamState is not implemented yet"))
+        let rate_hz = streams::state_rate(req.into_inner().rate_hz)?;
+        Ok(Response::new(streams::state_feed(self.shared.clone(), rate_hz)))
     }
 
     type PilotStream = ReceiverStream<Result<pb::State, Status>>;
 
     async fn pilot(&self, req: Request<Streaming<pb::PilotInput>>) -> Result<Response<Self::PilotStream>, Status> {
-        let _ = req;
-        Err(error("internal", Code::Unimplemented, "Pilot is not implemented yet"))
+        streams::pilot(self.shared.clone(), req.into_inner()).await.map(Response::new)
     }
 
     type WatchStream = ReceiverStream<Result<pb::Event, Status>>;
 
     async fn watch(&self, _req: Request<pb::Empty>) -> Result<Response<Self::WatchStream>, Status> {
-        Err(error("internal", Code::Unimplemented, "Watch is not implemented yet"))
+        Ok(Response::new(streams::watch(self.shared.clone()).await))
     }
 
     async fn inject_fault(&self, req: Request<pb::Fault>) -> Result<Response<pb::Empty>, Status> {

@@ -3,6 +3,7 @@ pub mod pacer;
 pub mod runner;
 pub mod server;
 pub mod session;
+pub mod streams;
 pub mod vehicle;
 
 pub mod pb {
