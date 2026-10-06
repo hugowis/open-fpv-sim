@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use ofs_config::load;
-use ofs_fc::msp::{api_version, rc_channels_us, MspClient, MSP_API_VERSION, MSP_RC};
+use ofs_fc::msp::{api_version, rc_channels_us, MspClient, MSP_API_VERSION, MSP_RC, MSP_REBOOT};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_sim::vehicle::{build, BuildOptions, Fault, Sticks, Vehicle};
 
@@ -84,4 +84,24 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     // Betaflight declares RX loss once frames stop for failsafe_delay (1.5 s by default) and then disarms
     // (src/main/flight/failsafe.c); stage-1 failsafe holds idle until then.
     assert!((1.4..=2.2).contains(&dt), "disarmed {dt:.3} s after the cut");
+}
+
+#[test]
+#[ignore]
+fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
+    let mut rig = Rig::new();
+    let v = &mut rig.v;
+    v.run_for(2.0).unwrap();
+    // Betaflight resets after MSP_REBOOT: SITL prints "[system]Reset!" and exits with status 0. (Its reply can
+    // be lost with the connection, so the test only sends the command.)
+    let mut client = msp();
+    client.send(MSP_REBOOT, &[]).unwrap();
+    let give_up = v.state().time_s + 5.0;
+    while v.state().fc_restarts == 0 && v.state().time_s < give_up {
+        v.run_for(0.01).unwrap();
+    }
+    assert_eq!(v.state().fc_restarts, 1);
+    v.run_for(2.0).unwrap();
+    let reply = msp().request(MSP_API_VERSION, &[], 500, || v.run_for(0.01)).unwrap();
+    assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
 }

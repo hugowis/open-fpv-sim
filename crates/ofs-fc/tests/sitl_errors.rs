@@ -6,7 +6,7 @@ use ofs_core::Bus;
 use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net::SitlNet;
-use ofs_fc::sitl::process::{is_bind_failure, is_ready_line, LaunchConfig};
+use ofs_fc::sitl::process::{is_bind_failure, is_ready_line, is_reset_line, LaunchConfig};
 use ofs_fc::sitl::FcError;
 
 // These tests bind the fixed SITL UDP ports, so they must not run concurrently.
@@ -93,4 +93,28 @@ fn a_changed_quad_diff_refuses_a_stale_eeprom() {
     assert!(matches!(err, FcError::Config(_)), "{err}");
     let shown = err.to_string();
     assert!(shown.contains("changed since") && shown.contains("eeprom.bin"), "{shown}");
+}
+
+#[test]
+fn reset_lines_are_recognised() {
+    // Betaflight's systemReset() / systemResetToBootloader() in SITL, just before exit(0).
+    assert!(is_reset_line("[system]Reset!"));
+    assert!(is_reset_line("[system]ResetToBootloader!"));
+    assert!(!is_reset_line("[system]Init..."));
+}
+
+/// Betaflight's MSP/TCP thread can print `bind port 5761 ... failed` just after the ready line.
+#[cfg(unix)]
+#[test]
+fn a_bind_failure_just_after_the_ready_line_is_a_startup_error() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["sh", "-c", "echo '[SITL] ready for the simulator'; sleep 0.1; echo 'bind port 5761 for UART1 failed!!'; sleep 5"]);
+    // Not a first boot: eeprom.bin and the applied diff exist, so the fake is only run as SITL.
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
+    let err = SitlProcess::start(&cfg.launch).err().unwrap();
+    assert!(matches!(err, FcError::Startup(..)), "{err}");
+    assert!(err.to_string().contains("could not bind its ports"), "{err}");
 }

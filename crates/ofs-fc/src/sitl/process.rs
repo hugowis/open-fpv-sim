@@ -10,6 +10,10 @@ use std::time::{Duration, Instant};
 use super::FcError;
 
 const TAIL_LINES: usize = 200;
+/// How long a missed reply waits for a Betaflight reboot to show itself (see [`SitlProcess::rebooted`]).
+pub const REBOOT_GRACE: Duration = Duration::from_secs(3);
+/// How long after the ready line a late `bind port ... failed` is still waited for.
+const BIND_GRACE: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -37,12 +41,19 @@ pub fn is_ready_line(line: &str) -> bool {
     line.contains(READY_LINE)
 }
 
+/// Betaflight's `systemReset()` (a reboot, e.g. after a Configurator save) prints this before `exit(0)`;
+/// so does the reset to bootloader. Together with a clean exit it means "restart me", not a crash.
+pub fn is_reset_line(line: &str) -> bool {
+    line.contains("[system]Reset")
+}
+
 #[derive(Default)]
 struct LogSink {
     tail: VecDeque<String>,
     file: Option<File>,
     bind_failed: bool,
     ready_seen: bool,
+    reset_seen: bool,
 }
 
 impl LogSink {
@@ -52,6 +63,9 @@ impl LogSink {
         }
         if is_ready_line(&line) {
             self.ready_seen = true;
+        }
+        if is_reset_line(&line) {
+            self.reset_seen = true;
         }
         if let Some(f) = self.file.as_mut() {
             let _ = writeln!(f, "{line}");
@@ -99,11 +113,13 @@ impl SitlProcess {
             }
             let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
             if bind_failed {
-                let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
-                return Err(FcError::Startup(what.into(), self.log_tail()));
+                return Err(self.bind_error());
             }
             if ready {
-                return Ok(());
+                // The TCP/MSP thread prints its `bind port 5761 ... failed` on its own schedule, which can land
+                // just after the ready line: give it a moment, so a stale SITL is always a startup error.
+                std::thread::sleep(BIND_GRACE);
+                return if self.log.lock().map(|l| l.bind_failed).unwrap_or(false) { Err(self.bind_error()) } else { Ok(()) };
             }
             if Instant::now() >= deadline {
                 let what = format!(
@@ -116,8 +132,30 @@ impl SitlProcess {
         }
     }
 
+    fn bind_error(&self) -> FcError {
+        let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
+        FcError::Startup(what.into(), self.log_tail())
+    }
+
     pub fn exit_status(&mut self) -> Option<ExitStatus> {
         self.child.try_wait().ok().flatten()
+    }
+
+    /// True when SITL announced a reset ([`is_reset_line`]) and exited cleanly: Betaflight rebooted.
+    ///
+    /// Called after a missed reply, so it waits up to [`REBOOT_GRACE`] for both: before resetting, Betaflight's
+    /// `motorShutdown()` sleeps 0.5 s of real time (PWM ESCs), longer than the per-exchange reply timeout, and
+    /// SITL then joins its threads before exiting. A SITL that has merely hung costs this grace once.
+    pub fn rebooted(&mut self) -> bool {
+        let deadline = Instant::now() + REBOOT_GRACE;
+        loop {
+            let reset_seen = self.log.lock().map(|l| l.reset_seen).unwrap_or(false);
+            match self.exit_status() {
+                Some(status) if reset_seen => return status.success(),
+                _ if Instant::now() >= deadline => return false,
+                _ => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
     }
 
     pub fn log_tail(&self) -> String {
@@ -157,7 +195,8 @@ fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcErro
     };
     if applied != std::fs::read(&cfg.diff_file)? {
         return Err(FcError::Config(format!(
-            "{} changed since this quad's first boot; delete {} to apply it again (this also discards settings              changed in Betaflight Configurator)",
+            "{} changed since this quad's first boot; delete {} to apply it again (this also discards settings \
+             changed in Betaflight Configurator)",
             cfg.diff_file.display(),
             workdir.join("eeprom.bin").display()
         )));
