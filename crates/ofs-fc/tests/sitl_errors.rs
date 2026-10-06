@@ -6,7 +6,7 @@ use ofs_core::Bus;
 use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net::SitlNet;
-use ofs_fc::sitl::process::{is_bind_failure, LaunchConfig};
+use ofs_fc::sitl::process::{is_bind_failure, is_ready_line, LaunchConfig};
 use ofs_fc::sitl::FcError;
 
 // These tests bind the fixed SITL UDP ports, so they must not run concurrently.
@@ -71,4 +71,10 @@ fn missing_sitl_explains_how_to_fix_it() {
     if cfg!(windows) {
         assert!(shown.contains("wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf"), "{shown}");
     }
+}
+
+#[test]
+fn ready_lines_are_recognised() {
+    assert!(is_ready_line("[SITL] ready for the simulator"));
+    assert!(!is_ready_line("bind port 5761 for UART1"));
 }

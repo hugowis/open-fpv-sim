@@ -2,13 +2,11 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::codec::MSP_TCP_PORT;
 use super::FcError;
 
 const TAIL_LINES: usize = 200;
@@ -31,17 +29,29 @@ pub fn is_bind_failure(line: &str) -> bool {
     line.contains("bind port") && line.contains("failed")
 }
 
+/// The patched SITL prints this when init has finished and its scheduler runs; only then does it accept
+/// state packets (third_party/betaflight/ofs-sitl.patch: deterministic boot).
+pub const READY_LINE: &str = "[SITL] ready for the simulator";
+
+pub fn is_ready_line(line: &str) -> bool {
+    line.contains(READY_LINE)
+}
+
 #[derive(Default)]
 struct LogSink {
     tail: VecDeque<String>,
     file: Option<File>,
     bind_failed: bool,
+    ready_seen: bool,
 }
 
 impl LogSink {
     fn push(&mut self, line: String) {
         if is_bind_failure(&line) {
             self.bind_failed = true;
+        }
+        if is_ready_line(&line) {
+            self.ready_seen = true;
         }
         if let Some(f) = self.file.as_mut() {
             let _ = writeln!(f, "{line}");
@@ -76,27 +86,30 @@ impl SitlProcess {
         Ok(proc)
     }
 
+    /// Waits for SITL to announce it is ready ([`READY_LINE`]). A stale instance holding the ports makes the new one
+    /// print `bind port ... failed` during init, before that line: a startup error.
     fn wait_until_ready(&mut self, timeout: Duration) -> Result<(), FcError> {
-        let addr = SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT));
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(status) = self.exit_status() {
                 return Err(FcError::Startup(format!("exited with {status} during startup"), self.log_tail()));
             }
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
-                // A stale instance also answers on tcp:5761; give the new one time to report bind failures.
-                std::thread::sleep(Duration::from_millis(300));
-                if self.log.lock().map(|l| l.bind_failed).unwrap_or(false) {
-                    let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
-                    return Err(FcError::Startup(what.into(), self.log_tail()));
-                }
+            let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
+            if bind_failed {
+                let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
+                return Err(FcError::Startup(what.into(), self.log_tail()));
+            }
+            if ready {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                let what = format!("did not open tcp:{MSP_TCP_PORT} within {} ms", timeout.as_millis());
+                let what = format!(
+                    "did not print \"{READY_LINE}\" within {} ms (is it the lockstep build from scripts/build-sitl.sh?)",
+                    timeout.as_millis()
+                );
                 return Err(FcError::Startup(what, self.log_tail()));
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 
