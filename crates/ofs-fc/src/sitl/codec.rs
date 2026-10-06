@@ -67,6 +67,26 @@ pub fn state_datagram(fdm: &FdmPacket, rc: &RcPacket) -> [u8; STATE_DATAGRAM_SIZ
     out
 }
 
+/// Bytes for SITL's UARTs may follow the 184-byte state datagram, as blocks of
+/// `[uart index (0-based)][length, u16 little-endian][bytes]`. The patched SITL hands them to the UART on the
+/// tick that applies the packet, so receiver traffic is deterministic. At most this many bytes of blocks
+/// (headers included) per datagram: `EXT_SERIAL_MAX` in third_party/betaflight/ofs-sitl.patch.
+pub const SERIAL_SECTION_MAX: usize = 512;
+pub const SERIAL_BLOCK_HEADER: usize = 3;
+
+/// The state datagram followed by serial blocks `(uart index, bytes)`.
+pub fn state_datagram_with_serial(fdm: &FdmPacket, rc: &RcPacket, blocks: &[(u8, Vec<u8>)]) -> Vec<u8> {
+    let mut out = state_datagram(fdm, rc).to_vec();
+    for (uart, bytes) in blocks {
+        let len = u16::try_from(bytes.len()).expect("serial block too long");
+        out.push(*uart);
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(bytes);
+    }
+    assert!(out.len() - STATE_DATAGRAM_SIZE <= SERIAL_SECTION_MAX, "serial section exceeds SITL's EXT_SERIAL_MAX");
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServoPacket {
     pub motor_speed: [f32; 4],

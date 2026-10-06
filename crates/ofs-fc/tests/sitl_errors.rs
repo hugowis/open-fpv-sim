@@ -29,6 +29,7 @@ fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
         reply_timeout: Duration::from_millis(200),
         home: Home { lat_deg: 50.0, lon_deg: 4.0, alt_m: 0.0 },
         motor_count: 4,
+        serial: vec![],
     }
 }
 

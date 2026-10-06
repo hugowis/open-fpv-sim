@@ -4,9 +4,11 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use glam::{DQuat, DVec3};
-use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
+use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
-use super::codec::{state_datagram, RcPacket, ServoPacket, PORT_PWM, PORT_STATE};
+use super::codec::{
+    state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
+};
 use super::frames::{fdm_packet, motor_commands, rc_channels, Home, SensorFrame};
 use super::net::SitlNet;
 use super::process::{run_cleanup, LaunchConfig, SitlProcess};
@@ -23,6 +25,16 @@ pub struct BridgeConfig {
     pub reply_timeout: Duration,
     pub home: Home,
     pub motor_count: usize,
+    /// Bytes for SITL's UARTs, carried in the state datagram (e.g. the receiver's CRSF into UART2).
+    pub serial: Vec<SerialLink>,
+}
+
+/// Bytes the simulator feeds into one of SITL's UARTs.
+#[derive(Debug, Clone)]
+pub struct SerialLink {
+    /// 0-based: UART2 = 1.
+    pub uart_index: u8,
+    pub rx: Wire,
 }
 
 struct Inputs {
@@ -99,6 +111,23 @@ impl SitlBridge {
             None => format!("{what} (no reply: datagram lost or SITL hung)"),
         };
         SimError::Firmware(format!("{state}; last output:\n{}", self.proc.log_tail()))
+    }
+
+    /// Takes pending UART bytes for this datagram, within SITL's serial section limit.
+    fn serial_blocks(&self) -> Vec<(u8, Vec<u8>)> {
+        let mut blocks = Vec::new();
+        let mut room = SERIAL_SECTION_MAX;
+        for link in &self.cfg.serial {
+            if room <= SERIAL_BLOCK_HEADER {
+                break;
+            }
+            let bytes = link.rx.take(room - SERIAL_BLOCK_HEADER);
+            if !bytes.is_empty() {
+                room -= SERIAL_BLOCK_HEADER + bytes.len();
+                blocks.push((link.uart_index, bytes));
+            }
+        }
+        blocks
     }
 }
 
@@ -203,7 +232,7 @@ impl Model for SitlBridge {
         let channels = rc_channels(bus.get(i.roll), bus.get(i.pitch), bus.get(i.yaw), bus.get(i.throttle), &aux);
         let rc = RcPacket { timestamp_s: ctx.time_s, channels };
         let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
-        let datagram = state_datagram(&fdm_packet(&frame, &self.cfg.home), &rc);
+        let datagram = state_datagram_with_serial(&fdm_packet(&frame, &self.cfg.home), &rc, &self.serial_blocks());
 
         let mut buf = [0u8; 128];
         let received = if self.answered {

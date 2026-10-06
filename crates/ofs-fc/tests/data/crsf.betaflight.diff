@@ -1,0 +1,9 @@
+# CRSF receiver on UART2 (serial index 1), fed by serial blocks in the state datagram.
+feature -GPS
+feature RX_SERIAL
+serial 1 64 115200 57600 0 115200
+set serialrx_provider = CRSF
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180

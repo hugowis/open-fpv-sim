@@ -1,7 +1,9 @@
 use std::f64::consts::PI;
 
 use glam::{DQuat, DVec3};
-use ofs_fc::sitl::codec::{state_datagram, FdmPacket, RcPacket, ServoPacket, STATE_DATAGRAM_SIZE};
+use ofs_fc::sitl::codec::{
+    state_datagram, state_datagram_with_serial, FdmPacket, RcPacket, ServoPacket, SERIAL_SECTION_MAX, STATE_DATAGRAM_SIZE,
+};
 use ofs_fc::sitl::frames::{attitude_flu_nwu, fdm_packet, motor_commands, rc_channels, Home, SensorFrame, EARTH_RADIUS_M};
 
 fn f64_at(bytes: &[u8], index: usize) -> f64 {
@@ -118,4 +120,33 @@ fn sticks_map_to_aetr_microseconds() {
     assert_eq!(&ch[..8], &[2000, 1000, 1250, 1750, 2000, 1000, 1500, 1500]);
     assert!(ch[8..].iter().all(|c| *c == 1500));
     assert_eq!(rc_channels(5.0, 0.0, 0.0, -3.0, &[])[..4], [2000, 1500, 1000, 1500]);
+}
+
+fn zero_fdm() -> FdmPacket {
+    FdmPacket {
+        timestamp_s: 0.25,
+        gyro_rpy_radps: [0.0; 3],
+        accel_xyz_mps2: [0.0; 3],
+        quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+        velocity_xyz_mps: [0.0; 3],
+        position_xyz: [0.0; 3],
+        pressure_pa: 101_325.0,
+    }
+}
+
+#[test]
+fn serial_blocks_follow_the_state_datagram() {
+    let fdm = zero_fdm();
+    let rc = RcPacket { timestamp_s: 0.25, channels: [0; 16] };
+    assert_eq!(state_datagram_with_serial(&fdm, &rc, &[]), state_datagram(&fdm, &rc).to_vec());
+    let d = state_datagram_with_serial(&fdm, &rc, &[(1, vec![0xC8, 0x18, 0x16]), (4, vec![0xAA])]);
+    assert_eq!(&d[..STATE_DATAGRAM_SIZE], &state_datagram(&fdm, &rc)[..]);
+    assert_eq!(&d[STATE_DATAGRAM_SIZE..], &[1, 3, 0, 0xC8, 0x18, 0x16, 4, 1, 0, 0xAA]);
+}
+
+#[test]
+#[should_panic(expected = "EXT_SERIAL_MAX")]
+fn oversized_serial_sections_are_refused() {
+    let rc = RcPacket { timestamp_s: 0.0, channels: [0; 16] };
+    state_datagram_with_serial(&zero_fdm(), &rc, &[(1, vec![0; SERIAL_SECTION_MAX])]);
 }

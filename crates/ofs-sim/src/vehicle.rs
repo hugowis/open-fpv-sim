@@ -202,6 +202,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
+                    serial: vec![],
                 },
                 &mut bus,
             )
