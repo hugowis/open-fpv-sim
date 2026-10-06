@@ -59,6 +59,7 @@ fn unsupported_schema_version_is_explicit() {
     let text = quad_text().replace("schema_version = 2", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("schema_version 1"), "{err}");
+    assert!(err.to_string().contains("[radio]") && err.to_string().contains("betaflight.diff"), "{err}");
 }
 
 #[test]

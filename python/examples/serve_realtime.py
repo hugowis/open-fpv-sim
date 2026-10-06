@@ -2,7 +2,9 @@
 
 Usage (repo root): OFS_SITL_LAUNCH="<sitl launch command>" python python/examples/serve_realtime.py [quad.toml] [seconds]
 Then in Betaflight Configurator (desktop app): enable manual connection, port tcp://127.0.0.1:5761, Connect.
-Saving in the Configurator reboots Betaflight; the simulator relaunches it and the Configurator reconnects.
+Saving in the Configurator reboots Betaflight and the simulator relaunches it, so the Configurator should reconnect.
+The relaunch is verified live (MSP_REBOOT on the Configurator port); the Configurator application itself has not been
+tried yet: that manual check is pending (see docs/dev-setup.md, "Betaflight Configurator").
 """
 import sys
 import time

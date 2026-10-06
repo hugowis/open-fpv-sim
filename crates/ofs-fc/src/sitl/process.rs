@@ -1,6 +1,6 @@
 //! Launches and supervises the Betaflight SITL process; applies the CLI diff on first boot.
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -86,7 +86,18 @@ pub struct SitlProcess {
 }
 
 impl SitlProcess {
+    /// Launches SITL; `sitl.log` starts afresh.
     pub fn start(cfg: &LaunchConfig) -> Result<Self, FcError> {
+        Self::launch(cfg, false)
+    }
+
+    /// Launches SITL again after a Betaflight reboot: `sitl.log` keeps the log from before the reboot and gets a
+    /// `--- relaunch after reboot ---` line.
+    pub fn relaunch(cfg: &LaunchConfig) -> Result<Self, FcError> {
+        Self::launch(cfg, true)
+    }
+
+    fn launch(cfg: &LaunchConfig, append_log: bool) -> Result<Self, FcError> {
         std::fs::create_dir_all(&cfg.workdir)?;
         let workdir = std::path::absolute(&cfg.workdir)?;
         if workdir.join("eeprom.bin").exists() {
@@ -96,7 +107,17 @@ impl SitlProcess {
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
         }
-        let log: SharedLog = Arc::new(Mutex::new(LogSink { file: File::create(workdir.join("sitl.log")).ok(), ..LogSink::default() }));
+        let log_path = workdir.join("sitl.log");
+        let file = if append_log {
+            let file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
+            file.map(|mut f| {
+                let _ = writeln!(f, "--- relaunch after reboot ---");
+                f
+            })
+        } else {
+            File::create(&log_path).ok()
+        };
+        let log: SharedLog = Arc::new(Mutex::new(LogSink { file, ..LogSink::default() }));
         let child = spawn_logged(&cfg.launch, &workdir, &log)?;
         let mut proc = SitlProcess { child, log, cleanup: cfg.cleanup.clone() };
         proc.wait_until_ready(cfg.startup_timeout)?;

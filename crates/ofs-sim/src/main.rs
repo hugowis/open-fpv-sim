@@ -61,10 +61,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::future::pending::<()>().await;
         }
     };
-    tokio::select! {
-        result = server => result?,
-        _ = grace => eprintln!("ofs-sim: streams still open after 3 s; closing anyway"),
-    }
-    service.shutdown(); // stops the real-time runner and Betaflight SITL
-    Ok(())
+    let result = tokio::select! {
+        result = server => result.map_err(Into::into),
+        _ = grace => {
+            eprintln!("ofs-sim: streams still open after 3 s; closing anyway");
+            Ok(())
+        }
+    };
+    service.shutdown(); // stops the real-time runner and Betaflight SITL, also when the server failed
+    result
 }

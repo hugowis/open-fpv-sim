@@ -346,3 +346,18 @@ async fn a_cancelled_watch_does_not_leak_a_watcher() {
     }
     assert!(!loaded, "the last watcher left but the session was kept: a watcher leaked");
 }
+
+#[tokio::test]
+async fn shutdown_stops_a_long_lockstep_run() {
+    let (mut c, service) = start_with_service().await;
+    load_open_loop(&mut c).await;
+    let mut runner = c.clone();
+    let run = tokio::spawn(async move { runner.run(RunRequest { seconds: 1e6 }).await });
+    tokio::time::sleep(Duration::from_millis(300)).await; // the Run now holds the session
+    let stop = tokio::task::spawn_blocking(move || service.shutdown());
+    tokio::time::timeout(Duration::from_secs(2), stop).await.expect("shutdown waited for the whole Run").unwrap();
+    let err = tokio::time::timeout(Duration::from_secs(2), run).await.expect("the Run did not return").unwrap().unwrap_err();
+    assert_eq!(err.code(), Code::Unavailable, "{err}");
+    let err = c.get_state(Empty {}).await.unwrap_err();
+    assert_eq!(kind(&err), "not_loaded", "the session slot is empty");
+}

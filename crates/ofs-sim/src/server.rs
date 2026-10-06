@@ -14,7 +14,7 @@ use tonic::{Code, Request, Response, Status, Streaming};
 use crate::pacer::OverrunPolicy;
 use crate::pb::{self, sim_server::Sim};
 use crate::runner;
-use crate::session::{event, RunMode, Session, Shared, Slot};
+use crate::session::{event, panic_message, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
 
@@ -103,13 +103,29 @@ impl SimService {
         F: FnOnce(&Shared, &mut Slot) -> Result<T, Status> + Send + 'static,
     {
         let shared = self.shared.clone();
-        tokio::task::spawn_blocking(move || {
+        let joined = tokio::task::spawn_blocking(move || {
             let mut slot = shared.lock();
             f(&shared, &mut slot)
         })
-        .await
-        .map_err(|e| error("internal", Code::Internal, e.to_string()))?
-        .map(Response::new)
+        .await;
+        match joined {
+            Ok(result) => result.map(Response::new),
+            Err(e) if e.is_panic() => {
+                // The handler panicked while holding the slot (the poisoned mutex is recovered by `Shared::lock`):
+                // poison the loaded session, which may be half-stepped, so it cannot be used further.
+                let message = format!("internal panic: {}", panic_message(e.into_panic().as_ref()));
+                let shared = self.shared.clone();
+                let poisoned = message.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Some(s) = shared.lock().as_mut() {
+                        s.poison(SimError::Other(poisoned));
+                    }
+                })
+                .await;
+                Err(error("internal", Code::Internal, message))
+            }
+            Err(e) => Err(error("internal", Code::Internal, e.to_string())),
+        }
     }
 }
 
@@ -172,6 +188,9 @@ impl Sim for SimService {
         let _cancel_on_drop = CancelOnDrop(cancelled.clone());
         self.blocking(move |shared, slot| {
             let s = loaded(slot)?;
+            if let Some(f) = &s.failure {
+                return Err(sim_error(f)); // also for a duration of zero ticks, which never reaches `step`
+            }
             if s.mode == RunMode::Realtime && s.running {
                 return Err(invalid_state("pause the real-time session before calling Run"));
             }
@@ -183,6 +202,9 @@ impl Sim for SimService {
             while done < total {
                 if cancelled.load(Ordering::Acquire) {
                     return Err(Status::cancelled("the client went away"));
+                }
+                if shared.stopping() {
+                    return Err(Status::unavailable("server shutting down")); // `shutdown` waits for this lock
                 }
                 let n = chunk.min(total - done);
                 let result = s.step(n);
@@ -279,5 +301,52 @@ impl Sim for SimService {
             Ok(pb::Empty {})
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::testing::open_loop_session;
+
+    fn kind_of(s: &Status) -> String {
+        s.metadata().get("ofs-error-kind").map(|v| v.to_str().unwrap().to_string()).unwrap_or_default()
+    }
+
+    fn service_with(session: Session) -> SimService {
+        let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
+        *svc.shared.lock() = Some(session);
+        svc
+    }
+
+    /// Making a session fail needs live Betaflight (a firmware failure) or a numerical blow-up that open-loop
+    /// sticks cannot cause, so the failure is set directly.
+    #[tokio::test]
+    async fn run_refuses_a_failed_session_even_for_zero_seconds() {
+        let mut session = open_loop_session(RunMode::Lockstep);
+        session.poison(SimError::Firmware("simulated failure".into()));
+        let svc = service_with(session);
+        for seconds in [0.0, 1e-9, 0.1] {
+            let err = svc.run(Request::new(pb::RunRequest { seconds })).await.unwrap_err();
+            assert_eq!(kind_of(&err), "firmware", "seconds = {seconds}");
+            assert_eq!(err.message(), "simulated failure");
+        }
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_poisons_the_loaded_session() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let err = svc.blocking::<(), _>(|_, _| panic!("boom")).await.unwrap_err();
+        assert_eq!(err.code(), Code::Internal);
+        assert_eq!(kind_of(&err), "internal");
+        assert!(err.message().contains("boom"), "{}", err.message());
+        // The slot lock still works and the session is poisoned: Run reports the failure.
+        let err = svc.run(Request::new(pb::RunRequest { seconds: 0.0 })).await.unwrap_err();
+        assert_eq!(kind_of(&err), "internal");
+        assert!(err.message().contains("internal panic: boom"), "{}", err.message());
+        let state = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner();
+        assert!(!state.running);
+        svc.shutdown();
     }
 }

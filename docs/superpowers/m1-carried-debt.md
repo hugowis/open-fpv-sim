@@ -4,8 +4,8 @@ These findings came out of the M1 task reviews and the final whole-branch review
 
 ## Server and session lifecycle
 - **Resolved in M2a:**
-  - graceful `ofs-sim` shutdown on Ctrl-C/SIGTERM;
-  - `Run` stops within 50 ms when its client goes away;
+  - graceful `ofs-sim` shutdown on Ctrl-C/SIGTERM (a long lockstep `Run` also stops when the server shuts down);
+  - `Run` stops within one 50 ms chunk of simulated time when its client goes away;
   - a Python client's session ends when the client disconnects (unless `keep_alive`);
   - firmware directories are keyed on the quad file's path.
 - **Non-loopback `--listen` (still open).** `Load` reads any path and executes that quad file's `fc.launch` argv, and TOML parse errors echo file contents back. Refuse or warn on non-loopback binds unless an explicit flag is given, before M2b exposes the server to more clients.
@@ -38,7 +38,7 @@ These findings came out of the M1 task reviews and the final whole-branch review
   - the gRPC tests share one temp dir.
 
 ## CI and tooling
-- **The CI workflow has not run yet.** That covers the core, sitl and windows jobs; there is no remote.
+- **The CI workflow has not run yet.** That covers the core, msrv, windows and sitl jobs. The `origin` remote (https://github.com/hugowis/open-fpv-sim) exists.
 - **No cargo/pip caching.** The SITL job rebuilds Betaflight on every run.
 - **14 pre-existing clippy `result_large_err` warnings** in `crates/ofs-sim/src/server.rs`. Clippy is not run in CI.
 - **The native-Linux Python hover path is unverified.** WSL has no grpc Python module; the Rust live bridge test does pass natively on Linux.

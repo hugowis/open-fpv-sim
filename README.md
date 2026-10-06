@@ -6,7 +6,7 @@ replicating real protocols so real tools work against it. Inspired by the [OpenD
 Status: **M2a — radio link and real time.**
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
-- Betaflight Configurator can connect.
+- Betaflight Configurator should connect to the running simulator (the manual check with the desktop app is pending). A reboot sent to its port makes the simulator relaunch SITL from its EEPROM (verified live).
 - Next is M2b: the Godot pilot client.
 
 - Design: `docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`

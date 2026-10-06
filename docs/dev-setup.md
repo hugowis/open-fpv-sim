@@ -13,7 +13,7 @@
 | Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` |
 | Real-time session (for Configurator) | `OFS_SITL_LAUNCH=<cmd> python python/examples/serve_realtime.py` |
 | Regenerate Python stubs | `python -m grpc_tools.protoc -I proto --python_out=python --pyi_out=python --grpc_python_out=python proto/ofs/v1/sim.proto` |
-| Regenerate the SITL patch | see the docstrings in `third_party/betaflight/tools/` |
+| Regenerate the SITL patch | start from the M1 patch (`third_party/betaflight/ofs-sitl.patch` at commit c1514e2) applied to the pinned Betaflight checkout, run `add_serial_in_datagram.py` then `deterministic_boot.py` (both in `third_party/betaflight/tools/`; see their docstrings). The generators are not idempotent: running them on a tree that already has the current patch inserts duplicates |
 
 ## Environment variables
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
@@ -31,7 +31,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   ```
   cd /mnt/c/<repo path>
   CARGO_TARGET_DIR=$HOME/ofs/target cargo test --workspace --locked
-  CARGO_TARGET_DIR=$HOME/ofs/target OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf cargo test -p ofs-sim --test sitl_live -- --ignored --test-threads=1
+  CARGO_TARGET_DIR=$HOME/ofs/target OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1
   ```
   WSL has no Python grpc module, so the Python tests need Windows.
 
@@ -54,7 +54,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 SITL serves MSP on `tcp://127.0.0.1:5761` (also from Windows, through WSL's localhost forwarding), but only while simulated time advances. So connect while a real-time session runs:
 1. Start `python python/examples/serve_realtime.py` (with `OFS_SITL_LAUNCH` set). It prints the Configurator address.
 2. In the Betaflight Configurator desktop app, enable manual connection in the options, enter `tcp://127.0.0.1:5761`, and press Connect.
-3. Saving reboots Betaflight; the simulator relaunches it and the Configurator reconnects.
+3. Saving reboots Betaflight and the simulator relaunches it, so the Configurator should reconnect. The relaunch is verified live (an `MSP_REBOOT` sent to the Configurator port made the simulator relaunch SITL from its EEPROM in about 1.6 s, and the radio link came back up), but the Configurator application itself has not been tried yet: the manual check below is pending.
 
 The web Betaflight App cannot open raw TCP connections.
 

@@ -91,9 +91,16 @@ def _state(m) -> State:
     )
 
 
+def _kind_name(kind: int) -> str:
+    """The event kind as a lower-case name; a kind this client does not know (a newer server) is `unknown_<n>`."""
+    try:
+        return pb.EventKind.Name(kind).removeprefix("EVENT_KIND_").lower()
+    except ValueError:
+        return f"unknown_{kind}"
+
+
 def _event(m) -> Event:
-    name = pb.EventKind.Name(m.kind).removeprefix("EVENT_KIND_").lower()
-    return Event(time_s=m.time_s, kind=name, message=m.message)
+    return Event(time_s=m.time_s, kind=_kind_name(m.kind), message=m.message)
 
 
 class Sim:
@@ -213,22 +220,26 @@ class Sim:
         Unloading stops Betaflight SITL cleanly; terminating the server alone would orphan it on Windows
         (TerminateProcess skips the server's cleanup).
         """
-        if self._watch is not None:
-            self._watch.cancel()
-            self._watch = None
-        if self._process is not None:
+        try:
+            if self._watch is not None:
+                watch, self._watch = self._watch, None
+                watch.cancel()
+            if self._process is not None:
+                try:
+                    self._stub.Unload(pb.Empty(), timeout=UNLOAD_TIMEOUT_S)
+                except Exception:  # best effort: the server may already be gone or failing
+                    pass
+        finally:
             try:
-                self._stub.Unload(pb.Empty(), timeout=UNLOAD_TIMEOUT_S)
-            except Exception:  # best effort: the server may already be gone or failing
-                pass
-        self._channel.close()
-        if self._process is not None:
-            self._process.terminate()
-            try:
-                self._process.wait(5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-            self._process = None
+                self._channel.close()
+            finally:
+                if self._process is not None:
+                    process, self._process = self._process, None
+                    process.terminate()
+                    try:
+                        process.wait(5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
 
     def __enter__(self) -> "Sim":
         return self

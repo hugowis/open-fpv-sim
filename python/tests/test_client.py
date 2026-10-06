@@ -92,3 +92,13 @@ def test_launch_stops_the_server_when_the_handshake_fails(sim_bin, tmp_path, mon
         procs[0].kill()
         procs[0].wait()
     assert not alive, "ofs-sim was left running after the failed handshake"
+
+
+def test_events_tolerate_an_unknown_kind_from_a_newer_server():
+    from ofs.client import _event
+    from ofs.v1 import sim_pb2 as pb
+
+    known = _event(pb.Event(time_s=1.0, kind=pb.EVENT_KIND_LINK_DOWN, message="m"))
+    assert known.kind == "link_down"
+    unknown = _event(pb.Event(time_s=2.0, kind=99, message="new"))
+    assert (unknown.kind, unknown.time_s, unknown.message) == ("unknown_99", 2.0, "new")

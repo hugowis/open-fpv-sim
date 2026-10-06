@@ -250,6 +250,12 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
     let raw: toml::Value = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v == i64::from(SCHEMA_VERSION) => {}
+        Some(v @ ..=1) => {
+            let message = format!(
+                "unsupported schema_version {v} (this build reads {SCHEMA_VERSION}); schema 2 adds the required [radio] section                  and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and                  quads/opendrone-5f-freestyle.betaflight.diff"
+            );
+            return Err(parse_err(message));
+        }
         Some(v) => return Err(parse_err(format!("unsupported schema_version {v} (this build reads {SCHEMA_VERSION})"))),
         None => return Err(parse_err("missing integer schema_version".into())),
     }

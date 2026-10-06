@@ -36,6 +36,9 @@ pub struct Session {
     pub watched: bool,
     last_link_up: bool,
     last_restarts: u32,
+    /// Unit tests only: the next `step` panics (exercises panic containment).
+    #[cfg(test)]
+    pub panic_on_step: bool,
 }
 
 pub type Slot = Option<Session>;
@@ -62,11 +65,23 @@ impl Session {
             watched: false,
             last_link_up: false,
             last_restarts: 0,
+            #[cfg(test)]
+            panic_on_step: false,
         }
+    }
+
+    /// Poisons the session after an internal failure (a panic): it stays paused until the next Load.
+    pub fn poison(&mut self, e: SimError) {
+        self.failure = Some(e);
+        self.running = false;
     }
 
     /// Steps `ticks` base ticks. A firmware or numerical failure poisons the session and pauses it.
     pub fn step(&mut self, ticks: u64) -> Result<(), SimError> {
+        #[cfg(test)]
+        if self.panic_on_step {
+            panic!("test panic in step");
+        }
         if let Some(f) = &self.failure {
             return Err(f.clone());
         }
@@ -169,5 +184,30 @@ impl Shared {
 
     pub fn stopping(&self) -> bool {
         self.stopping.load(Ordering::Acquire)
+    }
+}
+
+/// A readable message from a panic payload.
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".into())
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    use crate::pacer::OverrunPolicy;
+    use crate::vehicle::{self, BuildOptions};
+    use ofs_config::FcKind;
+
+    /// An open-loop session (no Betaflight needed) for unit tests.
+    pub fn open_loop_session(mode: RunMode) -> Session {
+        let quad = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
+        let cfg = ofs_config::load(std::path::Path::new(quad)).unwrap();
+        let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-unit-test-data"), fc_override: Some(FcKind::OpenLoop) };
+        Session::new(vehicle::build(&cfg, &opts).unwrap(), mode, OverrunPolicy::Warn, false)
     }
 }

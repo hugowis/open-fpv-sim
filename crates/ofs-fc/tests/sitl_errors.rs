@@ -118,3 +118,26 @@ fn a_bind_failure_just_after_the_ready_line_is_a_startup_error() {
     assert!(matches!(err, FcError::Startup(..)), "{err}");
     assert!(err.to_string().contains("could not bind its ports"), "{err}");
 }
+
+/// A relaunch after a Betaflight reboot keeps the log from before it; the first start truncates.
+#[cfg(unix)]
+#[test]
+fn a_relaunch_appends_to_the_sitl_log() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["sh", "-c", "echo '[SITL] ready for the simulator'; sleep 5"]);
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
+    let log = cfg.launch.workdir.join("sitl.log");
+    std::fs::write(&log, "stale log of an earlier run
+").unwrap();
+    drop(SitlProcess::start(&cfg.launch).unwrap());
+    let first = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(first, "[SITL] ready for the simulator
+", "the first start truncates");
+    drop(SitlProcess::relaunch(&cfg.launch).unwrap());
+    let both = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(both, format!("{first}--- relaunch after reboot ---
+{first}"), "the relaunch appends");
+}

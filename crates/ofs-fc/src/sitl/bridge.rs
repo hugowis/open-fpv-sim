@@ -156,7 +156,7 @@ impl SitlBridge {
     fn restart(&mut self) -> Result<(), SimError> {
         // Drop the old process first: its cleanup command would kill the new instance.
         self.proc = None;
-        let proc = SitlProcess::start(&self.launch)
+        let proc = SitlProcess::relaunch(&self.launch)
             .map_err(|e| SimError::Firmware(format!("relaunching Betaflight SITL after a reboot failed: {e}")))?;
         self.proc = Some(proc);
         self.answered = false;

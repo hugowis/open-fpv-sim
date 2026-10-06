@@ -8,7 +8,10 @@ Two races made runs differ (found in M2 with the CRSF receiver; docs/research/si
 Now state packets are ignored until init has finished and the scheduler runs (which SITL announces with
 "[SITL] ready for the simulator"), and the scheduler runs no task until the first packet.
 
-Usage (Linux or WSL) on a tree with ofs-sitl.patch applied:
+Usage (Linux or WSL): run it second, on the tree that add_serial_in_datagram.py already changed. That tree is the
+M1 patch (third_party/betaflight/ofs-sitl.patch as of commit c1514e2) applied to the pinned Betaflight checkout,
+plus add_serial_in_datagram.py; see that script's docstring for the whole sequence. The generators are NOT
+idempotent: running this one on a tree that already has the current patch inserts its changes a second time.
     python3 third_party/betaflight/tools/deterministic_boot.py ~/ofs/betaflight
 """
 import sys

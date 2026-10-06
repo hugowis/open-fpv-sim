@@ -4,11 +4,17 @@ The simulator appends blocks of [uart index][length lo][length hi][bytes] after 
 SITL stages them with the packet and hands them to the UART on the tick that applies it, so receiver traffic
 (CRSF) is deterministic in lockstep. See docs/research/sitl-interface.md §8.
 
+The base tree is the M1 patch (third_party/betaflight/ofs-sitl.patch as of commit c1514e2) applied to the pinned
+Betaflight checkout. Run this generator first, then deterministic_boot.py. The generators are NOT idempotent:
+running one on a tree that already has the current patch inserts its changes a second time.
+
 Usage (Linux or WSL), from the repository root:
-    bash scripts/build-sitl.sh                                   # tree at the pinned commit + current patch
+    git show c1514e2:third_party/betaflight/ofs-sitl.patch > /tmp/ofs-sitl-m1.patch
+    OFS_SITL_PATCH=/tmp/ofs-sitl-m1.patch bash scripts/build-sitl.sh   # pinned commit + the M1 patch
     python3 third_party/betaflight/tools/add_serial_in_datagram.py ~/ofs/betaflight
+    python3 third_party/betaflight/tools/deterministic_boot.py ~/ofs/betaflight
     git -C ~/ofs/betaflight diff > third_party/betaflight/ofs-sitl.patch
-    bash scripts/build-sitl.sh                                   # rebuild from the regenerated patch
+    bash scripts/build-sitl.sh                                         # rebuild from the regenerated patch
 """
 import sys
 
