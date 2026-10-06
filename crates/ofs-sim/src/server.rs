@@ -18,7 +18,7 @@ use crate::session::{event, panic_message, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub use ofs_proto::PROTOCOL_VERSION;
 
 #[derive(Clone)]
 pub struct SimService {

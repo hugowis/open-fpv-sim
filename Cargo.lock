@@ -674,6 +674,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ofs-proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "ofs-radio"
 version = "0.1.0"
 dependencies = [
@@ -705,15 +715,13 @@ dependencies = [
  "ofs-electrical",
  "ofs-fc",
  "ofs-physics",
+ "ofs-proto",
  "ofs-radio",
  "ofs-sensors",
- "prost",
- "protoc-bin-vendored",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tracing",
  "tracing-subscriber",
 ]

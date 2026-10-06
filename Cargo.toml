@@ -34,3 +34,4 @@ ofs-sensors = { path = "crates/ofs-sensors" }
 ofs-config = { path = "crates/ofs-config" }
 ofs-fc = { path = "crates/ofs-fc" }
 ofs-radio = { path = "crates/ofs-radio" }
+ofs-proto = { path = "crates/ofs-proto" }

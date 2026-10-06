@@ -6,6 +6,5 @@ pub mod session;
 pub mod streams;
 pub mod vehicle;
 
-pub mod pb {
-    tonic::include_proto!("ofs.v1");
-}
+/// The protocol messages and stubs live in `ofs-proto`; re-exported so server code and tests keep their paths.
+pub use ofs_proto::pb;

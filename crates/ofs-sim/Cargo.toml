@@ -13,18 +13,14 @@ ofs-sensors.workspace = true
 ofs-config.workspace = true
 ofs-fc.workspace = true
 ofs-radio.workspace = true
+ofs-proto.workspace = true
 glam.workspace = true
 tonic.workspace = true
-prost.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-
-[build-dependencies]
-tonic-build.workspace = true
-protoc-bin-vendored.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
