@@ -2,16 +2,16 @@
 
 These findings came out of the M1 task reviews and the final whole-branch review. Each was deliberately left out of M1. They are listed so the M2 planning can pick them up.
 
-## Server and session lifecycle (M2, before Godot connects)
-- **Graceful `ofs-sim` shutdown on Ctrl-C/SIGTERM.** This needs tokio's `signal` feature, which adds `signal-hook-registry` to Cargo.lock.
-  - Today `ofs.launch()`/`close()`, the pytest fixture and the examples do not leak SITL: `close()` sends Unload first.
-  - A hand-killed `ofs-sim` orphans SITL until the next start. The default `pkill -x betaflight_SITL` and the port-9003 re-probe then reap it.
-- **A long `Run` cannot be cancelled when the client disconnects.** Spec §7 says a disconnect should end the session. Step in chunks and abort when the request is dropped (`crates/ofs-sim/src/server.rs`).
-- **Non-loopback `--listen`.** `Load` reads any path and executes that quad file's `fc.launch` argv, and TOML parse errors echo file contents back. Refuse or warn on non-loopback binds unless an explicit flag is given.
-- **The firmware workdir is keyed on the quad file stem only.** Two quads with the same file name in different directories share one `eeprom.bin`.
+## Server and session lifecycle
+- **Resolved in M2a:**
+  - graceful `ofs-sim` shutdown on Ctrl-C/SIGTERM;
+  - `Run` stops within 50 ms when its client goes away;
+  - a Python client's session ends when the client disconnects (unless `keep_alive`);
+  - firmware directories are keyed on the quad file's path.
+- **Non-loopback `--listen` (still open).** `Load` reads any path and executes that quad file's `fc.launch` argv, and TOML parse errors echo file contents back. Refuse or warn on non-loopback binds unless an explicit flag is given, before M2b exposes the server to more clients.
 
 ## SITL bridge
-- **Stray second reply after a resend.** If the first datagram was resent and SITL received both copies, the second reply can arrive after the next drain and leave a one-tick lag. The resend already logs a warning, and firmware determinism is not claimed for runs with a resend. Fix with a settle-and-drain after a resent first exchange.
+- **Stray second reply after a resend.** If SITL received both copies of a resent first datagram, the second reply could arrive after the next drain and leave a one-tick lag. This is now rare: SITL ignores packets until it is ready and the bridge waits for its ready line, so resends only happen on lost datagrams. A settle-and-drain after a resent first exchange would close it fully.
 - **Reply sender not checked.** The bridge does not check that a reply comes from the expected SITL address.
 - **Not-found hint only.** The `FcError::Launch` hint covers only "program not found". A wrong `.elf` path behind `wsl.exe` surfaces as a startup error, without the hint.
 - **`net::run()` has no timeout.** A hung `wsl.exe` stalls the vehicle build.
@@ -44,7 +44,7 @@ These findings came out of the M1 task reviews and the final whole-branch review
 - **The native-Linux Python hover path is unverified.** WSL has no grpc Python module; the Rust live bridge test does pass natively on Linux.
 
 ## M0 open items still open
-- Betaflight Configurator connection (needs real-time mode, M2).
+- Betaflight Configurator connection. Real-time mode now exists (M2a); the manual check is pending the user, see `docs/dev-setup.md` and `docs/research/sitl-interface.md` §8.
 - SmartAudio reply.
 - Heading/quaternion mapping for the compass.
 - One intermittent, unexplained MSP timeout.
