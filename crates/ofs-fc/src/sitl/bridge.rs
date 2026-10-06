@@ -9,7 +9,7 @@ use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 use super::codec::{
     state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
 };
-use super::frames::{fdm_packet, motor_commands, rc_channels, Home, SensorFrame};
+use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
 use super::process::{run_cleanup, LaunchConfig, SitlProcess};
 use super::FcError;
@@ -44,11 +44,6 @@ struct Inputs {
     vel: Signal<DVec3>,
     pos: Signal<DVec3>,
     pressure: Signal<f64>,
-    roll: Signal<f64>,
-    pitch: Signal<f64>,
-    yaw: Signal<f64>,
-    throttle: Signal<f64>,
-    aux: Vec<Signal<f64>>,
 }
 
 pub struct SitlBridge {
@@ -83,11 +78,6 @@ impl SitlBridge {
             vel: bus.signal(names::BODY_VEL_NED),
             pos: bus.signal(names::BODY_POS_NED),
             pressure: bus.signal(names::BARO_PRESSURE),
-            roll: bus.signal(names::RC_ROLL),
-            pitch: bus.signal(names::RC_PITCH),
-            yaw: bus.signal(names::RC_YAW),
-            throttle: bus.signal(names::RC_THROTTLE),
-            aux: (0..names::RC_AUX_COUNT).map(|i| bus.signal(&names::rc_aux(i))).collect(),
         };
         let cmds = (0..cfg.motor_count).map(|i| bus.signal(&names::motor_cmd(i))).collect();
         let mut launch = cfg.launch.clone();
@@ -228,9 +218,9 @@ impl Model for SitlBridge {
             pos_ned_m: bus.get(i.pos),
             pressure_pa: bus.get(i.pressure),
         };
-        let aux: Vec<f64> = i.aux.iter().map(|s| bus.get(*s)).collect();
-        let channels = rc_channels(bus.get(i.roll), bus.get(i.pitch), bus.get(i.yaw), bus.get(i.throttle), &aux);
-        let rc = RcPacket { timestamp_s: ctx.time_s, channels };
+        // Pilot input reaches Betaflight only as CRSF on its receiver UART (spec §1.5). The UDP RC channels are
+        // zero: invalid pulses, so a SITL whose EEPROM still selects the UDP receiver fails safe instead of flying.
+        let rc = RcPacket { timestamp_s: ctx.time_s, channels: [0; 16] };
         let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
         let datagram = state_datagram_with_serial(&fdm_packet(&frame, &self.cfg.home), &rc, &self.serial_blocks());
 

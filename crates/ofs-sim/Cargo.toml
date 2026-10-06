@@ -12,6 +12,7 @@ ofs-electrical.workspace = true
 ofs-sensors.workspace = true
 ofs-config.workspace = true
 ofs-fc.workspace = true
+ofs-radio.workspace = true
 glam.workspace = true
 tonic.workspace = true
 prost.workspace = true

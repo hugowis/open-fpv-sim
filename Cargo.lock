@@ -705,6 +705,7 @@ dependencies = [
  "ofs-electrical",
  "ofs-fc",
  "ofs-physics",
+ "ofs-radio",
  "ofs-sensors",
  "prost",
  "protoc-bin-vendored",
