@@ -11,8 +11,40 @@ class Mode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     MODE_UNSPECIFIED: _ClassVar[Mode]
     MODE_LOCKSTEP: _ClassVar[Mode]
+    MODE_REALTIME: _ClassVar[Mode]
+
+class OverrunPolicy(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OVERRUN_POLICY_UNSPECIFIED: _ClassVar[OverrunPolicy]
+    OVERRUN_POLICY_WARN: _ClassVar[OverrunPolicy]
+    OVERRUN_POLICY_SLOW: _ClassVar[OverrunPolicy]
+
+class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    EVENT_KIND_UNSPECIFIED: _ClassVar[EventKind]
+    EVENT_KIND_OVERRUN: _ClassVar[EventKind]
+    EVENT_KIND_FIRMWARE_RESTARTED: _ClassVar[EventKind]
+    EVENT_KIND_SIM_ERROR: _ClassVar[EventKind]
+    EVENT_KIND_LINK_DOWN: _ClassVar[EventKind]
+    EVENT_KIND_LINK_UP: _ClassVar[EventKind]
+    EVENT_KIND_PILOT_CONNECTED: _ClassVar[EventKind]
+    EVENT_KIND_PILOT_DISCONNECTED: _ClassVar[EventKind]
+    EVENT_KIND_SESSION_ENDED: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
+MODE_REALTIME: Mode
+OVERRUN_POLICY_UNSPECIFIED: OverrunPolicy
+OVERRUN_POLICY_WARN: OverrunPolicy
+OVERRUN_POLICY_SLOW: OverrunPolicy
+EVENT_KIND_UNSPECIFIED: EventKind
+EVENT_KIND_OVERRUN: EventKind
+EVENT_KIND_FIRMWARE_RESTARTED: EventKind
+EVENT_KIND_SIM_ERROR: EventKind
+EVENT_KIND_LINK_DOWN: EventKind
+EVENT_KIND_LINK_UP: EventKind
+EVENT_KIND_PILOT_CONNECTED: EventKind
+EVENT_KIND_PILOT_DISCONNECTED: EventKind
+EVENT_KIND_SESSION_ENDED: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -33,24 +65,30 @@ class HandshakeReply(_message.Message):
     def __init__(self, protocol_version: _Optional[int] = ..., server_version: _Optional[str] = ...) -> None: ...
 
 class LoadRequest(_message.Message):
-    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc")
+    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive")
     QUAD_PATH_FIELD_NUMBER: _ClassVar[int]
     SEED_FIELD_NUMBER: _ClassVar[int]
     MODE_FIELD_NUMBER: _ClassVar[int]
     OPEN_LOOP_FC_FIELD_NUMBER: _ClassVar[int]
+    OVERRUN_POLICY_FIELD_NUMBER: _ClassVar[int]
+    KEEP_ALIVE_FIELD_NUMBER: _ClassVar[int]
     quad_path: str
     seed: int
     mode: Mode
     open_loop_fc: bool
-    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ...) -> None: ...
+    overrun_policy: OverrunPolicy
+    keep_alive: bool
+    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ...) -> None: ...
 
 class LoadReply(_message.Message):
-    __slots__ = ("quad_name", "base_hz")
+    __slots__ = ("quad_name", "base_hz", "configurator_address")
     QUAD_NAME_FIELD_NUMBER: _ClassVar[int]
     BASE_HZ_FIELD_NUMBER: _ClassVar[int]
+    CONFIGURATOR_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     quad_name: str
     base_hz: int
-    def __init__(self, quad_name: _Optional[str] = ..., base_hz: _Optional[int] = ...) -> None: ...
+    configurator_address: str
+    def __init__(self, quad_name: _Optional[str] = ..., base_hz: _Optional[int] = ..., configurator_address: _Optional[str] = ...) -> None: ...
 
 class Sticks(_message.Message):
     __slots__ = ("roll", "pitch", "yaw", "throttle", "aux")
@@ -71,6 +109,20 @@ class RunRequest(_message.Message):
     SECONDS_FIELD_NUMBER: _ClassVar[int]
     seconds: float
     def __init__(self, seconds: _Optional[float] = ...) -> None: ...
+
+class StreamRequest(_message.Message):
+    __slots__ = ("rate_hz",)
+    RATE_HZ_FIELD_NUMBER: _ClassVar[int]
+    rate_hz: int
+    def __init__(self, rate_hz: _Optional[int] = ...) -> None: ...
+
+class PilotInput(_message.Message):
+    __slots__ = ("sticks", "state_rate_hz")
+    STICKS_FIELD_NUMBER: _ClassVar[int]
+    STATE_RATE_HZ_FIELD_NUMBER: _ClassVar[int]
+    sticks: Sticks
+    state_rate_hz: int
+    def __init__(self, sticks: _Optional[_Union[Sticks, _Mapping]] = ..., state_rate_hz: _Optional[int] = ...) -> None: ...
 
 class Vec3(_message.Message):
     __slots__ = ("x", "y", "z")
@@ -94,8 +146,20 @@ class Quat(_message.Message):
     z: float
     def __init__(self, w: _Optional[float] = ..., x: _Optional[float] = ..., y: _Optional[float] = ..., z: _Optional[float] = ...) -> None: ...
 
+class RadioLink(_message.Message):
+    __slots__ = ("tx_enabled", "link_up", "lq_pct", "rssi_dbm")
+    TX_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    LINK_UP_FIELD_NUMBER: _ClassVar[int]
+    LQ_PCT_FIELD_NUMBER: _ClassVar[int]
+    RSSI_DBM_FIELD_NUMBER: _ClassVar[int]
+    tx_enabled: bool
+    link_up: bool
+    lq_pct: float
+    rssi_dbm: float
+    def __init__(self, tx_enabled: _Optional[bool] = ..., link_up: _Optional[bool] = ..., lq_pct: _Optional[float] = ..., rssi_dbm: _Optional[float] = ...) -> None: ...
+
 class State(_message.Message):
-    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd")
+    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts")
     TIME_S_FIELD_NUMBER: _ClassVar[int]
     POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_NED_MPS_FIELD_NUMBER: _ClassVar[int]
@@ -105,6 +169,10 @@ class State(_message.Message):
     BATTERY_CURRENT_A_FIELD_NUMBER: _ClassVar[int]
     MOTOR_RPM_FIELD_NUMBER: _ClassVar[int]
     MOTOR_CMD_FIELD_NUMBER: _ClassVar[int]
+    RADIO_FIELD_NUMBER: _ClassVar[int]
+    RUNNING_FIELD_NUMBER: _ClassVar[int]
+    OVERRUNS_FIELD_NUMBER: _ClassVar[int]
+    FC_RESTARTS_FIELD_NUMBER: _ClassVar[int]
     time_s: float
     position_ned_m: Vec3
     velocity_ned_mps: Vec3
@@ -114,4 +182,28 @@ class State(_message.Message):
     battery_current_a: float
     motor_rpm: _containers.RepeatedScalarFieldContainer[float]
     motor_cmd: _containers.RepeatedScalarFieldContainer[float]
-    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ...) -> None: ...
+    radio: RadioLink
+    running: bool
+    overruns: int
+    fc_restarts: int
+    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ...) -> None: ...
+
+class Event(_message.Message):
+    __slots__ = ("time_s", "kind", "message")
+    TIME_S_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    time_s: float
+    kind: EventKind
+    message: str
+    def __init__(self, time_s: _Optional[float] = ..., kind: _Optional[_Union[EventKind, str]] = ..., message: _Optional[str] = ...) -> None: ...
+
+class RadioLinkLoss(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class Fault(_message.Message):
+    __slots__ = ("radio_link_loss",)
+    RADIO_LINK_LOSS_FIELD_NUMBER: _ClassVar[int]
+    radio_link_loss: RadioLinkLoss
+    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ...) -> None: ...

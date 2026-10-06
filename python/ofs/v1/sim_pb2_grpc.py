@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Headless simulator control. Lockstep only in protocol version 1.
+    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
+    pilot link and fault injection. One session (loaded quad) per server.
     """
 
     def __init__(self, channel):
@@ -55,6 +56,16 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.RunRequest.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.State.FromString,
                 _registered_method=True)
+        self.Start = channel.unary_unary(
+                '/ofs.v1.Sim/Start',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                _registered_method=True)
+        self.Pause = channel.unary_unary(
+                '/ofs.v1.Sim/Pause',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                _registered_method=True)
         self.GetState = channel.unary_unary(
                 '/ofs.v1.Sim/GetState',
                 request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
@@ -65,10 +76,36 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                 _registered_method=True)
+        self.StreamState = channel.unary_stream(
+                '/ofs.v1.Sim/StreamState',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.State.FromString,
+                _registered_method=True)
+        self.Pilot = channel.stream_stream(
+                '/ofs.v1.Sim/Pilot',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.PilotInput.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.State.FromString,
+                _registered_method=True)
+        self.Watch = channel.unary_stream(
+                '/ofs.v1.Sim/Watch',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Event.FromString,
+                _registered_method=True)
+        self.InjectFault = channel.unary_unary(
+                '/ofs.v1.Sim/InjectFault',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Fault.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                _registered_method=True)
+        self.ClearFaults = channel.unary_unary(
+                '/ofs.v1.Sim/ClearFaults',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                _registered_method=True)
 
 
 class SimServicer:
-    """Headless simulator control. Lockstep only in protocol version 1.
+    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
+    pilot link and fault injection. One session (loaded quad) per server.
     """
 
     def Handshake(self, request, context):
@@ -90,6 +127,20 @@ class SimServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Run(self, request, context):
+        """Steps a lockstep session, or a paused real-time session (single-stepping).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Start(self, request, context):
+        """Real-time sessions load paused; Start paces them to the wall clock, Pause stops them.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Pause(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -102,6 +153,40 @@ class SimServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Unload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamState(self, request, context):
+        """Vehicle state at a client rate until the client cancels or the session is unloaded.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Pilot(self, request_iterator, context):
+        """The pilot's transmitter: sticks in, state out. While the stream is open the transmitter is on; when it
+        closes (or the client vanishes) the transmitter goes off and Betaflight fails safe. One pilot at a time.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Watch(self, request, context):
+        """Session events. A session loaded with keep_alive = false ends when its last watcher disconnects.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InjectFault(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClearFaults(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -130,6 +215,16 @@ def add_SimServicer_to_server(servicer, server):
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.RunRequest.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.State.SerializeToString,
             ),
+            'Start': grpc.unary_unary_rpc_method_handler(
+                    servicer.Start,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ),
+            'Pause': grpc.unary_unary_rpc_method_handler(
+                    servicer.Pause,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ),
             'GetState': grpc.unary_unary_rpc_method_handler(
                     servicer.GetState,
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
@@ -137,6 +232,31 @@ def add_SimServicer_to_server(servicer, server):
             ),
             'Unload': grpc.unary_unary_rpc_method_handler(
                     servicer.Unload,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ),
+            'StreamState': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamState,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.State.SerializeToString,
+            ),
+            'Pilot': grpc.stream_stream_rpc_method_handler(
+                    servicer.Pilot,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.PilotInput.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.State.SerializeToString,
+            ),
+            'Watch': grpc.unary_stream_rpc_method_handler(
+                    servicer.Watch,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Event.SerializeToString,
+            ),
+            'InjectFault': grpc.unary_unary_rpc_method_handler(
+                    servicer.InjectFault,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Fault.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ),
+            'ClearFaults': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearFaults,
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ),
@@ -149,7 +269,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Headless simulator control. Lockstep only in protocol version 1.
+    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
+    pilot link and fault injection. One session (loaded quad) per server.
     """
 
     @staticmethod
@@ -261,6 +382,60 @@ class Sim:
             _registered_method=True)
 
     @staticmethod
+    def Start(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/Start',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pause(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/Pause',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def GetState(request,
             target,
             options=(),
@@ -302,6 +477,141 @@ class Sim:
             request,
             target,
             '/ofs.v1.Sim/Unload',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamState(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/ofs.v1.Sim/StreamState',
+            ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.State.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pilot(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/ofs.v1.Sim/Pilot',
+            ofs_dot_v1_dot_sim__pb2.PilotInput.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.State.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Watch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/ofs.v1.Sim/Watch',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Event.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InjectFault(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/InjectFault',
+            ofs_dot_v1_dot_sim__pb2.Fault.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearFaults(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/ClearFaults',
             ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.Empty.FromString,
             options,
