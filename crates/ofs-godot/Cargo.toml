@@ -1,0 +1,15 @@
+[package]
+name = "ofs-godot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# The godot crate (godot-rust) needs a newer Rust than the rest of the workspace; the msrv CI job skips this crate.
+rust-version = "1.94"
+description = "Godot 4 extension (GDExtension, godot-rust): the pilot client's connection to ofs-sim"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ofs-client.workspace = true
+godot = "0.5"

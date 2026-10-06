@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.6
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://../target/debug/ofs_godot.dll"
+windows.release.x86_64 = "res://../target/release/ofs_godot.dll"
+linux.debug.x86_64 = "res://../target/debug/libofs_godot.so"
+linux.release.x86_64 = "res://../target/release/libofs_godot.so"
