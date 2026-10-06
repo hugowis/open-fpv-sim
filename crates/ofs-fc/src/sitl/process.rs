@@ -75,6 +75,9 @@ impl SitlProcess {
     pub fn start(cfg: &LaunchConfig) -> Result<Self, FcError> {
         std::fs::create_dir_all(&cfg.workdir)?;
         let workdir = std::path::absolute(&cfg.workdir)?;
+        if workdir.join("eeprom.bin").exists() {
+            check_diff_unchanged(cfg, &workdir)?;
+        }
         run_cleanup(&cfg.cleanup);
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
@@ -144,6 +147,22 @@ fn spawn_logged(argv: &[String], workdir: &Path, log: &SharedLog) -> Result<Chil
     pipe_lines(child.stdout.take().expect("stdout is piped"), log.clone());
     pipe_lines(child.stderr.take().expect("stderr is piped"), log.clone());
     Ok(child)
+}
+
+/// The quad's diff is applied on first boot only, so an EEPROM made from an older diff no longer matches the
+/// quad file. Refuse to start rather than fly a stale configuration.
+fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
+    let Ok(applied) = std::fs::read(workdir.join("betaflight.diff")) else {
+        return Ok(()); // first booted before copies of the applied diff were kept
+    };
+    if applied != std::fs::read(&cfg.diff_file)? {
+        return Err(FcError::Config(format!(
+            "{} changed since this quad's first boot; delete {} to apply it again (this also discards settings              changed in Betaflight Configurator)",
+            cfg.diff_file.display(),
+            workdir.join("eeprom.bin").display()
+        )));
+    }
+    Ok(())
 }
 
 /// First boot: `<launch> --config betaflight.diff` loads the diff, saves eeprom.bin and exits.

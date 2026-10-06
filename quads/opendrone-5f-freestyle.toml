@@ -1,6 +1,6 @@
 # OpenDrone 5" freestyle — M1 estimates. Units are in the key suffixes (SI).
 # Provenance tracking per parameter arrives with the component library (M4); all values here are estimates.
-schema_version = 1
+schema_version = 2
 name = "OpenDrone 5F freestyle (M1 estimates)"
 
 [sim]
@@ -79,3 +79,13 @@ betaflight_diff = "opendrone-5f-freestyle.betaflight.diff"
 reply_timeout_ms = 500
 first_reply_timeout_ms = 5000
 startup_timeout_ms = 15000
+
+[radio]
+# ExpressLRS, behavioural (level 1). The receiver's CRSF output is wired to Betaflight's UART2; the
+# betaflight.diff selects the CRSF receiver there.
+kind = "elrs"
+packet_rate_hz = 500
+uart = 2
+latency_packets = 1
+rssi_dbm = -50.0
+snr_db = 10.0

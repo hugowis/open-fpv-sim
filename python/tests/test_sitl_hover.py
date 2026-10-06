@@ -20,7 +20,7 @@ def _hover_module():
 def test_betaflight_sitl_hover(sim, tmp_path):
     sim.load(QUAD, seed=1)
     result = _hover_module().fly_hover(sim)
-    assert result["armed"], f"motors never spun: read {tmp_path}/opendrone-5f-freestyle/sitl.log for 'Arming disabled'"
+    assert result["armed"], f"motors never spun: read {tmp_path}/opendrone-5f-freestyle-*/sitl.log for 'Arming disabled'"
     assert result["max_alt_err_m"] < 0.3, result
     assert result["max_tilt_deg"] < 5.0, result
 
@@ -28,7 +28,7 @@ def test_betaflight_sitl_hover(sim, tmp_path):
 def test_betaflight_sitl_hover_is_deterministic(sim):
     """Spec §5.5/§9: same quad + seed + inputs in lockstep give identical runs, Betaflight SITL included.
 
-    Every load() relaunches SITL from <data_dir>/<quad stem>/eeprom.bin. The first-ever load also applies
+    Every load() relaunches SITL from <data_dir>/<quad stem>-<hash>/eeprom.bin. The first-ever load also applies
     betaflight.diff, so a warm-up flight runs first and both compared flights boot from the same EEPROM.
     (If ofs-sim logs a first-datagram resend warning, SITL may have run an extra t=0 tick: see the log.)
     """

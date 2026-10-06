@@ -1,11 +1,12 @@
 //! Assembles a quad from its config into a scheduler and exposes sticks in, state out.
 use std::f64::consts::PI;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::{FcKind, QuadConfig};
+use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
@@ -96,6 +97,17 @@ pub struct Vehicle {
     h: Handles,
 }
 
+/// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
+/// the same file name in different directories never share an EEPROM.
+pub fn firmware_dir(data_dir: &Path, quad_path: &Path) -> PathBuf {
+    let full = std::fs::canonicalize(quad_path)
+        .or_else(|_| std::path::absolute(quad_path))
+        .unwrap_or_else(|_| quad_path.to_path_buf());
+    let stem = quad_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
+    let hash = fnv1a64(full.to_string_lossy().as_bytes()) as u32;
+    data_dir.join(format!("{stem}-{hash:08x}"))
+}
+
 fn v3(a: [f64; 3]) -> DVec3 {
     DVec3::from_array(a)
 }
@@ -178,7 +190,6 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     match opts.fc_override.unwrap_or(cfg.fc.kind) {
         FcKind::OpenLoop => models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus))),
         FcKind::Sitl => {
-            let quad_stem = cfg.source_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
             let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
             let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
             if cleanup.is_empty() {
@@ -189,7 +200,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             let launch = LaunchConfig {
                 launch: launch_argv,
                 cleanup,
-                workdir: opts.data_dir.join(quad_stem),
+                workdir: firmware_dir(&opts.data_dir, &cfg.source_path),
                 diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
                 startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
             };

@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// 2: adds the required `[radio]` section (M2).
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +24,7 @@ pub struct QuadConfig {
     pub home: HomeSection,
     pub initial: InitialSection,
     pub fc: FcSection,
+    pub radio: RadioSection,
     #[serde(skip)]
     pub source_path: PathBuf,
 }
@@ -156,6 +158,66 @@ fn default_first_reply_timeout_ms() -> u64 {
 
 fn default_startup_timeout_ms() -> u64 {
     15_000
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RadioKind {
+    /// ExpressLRS, behavioural model (fidelity level 1).
+    Elrs,
+}
+
+/// The pilot's radio link. The receiver's CRSF output is wired to a Betaflight UART.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadioSection {
+    pub kind: RadioKind,
+    pub packet_rate_hz: u32,
+    /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
+    pub uart: u8,
+    #[serde(default = "default_latency_packets")]
+    pub latency_packets: u32,
+    /// Per-packet loss probability in the good and the bad (burst) channel state.
+    #[serde(default)]
+    pub loss_good: f64,
+    #[serde(default)]
+    pub loss_bad: f64,
+    /// Per-packet probability of entering and of leaving the bad state (Gilbert-Elliott burst loss).
+    #[serde(default)]
+    pub p_good_to_bad: f64,
+    #[serde(default = "default_p_bad_to_good")]
+    pub p_bad_to_good: f64,
+    #[serde(default = "default_rssi_dbm")]
+    pub rssi_dbm: f64,
+    #[serde(default = "default_snr_db")]
+    pub snr_db: f64,
+    #[serde(default = "default_link_stats_interval_packets")]
+    pub link_stats_interval_packets: u32,
+    /// Reported as-is in CRSF link statistics.
+    #[serde(default)]
+    pub rf_mode: u8,
+    #[serde(default)]
+    pub tx_power: u8,
+}
+
+fn default_latency_packets() -> u32 {
+    1
+}
+
+fn default_p_bad_to_good() -> f64 {
+    1.0
+}
+
+fn default_rssi_dbm() -> f64 {
+    -50.0
+}
+
+fn default_snr_db() -> f64 {
+    10.0
+}
+
+fn default_link_stats_interval_packets() -> u32 {
+    50
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -298,6 +360,24 @@ impl QuadConfig {
         ] {
             c.check(ms > 0, field, "must be > 0");
         }
+        let r = &self.radio;
+        c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
+        c.check(
+            (2..=8).contains(&r.uart),
+            "radio.uart",
+            format!("must be 2..=8; UART1 is Betaflight's MSP port, tcp:5761 (got {})", r.uart),
+        );
+        for (p, field) in [
+            (r.loss_good, "radio.loss_good"),
+            (r.loss_bad, "radio.loss_bad"),
+            (r.p_good_to_bad, "radio.p_good_to_bad"),
+            (r.p_bad_to_good, "radio.p_bad_to_good"),
+        ] {
+            c.check((0.0..=1.0).contains(&p), field, format!("must be a probability in [0, 1] (got {p})"));
+        }
+        c.check(r.rssi_dbm.is_finite() && r.rssi_dbm <= 0.0, "radio.rssi_dbm", format!("must be <= 0 dBm (got {})", r.rssi_dbm));
+        c.check(r.snr_db.is_finite(), "radio.snr_db", "must be finite");
+        c.check(r.link_stats_interval_packets > 0, "radio.link_stats_interval_packets", "must be > 0");
         if self.fc.kind == FcKind::Sitl {
             c.check(!self.fc.launch.is_empty(), "fc.launch", "must not be empty for kind = \"sitl\"");
             let diff = self.resolve(&self.fc.betaflight_diff);

@@ -79,3 +79,18 @@ fn ready_lines_are_recognised() {
     assert!(is_ready_line("[SITL] ready for the simulator"));
     assert!(!is_ready_line("bind port 5761 for UART1"));
 }
+
+#[test]
+fn a_changed_quad_diff_refuses_a_stale_eeprom() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["ofs-definitely-missing-binary"]);
+    // First boot happened with another diff: eeprom.bin and the applied copy exist.
+    std::fs::create_dir_all(dir.path().join("fc")).unwrap();
+    std::fs::write(dir.path().join("fc/eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::write(dir.path().join("fc/betaflight.diff"), "feature GPS\n").unwrap();
+    let err = SitlBridge::start(cfg, &mut Bus::new()).err().unwrap();
+    assert!(matches!(err, FcError::Config(_)), "{err}");
+    let shown = err.to_string();
+    assert!(shown.contains("changed since") && shown.contains("eeprom.bin"), "{shown}");
+}
