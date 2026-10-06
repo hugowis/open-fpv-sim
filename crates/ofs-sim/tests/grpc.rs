@@ -259,3 +259,90 @@ async fn watchers_receive_events() {
     let e = tokio::time::timeout(Duration::from_secs(5), watch.next()).await.unwrap().unwrap().unwrap();
     assert_eq!(e.kind(), EventKind::LinkUp);
 }
+
+#[tokio::test]
+async fn a_pilot_does_not_outlive_its_session() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+    let mut old_states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    assert!(old_states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
+
+    // The old pilot keeps its input stream open across an Unload and a new Load.
+    c.unload(Empty {}).await.unwrap();
+    load_open_loop(&mut c).await;
+
+    // The old pilot's slot is released once its state feed has ended, so a new pilot is not refused.
+    let mut new_pilot = None;
+    for _ in 0..100 {
+        let (tx2, rx2) = tokio::sync::mpsc::channel(8);
+        tx2.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+        match c.pilot(ReceiverStream::new(rx2)).await {
+            Ok(r) => {
+                new_pilot = Some((tx2, r.into_inner()));
+                break;
+            }
+            Err(e) => {
+                assert_eq!(kind(&e), "pilot_busy", "{e:?}");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
+    let (_tx2, mut new_states) = new_pilot.expect("a new pilot was refused for the whole wait");
+    assert!(new_states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
+
+    // The old pilot's later input and its end touch neither the new session's sticks nor its transmitter.
+    let _ = tx.send(PilotInput { sticks: Some(Sticks { throttle: 0.9, ..Default::default() }), state_rate_hz: 50 }).await;
+    drop(tx);
+    drop(old_states);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let s = c.run(RunRequest { seconds: 0.1 }).await.unwrap().into_inner();
+    assert!(s.radio.unwrap().tx_enabled, "the old pilot switched the new session's transmitter off");
+    assert!(s.motor_cmd.iter().all(|m| *m == 0.0), "the old pilot's sticks reached the new session: {:?}", s.motor_cmd);
+}
+
+#[tokio::test]
+async fn a_cancelled_watch_does_not_leak_a_watcher() {
+    let mut c = start().await;
+    c.load(LoadRequest { keep_alive: false, ..open_loop(Mode::Lockstep) }).await.unwrap();
+
+    // A long Run holds the session lock, so the Watch call has to wait for it.
+    let mut runner = c.clone();
+    let run = tokio::spawn(async move { runner.run(RunRequest { seconds: 1.0e6 }).await });
+    let mut held = false;
+    for _ in 0..200 {
+        if tokio::time::timeout(Duration::from_millis(100), c.get_state(Empty {})).await.is_err() {
+            held = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(held, "the long Run never held the session");
+    let mut req = Request::new(Empty {});
+    req.set_timeout(Duration::from_millis(300));
+    assert!(c.watch(req).await.is_err(), "the Watch call should have hit its deadline");
+
+    // End the Run; the cancelled Watch must not have left a watcher behind.
+    run.abort();
+    let mut free = false;
+    for _ in 0..200 {
+        if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(100), c.get_state(Empty {})).await {
+            free = true;
+            break;
+        }
+    }
+    assert!(free, "the Run never released the session");
+
+    let watch = c.watch(Empty {}).await.unwrap().into_inner();
+    drop(watch);
+    let mut loaded = true;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        loaded = c.get_state(Empty {}).await.is_ok();
+        if !loaded {
+            break;
+        }
+    }
+    assert!(!loaded, "the last watcher left but the session was kept: a watcher leaked");
+}

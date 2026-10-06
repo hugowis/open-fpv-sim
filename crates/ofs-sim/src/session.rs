@@ -1,6 +1,6 @@
 //! The loaded session and the state every part of the server shares: gRPC handlers, the real-time runner
 //! and the streams.
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -17,7 +17,12 @@ pub enum RunMode {
     Realtime,
 }
 
+/// Identities of loaded sessions, so a stream can tell its session from a later one.
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
 pub struct Session {
+    /// Unique per loaded session (never 0).
+    pub id: u64,
     pub vehicle: Vehicle,
     pub mode: RunMode,
     /// Real-time sessions only: paced to the wall clock right now.
@@ -47,6 +52,7 @@ impl Session {
     pub fn new(vehicle: Vehicle, mode: RunMode, policy: OverrunPolicy, keep_alive: bool) -> Self {
         let pacer = Pacer::new(policy, vehicle.base_hz());
         Self {
+            id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             vehicle,
             mode,
             running: false,
