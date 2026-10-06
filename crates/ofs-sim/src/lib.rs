@@ -1,4 +1,5 @@
 //! Open FPV Sim server library: vehicle assembly, sessions, real-time pacing and the gRPC service.
+pub mod listen;
 pub mod pacer;
 pub mod runner;
 pub mod server;
