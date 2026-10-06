@@ -2,14 +2,28 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Headless simulator control. Lockstep only in protocol version 1.
+// Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
+// pilot link and fault injection. One session (loaded quad) per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
   rpc SetSticks(Sticks) returns (Empty);
+  // Steps a lockstep session, or a paused real-time session (single-stepping).
   rpc Run(RunRequest) returns (State);
+  // Real-time sessions load paused; Start paces them to the wall clock, Pause stops them.
+  rpc Start(Empty) returns (Empty);
+  rpc Pause(Empty) returns (Empty);
   rpc GetState(Empty) returns (State);
   rpc Unload(Empty) returns (Empty);
+  // Vehicle state at a client rate until the client cancels or the session is unloaded.
+  rpc StreamState(StreamRequest) returns (stream State);
+  // The pilot's transmitter: sticks in, state out. While the stream is open the transmitter is on; when it
+  // closes (or the client vanishes) the transmitter goes off and Betaflight fails safe. One pilot at a time.
+  rpc Pilot(stream PilotInput) returns (stream State);
+  // Session events. A session loaded with keep_alive = false ends when its last watcher disconnects.
+  rpc Watch(Empty) returns (stream Event);
+  rpc InjectFault(Fault) returns (Empty);
+  rpc ClearFaults(Empty) returns (Empty);
 }
 
 message Empty {}
@@ -23,6 +37,14 @@ message HandshakeReply {
 enum Mode {
   MODE_UNSPECIFIED = 0;  // treated as lockstep
   MODE_LOCKSTEP = 1;
+  MODE_REALTIME = 2;
+}
+
+// What a real-time session does when it falls behind the wall clock (spec §5.1).
+enum OverrunPolicy {
+  OVERRUN_POLICY_UNSPECIFIED = 0;  // treated as warn
+  OVERRUN_POLICY_WARN = 1;         // catch up in bursts; drop a backlog over 100 ms and count an overrun
+  OVERRUN_POLICY_SLOW = 2;         // never burst; simulated time stretches, one overrun per 100 ms of stretch
 }
 
 message LoadRequest {
@@ -30,10 +52,13 @@ message LoadRequest {
   uint64 seed = 2;
   Mode mode = 3;
   bool open_loop_fc = 4;  // testing aid: replace the configured FC with throttle-only open loop
+  OverrunPolicy overrun_policy = 5;
+  bool keep_alive = 6;  // keep the session when its last watcher disconnects
 }
 message LoadReply {
   string quad_name = 1;
   uint32 base_hz = 2;
+  string configurator_address = 3;  // tcp://127.0.0.1:5761 when the FC is Betaflight SITL, else empty
 }
 
 // roll, pitch, yaw, aux in [-1, 1]; throttle in [0, 1]. Up to 4 aux channels; missing ones are -1.
@@ -47,6 +72,14 @@ message Sticks {
 
 message RunRequest { double seconds = 1; }
 
+// rate_hz: 1..240; 0 means 60.
+message StreamRequest { uint32 rate_hz = 1; }
+
+message PilotInput {
+  Sticks sticks = 1;
+  uint32 state_rate_hz = 2;  // read from the first message only; 0 means 60
+}
+
 message Vec3 {
   double x = 1;
   double y = 2;
@@ -59,6 +92,13 @@ message Quat {
   double z = 4;
 }
 
+message RadioLink {
+  bool tx_enabled = 1;  // a pilot or script is connected
+  bool link_up = 2;
+  double lq_pct = 3;
+  double rssi_dbm = 4;
+}
+
 message State {
   double time_s = 1;
   Vec3 position_ned_m = 2;
@@ -69,4 +109,34 @@ message State {
   double battery_current_a = 7;
   repeated double motor_rpm = 8;
   repeated double motor_cmd = 9;
+  RadioLink radio = 10;
+  bool running = 11;        // a real-time session paced to the wall clock right now
+  uint64 overruns = 12;     // real-time overruns so far
+  uint32 fc_restarts = 13;  // Betaflight reboots so far
+}
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_OVERRUN = 1;
+  EVENT_KIND_FIRMWARE_RESTARTED = 2;
+  EVENT_KIND_SIM_ERROR = 3;
+  EVENT_KIND_LINK_DOWN = 4;
+  EVENT_KIND_LINK_UP = 5;
+  EVENT_KIND_PILOT_CONNECTED = 6;
+  EVENT_KIND_PILOT_DISCONNECTED = 7;
+  EVENT_KIND_SESSION_ENDED = 8;
+}
+
+message Event {
+  double time_s = 1;  // simulated time
+  EventKind kind = 2;
+  string message = 3;
+}
+
+message RadioLinkLoss {}
+
+message Fault {
+  oneof kind {
+    RadioLinkLoss radio_link_loss = 1;  // every uplink packet is lost while active
+  }
 }

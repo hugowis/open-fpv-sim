@@ -18,7 +18,7 @@ toml = "0.8"
 thiserror = "1"
 tonic = "0.12"
 prost = "0.13"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
