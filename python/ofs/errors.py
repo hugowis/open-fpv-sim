@@ -38,6 +38,14 @@ class ServerUnavailable(OfsError):
     """The server could not be reached."""
 
 
+class PilotBusy(OfsError):
+    """Another pilot is already connected to the session."""
+
+
+class InternalError(OfsError):
+    """The server reported an internal error."""
+
+
 _KINDS = {
     "config": ConfigError,
     "firmware": FirmwareCrashed,
@@ -46,6 +54,8 @@ _KINDS = {
     "not_loaded": NotLoaded,
     "invalid_argument": InvalidArgument,
     "invalid_state": InvalidState,
+    "pilot_busy": PilotBusy,
+    "internal": InternalError,
 }
 
 

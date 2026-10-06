@@ -102,3 +102,27 @@ def test_events_tolerate_an_unknown_kind_from_a_newer_server():
     assert known.kind == "link_down"
     unknown = _event(pb.Event(time_s=2.0, kind=99, message="new"))
     assert (unknown.kind, unknown.time_s, unknown.message) == ("unknown_99", 2.0, "new")
+
+
+def test_pilot_busy_and_internal_are_typed():
+    import grpc
+
+    from ofs.errors import from_rpc_error
+
+    class FakeRpcError(grpc.RpcError):
+        def __init__(self, kind, message):
+            super().__init__(message)
+            self._md = (("ofs-error-kind", kind),)
+            self._message = message
+
+        def trailing_metadata(self):
+            return self._md
+
+        def details(self):
+            return self._message
+
+        def code(self):
+            return grpc.StatusCode.UNKNOWN
+
+    assert isinstance(from_rpc_error(FakeRpcError("pilot_busy", "another pilot is flying")), ofs.PilotBusy)
+    assert isinstance(from_rpc_error(FakeRpcError("internal", "boom")), ofs.InternalError)
