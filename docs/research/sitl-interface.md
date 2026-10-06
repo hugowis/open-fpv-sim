@@ -242,3 +242,40 @@ Two cross-cutting findings that also affect M2:
 - **Reply pairing:** a reply that arrives after a timeout would be taken as the next packet's reply. M1 treats a timeout as fatal, so that's safe, but drain the socket before each send. Optionally have SITL echo the FDM timestamp (24-byte reply) so mis-pairing is detectable.
 - **`pid_process_denom`:** fixed in the patch (one reply per tick regardless), but keep `pid_process_denom = 1` in quad configs so that one exchange is one PID update.
 - **One SITL per simulation-time origin:** SITL's external clock never runs backwards, so restarting simulation time at 0 needs a fresh SITL process. M1 already relaunches on every `Load`; keep it that way.
+
+## 8. M2 changes (radio link, real time, reboots)
+
+### UART bytes in the state datagram
+- **Format.** After the 184-byte datagram the simulator appends blocks of `[uart index (0-based)][len lo][len hi][bytes]`, at most 512 bytes in total (`EXT_SERIAL_MAX`). SITL's FDM thread stages them with the packet. `simulatorTakeGyroTick()` hands them to `tcpSerialInject()` → the port's RX buffer → the driver at that tick's `tcpSerialDispatchRx()`. The receiver's CRSF output therefore reaches Betaflight on a deterministic tick. M0 §5's caveat for TCP UARTs still applies to real tools connected over TCP.
+- **Generator:** `third_party/betaflight/tools/add_serial_in_datagram.py`.
+- **Verified:** CRSF sticks roll 0.2, pitch −0.2, yaw 0, throttle 0 read back over MSP_RC as exactly 1600 / 1400 / 1500 / 1000 µs.
+- **UDP RC:** the `rc_packet` channels are sent as zeros. With `serialrx_provider = CRSF`, Betaflight ignores them. A stale EEPROM still on the UDP receiver sees invalid pulses and fails safe.
+
+### Deterministic boot
+- **Symptom.** With CRSF, about 40 % of compared lockstep flights diverged, always at the same instant. Motor 0 read 0.245 vs 0.246 two seconds after arming. The M1 path (RC inside the datagram) stayed deterministic on the same binary.
+- **Ruled out.** The divergence was independent of packet rate (500 Hz / 1 kHz) and of link-statistics frames. `eeprom.bin` was identical before every flight.
+- **Located.** A Blackbox recorded from boot (`blackbox_mode = ALWAYS`) showed the attitude estimate already differing by 1–2 counts 0.3 s after the first packet. The recording also started 1 ms apart.
+- **Cause.** SITL's UDP thread starts early in `systemInit()`, so a state packet could land while init still ran. Init read the fake sensors before or after the packet's values arrived. CRSF's longer init moved which side of that race boots landed on. Separately, the scheduler ran tasks on wall time until the first packet.
+- **Fix** (`third_party/betaflight/tools/deterministic_boot.py`):
+  - state packets are ignored until the scheduler runs;
+  - SITL prints `[SITL] ready for the simulator` at that moment;
+  - the scheduler runs no task before the first packet;
+  - the bridge waits for that line instead of probing TCP 5761 and sleeping 300 ms.
+- **Result:** 8/8 compared flights bit-identical; the M1-path determinism test still passes.
+
+### Reboots
+- **What SITL does.** `systemReset()` prints `[system]Reset!`, joins its threads and calls `exit(0)`. Before that, `motorShutdown()` sleeps 501.5 ms of real time (PWM protocol), longer than the 500 ms reply timeout.
+- **What the bridge does.** After a missed reply it waits up to 3 s for "exited 0 and the reset line seen". It then drops the old process (its `pkill` cleanup would kill a new instance), relaunches from the same EEPROM with the same argv, and resends the current datagram with the first-exchange resend logic. SITL's clock restarts from the next packet (fixed 10 s base).
+- **Live test:** `a_betaflight_reboot_is_a_firmware_restart_not_a_crash`.
+
+### Real time and MSP
+- In a real-time session on Windows + WSL2, SITL answered `MSP_API_VERSION` (API 1.48) in about 16 ms without the client stepping anything.
+- An 8 s real-time run had 0 overruns.
+- **Configurator check: pending (needs the user).** Run `python python/examples/serve_realtime.py` (with `OFS_SITL_LAUNCH` set) and connect Betaflight Configurator to `tcp://127.0.0.1:5761`. Then change one PID value and press Save, reconnect and confirm the value persisted, and note `betaflight restarts=1` in the script's output. Record here: Configurator version, pass/fail, observations.
+
+### Failsafe timing
+- **Measured.** With the radio link cut while armed at idle, Betaflight disarmed 1.4–2.2 s later, consistent with its code:
+  - frames stop;
+  - `failsafe_delay` defaults to 1.5 s (`failsafeOnValidDataFailed`);
+  - then `JUST_DISARM` at low throttle, or `DROP`.
+- **Live test:** `a_radio_cut_fails_safe_on_betaflight_timing`.

@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use ofs_config::{load, ConfigError, FcKind};
+use ofs_config::{load, ConfigError, FcKind, RadioKind};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
 
@@ -19,7 +19,9 @@ fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
 #[test]
 fn reference_quad_loads_and_validates() {
     let cfg = load(Path::new(QUAD)).unwrap();
-    assert_eq!(cfg.schema_version, 1);
+    assert_eq!(cfg.schema_version, 2);
+    assert_eq!(cfg.radio.kind, RadioKind::Elrs);
+    assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
     assert_eq!(cfg.frame.motor_positions_frd_m.len(), 4);
     assert_eq!(cfg.fc.kind, FcKind::Sitl);
     assert!(cfg.validate().is_empty());
@@ -54,9 +56,10 @@ fn unknown_field_is_a_parse_error_naming_it() {
 #[test]
 fn unsupported_schema_version_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 1", "schema_version = 2");
+    let text = quad_text().replace("schema_version = 2", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
-    assert!(err.to_string().contains("schema_version 2"), "{err}");
+    assert!(err.to_string().contains("schema_version 1"), "{err}");
+    assert!(err.to_string().contains("[radio]") && err.to_string().contains("betaflight.diff"), "{err}");
 }
 
 #[test]
@@ -89,4 +92,30 @@ fn zero_fc_timeouts_are_rejected() {
     for field in ["fc.reply_timeout_ms", "fc.first_reply_timeout_ms", "fc.startup_timeout_ms"] {
         assert!(fields.contains(&field), "{field} missing from {fields:?}");
     }
+}
+
+#[test]
+fn radio_problems_are_reported_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text()
+        .replace("packet_rate_hz = 500", "packet_rate_hz = 333")
+        .replace("uart = 2", "uart = 1")
+        .replace("rssi_dbm = -50.0", "rssi_dbm = -50.0
+loss_good = 1.5");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    for field in ["radio.packet_rate_hz", "radio.uart", "radio.loss_good"] {
+        assert!(fields.contains(&field), "{field} missing from {fields:?}");
+    }
+}
+
+#[test]
+fn a_quad_without_a_radio_is_a_parse_error_naming_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text();
+    let without = &text[..text.find("[radio]").unwrap()];
+    let err = load(&write_quad(dir.path(), without)).unwrap_err();
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    assert!(err.to_string().contains("radio"), "{err}");
 }

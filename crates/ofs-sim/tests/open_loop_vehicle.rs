@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ofs_config::{load, FcKind};
-use ofs_sim::vehicle::{build, BuildOptions, Sticks, Vehicle};
+use ofs_sim::vehicle::{build, firmware_dir, BuildOptions, Fault, Sticks, Vehicle};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
 
@@ -60,4 +60,43 @@ fn a_new_vehicle_starts_with_default_sticks() {
     let mut explicit = vehicle(1);
     explicit.set_sticks(&Sticks::default());
     assert_eq!(built.digest(), explicit.digest());
+}
+
+#[test]
+fn firmware_dirs_differ_for_same_named_quads_in_different_folders() {
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    for d in [&a, &b] {
+        std::fs::write(d.path().join("quad.toml"), "").unwrap();
+    }
+    let data = Path::new("data");
+    let da = firmware_dir(data, &a.path().join("quad.toml"));
+    let db = firmware_dir(data, &b.path().join("quad.toml"));
+    assert_ne!(da, db);
+    assert!(da.file_name().unwrap().to_string_lossy().starts_with("quad-"), "{da:?}");
+    assert_eq!(da, firmware_dir(data, &a.path().join("quad.toml")), "stable");
+}
+
+#[test]
+fn the_radio_link_is_up_while_the_transmitter_is_on() {
+    let mut v = vehicle(1);
+    v.run_for(0.5).unwrap();
+    let r = v.state().radio;
+    assert!(r.tx_enabled && r.link_up, "{r:?}");
+    assert_eq!(r.lq_pct, 100.0);
+    v.set_transmitter(false);
+    v.run_for(0.5).unwrap();
+    let r = v.state().radio;
+    assert!(!r.tx_enabled && !r.link_up, "{r:?}");
+}
+
+#[test]
+fn the_link_loss_fault_drops_the_link_until_cleared() {
+    let mut v = vehicle(1);
+    v.set_fault(Fault::RadioLinkLoss, true);
+    v.run_for(0.5).unwrap();
+    assert!(!v.state().radio.link_up);
+    v.clear_faults();
+    v.run_for(0.1).unwrap();
+    assert!(v.state().radio.link_up);
 }

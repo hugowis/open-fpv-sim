@@ -24,35 +24,51 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10ofs/v1/sim.proto\x12\x06ofs.v1\"\x07\n\x05\x45mpty\",\n\x10HandshakeRequest\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\"B\n\x0eHandshakeReply\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x16\n\x0eserver_version\x18\x02 \x01(\t\"`\n\x0bLoadRequest\x12\x11\n\tquad_path\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x04\x12\x1a\n\x04mode\x18\x03 \x01(\x0e\x32\x0c.ofs.v1.Mode\x12\x14\n\x0copen_loop_fc\x18\x04 \x01(\x08\"/\n\tLoadReply\x12\x11\n\tquad_name\x18\x01 \x01(\t\x12\x0f\n\x07\x62\x61se_hz\x18\x02 \x01(\r\"Q\n\x06Sticks\x12\x0c\n\x04roll\x18\x01 \x01(\x01\x12\r\n\x05pitch\x18\x02 \x01(\x01\x12\x0b\n\x03yaw\x18\x03 \x01(\x01\x12\x10\n\x08throttle\x18\x04 \x01(\x01\x12\x0b\n\x03\x61ux\x18\x05 \x03(\x01\"\x1d\n\nRunRequest\x12\x0f\n\x07seconds\x18\x01 \x01(\x01\"\'\n\x04Vec3\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\"2\n\x04Quat\x12\t\n\x01w\x18\x01 \x01(\x01\x12\t\n\x01x\x18\x02 \x01(\x01\x12\t\n\x01y\x18\x03 \x01(\x01\x12\t\n\x01z\x18\x04 \x01(\x01\"\x87\x02\n\x05State\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12$\n\x0eposition_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12&\n\x10velocity_ned_mps\x18\x03 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x1e\n\x08\x61ttitude\x18\x04 \x01(\x0b\x32\x0c.ofs.v1.Quat\x12$\n\x0erate_frd_radps\x18\x05 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x19\n\x11\x62\x61ttery_voltage_v\x18\x06 \x01(\x01\x12\x19\n\x11\x62\x61ttery_current_a\x18\x07 \x01(\x01\x12\x11\n\tmotor_rpm\x18\x08 \x03(\x01\x12\x11\n\tmotor_cmd\x18\t \x03(\x01*/\n\x04Mode\x12\x14\n\x10MODE_UNSPECIFIED\x10\x00\x12\x11\n\rMODE_LOCKSTEP\x10\x01\x32\x9c\x02\n\x03Sim\x12=\n\tHandshake\x12\x18.ofs.v1.HandshakeRequest\x1a\x16.ofs.v1.HandshakeReply\x12.\n\x04Load\x12\x13.ofs.v1.LoadRequest\x1a\x11.ofs.v1.LoadReply\x12*\n\tSetSticks\x12\x0e.ofs.v1.Sticks\x1a\r.ofs.v1.Empty\x12(\n\x03Run\x12\x12.ofs.v1.RunRequest\x1a\r.ofs.v1.State\x12(\n\x08GetState\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.State\x12&\n\x06Unload\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Emptyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10ofs/v1/sim.proto\x12\x06ofs.v1\"\x07\n\x05\x45mpty\",\n\x10HandshakeRequest\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\"B\n\x0eHandshakeReply\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x16\n\x0eserver_version\x18\x02 \x01(\t\"\xa3\x01\n\x0bLoadRequest\x12\x11\n\tquad_path\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x04\x12\x1a\n\x04mode\x18\x03 \x01(\x0e\x32\x0c.ofs.v1.Mode\x12\x14\n\x0copen_loop_fc\x18\x04 \x01(\x08\x12-\n\x0eoverrun_policy\x18\x05 \x01(\x0e\x32\x15.ofs.v1.OverrunPolicy\x12\x12\n\nkeep_alive\x18\x06 \x01(\x08\"M\n\tLoadReply\x12\x11\n\tquad_name\x18\x01 \x01(\t\x12\x0f\n\x07\x62\x61se_hz\x18\x02 \x01(\r\x12\x1c\n\x14\x63onfigurator_address\x18\x03 \x01(\t\"Q\n\x06Sticks\x12\x0c\n\x04roll\x18\x01 \x01(\x01\x12\r\n\x05pitch\x18\x02 \x01(\x01\x12\x0b\n\x03yaw\x18\x03 \x01(\x01\x12\x10\n\x08throttle\x18\x04 \x01(\x01\x12\x0b\n\x03\x61ux\x18\x05 \x03(\x01\"\x1d\n\nRunRequest\x12\x0f\n\x07seconds\x18\x01 \x01(\x01\" \n\rStreamRequest\x12\x0f\n\x07rate_hz\x18\x01 \x01(\r\"C\n\nPilotInput\x12\x1e\n\x06sticks\x18\x01 \x01(\x0b\x32\x0e.ofs.v1.Sticks\x12\x15\n\rstate_rate_hz\x18\x02 \x01(\r\"\'\n\x04Vec3\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\"2\n\x04Quat\x12\t\n\x01w\x18\x01 \x01(\x01\x12\t\n\x01x\x18\x02 \x01(\x01\x12\t\n\x01y\x18\x03 \x01(\x01\x12\t\n\x01z\x18\x04 \x01(\x01\"R\n\tRadioLink\x12\x12\n\ntx_enabled\x18\x01 \x01(\x08\x12\x0f\n\x07link_up\x18\x02 \x01(\x08\x12\x0e\n\x06lq_pct\x18\x03 \x01(\x01\x12\x10\n\x08rssi_dbm\x18\x04 \x01(\x01\"\xe1\x02\n\x05State\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12$\n\x0eposition_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12&\n\x10velocity_ned_mps\x18\x03 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x1e\n\x08\x61ttitude\x18\x04 \x01(\x0b\x32\x0c.ofs.v1.Quat\x12$\n\x0erate_frd_radps\x18\x05 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x19\n\x11\x62\x61ttery_voltage_v\x18\x06 \x01(\x01\x12\x19\n\x11\x62\x61ttery_current_a\x18\x07 \x01(\x01\x12\x11\n\tmotor_rpm\x18\x08 \x03(\x01\x12\x11\n\tmotor_cmd\x18\t \x03(\x01\x12 \n\x05radio\x18\n \x01(\x0b\x32\x11.ofs.v1.RadioLink\x12\x0f\n\x07running\x18\x0b \x01(\x08\x12\x10\n\x08overruns\x18\x0c \x01(\x04\x12\x13\n\x0b\x66\x63_restarts\x18\r \x01(\r\"I\n\x05\x45vent\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12\x1f\n\x04kind\x18\x02 \x01(\x0e\x32\x11.ofs.v1.EventKind\x12\x0f\n\x07message\x18\x03 \x01(\t\"\x0f\n\rRadioLinkLoss\"A\n\x05\x46\x61ult\x12\x30\n\x0fradio_link_loss\x18\x01 \x01(\x0b\x32\x15.ofs.v1.RadioLinkLossH\x00\x42\x06\n\x04kind*B\n\x04Mode\x12\x14\n\x10MODE_UNSPECIFIED\x10\x00\x12\x11\n\rMODE_LOCKSTEP\x10\x01\x12\x11\n\rMODE_REALTIME\x10\x02*a\n\rOverrunPolicy\x12\x1e\n\x1aOVERRUN_POLICY_UNSPECIFIED\x10\x00\x12\x17\n\x13OVERRUN_POLICY_WARN\x10\x01\x12\x17\n\x13OVERRUN_POLICY_SLOW\x10\x02*\x8f\x02\n\tEventKind\x12\x1a\n\x16\x45VENT_KIND_UNSPECIFIED\x10\x00\x12\x16\n\x12\x45VENT_KIND_OVERRUN\x10\x01\x12!\n\x1d\x45VENT_KIND_FIRMWARE_RESTARTED\x10\x02\x12\x18\n\x14\x45VENT_KIND_SIM_ERROR\x10\x03\x12\x18\n\x14\x45VENT_KIND_LINK_DOWN\x10\x04\x12\x16\n\x12\x45VENT_KIND_LINK_UP\x10\x05\x12\x1e\n\x1a\x45VENT_KIND_PILOT_CONNECTED\x10\x06\x12!\n\x1d\x45VENT_KIND_PILOT_DISCONNECTED\x10\x07\x12\x1c\n\x18\x45VENT_KIND_SESSION_ENDED\x10\x08\x32\xd4\x04\n\x03Sim\x12=\n\tHandshake\x12\x18.ofs.v1.HandshakeRequest\x1a\x16.ofs.v1.HandshakeReply\x12.\n\x04Load\x12\x13.ofs.v1.LoadRequest\x1a\x11.ofs.v1.LoadReply\x12*\n\tSetSticks\x12\x0e.ofs.v1.Sticks\x1a\r.ofs.v1.Empty\x12(\n\x03Run\x12\x12.ofs.v1.RunRequest\x1a\r.ofs.v1.State\x12%\n\x05Start\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12%\n\x05Pause\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12(\n\x08GetState\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.State\x12&\n\x06Unload\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12\x35\n\x0bStreamState\x12\x15.ofs.v1.StreamRequest\x1a\r.ofs.v1.State0\x01\x12.\n\x05Pilot\x12\x12.ofs.v1.PilotInput\x1a\r.ofs.v1.State(\x01\x30\x01\x12\'\n\x05Watch\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Event0\x01\x12+\n\x0bInjectFault\x12\r.ofs.v1.Fault\x1a\r.ofs.v1.Empty\x12+\n\x0b\x43learFaults\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Emptyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'ofs.v1.sim_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MODE']._serialized_start=771
-  _globals['_MODE']._serialized_end=818
+  _globals['_MODE']._serialized_start=1305
+  _globals['_MODE']._serialized_end=1371
+  _globals['_OVERRUNPOLICY']._serialized_start=1373
+  _globals['_OVERRUNPOLICY']._serialized_end=1470
+  _globals['_EVENTKIND']._serialized_start=1473
+  _globals['_EVENTKIND']._serialized_end=1744
   _globals['_EMPTY']._serialized_start=28
   _globals['_EMPTY']._serialized_end=35
   _globals['_HANDSHAKEREQUEST']._serialized_start=37
   _globals['_HANDSHAKEREQUEST']._serialized_end=81
   _globals['_HANDSHAKEREPLY']._serialized_start=83
   _globals['_HANDSHAKEREPLY']._serialized_end=149
-  _globals['_LOADREQUEST']._serialized_start=151
-  _globals['_LOADREQUEST']._serialized_end=247
-  _globals['_LOADREPLY']._serialized_start=249
-  _globals['_LOADREPLY']._serialized_end=296
-  _globals['_STICKS']._serialized_start=298
-  _globals['_STICKS']._serialized_end=379
-  _globals['_RUNREQUEST']._serialized_start=381
-  _globals['_RUNREQUEST']._serialized_end=410
-  _globals['_VEC3']._serialized_start=412
-  _globals['_VEC3']._serialized_end=451
-  _globals['_QUAT']._serialized_start=453
-  _globals['_QUAT']._serialized_end=503
-  _globals['_STATE']._serialized_start=506
-  _globals['_STATE']._serialized_end=769
-  _globals['_SIM']._serialized_start=821
-  _globals['_SIM']._serialized_end=1105
+  _globals['_LOADREQUEST']._serialized_start=152
+  _globals['_LOADREQUEST']._serialized_end=315
+  _globals['_LOADREPLY']._serialized_start=317
+  _globals['_LOADREPLY']._serialized_end=394
+  _globals['_STICKS']._serialized_start=396
+  _globals['_STICKS']._serialized_end=477
+  _globals['_RUNREQUEST']._serialized_start=479
+  _globals['_RUNREQUEST']._serialized_end=508
+  _globals['_STREAMREQUEST']._serialized_start=510
+  _globals['_STREAMREQUEST']._serialized_end=542
+  _globals['_PILOTINPUT']._serialized_start=544
+  _globals['_PILOTINPUT']._serialized_end=611
+  _globals['_VEC3']._serialized_start=613
+  _globals['_VEC3']._serialized_end=652
+  _globals['_QUAT']._serialized_start=654
+  _globals['_QUAT']._serialized_end=704
+  _globals['_RADIOLINK']._serialized_start=706
+  _globals['_RADIOLINK']._serialized_end=788
+  _globals['_STATE']._serialized_start=791
+  _globals['_STATE']._serialized_end=1144
+  _globals['_EVENT']._serialized_start=1146
+  _globals['_EVENT']._serialized_end=1219
+  _globals['_RADIOLINKLOSS']._serialized_start=1221
+  _globals['_RADIOLINKLOSS']._serialized_end=1236
+  _globals['_FAULT']._serialized_start=1238
+  _globals['_FAULT']._serialized_end=1303
+  _globals['_SIM']._serialized_start=1747
+  _globals['_SIM']._serialized_end=2343
 # @@protoc_insertion_point(module_scope)

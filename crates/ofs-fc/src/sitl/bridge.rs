@@ -1,13 +1,16 @@
-//! Lockstep exchange with Betaflight SITL: send one state datagram (sensors + RC), wait for one motor packet.
+//! Lockstep exchange with Betaflight SITL: send one state datagram (sensors, plus bytes for SITL's UARTs),
+//! wait for one motor packet. A Betaflight reboot (e.g. a Configurator save) relaunches SITL.
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use glam::{DQuat, DVec3};
-use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
+use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
-use super::codec::{state_datagram, RcPacket, ServoPacket, PORT_PWM, PORT_STATE};
-use super::frames::{fdm_packet, motor_commands, rc_channels, Home, SensorFrame};
+use super::codec::{
+    state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
+};
+use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
 use super::process::{run_cleanup, LaunchConfig, SitlProcess};
 use super::FcError;
@@ -23,6 +26,16 @@ pub struct BridgeConfig {
     pub reply_timeout: Duration,
     pub home: Home,
     pub motor_count: usize,
+    /// Bytes for SITL's UARTs, carried in the state datagram (e.g. the receiver's CRSF into UART2).
+    pub serial: Vec<SerialLink>,
+}
+
+/// Bytes the simulator feeds into one of SITL's UARTs.
+#[derive(Debug, Clone)]
+pub struct SerialLink {
+    /// 0-based: UART2 = 1.
+    pub uart_index: u8,
+    pub rx: Wire,
 }
 
 struct Inputs {
@@ -32,20 +45,18 @@ struct Inputs {
     vel: Signal<DVec3>,
     pos: Signal<DVec3>,
     pressure: Signal<f64>,
-    roll: Signal<f64>,
-    pitch: Signal<f64>,
-    yaw: Signal<f64>,
-    throttle: Signal<f64>,
-    aux: Vec<Signal<f64>>,
 }
 
 pub struct SitlBridge {
     cfg: BridgeConfig,
+    /// What was launched (with `--ip` under WSL); launched again when Betaflight reboots.
+    launch: LaunchConfig,
     rx: UdpSocket,
     tx: UdpSocket,
     inputs: Inputs,
     cmds: Vec<Signal<f64>>,
-    proc: SitlProcess,
+    restarts: Signal<f64>,
+    proc: Option<SitlProcess>,
     answered: bool,
 }
 
@@ -71,19 +82,15 @@ impl SitlBridge {
             vel: bus.signal(names::BODY_VEL_NED),
             pos: bus.signal(names::BODY_POS_NED),
             pressure: bus.signal(names::BARO_PRESSURE),
-            roll: bus.signal(names::RC_ROLL),
-            pitch: bus.signal(names::RC_PITCH),
-            yaw: bus.signal(names::RC_YAW),
-            throttle: bus.signal(names::RC_THROTTLE),
-            aux: (0..names::RC_AUX_COUNT).map(|i| bus.signal(&names::rc_aux(i))).collect(),
         };
         let cmds = (0..cfg.motor_count).map(|i| bus.signal(&names::motor_cmd(i))).collect();
+        let restarts = bus.signal(names::FC_RESTARTS);
         let mut launch = cfg.launch.clone();
         if let Some(ip) = net.sitl_ip_arg {
             launch.launch.extend(["--ip".to_string(), ip.to_string()]);
         }
         let proc = SitlProcess::start(&launch)?;
-        Ok(Self { cfg, rx, tx, inputs, cmds, proc, answered: false })
+        Ok(Self { cfg, launch, rx, tx, inputs, cmds, restarts, proc: Some(proc), answered: false })
     }
 
     fn drain(&self) -> std::io::Result<()> {
@@ -94,11 +101,66 @@ impl SitlBridge {
     }
 
     fn firmware_error(&mut self, what: &str) -> SimError {
-        let state = match self.proc.exit_status() {
+        let Some(proc) = self.proc.as_mut() else {
+            return SimError::Firmware(format!("{what} (SITL is not running)"));
+        };
+        let state = match proc.exit_status() {
             Some(status) => format!("SITL exited with {status}"),
             None => format!("{what} (no reply: datagram lost or SITL hung)"),
         };
-        SimError::Firmware(format!("{state}; last output:\n{}", self.proc.log_tail()))
+        SimError::Firmware(format!("{state}; last output:\n{}", proc.log_tail()))
+    }
+
+    /// Takes pending UART bytes for this datagram, within SITL's serial section limit.
+    fn serial_blocks(&self) -> Vec<(u8, Vec<u8>)> {
+        let mut blocks = Vec::new();
+        let mut room = SERIAL_SECTION_MAX;
+        for link in &self.cfg.serial {
+            if room <= SERIAL_BLOCK_HEADER {
+                break;
+            }
+            let bytes = link.rx.take(room - SERIAL_BLOCK_HEADER);
+            if !bytes.is_empty() {
+                room -= SERIAL_BLOCK_HEADER + bytes.len();
+                blocks.push((link.uart_index, bytes));
+            }
+        }
+        blocks
+    }
+
+    /// One send/receive. Until SITL has answered once, the datagram is resent (see [`exchange_with_resend`]).
+    fn exchange(&mut self, datagram: &[u8], buf: &mut [u8]) -> std::io::Result<usize> {
+        let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
+        if self.answered {
+            send(&self.tx, datagram, to);
+            return self.rx.recv_from(buf).map(|(n, _)| n);
+        }
+        let timeout = self.cfg.first_reply_timeout;
+        let (n, resends) = exchange_with_resend(&self.rx, &self.tx, to, datagram, buf, timeout, FIRST_RESEND_INTERVAL)?;
+        if resends > 0 {
+            tracing::warn!(
+                "SITL did not answer the first state datagram; resent it {resends} time(s). SITL may have run an \
+                 extra tick at this instant, so firmware determinism is only claimed for runs without a resend"
+            );
+        }
+        self.answered = true;
+        self.rx.set_read_timeout(Some(self.cfg.reply_timeout))?;
+        Ok(n)
+    }
+
+    fn rebooted(&mut self) -> bool {
+        self.proc.as_mut().is_some_and(|p| p.rebooted())
+    }
+
+    /// Betaflight rebooted: launch SITL again from its EEPROM. SITL's clock restarts from the next packet.
+    fn restart(&mut self) -> Result<(), SimError> {
+        // Drop the old process first: its cleanup command would kill the new instance.
+        self.proc = None;
+        let proc = SitlProcess::relaunch(&self.launch)
+            .map_err(|e| SimError::Firmware(format!("relaunching Betaflight SITL after a reboot failed: {e}")))?;
+        self.proc = Some(proc);
+        self.answered = false;
+        Ok(())
     }
 }
 
@@ -199,40 +261,25 @@ impl Model for SitlBridge {
             pos_ned_m: bus.get(i.pos),
             pressure_pa: bus.get(i.pressure),
         };
-        let aux: Vec<f64> = i.aux.iter().map(|s| bus.get(*s)).collect();
-        let channels = rc_channels(bus.get(i.roll), bus.get(i.pitch), bus.get(i.yaw), bus.get(i.throttle), &aux);
-        let rc = RcPacket { timestamp_s: ctx.time_s, channels };
-        let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
-        let datagram = state_datagram(&fdm_packet(&frame, &self.cfg.home), &rc);
+        // Pilot input reaches Betaflight only as CRSF on its receiver UART (spec §1.5). The UDP RC channels are
+        // zero: invalid pulses, so a SITL whose EEPROM still selects the UDP receiver fails safe instead of flying.
+        let rc = RcPacket { timestamp_s: ctx.time_s, channels: [0; 16] };
+        let datagram = state_datagram_with_serial(&fdm_packet(&frame, &self.cfg.home), &rc, &self.serial_blocks());
 
         let mut buf = [0u8; 128];
-        let received = if self.answered {
-            send(&self.tx, &datagram, to);
-            self.rx.recv_from(&mut buf).map(|(n, _)| n)
-        } else {
-            let timeout = self.cfg.first_reply_timeout;
-            exchange_with_resend(&self.rx, &self.tx, to, &datagram, &mut buf, timeout, FIRST_RESEND_INTERVAL).map(|(n, resends)| {
-                if resends > 0 {
-                    tracing::warn!(
-                        "SITL did not answer the first state datagram; resent it {resends} time(s). SITL may have run an \
-                         extra t=0 tick, so firmware determinism is only claimed for runs without a resend"
-                    );
-                }
-                n
-            })
-        };
+        let mut received = self.exchange(&datagram, &mut buf);
+        if matches!(&received, Err(e) if no_reply(e)) && self.rebooted() {
+            self.restart()?;
+            bus.set(self.restarts, bus.get(self.restarts) + 1.0);
+            tracing::info!("Betaflight rebooted; SITL relaunched from its EEPROM");
+            received = self.exchange(&datagram, &mut buf);
+        }
         match received {
             Ok(n) => {
                 let packet = ServoPacket::decode(&buf[..n])
                     .ok_or_else(|| SimError::Firmware(format!("malformed motor packet ({n} bytes)")))?;
                 for (sig, v) in self.cmds.iter().zip(motor_commands(&packet)) {
                     bus.set(*sig, v);
-                }
-                if !self.answered {
-                    self.answered = true;
-                    self.rx
-                        .set_read_timeout(Some(self.cfg.reply_timeout))
-                        .map_err(|e| SimError::Firmware(format!("UDP setup failed: {e}")))?;
                 }
                 Ok(())
             }

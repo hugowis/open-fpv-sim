@@ -1,17 +1,19 @@
 //! Launches and supervises the Betaflight SITL process; applies the CLI diff on first boot.
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::codec::MSP_TCP_PORT;
 use super::FcError;
 
 const TAIL_LINES: usize = 200;
+/// How long a missed reply waits for a Betaflight reboot to show itself (see [`SitlProcess::rebooted`]).
+pub const REBOOT_GRACE: Duration = Duration::from_secs(3);
+/// How long after the ready line a late `bind port ... failed` is still waited for.
+const BIND_GRACE: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -31,17 +33,39 @@ pub fn is_bind_failure(line: &str) -> bool {
     line.contains("bind port") && line.contains("failed")
 }
 
+/// The patched SITL prints this when init has finished and its scheduler runs; only then does it accept
+/// state packets (third_party/betaflight/ofs-sitl.patch: deterministic boot).
+pub const READY_LINE: &str = "[SITL] ready for the simulator";
+
+pub fn is_ready_line(line: &str) -> bool {
+    line.contains(READY_LINE)
+}
+
+/// Betaflight's `systemReset()` (a reboot, e.g. after a Configurator save) prints this before `exit(0)`;
+/// so does the reset to bootloader. Together with a clean exit it means "restart me", not a crash.
+pub fn is_reset_line(line: &str) -> bool {
+    line.contains("[system]Reset")
+}
+
 #[derive(Default)]
 struct LogSink {
     tail: VecDeque<String>,
     file: Option<File>,
     bind_failed: bool,
+    ready_seen: bool,
+    reset_seen: bool,
 }
 
 impl LogSink {
     fn push(&mut self, line: String) {
         if is_bind_failure(&line) {
             self.bind_failed = true;
+        }
+        if is_ready_line(&line) {
+            self.ready_seen = true;
+        }
+        if is_reset_line(&line) {
+            self.reset_seen = true;
         }
         if let Some(f) = self.file.as_mut() {
             let _ = writeln!(f, "{line}");
@@ -62,46 +86,97 @@ pub struct SitlProcess {
 }
 
 impl SitlProcess {
+    /// Launches SITL; `sitl.log` starts afresh.
     pub fn start(cfg: &LaunchConfig) -> Result<Self, FcError> {
+        Self::launch(cfg, false)
+    }
+
+    /// Launches SITL again after a Betaflight reboot: `sitl.log` keeps the log from before the reboot and gets a
+    /// `--- relaunch after reboot ---` line.
+    pub fn relaunch(cfg: &LaunchConfig) -> Result<Self, FcError> {
+        Self::launch(cfg, true)
+    }
+
+    fn launch(cfg: &LaunchConfig, append_log: bool) -> Result<Self, FcError> {
         std::fs::create_dir_all(&cfg.workdir)?;
         let workdir = std::path::absolute(&cfg.workdir)?;
+        if workdir.join("eeprom.bin").exists() {
+            check_diff_unchanged(cfg, &workdir)?;
+        }
         run_cleanup(&cfg.cleanup);
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
         }
-        let log: SharedLog = Arc::new(Mutex::new(LogSink { file: File::create(workdir.join("sitl.log")).ok(), ..LogSink::default() }));
+        let log_path = workdir.join("sitl.log");
+        let file = if append_log {
+            let file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
+            file.map(|mut f| {
+                let _ = writeln!(f, "--- relaunch after reboot ---");
+                f
+            })
+        } else {
+            File::create(&log_path).ok()
+        };
+        let log: SharedLog = Arc::new(Mutex::new(LogSink { file, ..LogSink::default() }));
         let child = spawn_logged(&cfg.launch, &workdir, &log)?;
         let mut proc = SitlProcess { child, log, cleanup: cfg.cleanup.clone() };
         proc.wait_until_ready(cfg.startup_timeout)?;
         Ok(proc)
     }
 
+    /// Waits for SITL to announce it is ready ([`READY_LINE`]). A stale instance holding the ports makes the new one
+    /// print `bind port ... failed` during init, before that line: a startup error.
     fn wait_until_ready(&mut self, timeout: Duration) -> Result<(), FcError> {
-        let addr = SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT));
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(status) = self.exit_status() {
                 return Err(FcError::Startup(format!("exited with {status} during startup"), self.log_tail()));
             }
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
-                // A stale instance also answers on tcp:5761; give the new one time to report bind failures.
-                std::thread::sleep(Duration::from_millis(300));
-                if self.log.lock().map(|l| l.bind_failed).unwrap_or(false) {
-                    let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
-                    return Err(FcError::Startup(what.into(), self.log_tail()));
-                }
-                return Ok(());
+            let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
+            if bind_failed {
+                return Err(self.bind_error());
+            }
+            if ready {
+                // The TCP/MSP thread prints its `bind port 5761 ... failed` on its own schedule, which can land
+                // just after the ready line: give it a moment, so a stale SITL is always a startup error.
+                std::thread::sleep(BIND_GRACE);
+                return if self.log.lock().map(|l| l.bind_failed).unwrap_or(false) { Err(self.bind_error()) } else { Ok(()) };
             }
             if Instant::now() >= deadline {
-                let what = format!("did not open tcp:{MSP_TCP_PORT} within {} ms", timeout.as_millis());
+                let what = format!(
+                    "did not print \"{READY_LINE}\" within {} ms (is it the lockstep build from scripts/build-sitl.sh?)",
+                    timeout.as_millis()
+                );
                 return Err(FcError::Startup(what, self.log_tail()));
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    fn bind_error(&self) -> FcError {
+        let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
+        FcError::Startup(what.into(), self.log_tail())
     }
 
     pub fn exit_status(&mut self) -> Option<ExitStatus> {
         self.child.try_wait().ok().flatten()
+    }
+
+    /// True when SITL announced a reset ([`is_reset_line`]) and exited cleanly: Betaflight rebooted.
+    ///
+    /// Called after a missed reply, so it waits up to [`REBOOT_GRACE`] for both: before resetting, Betaflight's
+    /// `motorShutdown()` sleeps 0.5 s of real time (PWM ESCs), longer than the per-exchange reply timeout, and
+    /// SITL then joins its threads before exiting. A SITL that has merely hung costs this grace once.
+    pub fn rebooted(&mut self) -> bool {
+        let deadline = Instant::now() + REBOOT_GRACE;
+        loop {
+            let reset_seen = self.log.lock().map(|l| l.reset_seen).unwrap_or(false);
+            match self.exit_status() {
+                Some(status) if reset_seen => return status.success(),
+                _ if Instant::now() >= deadline => return false,
+                _ => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
     }
 
     pub fn log_tail(&self) -> String {
@@ -131,6 +206,23 @@ fn spawn_logged(argv: &[String], workdir: &Path, log: &SharedLog) -> Result<Chil
     pipe_lines(child.stdout.take().expect("stdout is piped"), log.clone());
     pipe_lines(child.stderr.take().expect("stderr is piped"), log.clone());
     Ok(child)
+}
+
+/// The quad's diff is applied on first boot only, so an EEPROM made from an older diff no longer matches the
+/// quad file. Refuse to start rather than fly a stale configuration.
+fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
+    let Ok(applied) = std::fs::read(workdir.join("betaflight.diff")) else {
+        return Ok(()); // first booted before copies of the applied diff were kept
+    };
+    if applied != std::fs::read(&cfg.diff_file)? {
+        return Err(FcError::Config(format!(
+            "{} changed since this quad's first boot; delete {} to apply it again (this also discards settings \
+             changed in Betaflight Configurator)",
+            cfg.diff_file.display(),
+            workdir.join("eeprom.bin").display()
+        )));
+    }
+    Ok(())
 }
 
 /// First boot: `<launch> --config betaflight.diff` loads the diff, saves eeprom.bin and exits.

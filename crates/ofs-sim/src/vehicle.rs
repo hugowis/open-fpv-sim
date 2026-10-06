@@ -1,21 +1,24 @@
 //! Assembles a quad from its config into a scheduler and exposes sticks in, state out.
 use std::f64::consts::PI;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::{FcKind, QuadConfig};
-use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError};
+use ofs_core::rng::fnv1a64;
+use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
-use ofs_fc::sitl::bridge::{BridgeConfig, SitlBridge};
+use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SitlBridge};
+use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody};
+use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
 
@@ -42,6 +45,27 @@ impl Default for Sticks {
     }
 }
 
+/// What the radio receiver reports.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadioState {
+    /// The transmitter is on (a pilot or script is connected).
+    pub tx_enabled: bool,
+    pub link_up: bool,
+    pub lq_pct: f64,
+    pub rssi_dbm: f64,
+}
+
+/// Faults a script can inject (spec §6.2). The v1 catalog completes in M4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// Every radio uplink packet is lost: the receiver goes silent and Betaflight fails safe.
+    RadioLinkLoss,
+}
+
+/// The receiver's UART buffer. With no flight controller draining it (open-loop FC), the oldest bytes are
+/// dropped like a UART overrun.
+const RECEIVER_UART_CAPACITY: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VehicleState {
     pub time_s: f64,
@@ -53,6 +77,9 @@ pub struct VehicleState {
     pub battery_current_a: f64,
     pub motor_rpm: Vec<f64>,
     pub motor_cmd: Vec<f64>,
+    pub radio: RadioState,
+    /// Betaflight reboots so far (e.g. after a Configurator save); always 0 without SITL.
+    pub fc_restarts: u32,
 }
 
 struct Handles {
@@ -69,6 +96,12 @@ struct Handles {
     yaw: Signal<f64>,
     throttle: Signal<f64>,
     aux: Vec<Signal<f64>>,
+    tx_enabled: Signal<f64>,
+    link_up: Signal<f64>,
+    lq: Signal<f64>,
+    rssi: Signal<f64>,
+    fault_radio_loss: Signal<f64>,
+    fc_restarts: Signal<f64>,
 }
 
 impl Handles {
@@ -87,6 +120,12 @@ impl Handles {
             yaw: bus.signal(names::RC_YAW),
             throttle: bus.signal(names::RC_THROTTLE),
             aux: (0..names::RC_AUX_COUNT).map(|i| bus.signal(&names::rc_aux(i))).collect(),
+            tx_enabled: bus.signal(names::RADIO_TX_ENABLED),
+            link_up: bus.signal(names::RADIO_LINK_UP),
+            lq: bus.signal(names::RADIO_LQ),
+            rssi: bus.signal(names::RADIO_RSSI),
+            fault_radio_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
+            fc_restarts: bus.signal(names::FC_RESTARTS),
         }
     }
 }
@@ -94,6 +133,18 @@ impl Handles {
 pub struct Vehicle {
     scheduler: Scheduler,
     h: Handles,
+    sitl: bool,
+}
+
+/// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
+/// the same file name in different directories never share an EEPROM.
+pub fn firmware_dir(data_dir: &Path, quad_path: &Path) -> PathBuf {
+    let full = std::fs::canonicalize(quad_path)
+        .or_else(|_| std::path::absolute(quad_path))
+        .unwrap_or_else(|_| quad_path.to_path_buf());
+    let stem = quad_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
+    let hash = fnv1a64(full.to_string_lossy().as_bytes()) as u32;
+    data_dir.join(format!("{stem}-{hash:08x}"))
 }
 
 fn v3(a: [f64; 3]) -> DVec3 {
@@ -174,11 +225,29 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Imu::new(imu, opts.seed, &mut bus)));
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
 
+    let r = &cfg.radio;
+    let link = LinkParams {
+        packet_rate_hz: r.packet_rate_hz,
+        latency_packets: r.latency_packets,
+        loss_good: r.loss_good,
+        loss_bad: r.loss_bad,
+        p_good_to_bad: r.p_good_to_bad,
+        p_bad_to_good: r.p_bad_to_good,
+        rssi_dbm: r.rssi_dbm,
+        snr_db: r.snr_db,
+        link_stats_interval_packets: r.link_stats_interval_packets,
+        rf_mode: r.rf_mode,
+        tx_power: r.tx_power,
+    };
+    let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
+    // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
+    models.push(Box::new(ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), &mut bus)));
+
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
-    match opts.fc_override.unwrap_or(cfg.fc.kind) {
+    let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
+    match fc_kind {
         FcKind::OpenLoop => models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus))),
         FcKind::Sitl => {
-            let quad_stem = cfg.source_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
             let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
             let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
             if cleanup.is_empty() {
@@ -189,7 +258,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             let launch = LaunchConfig {
                 launch: launch_argv,
                 cleanup,
-                workdir: opts.data_dir.join(quad_stem),
+                workdir: firmware_dir(&opts.data_dir, &cfg.source_path),
                 diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
                 startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
             };
@@ -202,6 +271,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
+                    serial: vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }],
                 },
                 &mut bus,
             )
@@ -215,9 +285,10 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     for m in models {
         scheduler.add(m);
     }
-    let mut vehicle = Vehicle { scheduler, h };
-    // The bus starts every signal at zero; aux 0.0 would reach SITL as 1500 us until the first SetSticks.
+    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl };
+    // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
+    vehicle.set_transmitter(true);
     Ok(vehicle)
 }
 
@@ -234,8 +305,46 @@ impl Vehicle {
         }
     }
 
+    /// Transmitter on (pilot or script connected) or off (the receiver hears nothing).
+    pub fn set_transmitter(&mut self, on: bool) {
+        let s = self.h.tx_enabled;
+        self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
+    }
+
+    pub fn set_fault(&mut self, fault: Fault, active: bool) {
+        let s = match fault {
+            Fault::RadioLinkLoss => self.h.fault_radio_loss,
+        };
+        self.scheduler.bus_mut().set(s, if active { 1.0 } else { 0.0 });
+    }
+
+    pub fn clear_faults(&mut self) {
+        self.set_fault(Fault::RadioLinkLoss, false);
+    }
+
     pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
         self.scheduler.run_for(seconds)
+    }
+
+    /// Steps `ticks` base ticks. On error the failing tick is not counted.
+    pub fn step_ticks(&mut self, ticks: u64) -> Result<(), SimError> {
+        for _ in 0..ticks {
+            self.scheduler.step()?;
+        }
+        Ok(())
+    }
+
+    pub fn time_s(&self) -> f64 {
+        self.scheduler.time_s()
+    }
+
+    pub fn base_hz(&self) -> u32 {
+        self.scheduler.base_hz()
+    }
+
+    /// Where Betaflight Configurator can connect (SITL's MSP UART), when this vehicle runs Betaflight SITL.
+    pub fn configurator_address(&self) -> Option<String> {
+        self.sitl.then(|| format!("tcp://127.0.0.1:{MSP_TCP_PORT}"))
     }
 
     pub fn state(&self) -> VehicleState {
@@ -251,6 +360,13 @@ impl Vehicle {
             battery_current_a: b.get(h.ibat),
             motor_rpm: h.omega.iter().map(|s| b.get(*s) * 60.0 / (2.0 * PI)).collect(),
             motor_cmd: h.cmd.iter().map(|s| b.get(*s)).collect(),
+            radio: RadioState {
+                tx_enabled: b.get(h.tx_enabled) > 0.5,
+                link_up: b.get(h.link_up) > 0.5,
+                lq_pct: b.get(h.lq),
+                rssi_dbm: b.get(h.rssi),
+            },
+            fc_restarts: b.get(h.fc_restarts) as u32,
         }
     }
 

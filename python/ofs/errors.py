@@ -30,6 +30,10 @@ class InvalidArgument(OfsError, ValueError):
     """A request argument was out of range."""
 
 
+class InvalidState(OfsError):
+    """The call does not fit the session's mode or state (e.g. Start on a lockstep session)."""
+
+
 class ServerUnavailable(OfsError):
     """The server could not be reached."""
 
@@ -41,6 +45,7 @@ _KINDS = {
     "protocol": ProtocolMismatch,
     "not_loaded": NotLoaded,
     "invalid_argument": InvalidArgument,
+    "invalid_state": InvalidState,
 }
 
 
