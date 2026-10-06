@@ -67,3 +67,23 @@ fn restart_re_anchors_after_a_pause() {
     let plan = p.plan(500.0011, 0.5);
     assert_eq!((plan.ticks, plan.overrun), (8, false));
 }
+
+#[test]
+fn slow_counts_one_overrun_per_max_lag_of_large_stall() {
+    // After a large stall, Slow should count multiple overruns.
+    // excess = 10.0 - CHUNK_S = 10.0 - 0.05 = 9.95
+    // Expected overruns = floor(9.95 / MAX_LAG_S) = floor(9.95 / 0.1) = 99
+    let mut p = Pacer::new(OverrunPolicy::Slow, HZ);
+    p.restart(0.0, 0.0);
+    let plan = p.plan(10.0, 0.0);
+    // The plan should run one chunk and report overrun=true
+    assert_eq!(plan.ticks, 400);
+    assert_eq!(plan.overrun, true);
+    // Should have counted 99 overruns from the excess
+    assert_eq!(p.overruns(), 99);
+    // Following in-time plan adds no more overruns
+    let sim_advance = 400.0 / f64::from(HZ); // 0.05 s
+    let plan2 = p.plan(10.0 + sim_advance, sim_advance);
+    assert_eq!(plan2.overrun, false);
+    assert_eq!(p.overruns(), 99);
+}

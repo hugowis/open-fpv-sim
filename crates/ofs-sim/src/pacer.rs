@@ -80,21 +80,19 @@ impl Pacer {
             self.anchor_wall_s = now_s;
             self.anchor_sim_s = sim_s + allowed;
             lag = allowed;
-            overrun = match self.policy {
-                OverrunPolicy::Warn => true,
+            match self.policy {
+                OverrunPolicy::Warn => {
+                    overrun = true;
+                    self.overruns += 1;
+                }
                 OverrunPolicy::Slow => {
                     self.stretched_s += excess;
-                    if self.stretched_s >= MAX_LAG_S {
-                        self.stretched_s -= MAX_LAG_S;
-                        true
-                    } else {
-                        false
-                    }
+                    let n = (self.stretched_s / MAX_LAG_S).floor() as u64;
+                    self.overruns += n;
+                    self.stretched_s -= n as f64 * MAX_LAG_S;
+                    overrun = n > 0;
                 }
             };
-            if overrun {
-                self.overruns += 1;
-            }
         }
         if lag < MIN_BATCH_S {
             return Plan { ticks: 0, sleep_s: (MIN_BATCH_S - lag).clamp(YIELD_S, MAX_SLEEP_S), overrun };
