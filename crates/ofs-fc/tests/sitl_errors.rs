@@ -9,7 +9,8 @@ use ofs_fc::sitl::net::SitlNet;
 use ofs_fc::sitl::process::{is_bind_failure, is_ready_line, is_reset_line, LaunchConfig};
 use ofs_fc::sitl::FcError;
 
-// These tests bind the fixed SITL UDP ports, so they must not run concurrently.
+// These tests bind the fixed SITL UDP ports, so they must not run concurrently. Tests that spawn a process
+// take the lock too: a fork briefly inherits the sockets another test holds, which makes a later bind fail.
 static PORTS: Mutex<()> = Mutex::new(());
 
 fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
@@ -108,6 +109,7 @@ fn reset_lines_are_recognised() {
 #[test]
 fn a_bind_failure_just_after_the_ready_line_is_a_startup_error() {
     use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), &["sh", "-c", "echo '[SITL] ready for the simulator'; sleep 0.1; echo 'bind port 5761 for UART1 failed!!'; sleep 5"]);
     // Not a first boot: eeprom.bin and the applied diff exist, so the fake is only run as SITL.
@@ -124,6 +126,7 @@ fn a_bind_failure_just_after_the_ready_line_is_a_startup_error() {
 #[test]
 fn a_relaunch_appends_to_the_sitl_log() {
     use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), &["sh", "-c", "echo '[SITL] ready for the simulator'; sleep 5"]);
     std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
