@@ -1,0 +1,15 @@
+[package]
+name = "ofs-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Protocol 2 messages and gRPC stubs shared by the simulator server and its Rust clients"
+
+[dependencies]
+tonic.workspace = true
+prost.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true

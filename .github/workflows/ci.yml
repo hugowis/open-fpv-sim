@@ -20,7 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.85
-      - run: cargo check --workspace --all-targets --locked
+      # ofs-godot alone needs a newer Rust (godot-rust 0.5.5); the stable jobs cover it.
+      - run: cargo check --workspace --all-targets --locked --exclude ofs-godot
 
   windows:
     runs-on: windows-latest
@@ -35,6 +36,15 @@ jobs:
       - run: python -m pip install -e "python[dev]"
       # Without OFS_SITL_LAUNCH the SITL tests skip (no WSL SITL on the runner).
       - run: python -m pytest python/tests -v
+
+  godot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Builds ofs-sim + ofs-godot, downloads Godot 4.7.2 (SHA-512 verified),
+      # runs the unit suites and the open-loop e2e; the Betaflight e2e skips.
+      - run: bash scripts/run-godot-tests.sh all
 
   sitl:
     runs-on: ubuntu-24.04
@@ -52,3 +62,6 @@ jobs:
       - run: cargo build -p ofs-sim --locked
       - run: python -m pip install -e "python[dev]"
       - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py -v
+      # The game against real Betaflight (OFS_SITL_LAUNCH is set above): arm, climb, failsafe on a radio cut, reload.
+      # The runner builds ofs-sim and ofs-godot and downloads the pinned Godot itself.
+      - run: bash scripts/run-godot-tests.sh e2e

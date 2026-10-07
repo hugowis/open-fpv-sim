@@ -14,6 +14,9 @@ struct Args {
     /// Per-quad firmware working directories (EEPROM, SITL log) are created here.
     #[arg(long, default_value = ".ofs-data")]
     data_dir: PathBuf,
+    /// Allow listening on a non-loopback address. Any client that can connect can make this machine run programs.
+    #[arg(long)]
+    allow_remote: bool,
 }
 
 /// Ctrl-C, or SIGTERM on unix.
@@ -42,6 +45,13 @@ async fn shutdown_signal() {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let args = Args::parse();
+    if let Err(message) = ofs_sim::listen::check_listen(args.listen, args.allow_remote) {
+        eprintln!("ofs-sim: {message}");
+        std::process::exit(2);
+    }
+    if !args.listen.ip().is_loopback() {
+        eprintln!("ofs-sim: warning: listening on {} (--allow-remote): every client that can connect can run programs here", args.listen);
+    }
     eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), args.listen);
     let service = SimService::new(args.data_dir);
     let (signalled, on_signal) = tokio::sync::oneshot::channel::<()>();
