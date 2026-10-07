@@ -62,3 +62,6 @@ jobs:
       - run: cargo build -p ofs-sim --locked
       - run: python -m pip install -e "python[dev]"
       - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py -v
+      # The game against real Betaflight (OFS_SITL_LAUNCH is set above): arm, climb, failsafe on a radio cut, reload.
+      # The runner builds ofs-sim and ofs-godot and downloads the pinned Godot itself.
+      - run: bash scripts/run-godot-tests.sh e2e

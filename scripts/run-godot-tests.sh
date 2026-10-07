@@ -4,7 +4,7 @@
 ##
 ## Needs a Godot 4.7 binary: set GODOT_BIN, or the script downloads Godot 4.7.2 (the official release
 ## zip, SHA-512 verified) into build/godot-dl/ and uses that. The server and the extension must be
-## built first (`cargo build -p ofs-sim -p ofs-godot`); the script builds them if the binary is missing.
+## built (`cargo build -p ofs-sim -p ofs-godot`); the script always runs that build, which is a no-op when up to date.
 ##
 ## Godot's exit codes around broken test scripts (checked on 4.7.2): a script with a parse error exits
 ## 1, but a script that raises a runtime error never exits - the engine keeps running. Every Godot
@@ -48,10 +48,10 @@ if [ -z "${GODOT_BIN:-}" ]; then
 fi
 echo "Godot: $GODOT_BIN"
 
-# The server binary the client starts, and the extension library the project loads.
-if [ ! -x target/debug/ofs-sim ] && [ ! -x target/debug/ofs-sim.exe ]; then
-    cargo build -p ofs-sim -p ofs-godot --locked
-fi
+# The server binary the client starts, and the extension library the project loads. Always built: a no-op when
+# up to date, and it keeps the tests from running against a stale server or without the extension (building only
+# `ofs-sim` leaves no `ofs_godot` library behind).
+cargo build -p ofs-sim -p ofs-godot --locked
 
 # `timeout -k` because a test script with a runtime error leaves the engine running forever.
 run_godot() {
