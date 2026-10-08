@@ -842,6 +842,7 @@ dependencies = [
  "ofs-proto",
  "ofs-radio",
  "ofs-sensors",
+ "ofs-video",
  "tempfile",
  "tokio",
  "tokio-stream",

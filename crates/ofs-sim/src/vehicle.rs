@@ -11,8 +11,9 @@ use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
-use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SitlBridge};
+use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
+use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
@@ -21,6 +22,8 @@ use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMoun
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
+use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
+use ofs_video::vtx::{band_index, VtxModel, VtxParams};
 
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
@@ -55,6 +58,19 @@ pub struct RadioState {
     pub rssi_dbm: f64,
 }
 
+/// What the VTX model publishes (all zero without a `[vtx]` section or without Betaflight).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VtxInfo {
+    pub present: bool,
+    /// 1..=6 (A, B, E, F, R, L), 0 in user-frequency mode.
+    pub band: u8,
+    /// 1..=8, 0 in user-frequency mode.
+    pub channel: u8,
+    pub freq_mhz: u32,
+    pub power_mw: u32,
+    pub pit_mode: bool,
+}
+
 /// Faults a script can inject (spec §6.2). The v1 catalog completes in M4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
@@ -65,6 +81,11 @@ pub enum Fault {
 /// The receiver's UART buffer. With no flight controller draining it (open-loop FC), the oldest bytes are
 /// dropped like a UART overrun.
 const RECEIVER_UART_CAPACITY: usize = 4096;
+
+/// Buffers between Betaflight's UARTs and the video models. Large enough for a few ticks of bursts; when a consumer
+/// falls behind, the oldest bytes are dropped like a UART overrun.
+const ESC_UART_CAPACITY: usize = 1024;
+const VIDEO_TAP_CAPACITY: usize = 16 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VehicleState {
@@ -80,6 +101,9 @@ pub struct VehicleState {
     pub radio: RadioState,
     /// Betaflight reboots so far (e.g. after a Configurator save); always 0 without SITL.
     pub fc_restarts: u32,
+    pub vtx: VtxInfo,
+    /// TX bytes Betaflight's UART capture dropped because a consumer fell behind.
+    pub serial_dropped_bytes: u64,
 }
 
 struct Handles {
@@ -102,6 +126,13 @@ struct Handles {
     rssi: Signal<f64>,
     fault_radio_loss: Signal<f64>,
     fc_restarts: Signal<f64>,
+    vtx_present: Signal<f64>,
+    vtx_band: Signal<f64>,
+    vtx_channel: Signal<f64>,
+    vtx_freq: Signal<f64>,
+    vtx_power: Signal<f64>,
+    vtx_pit: Signal<f64>,
+    serial_dropped: Signal<f64>,
 }
 
 impl Handles {
@@ -126,6 +157,13 @@ impl Handles {
             rssi: bus.signal(names::RADIO_RSSI),
             fault_radio_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
             fc_restarts: bus.signal(names::FC_RESTARTS),
+            vtx_present: bus.signal(names::VTX_PRESENT),
+            vtx_band: bus.signal(names::VTX_BAND),
+            vtx_channel: bus.signal(names::VTX_CHANNEL),
+            vtx_freq: bus.signal(names::VTX_FREQ_MHZ),
+            vtx_power: bus.signal(names::VTX_POWER_MW),
+            vtx_pit: bus.signal(names::VTX_PIT),
+            serial_dropped: bus.signal(names::FC_SERIAL_DROPPED),
         }
     }
 }
@@ -134,6 +172,7 @@ pub struct Vehicle {
     scheduler: Scheduler,
     h: Handles,
     sitl: bool,
+    osd: Option<OsdHandle>,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -153,6 +192,52 @@ fn v3(a: [f64; 3]) -> DVec3 {
 
 fn pairs(t: &[[f64; 2]]) -> Vec<(f64, f64)> {
     t.iter().map(|r| (r[0], r[1])).collect()
+}
+
+/// The video devices a quad file asks for, wired to Betaflight's UARTs.
+struct VideoDevices {
+    /// Run before the flight controller each tick (they write bytes it reads in this tick's exchange).
+    before_fc: Vec<Box<dyn Model>>,
+    /// Run after it (they read what it wrote in this tick's exchange).
+    after_fc: Vec<Box<dyn Model>>,
+    /// Bytes into Betaflight's UARTs (0-based UART indexes), besides the receiver's CRSF.
+    serial: Vec<SerialLink>,
+    /// Bytes out of Betaflight's UARTs.
+    taps: Vec<SerialTap>,
+    osd: Option<OsdHandle>,
+}
+
+fn video_devices(cfg: &QuadConfig, motors: usize, fc_divisor: u32, bus: &mut Bus) -> Result<VideoDevices, SimError> {
+    let mut v = VideoDevices { before_fc: Vec::new(), after_fc: Vec::new(), serial: Vec::new(), taps: Vec::new(), osd: None };
+    if let Some(e) = &cfg.esc_telemetry {
+        let uart = Wire::new(ESC_UART_CAPACITY);
+        v.before_fc.push(Box::new(EscTelemetry::new(uart.clone(), motors, cfg.sim.base_hz / e.rate_hz, bus)));
+        v.serial.push(SerialLink { uart_index: e.uart - 1, rx: uart });
+    }
+    if let Some(o) = &cfg.osd {
+        let tap = Wire::new(VIDEO_TAP_CAPACITY);
+        let model = OsdModel::new(o.cols as usize, o.rows as usize, tap.clone(), fc_divisor);
+        v.osd = Some(model.handle());
+        v.taps.push(SerialTap { uart_index: o.uart - 1, tx: tap });
+        v.after_fc.push(Box::new(model));
+    }
+    if let Some(x) = &cfg.vtx {
+        let requests = Wire::new(VIDEO_TAP_CAPACITY);
+        let replies = Wire::new(VIDEO_TAP_CAPACITY);
+        let params = VtxParams {
+            power_levels_mw: x.power_levels_mw.clone(),
+            power_levels_dbm: x.power_levels_dbm.clone(),
+            default_band: band_index(&x.default_band)
+                .ok_or_else(|| SimError::InvalidArgument(format!("vtx.default_band {:?} is not a band letter", x.default_band)))?,
+            default_channel: x.default_channel,
+            default_power_index: x.default_power_index,
+            reply_latency_s: x.reply_latency_ms / 1000.0,
+        };
+        v.taps.push(SerialTap { uart_index: x.uart - 1, tx: requests.clone() });
+        v.serial.push(SerialLink { uart_index: x.uart - 1, rx: replies.clone() });
+        v.after_fc.push(Box::new(VtxModel::new(params, requests, replies, fc_divisor, bus)));
+    }
+    Ok(v)
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
@@ -245,9 +330,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
 
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
+    let mut osd: Option<OsdHandle> = None;
     match fc_kind {
         FcKind::OpenLoop => models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus))),
         FcKind::Sitl => {
+            let video = video_devices(cfg, n, fc_divisor, &mut bus)?;
             let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
             let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
             if cleanup.is_empty() {
@@ -262,6 +349,8 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                 diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
                 startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
             };
+            let mut serial = vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }];
+            serial.extend(video.serial);
             let bridge = SitlBridge::start(
                 BridgeConfig {
                     launch,
@@ -271,13 +360,16 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
-                    serial: vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }],
-                    taps: vec![],
+                    serial,
+                    taps: video.taps,
                 },
                 &mut bus,
             )
             .map_err(|e| SimError::Firmware(e.to_string()))?;
+            models.extend(video.before_fc);
             models.push(Box::new(bridge));
+            models.extend(video.after_fc);
+            osd = video.osd;
         }
     }
 
@@ -286,7 +378,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     for m in models {
         scheduler.add(m);
     }
-    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl };
+    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
@@ -348,6 +440,11 @@ impl Vehicle {
         self.sitl.then(|| format!("tcp://127.0.0.1:{MSP_TCP_PORT}"))
     }
 
+    /// The latest OSD frame, when the quad has an `[osd]` section and runs Betaflight.
+    pub fn osd_frame(&self) -> Option<OsdFrame> {
+        self.osd.as_ref().map(OsdHandle::latest)
+    }
+
     pub fn state(&self) -> VehicleState {
         let b = self.scheduler.bus();
         let h = &self.h;
@@ -368,6 +465,15 @@ impl Vehicle {
                 rssi_dbm: b.get(h.rssi),
             },
             fc_restarts: b.get(h.fc_restarts) as u32,
+            vtx: VtxInfo {
+                present: b.get(h.vtx_present) > 0.5,
+                band: b.get(h.vtx_band) as u8,
+                channel: b.get(h.vtx_channel) as u8,
+                freq_mhz: b.get(h.vtx_freq) as u32,
+                power_mw: b.get(h.vtx_power) as u32,
+                pit_mode: b.get(h.vtx_pit) > 0.5,
+            },
+            serial_dropped_bytes: b.get(h.serial_dropped) as u64,
         }
     }
 
@@ -390,5 +496,49 @@ fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, SimError> {
             .map(Some)
             .map_err(|_| SimError::InvalidArgument(format!("{var}={v} is not an IPv4 address"))),
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shipped_quad() -> QuadConfig {
+        ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap()
+    }
+
+    #[test]
+    fn the_shipped_quad_wires_esc_telemetry_osd_and_vtx_to_their_uarts() {
+        let cfg = shipped_quad();
+        let mut bus = Bus::new();
+        let video = video_devices(&cfg, 4, 8, &mut bus).unwrap();
+        let serial: Vec<u8> = video.serial.iter().map(|l| l.uart_index).collect();
+        let taps: Vec<u8> = video.taps.iter().map(|t| t.uart_index).collect();
+        assert_eq!(serial, vec![2, 4], "ESC telemetry on UART3 and the VTX replies on UART5");
+        assert_eq!(taps, vec![3, 4], "DisplayPort from UART4 and SmartAudio requests from UART5");
+        assert_eq!(video.before_fc.len(), 1, "the ESC telemetry runs before the flight controller");
+        assert_eq!(video.after_fc.len(), 2, "the OSD and the VTX run after it");
+        assert!(video.osd.is_some());
+    }
+
+    #[test]
+    fn a_quad_without_video_sections_wires_nothing() {
+        let mut cfg = shipped_quad();
+        (cfg.esc_telemetry, cfg.osd, cfg.vtx) = (None, None, None);
+        let mut bus = Bus::new();
+        let video = video_devices(&cfg, 4, 8, &mut bus).unwrap();
+        assert!(video.serial.is_empty() && video.taps.is_empty() && video.osd.is_none());
+        assert!(video.before_fc.is_empty() && video.after_fc.is_empty());
+    }
+
+    #[test]
+    fn an_open_loop_vehicle_has_no_osd_and_no_vtx() {
+        let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-unit-test-data"), fc_override: Some(FcKind::OpenLoop) };
+        let mut vehicle = build(&shipped_quad(), &opts).unwrap();
+        vehicle.run_for(0.05).unwrap();
+        let state = vehicle.state();
+        assert_eq!(state.vtx, VtxInfo { present: false, band: 0, channel: 0, freq_mhz: 0, power_mw: 0, pit_mode: false });
+        assert_eq!(state.serial_dropped_bytes, 0);
+        assert!(vehicle.osd_frame().is_none());
     }
 }
