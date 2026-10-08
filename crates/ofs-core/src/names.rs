@@ -79,3 +79,15 @@ pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 pub const FC_RESTARTS: &str = "fc.restarts";
 /// Cumulative bytes SITL reported dropping from its UART TX capture buffers (a consumer fell behind).
 pub const FC_SERIAL_DROPPED: &str = "fc.serial_dropped_bytes";
+
+/// 1.0 when a VTX is wired to the flight controller.
+pub const VTX_PRESENT: &str = "vtx.present";
+/// Band 1..=6 (A, B, E, F, R, L); 0 while the VTX is in user-frequency mode.
+pub const VTX_BAND: &str = "vtx.band";
+/// Channel 1..=8; 0 in user-frequency mode.
+pub const VTX_CHANNEL: &str = "vtx.channel";
+pub const VTX_FREQ_MHZ: &str = "vtx.freq_mhz";
+/// Output power of the current power level in mW (see `vtx.pit_mode`).
+pub const VTX_POWER_MW: &str = "vtx.power_mw";
+/// 1.0 while the VTX is in pit mode.
+pub const VTX_PIT: &str = "vtx.pit_mode";
