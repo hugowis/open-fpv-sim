@@ -1,6 +1,7 @@
 //! Betaflight SITL bridge.
 pub mod bridge;
 pub mod codec;
+pub mod esc_telemetry;
 pub mod frames;
 pub mod net;
 pub mod process;
