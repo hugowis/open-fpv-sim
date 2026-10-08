@@ -99,7 +99,7 @@ UART numbering: SITL binds UART1 to the MSP port (TCP 5761, Configurator); UART2
 
 ## 6. Config, API and clients
 
-**Quad file (schema 3):** optional `[vtx]` (UART, band, channel, power table, defaults, reply latency), `[osd]` (UART, grid size) and `[esc_telemetry]` (UART, rate). Schema-2 files still load and have no VTX, OSD or ESC telemetry. The shipped quad file and its Betaflight diff are updated: serial ports (UART3 ESC sensor, UART4 DisplayPort, UART5 SmartAudio), `feature OSD`, the OSD element positions, and a VTX table (bands, channels, power levels) so the VTX menu works. As today, the diff is applied on first boot only; an existing `eeprom.bin` must be deleted.
+**Quad file (schema 3):** optional `[vtx]` (UART, band, channel, power table, defaults, reply latency), `[osd]` (UART, grid size) and `[esc_telemetry]` (UART, rate). Schema-2 files still load and have no VTX, OSD or ESC telemetry. The shipped quad file and its Betaflight diff are updated: serial ports (UART3 ESC sensor, UART4 DisplayPort, UART5 SmartAudio), `feature OSD`, the OSD element positions, `vcd_video_system = PAL` and `force_battery_cell_count`. The SITL build has no `vtxtable`: Betaflight uses the factory bands and builds its power list from the dBm values the VTX reports, so the diff has no `vtxtable` lines (plan, "Rulings and facts verified in advance"). As today, the diff is applied on first boot only; an existing `eeprom.bin` must be deleted.
 
 **Protocol 3:**
 - New stream `StreamOsd` sending `OsdFrame`.
@@ -122,9 +122,9 @@ UART numbering: SITL binds UART1 to the MSP port (TCP 5761, Configurator); UART2
 5. `ofs-sim` wiring, protocol 3, Python.
 6. `ofs-client`, `ofs-godot`, the Godot OSD layer, the font atlas script, the HUD VTX line, docs, the manual check.
 
-**Failure handling:** a malformed reply datagram is a firmware error (simulator failure, stops loudly). A corrupted OSD or SmartAudio frame is skipped and counted. Overflow raises `serial_overflow`. A bad VTX table, unknown band or duplicate UART is a config error at load.
+**Failure handling:** a malformed reply datagram is a firmware error (simulator failure, stops loudly). A corrupted OSD or SmartAudio frame is skipped and counted. Overflow raises `serial_overflow`. A bad VTX power list, an unknown band, a duplicate UART, or a diff that enables SmartAudio without a `[vtx]` section (Betaflight SITL crashes when its OSD shows the VTX channel and no VTX answers) is a config error at load.
 
-**Items the plan must confirm against the pinned Betaflight source before coding:** the DisplayPort attribute bits (blink, font page) and grid size; the exact SmartAudio frame bytes (`vtx_smartaudio.c`) and v2.1 power-table fields; how the ESC sensor turns frames into voltage, current and mAh; the exact low-battery warning text; which font files the Configurator repository provides (one page or two).
+**Confirmed against the pinned Betaflight source and live SITL while the plan was written (results in the plan's "Rulings and facts verified in advance"; the original list is kept for the record):** the DisplayPort attribute bits (blink, font page) and grid size; the exact SmartAudio frame bytes (`vtx_smartaudio.c`) and v2.1 power-table fields; how the ESC sensor turns frames into voltage, current and mAh; the exact low-battery warning text; which font files the Configurator repository provides (one page or two).
 
 **Tests:**
 - **Unit:** golden-byte tests for the SmartAudio codec, the DisplayPort decoder and the KISS encoder; `VtxModel` (table, power, pit); config validation.
