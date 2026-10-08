@@ -30,6 +30,8 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_PILOT_CONNECTED: _ClassVar[EventKind]
     EVENT_KIND_PILOT_DISCONNECTED: _ClassVar[EventKind]
     EVENT_KIND_SESSION_ENDED: _ClassVar[EventKind]
+    EVENT_KIND_VTX_CHANGED: _ClassVar[EventKind]
+    EVENT_KIND_SERIAL_OVERFLOW: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
@@ -45,6 +47,8 @@ EVENT_KIND_LINK_UP: EventKind
 EVENT_KIND_PILOT_CONNECTED: EventKind
 EVENT_KIND_PILOT_DISCONNECTED: EventKind
 EVENT_KIND_SESSION_ENDED: EventKind
+EVENT_KIND_VTX_CHANGED: EventKind
+EVENT_KIND_SERIAL_OVERFLOW: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -158,8 +162,40 @@ class RadioLink(_message.Message):
     rssi_dbm: float
     def __init__(self, tx_enabled: _Optional[bool] = ..., link_up: _Optional[bool] = ..., lq_pct: _Optional[float] = ..., rssi_dbm: _Optional[float] = ...) -> None: ...
 
+class OsdFrame(_message.Message):
+    __slots__ = ("seq", "time_s", "present", "cols", "rows", "cells")
+    SEQ_FIELD_NUMBER: _ClassVar[int]
+    TIME_S_FIELD_NUMBER: _ClassVar[int]
+    PRESENT_FIELD_NUMBER: _ClassVar[int]
+    COLS_FIELD_NUMBER: _ClassVar[int]
+    ROWS_FIELD_NUMBER: _ClassVar[int]
+    CELLS_FIELD_NUMBER: _ClassVar[int]
+    seq: int
+    time_s: float
+    present: bool
+    cols: int
+    rows: int
+    cells: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, seq: _Optional[int] = ..., time_s: _Optional[float] = ..., present: _Optional[bool] = ..., cols: _Optional[int] = ..., rows: _Optional[int] = ..., cells: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class Vtx(_message.Message):
+    __slots__ = ("present", "band", "channel", "freq_mhz", "power_mw", "pit_mode")
+    PRESENT_FIELD_NUMBER: _ClassVar[int]
+    BAND_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_FIELD_NUMBER: _ClassVar[int]
+    FREQ_MHZ_FIELD_NUMBER: _ClassVar[int]
+    POWER_MW_FIELD_NUMBER: _ClassVar[int]
+    PIT_MODE_FIELD_NUMBER: _ClassVar[int]
+    present: bool
+    band: int
+    channel: int
+    freq_mhz: int
+    power_mw: int
+    pit_mode: bool
+    def __init__(self, present: _Optional[bool] = ..., band: _Optional[int] = ..., channel: _Optional[int] = ..., freq_mhz: _Optional[int] = ..., power_mw: _Optional[int] = ..., pit_mode: _Optional[bool] = ...) -> None: ...
+
 class State(_message.Message):
-    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts")
+    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes")
     TIME_S_FIELD_NUMBER: _ClassVar[int]
     POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_NED_MPS_FIELD_NUMBER: _ClassVar[int]
@@ -173,6 +209,8 @@ class State(_message.Message):
     RUNNING_FIELD_NUMBER: _ClassVar[int]
     OVERRUNS_FIELD_NUMBER: _ClassVar[int]
     FC_RESTARTS_FIELD_NUMBER: _ClassVar[int]
+    VTX_FIELD_NUMBER: _ClassVar[int]
+    SERIAL_DROPPED_BYTES_FIELD_NUMBER: _ClassVar[int]
     time_s: float
     position_ned_m: Vec3
     velocity_ned_mps: Vec3
@@ -186,7 +224,9 @@ class State(_message.Message):
     running: bool
     overruns: int
     fc_restarts: int
-    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ...) -> None: ...
+    vtx: Vtx
+    serial_dropped_bytes: int
+    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ...) -> None: ...
 
 class Event(_message.Message):
     __slots__ = ("time_s", "kind", "message")

@@ -112,6 +112,8 @@ pub enum EventKind {
     PilotConnected,
     PilotDisconnected,
     SessionEnded,
+    VtxChanged,
+    SerialOverflow,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -127,6 +129,8 @@ impl EventKind {
             EventKind::PilotConnected => "pilot_connected",
             EventKind::PilotDisconnected => "pilot_disconnected",
             EventKind::SessionEnded => "session_ended",
+            EventKind::VtxChanged => "vtx_changed",
+            EventKind::SerialOverflow => "serial_overflow",
             EventKind::Unknown => "unknown",
         }
     }
@@ -151,6 +155,8 @@ impl Event {
             Ok(pb::EventKind::PilotConnected) => EventKind::PilotConnected,
             Ok(pb::EventKind::PilotDisconnected) => EventKind::PilotDisconnected,
             Ok(pb::EventKind::SessionEnded) => EventKind::SessionEnded,
+            Ok(pb::EventKind::VtxChanged) => EventKind::VtxChanged,
+            Ok(pb::EventKind::SerialOverflow) => EventKind::SerialOverflow,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

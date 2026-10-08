@@ -26,8 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
-    pilot link and fault injection. One session (loaded quad) per server.
+    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
     """
 
     def __init__(self, channel):
@@ -101,11 +101,21 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                 _registered_method=True)
+        self.GetOsd = channel.unary_unary(
+                '/ofs.v1.Sim/GetOsd',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
+                _registered_method=True)
+        self.StreamOsd = channel.unary_stream(
+                '/ofs.v1.Sim/StreamOsd',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
+                _registered_method=True)
 
 
 class SimServicer:
-    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
-    pilot link and fault injection. One session (loaded quad) per server.
+    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
     """
 
     def Handshake(self, request, context):
@@ -192,6 +202,21 @@ class SimServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetOsd(self, request, context):
+        """Betaflight's OSD as a character grid (present = false, 0 columns, when the quad has no OSD).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamOsd(self, request, context):
+        """OSD frames: the current one at once, then each time the grid changes or the OSD appears or disappears,
+        checked at up to rate_hz (1..60; 0 means 60).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SimServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -260,6 +285,16 @@ def add_SimServicer_to_server(servicer, server):
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ),
+            'GetOsd': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetOsd,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.SerializeToString,
+            ),
+            'StreamOsd': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamOsd,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'ofs.v1.Sim', rpc_method_handlers)
@@ -269,8 +304,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
-    pilot link and fault injection. One session (loaded quad) per server.
+    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
     """
 
     @staticmethod
@@ -614,6 +649,60 @@ class Sim:
             '/ofs.v1.Sim/ClearFaults',
             ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetOsd(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/GetOsd',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamOsd(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/ofs.v1.Sim/StreamOsd',
+            ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
             options,
             channel_credentials,
             insecure,
