@@ -8,3 +8,36 @@ aux 0 0 0 1700 2100 0 0
 aux 1 1 1 1700 2100 0 0
 set motor_pwm_protocol = PWM
 set small_angle = 180
+
+# M3a video. Serial indexes are 0-based: UART3 = serial 2, UART4 = serial 3, UART5 = serial 4.
+# Battery as the ESC sensor (KISS frames on UART3): voltage, current and mAh come from the simulated battery.
+feature ESC_SENSOR
+serial 2 1024 115200 57600 0 115200
+set battery_meter = ESC
+set current_meter = ESC
+# Must match battery.cells in the quad file: Betaflight would otherwise guess the cell count from the first voltage it
+# sees, and a part-charged 6S pack reads as 5S (and never raises the low-battery warning).
+set force_battery_cell_count = 6
+# OSD over MSP DisplayPort on UART4 (MSP + VTX_MSP functions); 30x16 PAL grid.
+feature OSD
+serial 3 131073 115200 57600 0 115200
+set osd_displayport_device = MSP
+set vcd_video_system = PAL
+set craft_name = OpenFPV
+# Element positions: 2048 (visible in OSD profile 1) + (row << 5) + column.
+set osd_craft_name_pos = 2058
+set osd_flymode_pos = 2081
+set osd_vtx_channel_pos = 2102
+set osd_disarmed_pos = 2315
+set osd_warnings_pos = 2377
+set osd_vbat_pos = 2497
+set osd_mah_drawn_pos = 2504
+set osd_current_pos = 2512
+set osd_tim_1_pos = 2529
+set osd_link_quality_pos = 2536
+set osd_altitude_pos = 2548
+# SmartAudio VTX on UART5. SITL has no vtxtable: Betaflight uses the factory bands and the power levels the VTX reports.
+serial 4 2048 115200 57600 0 115200
+set vtx_band = 5
+set vtx_channel = 1
+set vtx_power = 2
