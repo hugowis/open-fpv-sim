@@ -8,7 +8,8 @@ use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 use super::codec::{
-    state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
+    state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, REPLY_MAX, SERIAL_BLOCK_HEADER,
+    SERIAL_SECTION_MAX,
 };
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
@@ -95,7 +96,7 @@ impl SitlBridge {
 
     fn drain(&self) -> std::io::Result<()> {
         self.rx.set_nonblocking(true)?;
-        let mut buf = [0u8; 128];
+        let mut buf = [0u8; REPLY_MAX];
         while self.rx.recv_from(&mut buf).is_ok() {}
         self.rx.set_nonblocking(false)
     }
@@ -266,7 +267,7 @@ impl Model for SitlBridge {
         let rc = RcPacket { timestamp_s: ctx.time_s, channels: [0; 16] };
         let datagram = state_datagram_with_serial(&fdm_packet(&frame, &self.cfg.home), &rc, &self.serial_blocks());
 
-        let mut buf = [0u8; 128];
+        let mut buf = [0u8; REPLY_MAX];
         let mut received = self.exchange(&datagram, &mut buf);
         if matches!(&received, Err(e) if no_reply(e)) && self.rebooted() {
             self.restart()?;

@@ -150,3 +150,40 @@ fn oversized_serial_sections_are_refused() {
     let rc = RcPacket { timestamp_s: 0.0, channels: [0; 16] };
     state_datagram_with_serial(&zero_fdm(), &rc, &[(1, vec![0; SERIAL_SECTION_MAX])]);
 }
+
+use ofs_fc::sitl::codec::{encode_reply, parse_reply_serial, ReplySerial, REPLY_MAX};
+
+#[test]
+fn a_reply_without_a_trailer_is_a_legacy_reply() {
+    assert_eq!(parse_reply_serial(&[]).unwrap(), ReplySerial::default());
+}
+
+#[test]
+fn a_reply_trailer_carries_the_dropped_count_and_uart_blocks() {
+    let reply = encode_reply([0.1, 0.2, 0.3, 0.4], 7, &[(3, b"abc".to_vec()), (4, vec![0xAA, 0x55])]);
+    assert_eq!(reply.len(), 16 + 2 + (3 + 3) + (3 + 2));
+    let packet = ServoPacket::decode(&reply).unwrap();
+    assert_eq!(packet.motor_speed, [0.1, 0.2, 0.3, 0.4]);
+    let serial = parse_reply_serial(&reply[ServoPacket::SIZE..]).unwrap();
+    assert_eq!(serial.dropped, 7);
+    assert_eq!(serial.blocks, vec![(3, b"abc".to_vec()), (4, vec![0xAA, 0x55])]);
+}
+
+#[test]
+fn malformed_trailers_are_errors_not_panics() {
+    assert!(parse_reply_serial(&[1]).is_err(), "a lone byte");
+    assert!(parse_reply_serial(&[0, 0, 3, 5]).is_err(), "truncated block header");
+    assert!(parse_reply_serial(&[0, 0, 3, 9, 0, 1, 2]).is_err(), "block longer than the datagram");
+}
+
+#[test]
+fn the_largest_reply_fits_the_receive_buffer() {
+    let reply = encode_reply([0.0; 4], 0, &[(1, vec![0; 509])]);
+    assert_eq!(reply.len(), REPLY_MAX);
+}
+
+#[test]
+#[should_panic(expected = "exceeds")]
+fn an_oversized_reply_is_refused_by_the_encoder() {
+    let _ = encode_reply([0.0; 4], 0, &[(1, vec![0; 510])]);
+}
