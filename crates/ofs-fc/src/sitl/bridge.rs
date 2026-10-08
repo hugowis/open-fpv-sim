@@ -8,8 +8,8 @@ use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 use super::codec::{
-    state_datagram_with_serial, RcPacket, ServoPacket, PORT_PWM, PORT_STATE, REPLY_MAX, SERIAL_BLOCK_HEADER,
-    SERIAL_SECTION_MAX,
+    parse_reply_serial, state_datagram_with_serial, RcPacket, ReplySerial, ServoPacket, PORT_PWM, PORT_STATE,
+    REPLY_MAX, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
 };
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
@@ -29,6 +29,8 @@ pub struct BridgeConfig {
     pub motor_count: usize,
     /// Bytes for SITL's UARTs, carried in the state datagram (e.g. the receiver's CRSF into UART2).
     pub serial: Vec<SerialLink>,
+    /// Betaflight's UART TX bytes, routed to the models that listen (OSD, VTX)
+    pub taps: Vec<SerialTap>,
 }
 
 /// Bytes the simulator feeds into one of SITL's UARTs.
@@ -37,6 +39,23 @@ pub struct SerialLink {
     /// 0-based: UART2 = 1.
     pub uart_index: u8,
     pub rx: Wire,
+}
+
+/// Bytes Betaflight writes to one of its UARTs (UART2 and up), as returned in each SITL reply.
+#[derive(Debug, Clone)]
+pub struct SerialTap {
+    /// 0-based: UART4 = 3.
+    pub uart_index: u8,
+    pub tx: Wire,
+}
+
+/// Hands the reply's UART blocks to the taps wired to them; blocks of UARTs nobody listens to are discarded.
+pub fn route_reply(taps: &[SerialTap], serial: &ReplySerial) {
+    for (uart, bytes) in &serial.blocks {
+        if let Some(tap) = taps.iter().find(|t| t.uart_index == *uart) {
+            tap.tx.write(bytes);
+        }
+    }
 }
 
 struct Inputs {
@@ -57,6 +76,7 @@ pub struct SitlBridge {
     inputs: Inputs,
     cmds: Vec<Signal<f64>>,
     restarts: Signal<f64>,
+    serial_dropped: Signal<f64>,
     proc: Option<SitlProcess>,
     answered: bool,
 }
@@ -86,12 +106,13 @@ impl SitlBridge {
         };
         let cmds = (0..cfg.motor_count).map(|i| bus.signal(&names::motor_cmd(i))).collect();
         let restarts = bus.signal(names::FC_RESTARTS);
+        let serial_dropped = bus.signal(names::FC_SERIAL_DROPPED);
         let mut launch = cfg.launch.clone();
         if let Some(ip) = net.sitl_ip_arg {
             launch.launch.extend(["--ip".to_string(), ip.to_string()]);
         }
         let proc = SitlProcess::start(&launch)?;
-        Ok(Self { cfg, launch, rx, tx, inputs, cmds, restarts, proc: Some(proc), answered: false })
+        Ok(Self { cfg, launch, rx, tx, inputs, cmds, restarts, serial_dropped, proc: Some(proc), answered: false })
     }
 
     fn drain(&self) -> std::io::Result<()> {
@@ -281,6 +302,12 @@ impl Model for SitlBridge {
                     .ok_or_else(|| SimError::Firmware(format!("malformed motor packet ({n} bytes)")))?;
                 for (sig, v) in self.cmds.iter().zip(motor_commands(&packet)) {
                     bus.set(*sig, v);
+                }
+                let serial = parse_reply_serial(&buf[ServoPacket::SIZE..n])
+                    .map_err(|e| SimError::Firmware(format!("malformed SITL reply: {e}")))?;
+                route_reply(&self.cfg.taps, &serial);
+                if serial.dropped > 0 {
+                    bus.set(self.serial_dropped, bus.get(self.serial_dropped) + f64::from(serial.dropped));
                 }
                 Ok(())
             }

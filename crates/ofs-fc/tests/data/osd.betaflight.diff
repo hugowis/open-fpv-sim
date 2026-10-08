@@ -1,0 +1,8 @@
+# OSD over MSP DisplayPort on UART4 (serial index 3), captured from SITL's reply datagram.
+feature -GPS
+feature OSD
+serial 3 131073 115200 57600 0 115200
+set osd_displayport_device = MSP
+set vcd_video_system = PAL
+set motor_pwm_protocol = PWM
+set small_angle = 180

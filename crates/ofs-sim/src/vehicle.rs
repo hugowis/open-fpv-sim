@@ -272,6 +272,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
                     serial: vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }],
+                    taps: vec![],
                 },
                 &mut bus,
             )
