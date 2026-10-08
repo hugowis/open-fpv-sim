@@ -30,11 +30,19 @@ pub struct Client {
     seen: Mutex<Seen>,
 }
 
+/// Upper bound of the stick rate: a mistyped setting must not make the worker spin or flood the server.
+pub const MAX_STICK_RATE_HZ: u32 = 1000;
+
+/// Keeps the two rates inside what the server and the worker handle.
+fn clamp_rates(settings: &mut Settings) {
+    settings.state_rate_hz = settings.state_rate_hz.clamp(1, 240);
+    settings.stick_rate_hz = settings.stick_rate_hz.clamp(1, MAX_STICK_RATE_HZ);
+}
+
 impl Client {
     /// Starts the supervisor and returns at once; progress arrives through `poll`.
     pub fn start(mut settings: Settings) -> Result<Client, ClientError> {
-        settings.state_rate_hz = settings.state_rate_hz.clamp(1, 240);
-        settings.stick_rate_hz = settings.stick_rate_hz.max(1);
+        clamp_rates(&mut settings);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("ofs-client")
@@ -152,4 +160,25 @@ impl Drop for Client {
 
 fn lock_receiver<T>(m: &Mutex<std_mpsc::Receiver<T>>) -> std::sync::MutexGuard<'_, std_mpsc::Receiver<T>> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rates_are_clamped_to_what_the_server_and_worker_handle() {
+        let mut settings = Settings::new("quad.toml");
+        settings.state_rate_hz = 100_000;
+        settings.stick_rate_hz = 4_000_000_000;
+        clamp_rates(&mut settings);
+        assert_eq!((settings.state_rate_hz, settings.stick_rate_hz), (240, MAX_STICK_RATE_HZ));
+        settings.state_rate_hz = 0;
+        settings.stick_rate_hz = 0;
+        clamp_rates(&mut settings);
+        assert_eq!((settings.state_rate_hz, settings.stick_rate_hz), (1, 1));
+        let mut defaults = Settings::new("quad.toml");
+        clamp_rates(&mut defaults);
+        assert_eq!((defaults.state_rate_hz, defaults.stick_rate_hz), (Settings::new("quad.toml").state_rate_hz, 250));
+    }
 }

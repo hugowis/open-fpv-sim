@@ -3,7 +3,7 @@
 ## Usage: scripts/run-godot-tests.sh [unit|e2e|all]   (default: all)
 ##
 ## Needs a Godot 4.7 binary: set GODOT_BIN, or the script downloads Godot 4.7.2 (the official release
-## zip, SHA-512 verified) into build/godot-dl/ and uses that. The server and the extension must be
+## zip, checked against the SHA-512 pinned below) into build/godot-dl/ and uses that. The server and the extension must be
 ## built (`cargo build -p ofs-sim -p ofs-godot`); the script always runs that build, which is a no-op when up to date.
 ##
 ## Godot's exit codes around broken test scripts (checked on 4.7.2): a script with a parse error exits
@@ -15,6 +15,9 @@ cd "$(dirname "$0")/.."
 
 GODOT_VERSION="4.7.2"
 GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+# SHA-512 of that zip, from the 4.7.2-stable release's SHA512-SUMS.txt. Pinned here so that a swapped download and a
+# swapped checksum list on the release page cannot both pass; update it together with GODOT_VERSION.
+GODOT_SHA512="9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65"
 GODOT_DL="${OFS_GODOT_DL:-build/godot-dl}"
 
 suite="${1:-all}"
@@ -33,15 +36,8 @@ if [ -z "${GODOT_BIN:-}" ]; then
         echo "Downloading Godot ${GODOT_VERSION} into $GODOT_DL ..."
         curl -sSL --retry 3 -o "$GODOT_DL/$GODOT_ASSET" \
             "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/$GODOT_ASSET"
-        curl -sSL --retry 3 -o "$GODOT_DL/SHA512-SUMS.txt" \
-            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/SHA512-SUMS.txt"
-        expected=$(grep "$GODOT_ASSET" "$GODOT_DL/SHA512-SUMS.txt" | grep -oE "[0-9a-f]{128}" | head -1)
-        if [ -z "$expected" ]; then
-            echo "FAILED: the SHA-512 list has no entry for $GODOT_ASSET"
-            exit 1
-        fi
-        echo "$expected  $GODOT_DL/$GODOT_ASSET" | sha512sum --check --status \
-            || { echo "FAILED: the Godot download did not match SHA512-SUMS.txt"; exit 1; }
+        echo "$GODOT_SHA512  $GODOT_DL/$GODOT_ASSET" | sha512sum --check --status \
+            || { echo "FAILED: the Godot download does not match the SHA-512 pinned in this script"; rm -f "$GODOT_DL/$GODOT_ASSET"; exit 1; }
         unzip -q -o "$GODOT_DL/$GODOT_ASSET" -d "$GODOT_DL"
         chmod +x "$GODOT_BIN"
     fi
@@ -79,6 +75,7 @@ fi
 
 if [ "$suite" = e2e ] || [ "$suite" = all ]; then
     run_godot 180 --headless --path godot -s res://tests/e2e_open_loop.gd
+    run_godot 180 --headless --path godot -s res://tests/e2e_errors.gd
     if [ -n "${OFS_SITL_LAUNCH:-}" ]; then
         run_godot 300 --headless --path godot -s res://tests/e2e_betaflight.gd
     else

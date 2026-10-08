@@ -78,32 +78,25 @@ impl OfsClient {
     #[signal]
     fn request_failed(kind: GString, message: GString);
 
-    /// Starts connecting; returns at once. Returns false (and logs why) when already started or the settings are
-    /// invalid. Keys: `quad_path` (required), `server_addr`, `server_bin` (a program to start when nothing
+    /// Starts connecting; returns at once. Returns an empty string when it started, otherwise why it did not
+    /// ("already started", or which setting is invalid). Keys: `quad_path` (required), `server_addr`, `server_bin` (a program to start when nothing
     /// answers), `data_dir`, `log_file`, `env` (Dictionary of String to String for the started server), `seed`,
     /// `open_loop`, `overrun_policy` ("warn" or "slow"), `state_rate_hz`, `stick_rate_hz`.
     #[func]
-    fn start(&mut self, settings: VarDictionary) -> bool {
+    fn start(&mut self, settings: VarDictionary) -> GString {
         if self.client.is_some() {
-            godot_error!("OfsClient.start: already started");
-            return false;
+            return GString::from("already started");
         }
         let settings = match parse_settings(&settings) {
             Ok(settings) => settings,
-            Err(message) => {
-                godot_error!("OfsClient.start: {message}");
-                return false;
-            }
+            Err(message) => return GString::from(message.as_str()),
         };
         match Client::start(settings) {
             Ok(client) => {
                 self.client = Some(client);
-                true
+                GString::new()
             }
-            Err(error) => {
-                godot_error!("OfsClient.start: {error}");
-                false
-            }
+            Err(error) => GString::from(error.to_string().as_str()),
         }
     }
 

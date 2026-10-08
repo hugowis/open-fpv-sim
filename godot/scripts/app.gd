@@ -51,7 +51,12 @@ func _ready() -> void:
 	client.event_received.connect(_on_event)
 	client.request_failed.connect(_on_request_failed)
 	client.session_ready.connect(_on_session_ready)
-	client.start(AppSettings.to_client_dict(settings))
+	var error: String = client.start(AppSettings.to_client_dict(settings))
+	if error != "":
+		push_error("OfsClient.start: " + error)
+		hud.show_fatal("Could not start the simulator client: %s
+Check the [client] section of user://ofs_client.cfg and the OFS_* variables, then restart." % error)
+		set_process(false)
 
 
 func _load_controls() -> void:

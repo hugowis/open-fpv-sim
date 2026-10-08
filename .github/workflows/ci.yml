@@ -42,8 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      # Builds ofs-sim + ofs-godot, downloads Godot 4.7.2 (SHA-512 verified),
-      # runs the unit suites and the open-loop e2e; the Betaflight e2e skips.
+      # Builds ofs-sim + ofs-godot, downloads Godot 4.7.2 (checked against the pinned SHA-512),
+      # runs the unit suites and the open-loop and error e2e; the Betaflight e2e skips.
       - run: bash scripts/run-godot-tests.sh all
 
   sitl:
