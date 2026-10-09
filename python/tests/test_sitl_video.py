@@ -1,5 +1,5 @@
-"""OSD, VTX and ESC telemetry through the API against Betaflight SITL (spec docs/superpowers/specs/2026-10-08-m3a).
-Needs OFS_SITL_LAUNCH."""
+"""OSD, VTX, ESC telemetry and the analog video link through the API against Betaflight SITL (specs
+docs/superpowers/specs/2026-10-08-m3a and 2026-10-09-m3b). Needs OFS_SITL_LAUNCH."""
 import os
 import pathlib
 import re
@@ -9,7 +9,7 @@ import socket
 import pytest
 
 import ofs
-from conftest import QUAD
+from conftest import QUAD, WORLD
 
 pytestmark = pytest.mark.skipif(not os.environ.get("OFS_SITL_LAUNCH"),
                                 reason="set OFS_SITL_LAUNCH to run against Betaflight SITL")
@@ -152,3 +152,63 @@ def test_the_osd_and_vtx_survive_a_betaflight_reboot(sim):
     assert state.fc_restarts == 1
     assert sim.get_osd().present, "the OSD never came back after the reboot"
     assert state.vtx.present and state.vtx.freq_mhz == 5658, state.vtx
+
+
+def far_pilot_world(tmp_path):
+    """The flat field with the pilot 300 m south of the launch pad, looking north at it: far enough for the VTX power
+    to matter."""
+    text = pathlib.Path(WORLD).read_text().replace("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [-300.0, 0.0, -1.7]")
+    path = tmp_path / "far.toml"
+    path.write_text(text)
+    return str(path)
+
+
+R1, R2, R8 = 32, 33, 39  # SmartAudio channel index: (band - 1) * 8 + (channel - 1), Raceband is band 5
+
+
+def set_vtx(msp, index, power_level, pit=0):
+    """The Configurator's VTX tab: band and channel as one index, power level 1..4 (25, 200, 600, 1000 mW), pit mode."""
+    msp.request(MSP_SET_VTX_CONFIG, bytes([index, 0, power_level, pit]))
+
+
+def test_vtx_power_moves_the_snr_and_pit_mode_loses_the_picture(sim, tmp_path):
+    sim.load(QUAD, seed=1, world=far_pilot_world(tmp_path))
+    sim.run(6.0)
+    sim.events()
+    msp = Msp(sim)
+    try:
+        set_vtx(msp, R1, 1)
+        low = sim.run(1.0)
+        set_vtx(msp, R1, 3)
+        high = sim.run(1.0)
+        set_vtx(msp, R1, 3, pit=1)
+        pit = sim.run(1.0)
+    finally:
+        msp.close()
+    assert (low.vtx.power_mw, high.vtx.power_mw, pit.vtx.pit_mode) == (25, 600, True), (low.vtx, high.vtx, pit.vtx)
+    gained = high.video.snr_db - low.video.snr_db
+    assert abs(gained - 13.8) < 0.5, f"25 -> 600 mW is +13.8 dB: got {gained:.2f} ({low.video} -> {high.video})"
+    assert low.video.sync == "locked" and high.video.sync == "locked", (low.video, high.video)
+    assert pit.video.sync == "lost" and pit.video.noise > 0.9, pit.video
+    lost = [e for e in sim.events() if e.kind == "video_lost"]
+    assert lost and "SNR" in lost[-1].message, lost
+
+
+def test_moving_off_the_parked_quads_channel_lowers_the_interference(sim, tmp_path):
+    sim.load(QUAD, seed=1, world=far_pilot_world(tmp_path))
+    sim.run(6.0)
+    msp = Msp(sim)
+    try:
+        set_vtx(msp, R1, 3)
+        r1 = sim.run(1.0)
+        set_vtx(msp, R2, 3)  # the parked quad's channel
+        r2 = sim.run(1.0)
+        set_vtx(msp, R8, 3)
+        r8 = sim.run(1.0)
+    finally:
+        msp.close()
+    assert (r1.vtx.freq_mhz, r2.vtx.freq_mhz, r8.vtx.freq_mhz) == (5658, 5695, 5917)
+    v1, v2, v8 = r1.video, r2.video, r8.video
+    assert abs((v2.interference_dbm - v1.interference_dbm) - 22.8) < 0.5, (v1, v2)  # 37 MHz of rejection: 22.75 dB
+    assert v8.interference_dbm < v2.interference_dbm - 39.0, (v2, v8)  # 222 MHz away: 40 dB
+    assert v2.snr_db < v1.snr_db - 3.0, "on the parked quad's channel the picture gets worse"

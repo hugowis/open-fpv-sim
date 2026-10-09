@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## Betaflight's OSD, drawn from the character grid the simulator decodes. It sits on layer 2: above the lens (layer 1,
-## the camera optics) and below the HUD (layer 4). Layer 3 is reserved for the analog degradation of M3b, which must
-## see the picture and this OSD together, as a real analog link does. Hidden in the chase view.
+## the camera optics) and below the analog video layer (3, ui/video.gd), which breaks up the picture and this OSD
+## together as a real analog link does; the HUD is on layer 4. Hidden in the chase view.
 
 const FONT: Texture2D = preload("res://ui/osd_font.png")
 const GLYPH_W := 12

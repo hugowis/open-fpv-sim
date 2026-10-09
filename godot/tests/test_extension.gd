@@ -39,6 +39,13 @@ func test_osd_and_vtx_getters_are_inert_before_start() -> void:
 	client.queue_free()
 
 
+func test_the_world_getters_are_inert_before_start() -> void:
+	var client := await _client()
+	eq(client.get_world(), {}, "no world")
+	eq(client.get_world_version(), 0, "no world updates")
+	client.queue_free()
+
+
 func test_invalid_settings_are_reported_as_text() -> void:
 	var client := await _client()
 	ok(client.start({}).contains("quad_path"), "a quad is required")

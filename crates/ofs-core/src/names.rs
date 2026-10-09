@@ -80,7 +80,7 @@ pub const FC_RESTARTS: &str = "fc.restarts";
 /// Cumulative bytes SITL reported dropping from its UART TX capture buffers (a consumer fell behind).
 pub const FC_SERIAL_DROPPED: &str = "fc.serial_dropped_bytes";
 
-/// 1.0 when a VTX is wired to the flight controller.
+/// 1.0 when the quad has a VTX (it transmits from load on, with or without Betaflight).
 pub const VTX_PRESENT: &str = "vtx.present";
 /// Band 1..=6 (A, B, E, F, R, L); 0 while the VTX is in user-frequency mode.
 pub const VTX_BAND: &str = "vtx.band";
@@ -91,3 +91,25 @@ pub const VTX_FREQ_MHZ: &str = "vtx.freq_mhz";
 pub const VTX_POWER_MW: &str = "vtx.power_mw";
 /// 1.0 while the VTX is in pit mode.
 pub const VTX_PIT: &str = "vtx.pit_mode";
+
+/// 1.0 when the quad has a VTX, so the video link model runs.
+pub const VIDEO_PRESENT: &str = "video.present";
+/// Signal-to-noise ratio in dB at the receiver antenna in use.
+pub const VIDEO_SNR: &str = "video.snr_db";
+/// Index (into the world's receiver antennas) of the antenna in use.
+pub const VIDEO_ANTENNA: &str = "video.antenna";
+/// Other emitters' power after the receiver's channel filter, at the antenna in use, in dBm.
+pub const VIDEO_INTERFERENCE: &str = "video.interference_dbm";
+/// Picture grain, 0 (clean) to 1 (static).
+pub const VIDEO_NOISE: &str = "video.noise";
+/// FM threshold sparkles, 0 to 1.
+pub const VIDEO_SPARKLES: &str = "video.sparkles";
+/// Colour saturation, 1 (full colour) to 0 (black and white).
+pub const VIDEO_CHROMA: &str = "video.chroma";
+/// 0 locked, 1 unstable (tearing), 2 lost (rolling, static).
+pub const VIDEO_SYNC: &str = "video.sync";
+
+/// Received power in dBm at one receiver antenna, by its name in the world file.
+pub fn video_rssi(antenna: &str) -> String {
+    format!("video.rssi_dbm.{antenna}")
+}

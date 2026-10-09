@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use glam::{DQuat, DVec3};
-use ofs_config::{FcKind, QuadConfig};
+use ofs_config::world::{self as world_cfg, WorldConfig};
+use ofs_config::{FcKind, QuadConfig, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
@@ -22,8 +23,10 @@ use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMoun
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
+use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
-use ofs_video::vtx::{band_index, VtxModel, VtxParams};
+use ofs_video::propagation::{Antenna, AntennaKind, Obstacle, Polarization, Shape};
+use ofs_video::vtx::{band_index, VtxModel, VtxParams, FREQUENCIES_MHZ};
 
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
@@ -31,6 +34,8 @@ pub struct BuildOptions {
     /// Per-quad firmware working directories live under here.
     pub data_dir: PathBuf,
     pub fc_override: Option<FcKind>,
+    /// The field the quad flies in: the pilot's goggles, objects and other transmitters (the video link's world).
+    pub world: WorldConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +76,38 @@ pub struct VtxInfo {
     pub pit_mode: bool,
 }
 
+/// The analog video link as the goggles see it (`present = false` and a clean picture without a VTX).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoInfo {
+    pub present: bool,
+    pub snr_db: f64,
+    pub interference_dbm: f64,
+    /// Received power at each goggle antenna, in the world file's order.
+    pub rssi_dbm: Vec<(String, f64)>,
+    /// The antenna the receiver uses.
+    pub active_antenna: String,
+    pub noise: f64,
+    pub sparkles: f64,
+    pub chroma: f64,
+    pub sync: VideoSync,
+}
+
+impl Default for VideoInfo {
+    fn default() -> Self {
+        Self {
+            present: false,
+            snr_db: 0.0,
+            interference_dbm: 0.0,
+            rssi_dbm: Vec::new(),
+            active_antenna: String::new(),
+            noise: 0.0,
+            sparkles: 0.0,
+            chroma: 1.0,
+            sync: VideoSync::Locked,
+        }
+    }
+}
+
 /// Faults a script can inject (spec §6.2). The v1 catalog completes in M4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
@@ -104,6 +141,53 @@ pub struct VehicleState {
     pub vtx: VtxInfo,
     /// TX bytes Betaflight's UART capture dropped because a consumer fell behind.
     pub serial_dropped_bytes: u64,
+    pub video: VideoInfo,
+}
+
+struct VideoHandles {
+    present: Signal<f64>,
+    snr: Signal<f64>,
+    interference: Signal<f64>,
+    rssi: Vec<(String, Signal<f64>)>,
+    antenna: Signal<f64>,
+    noise: Signal<f64>,
+    sparkles: Signal<f64>,
+    chroma: Signal<f64>,
+    sync: Signal<f64>,
+}
+
+impl VideoHandles {
+    fn register(bus: &mut Bus, world: &WorldConfig) -> Self {
+        Self {
+            present: bus.signal(names::VIDEO_PRESENT),
+            snr: bus.signal(names::VIDEO_SNR),
+            interference: bus.signal(names::VIDEO_INTERFERENCE),
+            rssi: world.receiver.antennas.iter().map(|a| (a.name.clone(), bus.signal(&names::video_rssi(&a.name)))).collect(),
+            antenna: bus.signal(names::VIDEO_ANTENNA),
+            noise: bus.signal(names::VIDEO_NOISE),
+            sparkles: bus.signal(names::VIDEO_SPARKLES),
+            chroma: bus.signal(names::VIDEO_CHROMA),
+            sync: bus.signal(names::VIDEO_SYNC),
+        }
+    }
+
+    fn read(&self, b: &Bus) -> VideoInfo {
+        if b.get(self.present) < 0.5 {
+            return VideoInfo::default();
+        }
+        let active = b.get(self.antenna) as usize;
+        VideoInfo {
+            present: true,
+            snr_db: b.get(self.snr),
+            interference_dbm: b.get(self.interference),
+            rssi_dbm: self.rssi.iter().map(|(name, s)| (name.clone(), b.get(*s))).collect(),
+            active_antenna: self.rssi.get(active).map(|(name, _)| name.clone()).unwrap_or_default(),
+            noise: b.get(self.noise),
+            sparkles: b.get(self.sparkles),
+            chroma: b.get(self.chroma),
+            sync: VideoSync::from_signal(b.get(self.sync)),
+        }
+    }
 }
 
 struct Handles {
@@ -133,10 +217,11 @@ struct Handles {
     vtx_power: Signal<f64>,
     vtx_pit: Signal<f64>,
     serial_dropped: Signal<f64>,
+    video: VideoHandles,
 }
 
 impl Handles {
-    fn register(bus: &mut Bus, motors: usize) -> Self {
+    fn register(bus: &mut Bus, motors: usize, world: &WorldConfig) -> Self {
         Self {
             pos: bus.signal(names::BODY_POS_NED),
             vel: bus.signal(names::BODY_VEL_NED),
@@ -164,6 +249,7 @@ impl Handles {
             vtx_power: bus.signal(names::VTX_POWER_MW),
             vtx_pit: bus.signal(names::VTX_PIT),
             serial_dropped: bus.signal(names::FC_SERIAL_DROPPED),
+            video: VideoHandles::register(bus, world),
         }
     }
 }
@@ -173,6 +259,7 @@ pub struct Vehicle {
     h: Handles,
     sitl: bool,
     osd: Option<OsdHandle>,
+    world: WorldConfig,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -224,20 +311,127 @@ fn video_devices(cfg: &QuadConfig, motors: usize, fc_divisor: u32, bus: &mut Bus
     if let Some(x) = &cfg.vtx {
         let requests = Wire::new(VIDEO_TAP_CAPACITY);
         let replies = Wire::new(VIDEO_TAP_CAPACITY);
-        let params = VtxParams {
-            power_levels_mw: x.power_levels_mw.clone(),
-            power_levels_dbm: x.power_levels_dbm.clone(),
-            default_band: band_index(&x.default_band)
-                .ok_or_else(|| SimError::InvalidArgument(format!("vtx.default_band {:?} is not a band letter", x.default_band)))?,
-            default_channel: x.default_channel,
-            default_power_index: x.default_power_index,
-            reply_latency_s: x.reply_latency_ms / 1000.0,
-        };
         v.taps.push(SerialTap { uart_index: x.uart - 1, tx: requests.clone() });
         v.serial.push(SerialLink { uart_index: x.uart - 1, rx: replies.clone() });
-        v.after_fc.push(Box::new(VtxModel::new(params, requests, replies, fc_divisor, bus)));
+        v.after_fc.push(Box::new(vtx_model(x, requests, replies, fc_divisor, bus)?));
     }
     Ok(v)
+}
+
+/// The VTX: it answers SmartAudio on `requests`/`replies` and transmits its power-up channel and power from the start.
+fn vtx_model(x: &VtxSection, requests: Wire, replies: Wire, divisor: u32, bus: &mut Bus) -> Result<VtxModel, SimError> {
+    let params = VtxParams {
+        power_levels_mw: x.power_levels_mw.clone(),
+        power_levels_dbm: x.power_levels_dbm.clone(),
+        default_band: band_index(&x.default_band)
+            .ok_or_else(|| SimError::InvalidArgument(format!("vtx.default_band {:?} is not a band letter", x.default_band)))?,
+        default_channel: x.default_channel,
+        default_power_index: x.default_power_index,
+        reply_latency_s: x.reply_latency_ms / 1000.0,
+    };
+    Ok(VtxModel::new(params, requests, replies, divisor, bus))
+}
+
+fn polarization(p: world_cfg::Polarization) -> Polarization {
+    match p {
+        world_cfg::Polarization::Rhcp => Polarization::Rhcp,
+        world_cfg::Polarization::Lhcp => Polarization::Lhcp,
+        world_cfg::Polarization::Linear => Polarization::Linear,
+    }
+}
+
+fn antenna_kind(kind: world_cfg::AntennaKind, beamwidth_deg: Option<f64>) -> AntennaKind {
+    match kind {
+        world_cfg::AntennaKind::Omni => AntennaKind::Omni,
+        world_cfg::AntennaKind::Patch => AntennaKind::Patch { beamwidth_deg: beamwidth_deg.unwrap_or(60.0) },
+    }
+}
+
+/// A direction in NED from a heading (degrees clockwise from north) and an elevation (degrees up).
+pub fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
+    let (h, e) = (heading_deg.to_radians(), elevation_deg.to_radians());
+    DVec3::new(e.cos() * h.cos(), e.cos() * h.sin(), -e.sin())
+}
+
+/// An emitter's frequency: its `freq_mhz`, or its band and channel in the factory table.
+pub(crate) fn emitter_freq_mhz(e: &world_cfg::EmitterSection) -> Result<f64, SimError> {
+    if let Some(f) = e.freq_mhz {
+        return Ok(f);
+    }
+    let band = e.band.as_deref().and_then(band_index);
+    match (band, e.channel) {
+        (Some(b), Some(c @ 1..=8)) => Ok(f64::from(FREQUENCIES_MHZ[b][usize::from(c) - 1])),
+        _ => Err(SimError::InvalidArgument(format!("emitter {:?} has no valid frequency", e.name))),
+    }
+}
+
+/// The video link's view of the world file and the quad's VTX antenna.
+pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkParams, SimError> {
+    let facing = world.pilot.facing_deg;
+    let antennas = world
+        .receiver
+        .antennas
+        .iter()
+        .map(|a| ReceiverAntenna {
+            name: a.name.clone(),
+            antenna: Antenna {
+                kind: antenna_kind(a.kind, a.beamwidth_deg),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
+            },
+        })
+        .collect();
+    let obstacles = world
+        .objects
+        .iter()
+        .filter(|o| o.rf_loss_db > 0.0)
+        .map(|o| {
+            let center = v3(o.center_ned_m);
+            let shape = match o.shape {
+                world_cfg::Shape::Box => {
+                    let s = o.size_m.unwrap_or_default();
+                    Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
+                }
+                world_cfg::Shape::Cylinder => {
+                    Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
+                }
+            };
+            Obstacle { shape: shape.rooted(), rf_loss_db: o.rf_loss_db }
+        })
+        .collect();
+    let emitters = world
+        .emitters
+        .iter()
+        .map(|e| {
+            Ok(Emitter {
+                position: v3(e.position_ned_m),
+                freq_mhz: emitter_freq_mhz(e)?,
+                power_mw: e.power_mw,
+                antenna: Antenna { kind: AntennaKind::Omni, gain_dbi: e.gain_dbi, polarization: polarization(e.polarization), axis: DVec3::NEG_Z },
+            })
+        })
+        .collect::<Result<Vec<_>, SimError>>()?;
+    let a = &vtx.antenna;
+    Ok(VideoLinkParams {
+        world: LinkWorld {
+            pilot_position: v3(world.pilot.position_ned_m),
+            antennas,
+            noise_floor_dbm: world.receiver.noise_floor_dbm,
+            diversity: world.receiver.diversity,
+            obstacles,
+            emitters,
+        },
+        vtx_antenna: Antenna {
+            kind: antenna_kind(a.kind, a.beamwidth_deg),
+            gain_dbi: a.gain_dbi,
+            polarization: polarization(a.polarization),
+            axis: v3(a.mount_frd).normalize(),
+        },
+        pit_power_mw: vtx.pit_power_mw,
+        fading: true,
+        ground_bounce: true,
+    })
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
@@ -332,7 +526,13 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
     let mut osd: Option<OsdHandle> = None;
     match fc_kind {
-        FcKind::OpenLoop => models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus))),
+        FcKind::OpenLoop => {
+            models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus)));
+            // No Betaflight to talk to, but the VTX is on the quad all the same: it transmits its power-up channel.
+            if let Some(x) = &cfg.vtx {
+                models.push(Box::new(vtx_model(x, Wire::new(VIDEO_TAP_CAPACITY), Wire::new(VIDEO_TAP_CAPACITY), fc_divisor, &mut bus)?));
+            }
+        }
         FcKind::Sitl => {
             let video = video_devices(cfg, n, fc_divisor, &mut bus)?;
             let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
@@ -372,13 +572,18 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             osd = video.osd;
         }
     }
+    if let Some(x) = &cfg.vtx {
+        // Last in the tick: it reads the pose the physics wrote and the channel the VTX published.
+        let params = link_params(x, &opts.world)?;
+        models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, &mut bus)));
+    }
 
-    let h = Handles::register(&mut bus, n);
+    let h = Handles::register(&mut bus, n, &opts.world);
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
         scheduler.add(m);
     }
-    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd };
+    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone() };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
@@ -445,6 +650,11 @@ impl Vehicle {
         self.osd.as_ref().map(OsdHandle::latest)
     }
 
+    /// The world the vehicle flies in (the open field when the session named none).
+    pub fn world(&self) -> &WorldConfig {
+        &self.world
+    }
+
     pub fn state(&self) -> VehicleState {
         let b = self.scheduler.bus();
         let h = &self.h;
@@ -474,6 +684,7 @@ impl Vehicle {
                 pit_mode: b.get(h.vtx_pit) > 0.5,
             },
             serial_dropped_bytes: b.get(h.serial_dropped) as u64,
+            video: h.video.read(b),
         }
     }
 
@@ -531,14 +742,96 @@ mod tests {
         assert!(video.before_fc.is_empty() && video.after_fc.is_empty());
     }
 
+    fn flat_world() -> WorldConfig {
+        world_cfg::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"))).unwrap()
+    }
+
+    fn open_loop(cfg: &QuadConfig, world: WorldConfig) -> Vehicle {
+        let opts = BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-unit-test-data"),
+            fc_override: Some(FcKind::OpenLoop),
+            world,
+        };
+        build(cfg, &opts).unwrap()
+    }
+
     #[test]
-    fn an_open_loop_vehicle_has_no_osd_and_no_vtx() {
-        let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-unit-test-data"), fc_override: Some(FcKind::OpenLoop) };
-        let mut vehicle = build(&shipped_quad(), &opts).unwrap();
+    fn an_open_loop_vehicle_has_its_vtx_at_the_power_up_channel_but_no_osd() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         vehicle.run_for(0.05).unwrap();
         let state = vehicle.state();
-        assert_eq!(state.vtx, VtxInfo { present: false, band: 0, channel: 0, freq_mhz: 0, power_mw: 0, pit_mode: false });
+        assert_eq!(state.vtx, VtxInfo { present: true, band: 5, channel: 1, freq_mhz: 5658, power_mw: 200, pit_mode: false });
         assert_eq!(state.serial_dropped_bytes, 0);
         assert!(vehicle.osd_frame().is_none());
+        assert!(state.video.present);
+        assert_eq!(state.video.sync, VideoSync::Locked, "{:?}", state.video);
+        assert_eq!(state.video.active_antenna, "omni");
+        assert_eq!(vehicle.world().name, "open field");
+    }
+
+    #[test]
+    fn a_quad_without_a_vtx_has_no_video_link() {
+        let mut cfg = shipped_quad();
+        cfg.vtx = None;
+        let mut vehicle = open_loop(&cfg, flat_world());
+        vehicle.run_for(0.05).unwrap();
+        let state = vehicle.state();
+        assert!(!state.vtx.present);
+        assert_eq!(state.video, VideoInfo::default());
+    }
+
+    #[test]
+    fn the_link_parameters_follow_the_world_file() {
+        let world = flat_world();
+        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world).unwrap();
+        let w = &params.world;
+        assert_eq!(w.pilot_position, DVec3::new(-3.0, 2.0, -1.7));
+        assert_eq!(w.antennas.len(), 2);
+        assert!((w.antennas[0].antenna.axis - DVec3::NEG_Z).length() < 1e-12, "the omni stands upright");
+        let patch = w.antennas[1].antenna;
+        assert_eq!(patch.kind, AntennaKind::Patch { beamwidth_deg: 60.0 });
+        let expected = DVec3::new(10f64.to_radians().cos(), 0.0, -10f64.to_radians().sin());
+        assert!((patch.axis - expected).length() < 1e-12, "the patch looks north, 10 degrees up: {}", patch.axis);
+        assert_eq!(w.obstacles.len(), 4, "only the buildings take signal");
+        assert_eq!(w.emitters.len(), 1);
+        assert_eq!(w.emitters[0].freq_mhz, 5695.0, "R2");
+        assert!((params.vtx_antenna.axis - DVec3::new(-0.5, 0.0, -1.0).normalize()).length() < 1e-12);
+        assert_eq!(params.pit_power_mw, 0.1);
+        assert!(params.fading && params.ground_bounce);
+        assert!((aim_ned(90.0, 0.0) - DVec3::Y).length() < 1e-12, "heading 90 is east");
+    }
+
+    /// The quad resting on the ground at `north`, `east` in the flat world (or the same world without objects).
+    fn snr_at(north: f64, east: f64, objects: bool, power_index: usize) -> VideoInfo {
+        let mut cfg = shipped_quad();
+        cfg.initial.position_ned_m = [north, east, -0.03];
+        cfg.vtx.as_mut().unwrap().default_power_index = power_index;
+        let mut world = flat_world();
+        if !objects {
+            world.objects.clear();
+        }
+        let mut vehicle = open_loop(&cfg, world);
+        vehicle.run_for(0.2).unwrap();
+        vehicle.state().video
+    }
+
+    #[test]
+    fn the_picture_is_clean_near_the_pilot_and_lost_far_away() {
+        let near = snr_at(10.0, 0.0, true, 1);
+        assert_eq!((near.sync, near.noise, near.chroma), (VideoSync::Locked, 0.0, 1.0), "10 m out at 200 mW: {near:?}");
+        let far = snr_at(4000.0, 0.0, true, 0);
+        assert_eq!(far.sync, VideoSync::Lost, "4 km out at 25 mW: {far:?}");
+        assert!(far.noise > 0.9, "static: {far:?}");
+        assert_eq!(far.active_antenna, "patch", "out in front the patch hears it best");
+    }
+
+    #[test]
+    fn building_b_shadows_the_quad_behind_it() {
+        // Twice as far from the pilot as building B's centre, on the same bearing: the building is in the way.
+        let (north, east) = (-3.0 + 2.0 * 78.0, 2.0 + 2.0 * 36.0);
+        let open = snr_at(north, east, false, 1);
+        let shadowed = snr_at(north, east, true, 1);
+        assert!(open.snr_db - shadowed.snr_db > 15.0, "open {} dB, behind the building {} dB", open.snr_db, shadowed.snr_db);
     }
 }

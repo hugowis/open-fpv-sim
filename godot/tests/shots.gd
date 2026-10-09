@@ -2,7 +2,7 @@ extends SceneTree
 ## Renders the game to PNG files with a real renderer (a window opens briefly), to check the visuals by eye:
 ##   godot --path godot -s res://tests/shots.gd -- --out=C:/some/dir
 ## Flies the open-loop drone forward for a moment, then saves start_fpv.png, start_chase.png, osd_fpv.png, hop_fpv.png,
-## hop_chase.png, help.png and controls.png.
+## hop_chase.png, video_grain.png, video_unstable.png, video_lost.png, help.png and controls.png.
 
 func _initialize() -> void:
 	_run()
@@ -75,6 +75,20 @@ func _run() -> void:
 	await _frames(20)
 	await _save("hop_chase")
 	app.set_chase_view(false)
+	# The analog link's looks, forced (the drone stays near the pilot, where the real link is clean). `_process` would
+	# overwrite them with the real telemetry, so it is paused while they are shot (after the HUD has caught up).
+	await _frames(3)
+	app.set_process(false)
+	for look in [["video_grain", {"video_noise": 0.45, "video_sparkles": 0.1, "video_chroma": 1.0, "video_sync": "locked"}],
+			["video_unstable", {"video_noise": 0.7, "video_sparkles": 0.6, "video_chroma": 0.3, "video_sync": "unstable"}],
+			["video_lost", {"video_noise": 1.0, "video_sparkles": 1.0, "video_chroma": 0.0, "video_sync": "lost"}]]:
+		var t: Dictionary = look[1]
+		t["video_present"] = true
+		for i in 10:
+			app.video.update_view(t, 0.03)
+			await process_frame
+		await _save(look[0])
+	app.set_process(true)
 	app.hud.set_help_visible(true)
 	await _save("help")
 	app.hud.set_help_visible(false)

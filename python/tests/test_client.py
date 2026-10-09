@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 import ofs
-from conftest import QUAD
+from conftest import QUAD, WORLD
 
 
 def test_open_loop_rest_then_climb(sim):
@@ -128,14 +128,54 @@ def test_pilot_busy_and_internal_are_typed():
     assert isinstance(from_rpc_error(FakeRpcError("internal", "boom")), ofs.InternalError)
 
 
-def test_osd_and_vtx_are_absent_without_firmware(sim):
+def test_without_firmware_the_osd_is_absent_but_the_vtx_transmits(sim):
     sim.load(QUAD, open_loop_fc=True)
     osd = sim.get_osd()
     assert (osd.present, osd.cols, osd.rows) == (False, 0, 0)
     assert osd.rows_text() == [] and osd.text == ""
-    state = sim.state()
-    assert state.vtx == ofs.Vtx() and not state.vtx.present
+    state = sim.run(0.1)
+    assert state.vtx == ofs.Vtx(present=True, band=5, channel=1, freq_mhz=5658, power_mw=200, pit_mode=False)
     assert state.serial_dropped_bytes == 0
+    assert state.video.present and state.video.sync == "locked", state.video
+    assert list(state.video.rssi) == ["omni"], "the open field's single antenna"
+
+
+def test_a_session_flies_in_its_world(sim):
+    sim.load(QUAD, open_loop_fc=True, world=WORLD)
+    world = sim.get_world()
+    assert world.name == "Flat field"
+    assert world.pilot_position_ned_m == (-3.0, 2.0, -1.7)
+    assert [a.name for a in world.antennas] == ["omni", "patch"]
+    assert len(world.objects) == 30
+    b = next(o for o in world.objects if o.name == "BuildingB")
+    assert (b.shape, b.size_m, b.rf_loss_db) == ("box", (10.0, 10.0, 22.0), 30.0)
+    assert [(e.name, e.freq_mhz) for e in world.emitters] == [("parked-quad", 5695.0)]
+    video = sim.run(0.5).video
+    assert video.present and video.sync == "locked" and video.snr_db > 40.0, video
+    assert list(video.rssi) == ["omni", "patch"] and video.active_antenna in video.rssi
+    assert 0.0 <= video.noise <= 1.0 and video.chroma == 1.0
+    sim.load(QUAD, open_loop_fc=True)
+    assert sim.get_world().name == "open field"
+
+
+def test_a_bad_world_path_is_a_config_error(sim):
+    with pytest.raises(ofs.ConfigError):
+        sim.load(QUAD, open_loop_fc=True, world="no/such/world.toml")
+    with pytest.raises(ofs.NotLoaded):
+        sim.get_world()
+
+
+def test_video_messages_convert():
+    from ofs.client import _event, _video
+    from ofs.v1 import sim_pb2 as pb
+
+    m = pb.VideoLink(present=True, snr_db=2.5, sync=pb.VIDEO_SYNC_LOST, active_antenna="patch",
+                     rssi=[pb.AntennaRssi(name="omni", rssi_dbm=-90.0), pb.AntennaRssi(name="patch", rssi_dbm=-85.0)])
+    v = _video(m)
+    assert (v.sync, v.active_antenna, v.rssi) == ("lost", "patch", {"omni": -90.0, "patch": -85.0})
+    assert _video(pb.VideoLink()).sync == "" and not _video(pb.VideoLink()).present
+    assert _event(pb.Event(kind=pb.EVENT_KIND_VIDEO_LOST)).kind == "video_lost"
+    assert _event(pb.Event(kind=pb.EVENT_KIND_VIDEO_RESTORED)).kind == "video_restored"
 
 
 def test_the_osd_helpers_read_packed_cells():

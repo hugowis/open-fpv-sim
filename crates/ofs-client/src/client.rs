@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::error::{ClientError, ErrorKind};
 use crate::interp::{Pose, StateBuffer};
-use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update};
+use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
 use crate::worker::{lock, run, Shared};
 
 /// How long `shutdown` waits for the supervisor (it unloads the session of a server it launched).
@@ -61,6 +61,8 @@ impl Client {
             telemetry: Mutex::new(None),
             osd: Mutex::new(None),
             osd_version: AtomicU64::new(0),
+            world: Mutex::new(None),
+            world_version: AtomicU64::new(0),
         });
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (finished_tx, finished_rx) = std_mpsc::channel();
@@ -151,6 +153,16 @@ impl Client {
     /// Counts OSD updates (and clears): a changed value means [`osd`](Self::osd) has something new to draw.
     pub fn osd_version(&self) -> u64 {
         self.shared.osd_version.load(Ordering::Acquire)
+    }
+
+    /// The world of the loaded session, in Godot's frame; `None` before the first load and while one is under way.
+    pub fn world(&self) -> Option<World> {
+        lock(&self.shared.world).clone()
+    }
+
+    /// Counts world updates (and clears): a changed value means [`world`](Self::world) has something new to build.
+    pub fn world_version(&self) -> u64 {
+        self.shared.world_version.load(Ordering::Acquire)
     }
 
     /// Ends the session (unloading it first when this client launched the server) and stops the supervisor.

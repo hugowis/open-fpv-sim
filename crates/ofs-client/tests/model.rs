@@ -1,4 +1,5 @@
-use ofs_client::{ClientError, ErrorKind, Event, EventKind, OsdFrame, Sticks, Telemetry, VtxInfo};
+use glam::DVec3;
+use ofs_client::{ClientError, ErrorKind, Event, EventKind, OsdFrame, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -106,4 +107,73 @@ fn new_event_kinds_have_names() {
     assert_eq!(e.kind.as_str(), "vtx_changed");
     let e = Event::from_pb(pb::Event { time_s: 1.0, kind: pb::EventKind::SerialOverflow as i32, message: String::new() });
     assert_eq!(e.kind.as_str(), "serial_overflow");
+}
+
+#[test]
+fn video_messages_convert() {
+    let m = pb::VideoLink {
+        present: true,
+        snr_db: 7.5,
+        interference_dbm: -100.0,
+        rssi: vec![pb::AntennaRssi { name: "omni".into(), rssi_dbm: -90.0 }, pb::AntennaRssi { name: "patch".into(), rssi_dbm: -85.5 }],
+        active_antenna: "patch".into(),
+        noise: 0.6,
+        sparkles: 0.1,
+        chroma: 0.8,
+        sync: pb::VideoSync::Unstable as i32,
+    };
+    let v = VideoInfo::from_pb(&m);
+    assert_eq!(v.sync, VideoSync::Unstable);
+    assert_eq!(v.sync.as_str(), "unstable");
+    assert_eq!(v.rssi_dbm, vec![("omni".to_string(), -90.0), ("patch".to_string(), -85.5)]);
+    assert_eq!((v.active_antenna.as_str(), v.snr_db, v.noise, v.chroma), ("patch", 7.5, 0.6, 0.8));
+    let absent = VideoInfo::from_pb(&pb::VideoLink::default());
+    assert_eq!(absent.sync, VideoSync::None);
+    assert_eq!(absent.sync.as_str(), "");
+    let t = Telemetry::from_pb(&pb::State::default());
+    assert_eq!(t.video, VideoInfo::default(), "a state without video: no link, a clean picture");
+    assert_eq!(t.video.chroma, 1.0);
+}
+
+#[test]
+fn the_world_converts_to_godots_frame() {
+    let v = |x, y, z| Some(pb::Vec3 { x, y, z });
+    let w = World::from_pb(pb::World {
+        name: "Flat field".into(),
+        pilot_position_ned_m: v(-3.0, 2.0, -1.7),
+        pilot_facing_deg: 0.0,
+        antennas: vec![
+            pb::ReceiverAntenna { name: "omni".into(), kind: "omni".into(), aim_el_deg: 90.0, ..Default::default() },
+            pb::ReceiverAntenna { name: "patch".into(), kind: "patch".into(), aim_az_deg: 0.0, aim_el_deg: 10.0, ..Default::default() },
+        ],
+        objects: vec![pb::WorldObject {
+            name: "BuildingA".into(),
+            shape: "box".into(),
+            center_ned_m: v(110.0, -45.0, -7.0),
+            size_m: v(12.0, 14.0, 14.0),
+            color: v(0.62, 0.64, 0.66),
+            rf_loss_db: 25.0,
+            ..Default::default()
+        }],
+        emitters: vec![pb::Emitter { name: "parked-quad".into(), position_ned_m: v(30.0, -60.0, -1.0), freq_mhz: 5695.0, power_mw: 25.0 }],
+    });
+    assert_eq!(w.pilot_position, DVec3::new(2.0, 1.7, 3.0), "east, up, south");
+    let b = &w.objects[0];
+    assert_eq!(b.center, DVec3::new(-45.0, 7.0, -110.0), "where world.gd drew building A");
+    assert_eq!(b.size, DVec3::new(14.0, 14.0, 12.0), "east, height, north");
+    assert_eq!(b.color, [0.62, 0.64, 0.66]);
+    assert!((w.antennas[0].aim - DVec3::Y).length() < 1e-12, "the omni stands up: {}", w.antennas[0].aim);
+    let up = 10f64.to_radians();
+    assert!((w.antennas[1].aim - DVec3::new(0.0, up.sin(), -up.cos())).length() < 1e-12, "the patch looks north (-Z), 10 degrees up");
+    assert_eq!(w.emitters[0].position, DVec3::new(-60.0, 1.0, -30.0));
+    let east = World::from_pb(pb::World { pilot_facing_deg: 90.0, antennas: vec![pb::ReceiverAntenna { aim_el_deg: 0.0, ..Default::default() }], ..Default::default() });
+    assert!((east.antennas[0].aim - DVec3::X).length() < 1e-12, "facing east, aimed ahead: +X");
+}
+
+#[test]
+fn the_video_event_kinds_have_names() {
+    let e = Event::from_pb(pb::Event { time_s: 1.0, kind: pb::EventKind::VideoLost as i32, message: "video lost: SNR -2.0 dB on omni".into() });
+    assert_eq!((e.kind, e.kind.as_str()), (EventKind::VideoLost, "video_lost"));
+    let e = Event::from_pb(pb::Event { time_s: 1.0, kind: pb::EventKind::VideoRestored as i32, message: String::new() });
+    assert_eq!(e.kind.as_str(), "video_restored");
 }

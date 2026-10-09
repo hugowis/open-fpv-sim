@@ -110,3 +110,20 @@ func test_updates_cope_with_missing_data() -> void:
 	hud.update_view(_view({"sticks": {"roll": 0.1, "pitch": -0.2, "yaw": 0.0, "throttle": 0.5, "aux": [1.0, -1.0, -1.0, -1.0]}}))
 	ok(true, "no errors")
 	hud.queue_free()
+
+
+func test_the_video_line_shows_the_signal_and_its_antenna() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	eq(hud.video_text(), "", "no video link in the telemetry")
+	var video := {"video_present": true, "video_snr_db": 18.4, "video_sync": "locked", "video_noise": 0.2,
+		"video_antenna": "patch", "video_rssi": {"omni": -78.2, "patch": -71.4}}
+	hud.update_view(_view({"telemetry": _telemetry(video)}))
+	eq(hud.video_text(), "VID 18 dB  patch  -71 dBm", "the line")
+	video["video_sync"] = "lost"
+	video["video_snr_db"] = -2.6
+	hud.update_view(_view({"telemetry": _telemetry(video)}))
+	eq(hud.video_text(), "VID -3 dB  patch  -71 dBm  NO SYNC", "without sync")
+	hud.update_view(_view({"telemetry": {}}))
+	eq(hud.video_text(), "", "cleared with the telemetry")
+	hud.queue_free()

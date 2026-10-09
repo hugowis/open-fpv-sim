@@ -22,6 +22,8 @@ const TIPS := {
 @onready var chase_camera: Camera3D = $ChaseCamera
 @onready var lens: CanvasLayer = $Lens
 @onready var osd: CanvasLayer = $Osd
+@onready var video: CanvasLayer = $Video
+@onready var world: Node3D = $World
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 
@@ -36,12 +38,16 @@ var last_sticks := {}
 var phase_kind := ""
 var _link_was_lost := false
 var _osd_version := -1
+var _world_version := -1
 
 
 func _ready() -> void:
 	settings = AppSettings.load_settings()
 	_load_controls()
 	controls_menu.setup(controls, CONTROLS_PATH)
+	video.effects = settings["video_effects"]
+	controls_menu.set_video_effects(settings["video_effects"])
+	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
 	if not ClassDB.class_exists("OfsClient"):
 		hud.show_fatal("The OfsClient extension is not loaded.\nBuild it with `cargo build -p ofs-godot` (docs/dev-setup.md) and restart.")
 		set_process(false)
@@ -78,9 +84,14 @@ func _process(delta: float) -> void:
 	if osd_version != _osd_version:
 		_osd_version = osd_version
 		osd.set_frame(client.get_osd())
+	var world_version: int = client.get_world_version()
+	if world_version != _world_version:
+		_world_version = world_version
+		world.build(client.get_world())
 	var telemetry: Dictionary = client.get_telemetry()
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
+	video.update_view(telemetry, delta)
 	var detail: String = client.get_phase_detail()
 	if client.get_phase() == "failed" and TIPS.has(phase_kind):
 		detail += "\n" + TIPS[phase_kind]
@@ -126,6 +137,14 @@ func set_chase_view(chase: bool) -> void:
 	(chase_camera if chase else fpv_camera).make_current()
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
+	video.set_enabled(not chase)
+
+
+func _on_video_effects_toggled(on: bool) -> void:
+	video.effects = on
+	settings["video_effects"] = on
+	if not AppSettings.save_value("video_effects", on):
+		hud.add_toast("Could not save the Video effects setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
 func set_radio_cut(cut: bool) -> void:
@@ -175,6 +194,10 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast(message)
 		"vtx_changed":
 			hud.add_toast("VTX: %s" % message)
+		"video_lost":
+			hud.add_toast("Video lost - %s" % message.trim_prefix("video lost: "), "warn")
+		"video_restored":
+			hud.add_toast("Video back - %s" % message.trim_prefix("video restored: "))
 		"serial_overflow":
 			hud.add_toast("Betaflight UART output dropped: %s" % message, "warn")
 		_:

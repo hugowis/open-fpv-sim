@@ -1,26 +1,52 @@
 extends Node3D
-## A grey-box world: sky, sun, a ground plane with a metre grid, a launch pad, pylons, gates and a few buildings.
-## It is only drawn. The simulator knows the ground (a plane at height 0) and nothing else, so nothing here
-## collides with the drone.
+## The grey-box world. The sky, the sun and the ground plane with its metre grid are drawn here; the objects on the
+## field (launch pad, pylons, gates, buildings), the pilot's spot and other transmitters come from the world file the
+## simulator loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here collides with
+## the drone: the simulator's ground is a plane at height 0, and it knows the objects only for the video signal.
 ##
 ## Godot's frame: +Y up, forward (north, where the drone starts facing) is -Z, +X is right (east).
 
 const GRID_SHADER := preload("res://world/grid.gdshader")
 
-const ORANGE := Color(1.0, 0.45, 0.1)
-const WHITE := Color(0.92, 0.92, 0.9)
-const GREEN := Color(0.2, 0.8, 0.35)
-const YELLOW := Color(0.95, 0.8, 0.15)
-const CONCRETE := Color(0.62, 0.64, 0.66)
+const PILOT_COLOR := Color(0.25, 0.55, 1.0)
+const EMITTER_COLOR := Color(0.85, 0.25, 0.85)
+## Where the pilot's eyes are below the goggle position, and how tall the marker is.
+const PILOT_BODY_HEIGHT_M := 1.5
+
+## The nodes `build` made, removed by the next `build`.
+var _built: Array[Node] = []
 
 
 func _ready() -> void:
 	_add_environment()
 	_add_ground()
-	_add_launch_pad()
-	_add_pylons()
-	_add_gates()
-	_add_buildings()
+
+
+## Replaces the field's objects and markers with those of `world` (the Dictionary `OfsClient.get_world()` returns;
+## an empty one clears the field).
+func build(world: Dictionary) -> void:
+	for node in _built:
+		remove_child(node)
+		node.queue_free()
+	_built.clear()
+	for o in world.get("objects", []):
+		match o.get("shape", ""):
+			"box":
+				_box(o["name"], o["center"], o["size"], o["color"])
+			"cylinder":
+				_cylinder(o["name"], o["center"], o["radius"], o["height"], o["color"])
+	if world.has("pilot_position"):
+		_add_pilot(world["pilot_position"], world.get("antennas", []))
+	for e in world.get("emitters", []):
+		_add_emitter(e)
+
+
+## The names of the nodes the world file made (for the tests and the e2e).
+func built_names() -> PackedStringArray:
+	var names := PackedStringArray()
+	for node in _built:
+		names.append(node.name)
+	return names
 
 
 func _add_environment() -> void:
@@ -59,35 +85,6 @@ func _add_ground() -> void:
 	add_child(ground)
 
 
-func _add_launch_pad() -> void:
-	_box("LaunchPad", Vector3(0, 0.01, 0), Vector3(3.0, 0.02, 3.0), Color(0.78, 0.78, 0.76))
-
-
-func _add_pylons() -> void:
-	# Two rows of pylons along the flight direction, every 15 m.
-	for i in range(1, 9):
-		var z := -15.0 * i
-		_cylinder("Pylon%dL" % i, Vector3(-6.0, 1.5, z), 0.15, 3.0, ORANGE if i % 2 == 0 else WHITE)
-		_cylinder("Pylon%dR" % i, Vector3(6.0, 1.5, z), 0.15, 3.0, WHITE if i % 2 == 0 else ORANGE)
-
-
-func _add_gates() -> void:
-	var gates := [[-30.0, GREEN], [-60.0, YELLOW], [-90.0, GREEN]]
-	for i in gates.size():
-		var z: float = gates[i][0]
-		var color: Color = gates[i][1]
-		_box("Gate%dPostL" % i, Vector3(-1.6, 1.25, z), Vector3(0.12, 2.5, 0.12), color)
-		_box("Gate%dPostR" % i, Vector3(1.6, 1.25, z), Vector3(0.12, 2.5, 0.12), color)
-		_box("Gate%dBar" % i, Vector3(0.0, 2.5, z), Vector3(3.32, 0.12, 0.12), color)
-
-
-func _add_buildings() -> void:
-	_box("BuildingA", Vector3(-45.0, 7.0, -110.0), Vector3(14.0, 14.0, 12.0), CONCRETE)
-	_box("BuildingB", Vector3(38.0, 11.0, -75.0), Vector3(10.0, 22.0, 10.0), CONCRETE.darkened(0.15))
-	_box("BuildingC", Vector3(70.0, 5.0, -140.0), Vector3(30.0, 10.0, 18.0), CONCRETE.lightened(0.1))
-	_box("BuildingD", Vector3(-80.0, 9.0, -30.0), Vector3(12.0, 18.0, 12.0), CONCRETE.darkened(0.05))
-
-
 func _material(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
@@ -95,15 +92,24 @@ func _material(color: Color) -> StandardMaterial3D:
 	return material
 
 
-func _box(node_name: String, center: Vector3, size: Vector3, color: Color) -> void:
-	var mesh := BoxMesh.new()
-	mesh.size = size
+func _add_built(node: Node3D) -> void:
+	add_child(node)
+	_built.append(node)
+
+
+func _mesh(node_name: String, mesh: Mesh, color: Color, position_: Vector3) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
 	instance.name = node_name
 	instance.mesh = mesh
 	instance.material_override = _material(color)
-	instance.position = center
-	add_child(instance)
+	instance.position = position_
+	return instance
+
+
+func _box(node_name: String, center: Vector3, size: Vector3, color: Color) -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	_add_built(_mesh(node_name, mesh, color, center))
 
 
 func _cylinder(node_name: String, center: Vector3, radius: float, height: float, color: Color) -> void:
@@ -111,9 +117,51 @@ func _cylinder(node_name: String, center: Vector3, radius: float, height: float,
 	mesh.top_radius = radius
 	mesh.bottom_radius = radius
 	mesh.height = height
-	var instance := MeshInstance3D.new()
-	instance.name = node_name
-	instance.mesh = mesh
-	instance.material_override = _material(color)
-	instance.position = center
-	add_child(instance)
+	_add_built(_mesh(node_name, mesh, color, center))
+
+
+## A figure where the pilot stands (its head at the goggles), with a pointer along each patch antenna's aim.
+func _add_pilot(goggles: Vector3, antennas: Array) -> void:
+	var pilot := Node3D.new()
+	pilot.name = "Pilot"
+	pilot.position = goggles
+	var body := CylinderMesh.new()
+	body.top_radius = 0.18
+	body.bottom_radius = 0.22
+	body.height = PILOT_BODY_HEIGHT_M
+	pilot.add_child(_mesh("Body", body, PILOT_COLOR, Vector3(0.0, -0.2 - PILOT_BODY_HEIGHT_M * 0.5, 0.0)))
+	var head := SphereMesh.new()
+	head.radius = 0.13
+	head.height = 0.26
+	pilot.add_child(_mesh("Head", head, PILOT_COLOR, Vector3.ZERO))
+	for a in antennas:
+		if a.get("kind", "") != "patch":
+			continue
+		var aim: Vector3 = a["aim"]
+		var pointer := BoxMesh.new()
+		pointer.size = Vector3(0.05, 0.05, 0.8)
+		var arrow := _mesh("Aim_" + String(a["name"]), pointer, PILOT_COLOR.lightened(0.4), aim * 0.5)
+		arrow.basis = Basis.looking_at(aim, Vector3.UP if absf(aim.y) < 0.99 else Vector3.FORWARD)
+		pilot.add_child(arrow)
+	_add_built(pilot)
+
+
+## A post up to the transmitter, labelled with its frequency.
+func _add_emitter(e: Dictionary) -> void:
+	var at: Vector3 = e["position"]
+	var marker := Node3D.new()
+	marker.name = "Emitter_" + String(e["name"])
+	marker.position = Vector3(at.x, 0.0, at.z)
+	var post := CylinderMesh.new()
+	post.top_radius = 0.05
+	post.bottom_radius = 0.05
+	post.height = maxf(at.y, 0.1)
+	marker.add_child(_mesh("Post", post, EMITTER_COLOR, Vector3(0.0, post.height * 0.5, 0.0)))
+	var label := Label3D.new()
+	label.name = "Label"
+	label.text = "%s  %d MHz" % [e["name"], int(e["freq_mhz"])]
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position = Vector3(0.0, post.height + 0.4, 0.0)
+	label.modulate = EMITTER_COLOR
+	marker.add_child(label)
+	_add_built(marker)

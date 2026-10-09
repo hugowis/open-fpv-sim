@@ -6,6 +6,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 QUAD = str(REPO / "quads" / "opendrone-5f-freestyle.toml")
+WORLD = str(REPO / "worlds" / "flat.toml")
 
 
 @pytest.fixture(scope="session")

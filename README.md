@@ -3,11 +3,13 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-Status: **M2b — the Godot pilot client.**
+Status: **M3b — the analog video link.**
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
 - Betaflight Configurator should connect to the running simulator (the manual check with the desktop app is pending). A reboot sent to its port makes the simulator relaunch SITL from its EEPROM (verified live).
 - A Godot pilot client flies the simulator from a game window, through the same radio link (see below).
+- Betaflight's own OSD, a SmartAudio VTX and the battery reach the FPV view (M3a), and a 5.8 GHz analog link model
+  breaks the picture up with distance, attitude, buildings and interference (M3b, `docs/research/video-link.md`).
 
 - Design: `docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`
 - SITL interface findings: `docs/research/sitl-interface.md`
@@ -33,7 +35,9 @@ A game window on top of the same simulator: FPV and chase cameras, an HUD (phase
 and Betaflight flying through the simulated ExpressLRS/CRSF link into real firmware — failsafe, reboots and the
 Configurator port all behave as in the Python session. Betaflight's own OSD is drawn in the FPV view, the VTX is
 controlled by Betaflight over SmartAudio and shown in the HUD, and the battery reaches Betaflight so its OSD shows
-real voltage and warnings. A USB radio in joystick mode, a gamepad or the keyboard
+real voltage and warnings. The world (`worlds/flat.toml`: launch pad, gates, buildings, the pilot's spot and a parked
+quad's VTX) is a data file the simulator loads; its analog video link degrades the picture and the OSD together, like
+real goggles. A USB radio in joystick mode, a gamepad or the keyboard
 flies it; the F2 screen sets the bindings, and they persist to `user://controls.json` (Godot's per-user data dir,
 `%APPDATA%\Godot\app_userdata\Open FPV Sim\` on Windows, `~/.local/share/godot/app_userdata/Open FPV Sim/` on Linux).
 
@@ -46,7 +50,8 @@ the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
 command-line flags after `--`. By default the game starts `ofs-sim` itself (from `target/release`, else
-`target/debug`, else `PATH`) on `127.0.0.1:50051` and loads `quads/opendrone-5f-freestyle.toml` in real time.
+`target/debug`, else `PATH`) on `127.0.0.1:50051` and loads `quads/opendrone-5f-freestyle.toml` in
+`worlds/flat.toml` in real time.
 Overrides:
 
 | Setting | Environment | Flag |
@@ -57,6 +62,8 @@ Overrides:
 | data dir | `OFS_DATA_DIR` | `--data-dir=` |
 | open loop (no firmware) | `OFS_OPEN_LOOP` | `--open-loop` |
 | SITL launch command | `OFS_SITL_LAUNCH` | `--sitl-launch=` |
+| world file | `OFS_WORLD` | `--world=` |
+| video effects (on/off) | `OFS_VIDEO_EFFECTS` | `--video-effects=` |
 
     godot --path godot -- --open-loop              # fly the model without Betaflight
 

@@ -13,6 +13,8 @@ const ENV_NAMES := {
 	"OFS_DATA_DIR": "data_dir",
 	"OFS_OPEN_LOOP": "open_loop",
 	"OFS_SITL_LAUNCH": "sitl_launch",
+	"OFS_WORLD": "world_path",
+	"OFS_VIDEO_EFFECTS": "video_effects",
 }
 ## Command-line flag -> setting (`--name=value`; `--open-loop` alone means true).
 const FLAG_NAMES := {
@@ -22,6 +24,8 @@ const FLAG_NAMES := {
 	"--data-dir": "data_dir",
 	"--open-loop": "open_loop",
 	"--sitl-launch": "sitl_launch",
+	"--world": "world_path",
+	"--video-effects": "video_effects",
 }
 
 
@@ -44,6 +48,8 @@ static func defaults() -> Dictionary:
 		"server_bin": server_bin,
 		"data_dir": root.path_join(".ofs-data"),
 		"quad_path": root.path_join("quads").path_join("opendrone-5f-freestyle.toml"),
+		"world_path": root.path_join("worlds").path_join("flat.toml"),
+		"video_effects": true,
 		"sitl_launch": "",
 		"open_loop": false,
 		"seed": 1,
@@ -99,10 +105,22 @@ static func load_settings() -> Dictionary:
 	return resolve(config, env, OS.get_cmdline_user_args())
 
 
+## Stores one setting in the `[client]` section of user://ofs_client.cfg (for settings changed in the game, like
+## "Video effects"), keeping the rest of the file. Returns false when the file cannot be written.
+static func save_value(key: String, value, path := CONFIG_PATH) -> bool:
+	var file := ConfigFile.new()
+	# A missing file starts empty; one that exists but does not parse (a hand edit gone wrong) is left alone.
+	if FileAccess.file_exists(path) and file.load(path) != OK:
+		return false
+	file.set_value("client", key, value)
+	return file.save(path) == OK
+
+
 ## The dictionary `OfsClient.start` takes.
 static func to_client_dict(s: Dictionary) -> Dictionary:
 	var d := {
 		"quad_path": s["quad_path"],
+		"world_path": s["world_path"],
 		"server_addr": s["server_addr"],
 		"seed": s["seed"],
 		"open_loop": s["open_loop"],

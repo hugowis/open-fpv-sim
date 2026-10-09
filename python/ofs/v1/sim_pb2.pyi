@@ -19,6 +19,13 @@ class OverrunPolicy(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     OVERRUN_POLICY_WARN: _ClassVar[OverrunPolicy]
     OVERRUN_POLICY_SLOW: _ClassVar[OverrunPolicy]
 
+class VideoSync(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    VIDEO_SYNC_UNSPECIFIED: _ClassVar[VideoSync]
+    VIDEO_SYNC_LOCKED: _ClassVar[VideoSync]
+    VIDEO_SYNC_UNSTABLE: _ClassVar[VideoSync]
+    VIDEO_SYNC_LOST: _ClassVar[VideoSync]
+
 class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     EVENT_KIND_UNSPECIFIED: _ClassVar[EventKind]
@@ -32,12 +39,18 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_SESSION_ENDED: _ClassVar[EventKind]
     EVENT_KIND_VTX_CHANGED: _ClassVar[EventKind]
     EVENT_KIND_SERIAL_OVERFLOW: _ClassVar[EventKind]
+    EVENT_KIND_VIDEO_LOST: _ClassVar[EventKind]
+    EVENT_KIND_VIDEO_RESTORED: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
 OVERRUN_POLICY_UNSPECIFIED: OverrunPolicy
 OVERRUN_POLICY_WARN: OverrunPolicy
 OVERRUN_POLICY_SLOW: OverrunPolicy
+VIDEO_SYNC_UNSPECIFIED: VideoSync
+VIDEO_SYNC_LOCKED: VideoSync
+VIDEO_SYNC_UNSTABLE: VideoSync
+VIDEO_SYNC_LOST: VideoSync
 EVENT_KIND_UNSPECIFIED: EventKind
 EVENT_KIND_OVERRUN: EventKind
 EVENT_KIND_FIRMWARE_RESTARTED: EventKind
@@ -49,6 +62,8 @@ EVENT_KIND_PILOT_DISCONNECTED: EventKind
 EVENT_KIND_SESSION_ENDED: EventKind
 EVENT_KIND_VTX_CHANGED: EventKind
 EVENT_KIND_SERIAL_OVERFLOW: EventKind
+EVENT_KIND_VIDEO_LOST: EventKind
+EVENT_KIND_VIDEO_RESTORED: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -69,20 +84,22 @@ class HandshakeReply(_message.Message):
     def __init__(self, protocol_version: _Optional[int] = ..., server_version: _Optional[str] = ...) -> None: ...
 
 class LoadRequest(_message.Message):
-    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive")
+    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive", "world_path")
     QUAD_PATH_FIELD_NUMBER: _ClassVar[int]
     SEED_FIELD_NUMBER: _ClassVar[int]
     MODE_FIELD_NUMBER: _ClassVar[int]
     OPEN_LOOP_FC_FIELD_NUMBER: _ClassVar[int]
     OVERRUN_POLICY_FIELD_NUMBER: _ClassVar[int]
     KEEP_ALIVE_FIELD_NUMBER: _ClassVar[int]
+    WORLD_PATH_FIELD_NUMBER: _ClassVar[int]
     quad_path: str
     seed: int
     mode: Mode
     open_loop_fc: bool
     overrun_policy: OverrunPolicy
     keep_alive: bool
-    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ...) -> None: ...
+    world_path: str
+    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ..., world_path: _Optional[str] = ...) -> None: ...
 
 class LoadReply(_message.Message):
     __slots__ = ("quad_name", "base_hz", "configurator_address")
@@ -194,8 +211,38 @@ class Vtx(_message.Message):
     pit_mode: bool
     def __init__(self, present: _Optional[bool] = ..., band: _Optional[int] = ..., channel: _Optional[int] = ..., freq_mhz: _Optional[int] = ..., power_mw: _Optional[int] = ..., pit_mode: _Optional[bool] = ...) -> None: ...
 
+class AntennaRssi(_message.Message):
+    __slots__ = ("name", "rssi_dbm")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    RSSI_DBM_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    rssi_dbm: float
+    def __init__(self, name: _Optional[str] = ..., rssi_dbm: _Optional[float] = ...) -> None: ...
+
+class VideoLink(_message.Message):
+    __slots__ = ("present", "snr_db", "interference_dbm", "rssi", "active_antenna", "noise", "sparkles", "chroma", "sync")
+    PRESENT_FIELD_NUMBER: _ClassVar[int]
+    SNR_DB_FIELD_NUMBER: _ClassVar[int]
+    INTERFERENCE_DBM_FIELD_NUMBER: _ClassVar[int]
+    RSSI_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_ANTENNA_FIELD_NUMBER: _ClassVar[int]
+    NOISE_FIELD_NUMBER: _ClassVar[int]
+    SPARKLES_FIELD_NUMBER: _ClassVar[int]
+    CHROMA_FIELD_NUMBER: _ClassVar[int]
+    SYNC_FIELD_NUMBER: _ClassVar[int]
+    present: bool
+    snr_db: float
+    interference_dbm: float
+    rssi: _containers.RepeatedCompositeFieldContainer[AntennaRssi]
+    active_antenna: str
+    noise: float
+    sparkles: float
+    chroma: float
+    sync: VideoSync
+    def __init__(self, present: _Optional[bool] = ..., snr_db: _Optional[float] = ..., interference_dbm: _Optional[float] = ..., rssi: _Optional[_Iterable[_Union[AntennaRssi, _Mapping]]] = ..., active_antenna: _Optional[str] = ..., noise: _Optional[float] = ..., sparkles: _Optional[float] = ..., chroma: _Optional[float] = ..., sync: _Optional[_Union[VideoSync, str]] = ...) -> None: ...
+
 class State(_message.Message):
-    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes")
+    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video")
     TIME_S_FIELD_NUMBER: _ClassVar[int]
     POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_NED_MPS_FIELD_NUMBER: _ClassVar[int]
@@ -211,6 +258,7 @@ class State(_message.Message):
     FC_RESTARTS_FIELD_NUMBER: _ClassVar[int]
     VTX_FIELD_NUMBER: _ClassVar[int]
     SERIAL_DROPPED_BYTES_FIELD_NUMBER: _ClassVar[int]
+    VIDEO_FIELD_NUMBER: _ClassVar[int]
     time_s: float
     position_ned_m: Vec3
     velocity_ned_mps: Vec3
@@ -226,7 +274,8 @@ class State(_message.Message):
     fc_restarts: int
     vtx: Vtx
     serial_dropped_bytes: int
-    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ...) -> None: ...
+    video: VideoLink
+    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ...) -> None: ...
 
 class Event(_message.Message):
     __slots__ = ("time_s", "kind", "message")
@@ -247,3 +296,69 @@ class Fault(_message.Message):
     RADIO_LINK_LOSS_FIELD_NUMBER: _ClassVar[int]
     radio_link_loss: RadioLinkLoss
     def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ...) -> None: ...
+
+class ReceiverAntenna(_message.Message):
+    __slots__ = ("name", "kind", "gain_dbi", "beamwidth_deg", "polarization", "aim_az_deg", "aim_el_deg")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    GAIN_DBI_FIELD_NUMBER: _ClassVar[int]
+    BEAMWIDTH_DEG_FIELD_NUMBER: _ClassVar[int]
+    POLARIZATION_FIELD_NUMBER: _ClassVar[int]
+    AIM_AZ_DEG_FIELD_NUMBER: _ClassVar[int]
+    AIM_EL_DEG_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    kind: str
+    gain_dbi: float
+    beamwidth_deg: float
+    polarization: str
+    aim_az_deg: float
+    aim_el_deg: float
+    def __init__(self, name: _Optional[str] = ..., kind: _Optional[str] = ..., gain_dbi: _Optional[float] = ..., beamwidth_deg: _Optional[float] = ..., polarization: _Optional[str] = ..., aim_az_deg: _Optional[float] = ..., aim_el_deg: _Optional[float] = ...) -> None: ...
+
+class WorldObject(_message.Message):
+    __slots__ = ("name", "shape", "center_ned_m", "size_m", "radius_m", "height_m", "color", "rf_loss_db")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    SHAPE_FIELD_NUMBER: _ClassVar[int]
+    CENTER_NED_M_FIELD_NUMBER: _ClassVar[int]
+    SIZE_M_FIELD_NUMBER: _ClassVar[int]
+    RADIUS_M_FIELD_NUMBER: _ClassVar[int]
+    HEIGHT_M_FIELD_NUMBER: _ClassVar[int]
+    COLOR_FIELD_NUMBER: _ClassVar[int]
+    RF_LOSS_DB_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    shape: str
+    center_ned_m: Vec3
+    size_m: Vec3
+    radius_m: float
+    height_m: float
+    color: Vec3
+    rf_loss_db: float
+    def __init__(self, name: _Optional[str] = ..., shape: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., size_m: _Optional[_Union[Vec3, _Mapping]] = ..., radius_m: _Optional[float] = ..., height_m: _Optional[float] = ..., color: _Optional[_Union[Vec3, _Mapping]] = ..., rf_loss_db: _Optional[float] = ...) -> None: ...
+
+class Emitter(_message.Message):
+    __slots__ = ("name", "position_ned_m", "freq_mhz", "power_mw")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
+    FREQ_MHZ_FIELD_NUMBER: _ClassVar[int]
+    POWER_MW_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    position_ned_m: Vec3
+    freq_mhz: float
+    power_mw: float
+    def __init__(self, name: _Optional[str] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., freq_mhz: _Optional[float] = ..., power_mw: _Optional[float] = ...) -> None: ...
+
+class World(_message.Message):
+    __slots__ = ("name", "pilot_position_ned_m", "pilot_facing_deg", "antennas", "objects", "emitters")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    PILOT_POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
+    PILOT_FACING_DEG_FIELD_NUMBER: _ClassVar[int]
+    ANTENNAS_FIELD_NUMBER: _ClassVar[int]
+    OBJECTS_FIELD_NUMBER: _ClassVar[int]
+    EMITTERS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    pilot_position_ned_m: Vec3
+    pilot_facing_deg: float
+    antennas: _containers.RepeatedCompositeFieldContainer[ReceiverAntenna]
+    objects: _containers.RepeatedCompositeFieldContainer[WorldObject]
+    emitters: _containers.RepeatedCompositeFieldContainer[Emitter]
+    def __init__(self, name: _Optional[str] = ..., pilot_position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., pilot_facing_deg: _Optional[float] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ..., objects: _Optional[_Iterable[_Union[WorldObject, _Mapping]]] = ..., emitters: _Optional[_Iterable[_Union[Emitter, _Mapping]]] = ...) -> None: ...

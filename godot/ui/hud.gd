@@ -31,6 +31,7 @@ var _sim := Label.new()
 var _link := Label.new()
 var _battery := Label.new()
 var _vtx := Label.new()
+var _video := Label.new()
 var _flight := Label.new()
 var _configurator := Label.new()
 var _banner := Label.new()
@@ -53,6 +54,7 @@ func _ready() -> void:
 	_place(root, _link, 1.0, 0.0, 14.0, 14.0, true)
 	_place(root, _battery, 1.0, 0.0, 14.0, 44.0, true)
 	_place(root, _vtx, 1.0, 0.0, 14.0, 74.0, true)
+	_place(root, _video, 1.0, 0.0, 14.0, 104.0, true)
 	_place(root, _flight, 0.0, 1.0, 14.0, 14.0, false)
 	_place(root, _configurator, 1.0, 1.0, 14.0, 14.0, true)
 	_place(root, _toasts, 1.0, 0.5, 14.0, 0.0, true)
@@ -74,7 +76,7 @@ func _ready() -> void:
 	_place(root, _help, 0.5, 0.5, 0.0, 0.0, false)
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.grow_vertical = Control.GROW_DIRECTION_BOTH
-	for label in [_status, _sim, _link, _battery, _vtx, _flight, _configurator]:
+	for label in [_status, _sim, _link, _battery, _vtx, _video, _flight, _configurator]:
 		_style(label, 18)
 
 
@@ -127,7 +129,7 @@ func help_visible() -> bool:
 
 func set_hud_visible(visible_now: bool) -> void:
 	_shown = visible_now
-	for node in [_status, _sim, _link, _battery, _vtx, _flight, _configurator, _sticks_view, _toasts]:
+	for node in [_status, _sim, _link, _battery, _vtx, _video, _flight, _configurator, _sticks_view, _toasts]:
 		node.visible = visible_now
 
 
@@ -176,6 +178,10 @@ func vtx_text() -> String:
 	return _vtx.text
 
 
+func video_text() -> String:
+	return _video.text
+
+
 ## view: {phase, detail, telemetry: Dictionary (empty before the first state), sticks: Dictionary from Controls.read,
 ## controls_status, configurator, quad, camera, radio_cut}
 func update_view(view: Dictionary) -> void:
@@ -187,6 +193,7 @@ func update_view(view: Dictionary) -> void:
 		_link.text = ""
 		_battery.text = ""
 		_vtx.text = ""
+		_video.text = ""
 		_flight.text = ""
 	else:
 		var running: bool = t["running"]
@@ -203,6 +210,7 @@ func update_view(view: Dictionary) -> void:
 			_vtx.text = "VTX %s  %d MHz  %d mW%s" % [channel if channel != "" else "user", t["vtx_freq_mhz"], t["vtx_power_mw"], "  PIT" if t["vtx_pit_mode"] else ""]
 		else:
 			_vtx.text = ""
+		_update_video(t)
 		_flight.text = "ALT   %.1f m
 SPEED %.1f m/s
 CLIMB %+.1f m/s
@@ -214,6 +222,21 @@ MOTORS %s" % [
 	var address: String = view.get("configurator", "")
 	_configurator.text = "Betaflight Configurator: %s" % address if address != "" else ""
 	_update_banner(view, t, phase)
+
+
+## "VID 18 dB  patch  -71 dBm": the goggles' signal, the antenna in use and its power; green when the picture is clean,
+## yellow while it degrades, red without sync.
+func _update_video(t: Dictionary) -> void:
+	if not t.get("video_present", false):
+		_video.text = ""
+		return
+	var antenna: String = t.get("video_antenna", "")
+	var rssi: Dictionary = t.get("video_rssi", {})
+	var sync: String = t.get("video_sync", "")
+	_video.text = "VID %d dB  %s  %d dBm%s" % [
+		roundi(t["video_snr_db"]), antenna, roundi(rssi.get(antenna, 0.0)), "  NO SYNC" if sync == "lost" else ""]
+	var clean: bool = t.get("video_noise", 0.0) <= 0.0 and sync == "locked"
+	_video.add_theme_color_override("font_color", GREEN if clean else (RED if sync == "lost" else YELLOW))
 
 
 func _update_banner(view: Dictionary, t: Dictionary, phase: String) -> void:

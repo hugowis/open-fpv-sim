@@ -4,7 +4,7 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use ofs_client::{Command, ErrorKind, EventKind, Phase, Settings, Sticks, Update, VtxInfo};
+use ofs_client::{Command, ErrorKind, EventKind, Phase, Settings, Sticks, Update, VideoSync, VtxInfo};
 
 fn flying(server: &TestServer) -> Probe {
     let mut probe = Probe::start(server.settings());
@@ -157,13 +157,44 @@ fn shutting_down_stops_the_supervisor() {
 }
 
 #[test]
-fn a_quad_without_firmware_has_an_absent_osd_and_no_vtx() {
+fn a_quad_without_firmware_has_an_absent_osd_but_its_vtx_transmits() {
     let server = TestServer::start();
     let mut probe = flying(&server);
     probe.wait("the OSD stream delivers its first frame", SHORT, |p| p.client.osd().is_some());
     let osd = probe.client.osd().unwrap();
     assert!(!osd.present && osd.cols == 0 && osd.cells.is_empty(), "{osd:?}");
     assert!(probe.client.osd_version() >= 1);
-    probe.wait("states arrive", SHORT, |p| p.client.telemetry().is_some());
-    assert_eq!(probe.client.telemetry().unwrap().vtx, VtxInfo::default());
+    probe.wait("states with the VTX arrive", SHORT, |p| p.client.telemetry().is_some_and(|t| t.vtx.present));
+    let t = probe.client.telemetry().unwrap();
+    assert_eq!(t.vtx, VtxInfo { present: true, band: 5, channel: 1, freq_mhz: 5658, power_mw: 200, pit_mode: false });
+    assert!(t.video.present && t.video.sync == VideoSync::Locked, "{:?}", t.video);
+    let world = probe.client.world().expect("the world arrives with the load");
+    assert_eq!(world.name, "open field", "no world_path: the open field");
+}
+
+#[test]
+fn the_world_of_the_settings_arrives_with_the_load_and_again_after_a_reload() {
+    let server = TestServer::start();
+    let world_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml");
+    let mut probe = Probe::start(Settings { world_path: world_path.into(), ..server.settings() });
+    probe.wait_phase(Phase::Flying, LONG);
+    let world = probe.client.world().expect("the world is there once flying");
+    assert_eq!(world.name, "Flat field");
+    assert_eq!(world.objects.len(), 30);
+    assert_eq!(world.antennas.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["omni", "patch"]);
+    let version = probe.client.world_version();
+    probe.wait("telemetry names the antennas", SHORT, |p| p.client.telemetry().is_some_and(|t| t.video.rssi_dbm.len() == 2));
+    probe.client.send(Command::Reload);
+    probe.wait("the world is fetched again", LONG, |p| p.client.world_version() >= version + 2 && p.client.world().is_some());
+}
+
+#[test]
+fn a_missing_world_file_fails_with_a_config_error() {
+    let server = TestServer::start();
+    let mut probe = Probe::start(Settings { world_path: "no/such/world.toml".into(), ..server.settings() });
+    probe.wait_phase(Phase::Failed, SHORT);
+    let (_, detail, kind) = probe.client.phase();
+    assert_eq!(kind, Some(ErrorKind::Config));
+    assert!(detail.contains("no/such/world.toml"), "{detail}");
+    assert!(probe.client.world().is_none());
 }

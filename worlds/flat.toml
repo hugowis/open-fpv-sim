@@ -1,0 +1,274 @@
+# The grey-box field: a launch pad, two rows of pylons, three gates and four buildings on flat ground.
+# The simulator uses it for the video link (line of sight, diffraction around the buildings, interference); the Godot
+# client draws the objects from it. Nothing here collides with the drone: the simulator's ground is the plane d = 0.
+#
+# Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
+# All values are estimates.
+schema_version = 1
+name = "Flat field"
+
+[pilot]
+# Beside the launch pad, goggles 1.7 m up, looking north along the course.
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = true
+
+# Diversity goggles: an upright omni and a patch aimed ahead, tilted 10 degrees up.
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+[[receiver.antennas]]
+name = "patch"
+kind = "patch"
+gain_dbi = 8.0
+beamwidth_deg = 60.0
+polarization = "rhcp"
+aim_az_deg = 0.0
+aim_el_deg = 10.0
+
+# Another quad's VTX, left on at the west edge of the field on R2, next to the default R1.
+[[emitters]]
+name = "parked-quad"
+position_ned_m = [30.0, -60.0, -1.0]
+band = "R"
+channel = 2
+power_mw = 25.0
+
+[[objects]]
+name = "LaunchPad"
+shape = "box"
+center_ned_m = [0.0, 0.0, -0.01]
+size_m = [3.0, 3.0, 0.02]
+color = [0.78, 0.78, 0.76]
+
+# Two rows of pylons along the course, every 15 m, 6 m either side of it.
+[[objects]]
+name = "Pylon1L"
+shape = "cylinder"
+center_ned_m = [15.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon1R"
+shape = "cylinder"
+center_ned_m = [15.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon2L"
+shape = "cylinder"
+center_ned_m = [30.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon2R"
+shape = "cylinder"
+center_ned_m = [30.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon3L"
+shape = "cylinder"
+center_ned_m = [45.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon3R"
+shape = "cylinder"
+center_ned_m = [45.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon4L"
+shape = "cylinder"
+center_ned_m = [60.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon4R"
+shape = "cylinder"
+center_ned_m = [60.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon5L"
+shape = "cylinder"
+center_ned_m = [75.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon5R"
+shape = "cylinder"
+center_ned_m = [75.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon6L"
+shape = "cylinder"
+center_ned_m = [90.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon6R"
+shape = "cylinder"
+center_ned_m = [90.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon7L"
+shape = "cylinder"
+center_ned_m = [105.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+[[objects]]
+name = "Pylon7R"
+shape = "cylinder"
+center_ned_m = [105.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon8L"
+shape = "cylinder"
+center_ned_m = [120.0, -6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [1.0, 0.45, 0.1]
+
+[[objects]]
+name = "Pylon8R"
+shape = "cylinder"
+center_ned_m = [120.0, 6.0, -1.5]
+radius_m = 0.15
+height_m = 3.0
+color = [0.92, 0.92, 0.9]
+
+# Three gates on the course: two posts and a top bar each.
+[[objects]]
+name = "Gate0PostL"
+shape = "box"
+center_ned_m = [30.0, -1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate0PostR"
+shape = "box"
+center_ned_m = [30.0, 1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate0Bar"
+shape = "box"
+center_ned_m = [30.0, 0.0, -2.5]
+size_m = [0.12, 3.32, 0.12]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate1PostL"
+shape = "box"
+center_ned_m = [60.0, -1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.95, 0.8, 0.15]
+
+[[objects]]
+name = "Gate1PostR"
+shape = "box"
+center_ned_m = [60.0, 1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.95, 0.8, 0.15]
+
+[[objects]]
+name = "Gate1Bar"
+shape = "box"
+center_ned_m = [60.0, 0.0, -2.5]
+size_m = [0.12, 3.32, 0.12]
+color = [0.95, 0.8, 0.15]
+
+[[objects]]
+name = "Gate2PostL"
+shape = "box"
+center_ned_m = [90.0, -1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate2PostR"
+shape = "box"
+center_ned_m = [90.0, 1.6, -1.25]
+size_m = [0.12, 0.12, 2.5]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate2Bar"
+shape = "box"
+center_ned_m = [90.0, 0.0, -2.5]
+size_m = [0.12, 3.32, 0.12]
+color = [0.2, 0.8, 0.35]
+
+# Concrete buildings: they block the video signal.
+[[objects]]
+name = "BuildingA"
+shape = "box"
+center_ned_m = [110.0, -45.0, -7.0]
+size_m = [12.0, 14.0, 14.0]
+color = [0.62, 0.64, 0.66]
+rf_loss_db = 25.0
+
+[[objects]]
+name = "BuildingB"
+shape = "box"
+center_ned_m = [75.0, 38.0, -11.0]
+size_m = [10.0, 10.0, 22.0]
+color = [0.527, 0.544, 0.561]
+rf_loss_db = 30.0
+
+[[objects]]
+name = "BuildingC"
+shape = "box"
+center_ned_m = [140.0, 70.0, -5.0]
+size_m = [18.0, 30.0, 10.0]
+color = [0.658, 0.676, 0.694]
+rf_loss_db = 20.0
+
+[[objects]]
+name = "BuildingD"
+shape = "box"
+center_ned_m = [30.0, -80.0, -9.0]
+size_m = [12.0, 12.0, 18.0]
+color = [0.589, 0.608, 0.627]
+rf_loss_db = 25.0
