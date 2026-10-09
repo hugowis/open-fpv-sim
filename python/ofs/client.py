@@ -18,7 +18,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -31,6 +31,52 @@ class RadioLink:
     link_up: bool = False
     lq_pct: float = 0.0
     rssi_dbm: float = 0.0
+
+
+@dataclass(frozen=True)
+class Vtx:
+    """The video transmitter (all zero when the quad has none)."""
+    present: bool = False
+    band: int = 0  # 1..6 = A, B, E, F, R, L; 0 in user-frequency mode
+    channel: int = 0  # 1..8; 0 in user-frequency mode
+    freq_mhz: int = 0
+    power_mw: int = 0
+    pit_mode: bool = False
+
+    @property
+    def band_letter(self) -> str:
+        return "ABEFRL"[self.band - 1] if 1 <= self.band <= 6 else ""
+
+
+@dataclass(frozen=True)
+class Osd:
+    """Betaflight's OSD as a character grid. `cells` are row-major, each `char | page << 8 | blink << 10`."""
+    seq: int
+    time_s: float
+    present: bool
+    cols: int
+    rows: int
+    cells: tuple
+
+    def char(self, row: int, col: int) -> int:
+        return self.cells[row * self.cols + col] & 0xFF
+
+    def page(self, row: int, col: int) -> int:
+        return (self.cells[row * self.cols + col] >> 8) & 0x3
+
+    def blink(self, row: int, col: int) -> bool:
+        return bool((self.cells[row * self.cols + col] >> 10) & 1)
+
+    def rows_text(self) -> list:
+        """The rows as text. Printable ASCII is shown as is; Betaflight's symbols (battery icon, units) as `?`."""
+        out = []
+        for r in range(self.rows):
+            out.append("".join(chr(c) if 0x20 <= c <= 0x7E else "?" for c in (self.char(r, k) for k in range(self.cols))))
+        return out
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self.rows_text())
 
 
 @dataclass(frozen=True)
@@ -48,6 +94,8 @@ class State:
     running: bool = False
     overruns: int = 0
     fc_restarts: int = 0
+    vtx: Vtx = field(default_factory=Vtx)
+    serial_dropped_bytes: int = 0
 
     @property
     def altitude_m(self) -> float:
@@ -65,7 +113,7 @@ class State:
 @dataclass(frozen=True)
 class Event:
     time_s: float
-    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended"
+    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended", "vtx_changed", "serial_overflow"
     message: str
 
 
@@ -88,7 +136,13 @@ def _state(m) -> State:
         running=m.running,
         overruns=m.overruns,
         fc_restarts=m.fc_restarts,
+        vtx=Vtx(m.vtx.present, m.vtx.band, m.vtx.channel, m.vtx.freq_mhz, m.vtx.power_mw, m.vtx.pit_mode),
+        serial_dropped_bytes=m.serial_dropped_bytes,
     )
+
+
+def _osd(m) -> Osd:
+    return Osd(seq=m.seq, time_s=m.time_s, present=m.present, cols=m.cols, rows=m.rows, cells=tuple(m.cells))
 
 
 def _kind_name(kind: int) -> str:
@@ -187,12 +241,28 @@ class Sim:
     def state(self) -> State:
         return _state(self._call(self._stub.GetState, pb.Empty()))
 
+    def get_osd(self) -> Osd:
+        """The current OSD frame (`present` is False without an OSD)."""
+        return _osd(self._call(self._stub.GetOsd, pb.Empty()))
+
     def stream_states(self, rate_hz: int = 60):
         """Yields the state at `rate_hz` (1..240) until you stop iterating or the session ends."""
         call = self._stub.StreamState(pb.StreamRequest(rate_hz=rate_hz))
         try:
             for m in call:
                 yield _state(m)
+        except grpc.RpcError as e:
+            if e.code() != grpc.StatusCode.CANCELLED:
+                raise from_rpc_error(e) from None
+        finally:
+            call.cancel()
+
+    def stream_osd(self, rate_hz: int = 60):
+        """Yields the OSD when it changes (and once at the start), checked at up to `rate_hz` (1..60)."""
+        call = self._stub.StreamOsd(pb.StreamRequest(rate_hz=rate_hz))
+        try:
+            for m in call:
+                yield _osd(m)
         except grpc.RpcError as e:
             if e.code() != grpc.StatusCode.CANCELLED:
                 raise from_rpc_error(e) from None

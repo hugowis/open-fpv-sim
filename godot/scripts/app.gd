@@ -21,6 +21,7 @@ const TIPS := {
 @onready var fpv_camera: Camera3D = $Drone/FpvCamera
 @onready var chase_camera: Camera3D = $ChaseCamera
 @onready var lens: CanvasLayer = $Lens
+@onready var osd: CanvasLayer = $Osd
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 
@@ -34,6 +35,7 @@ var chase_view := false
 var last_sticks := {}
 var phase_kind := ""
 var _link_was_lost := false
+var _osd_version := -1
 
 
 func _ready() -> void:
@@ -72,6 +74,10 @@ func _process(delta: float) -> void:
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
 	if client.has_pose():
 		drone.transform = client.get_pose()
+	var osd_version: int = client.get_osd_version()
+	if osd_version != _osd_version:
+		_osd_version = osd_version
+		osd.set_frame(client.get_osd())
 	var telemetry: Dictionary = client.get_telemetry()
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
@@ -119,6 +125,7 @@ func set_chase_view(chase: bool) -> void:
 	chase_view = chase
 	(chase_camera if chase else fpv_camera).make_current()
 	lens.set_enabled(not chase)
+	osd.set_enabled(not chase)
 
 
 func set_radio_cut(cut: bool) -> void:
@@ -132,6 +139,8 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	if phase == "loading":
 		radio_cut = false  # a reloaded quad has no faults
 		_link_was_lost = false
+		osd.set_frame({})
+		_osd_version = -1
 	if phase == "failed":
 		hud.add_toast("Failed: %s" % detail.get_slice("\n", 0), "error")
 
@@ -164,6 +173,10 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast("Session ended: %s" % message, "warn")
 		"pilot_connected", "pilot_disconnected":
 			hud.add_toast(message)
+		"vtx_changed":
+			hud.add_toast("VTX: %s" % message)
+		"serial_overflow":
+			hud.add_toast("Betaflight UART output dropped: %s" % message, "warn")
 		_:
 			hud.add_toast("%s: %s" % [kind, message])
 

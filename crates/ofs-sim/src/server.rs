@@ -256,6 +256,10 @@ impl Sim for SimService {
         self.blocking(|_, slot| Ok(loaded(slot)?.state_msg())).await
     }
 
+    async fn get_osd(&self, _req: Request<pb::Empty>) -> Result<Response<pb::OsdFrame>, Status> {
+        self.blocking(|_, slot| Ok(loaded(slot)?.osd_msg())).await
+    }
+
     async fn unload(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
         self.blocking(|_, slot| {
             *slot = None;
@@ -269,6 +273,13 @@ impl Sim for SimService {
     async fn stream_state(&self, req: Request<pb::StreamRequest>) -> Result<Response<Self::StreamStateStream>, Status> {
         let rate_hz = streams::state_rate(req.into_inner().rate_hz)?;
         Ok(Response::new(streams::state_feed(self.shared.clone(), rate_hz)))
+    }
+
+    type StreamOsdStream = ReceiverStream<Result<pb::OsdFrame, Status>>;
+
+    async fn stream_osd(&self, req: Request<pb::StreamRequest>) -> Result<Response<Self::StreamOsdStream>, Status> {
+        let rate_hz = streams::osd_rate(req.into_inner().rate_hz)?;
+        Ok(Response::new(streams::osd_feed(self.shared.clone(), rate_hz)))
     }
 
     type PilotStream = ReceiverStream<Result<pb::State, Status>>;
@@ -347,6 +358,32 @@ mod tests {
         assert!(err.message().contains("internal panic: boom"), "{}", err.message());
         let state = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner();
         assert!(!state.running);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_session_without_an_osd_answers_get_osd_with_an_absent_frame() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let frame = svc.get_osd(Request::new(pb::Empty {})).await.unwrap().into_inner();
+        assert!(!frame.present);
+        assert_eq!((frame.cols, frame.rows, frame.seq), (0, 0, 0));
+        assert!(frame.cells.is_empty());
+        let state = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner();
+        let vtx = state.vtx.expect("State.vtx is always set");
+        assert!(!vtx.present);
+        assert_eq!(state.serial_dropped_bytes, 0);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn get_osd_needs_a_loaded_session_and_the_osd_stream_rate_is_validated() {
+        let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
+        assert_eq!(kind_of(&svc.get_osd(Request::new(pb::Empty {})).await.unwrap_err()), "not_loaded");
+        for hz in [61, 1000] {
+            let err = svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: hz })).await.err().expect("rate rejected");
+            assert_eq!(kind_of(&err), "invalid_argument", "rate {hz}");
+        }
+        assert!(svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: 0 })).await.is_ok(), "0 means the default rate");
         svc.shutdown();
     }
 }

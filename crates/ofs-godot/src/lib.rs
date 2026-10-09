@@ -180,7 +180,9 @@ impl OfsClient {
 
     /// The newest telemetry, or an empty Dictionary before the first state: `time_s`, `altitude_m`, `speed_mps`,
     /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` (PackedFloat32Array), `motors_spinning`,
-    /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `running`, `overruns`, `fc_restarts` and `age_s`.
+    /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `running`, `overruns`, `fc_restarts`, `age_s`, and the VTX's
+    /// `vtx_present`, `vtx_band`, `vtx_channel`, `vtx_channel_name` (a String, empty without a VTX), `vtx_freq_mhz`,
+    /// `vtx_power_mw` and `vtx_pit_mode`.
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -201,8 +203,37 @@ impl OfsClient {
         d.set("running", t.running);
         d.set("overruns", t.overruns as i64);
         d.set("fc_restarts", i64::from(t.fc_restarts));
+        d.set("vtx_present", t.vtx.present);
+        d.set("vtx_band", i64::from(t.vtx.band));
+        d.set("vtx_channel", i64::from(t.vtx.channel));
+        d.set("vtx_channel_name", &GString::from(t.vtx.channel_name().as_str()));
+        d.set("vtx_freq_mhz", i64::from(t.vtx.freq_mhz));
+        d.set("vtx_power_mw", i64::from(t.vtx.power_mw));
+        d.set("vtx_pit_mode", t.vtx.pit_mode);
         d.set("age_s", t.age_s);
         d
+    }
+
+    /// The newest OSD frame: `seq`, `time_s`, `present`, `cols`, `rows` and `cells` (a PackedInt32Array, row-major,
+    /// each `char | font_page << 8 | blink << 10`); an empty Dictionary before the first frame.
+    #[func]
+    fn get_osd(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(frame) = self.client.as_ref().and_then(|c| c.osd()) else { return d };
+        let cells: Vec<i32> = frame.cells.iter().map(|c| *c as i32).collect();
+        d.set("seq", frame.seq as i64);
+        d.set("time_s", frame.time_s);
+        d.set("present", frame.present);
+        d.set("cols", i64::from(frame.cols));
+        d.set("rows", i64::from(frame.rows));
+        d.set("cells", &PackedInt32Array::from(cells.as_slice()));
+        d
+    }
+
+    /// Counts OSD updates; when it changes, `get_osd()` has something new to draw.
+    #[func]
+    fn get_osd_version(&self) -> i64 {
+        self.client.as_ref().map_or(0, |c| c.osd_version() as i64)
     }
 }
 

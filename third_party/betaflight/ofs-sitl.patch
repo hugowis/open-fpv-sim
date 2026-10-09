@@ -1,8 +1,94 @@
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
-index a922cc7..0c7c47b 100644
+index a922cc7..664ae64 100644
 --- a/src/main/drivers/serial_tcp.c
 +++ b/src/main/drivers/serial_tcp.c
-@@ -255,6 +255,15 @@ void tcpDataOut(tcpPort_t *instance)
+@@ -35,6 +35,8 @@
+ 
+ #include "common/utils.h"
+ 
++#include <string.h>
++
+ #include "io/serial.h"
+ #include "serial_tcp.h"
+ 
+@@ -232,9 +234,76 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
+     tcpDataOut(s);
+ }
+ 
++#if ENABLE_SIMULATOR_EXTERNAL_TIME
++// Lockstep builds: what Betaflight writes to UART2 and up is captured for the simulator instead of waiting for a TCP
++// client (UART1 stays the real MSP port for Configurator). tcpSerialTakeTx() hands the bytes to the reply datagram.
++#define TX_CAPTURE_SIZE 4096
++static uint8_t txCapture[SERIAL_PORT_COUNT][TX_CAPTURE_SIZE];
++static unsigned txCaptureLen[SERIAL_PORT_COUNT];
++static unsigned txCaptureDropped;
++static pthread_mutex_t txCaptureLock = PTHREAD_MUTEX_INITIALIZER;
++
++static void tcpCaptureTx(tcpPort_t *s)
++{
++    const unsigned id = s->id;
++    if (id >= SERIAL_PORT_COUNT) {
++        return;
++    }
++    pthread_mutex_lock(&s->txLock);
++    pthread_mutex_lock(&txCaptureLock);
++    while (s->port.txBufferTail != s->port.txBufferHead) {
++        if (txCaptureLen[id] < TX_CAPTURE_SIZE) {
++            txCapture[id][txCaptureLen[id]++] = s->port.txBuffer[s->port.txBufferTail];
++        } else if (txCaptureDropped < 0xFFFF) {
++            txCaptureDropped++;
++        }
++        if (++s->port.txBufferTail >= s->port.txBufferSize) {
++            s->port.txBufferTail = 0;
++        }
++    }
++    pthread_mutex_unlock(&txCaptureLock);
++    pthread_mutex_unlock(&s->txLock);
++}
++
++// Fills `out` (at most `room` bytes) with blocks [uart index][len lo][len hi][bytes] for UART2 and up, oldest bytes
++// first, and returns their size. `*dropped` receives the bytes dropped since the previous call.
++int tcpSerialTakeTx(uint8_t *out, int room, uint16_t *dropped)
++{
++    int used = 0;
++    pthread_mutex_lock(&txCaptureLock);
++    *dropped = (uint16_t)txCaptureDropped;
++    txCaptureDropped = 0;
++    for (unsigned id = 1; id < SERIAL_PORT_COUNT; id++) {
++        const int header = 3;
++        if (txCaptureLen[id] == 0 || room - used <= header) {
++            continue;
++        }
++        int n = (int)txCaptureLen[id];
++        if (n > room - used - header) {
++            n = room - used - header;
++        }
++        out[used] = (uint8_t)id;
++        out[used + 1] = (uint8_t)(n & 0xFF);
++        out[used + 2] = (uint8_t)(n >> 8);
++        memcpy(out + used + header, txCapture[id], n);
++        used += header + n;
++        txCaptureLen[id] -= (unsigned)n;
++        memmove(txCapture[id], txCapture[id] + n, txCaptureLen[id]);
++    }
++    pthread_mutex_unlock(&txCaptureLock);
++    return used;
++}
++#endif
++
+ void tcpDataOut(tcpPort_t *instance)
+ {
+     tcpPort_t *s = (tcpPort_t *)instance;
++#if ENABLE_SIMULATOR_EXTERNAL_TIME
++    if (s->id != 0) {
++        tcpCaptureTx(s);
++        return;
++    }
++#endif
+     if (s->conn == NULL) return;
+     pthread_mutex_lock(&s->txLock);
+ 
+@@ -255,6 +324,15 @@ void tcpDataOut(tcpPort_t *instance)
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
@@ -18,7 +104,7 @@ index a922cc7..0c7c47b 100644
      pthread_mutex_lock(&s->rxLock);
  
      while (size--) {
-@@ -270,17 +279,62 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+@@ -270,17 +348,62 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  //    printf("\n");
  }
  
@@ -84,15 +170,16 @@ index a922cc7..0c7c47b 100644
 +    tcpDataIn(&tcpSerialPorts[id], (uint8_t *)data, size);
 +}
 diff --git a/src/main/drivers/serial_tcp.h b/src/main/drivers/serial_tcp.h
-index a391e10..2674642 100644
+index a391e10..1ae795c 100644
 --- a/src/main/drivers/serial_tcp.h
 +++ b/src/main/drivers/serial_tcp.h
-@@ -46,6 +46,8 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
+@@ -46,6 +46,9 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
  
  // tcpPort API
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size);
 +void tcpSerialDispatchRx(void);  // lockstep: deliver buffered RX bytes on the main thread
 +void tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram
++int tcpSerialTakeTx(uint8_t *out, int room, uint16_t *dropped);  // lockstep: UART2+ TX blocks for the reply datagram
  void tcpDataOut(tcpPort_t *instance);
  
  bool tcpIsStart(void);
@@ -201,7 +288,7 @@ index 3759c26..4a82321 100644
  #define GYRO_COUNT 1 // 1 Gyro
  
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..e5255f7 100644
+index ee216ef..5af9843 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -101,6 +101,130 @@ static bool fdm_received = false;
@@ -546,7 +633,7 @@ index ee216ef..e5255f7 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1124,65 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1124,71 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
@@ -568,7 +655,13 @@ index ee216ef..e5255f7 100644
 +{
 +    extReplyPending = false;
 +    extBusyPasses = 0;
-+    udpSend(&pwmLink, &pwmPkt, sizeof(servo_packet));
++    // The reply is the servo packet, a dropped-bytes count, then the TX blocks of UART2 and up (tcpSerialTakeTx).
++    static struct { servo_packet servo; uint16_t dropped; uint8_t serial[EXT_SERIAL_MAX]; } __attribute__((packed)) reply;
++    reply.servo = pwmPkt;
++    uint16_t dropped = 0;
++    const int used = tcpSerialTakeTx(reply.serial, EXT_SERIAL_MAX, &dropped);
++    reply.dropped = dropped;
++    udpSend(&pwmLink, &reply, sizeof(servo_packet) + sizeof(uint16_t) + used);
 +    udpSend(&pwmRawLink, &pwmRawPkt, sizeof(servo_packet_raw));
 +}
 +
@@ -613,7 +706,7 @@ index ee216ef..e5255f7 100644
  {
      servosPwm[index] = value;
 diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
-index 69d3250..9e6a556 100644
+index 69d3250..573b8ee 100644
 --- a/src/platform/SIMULATOR/target/SITL/target.h
 +++ b/src/platform/SIMULATOR/target/SITL/target.h
 @@ -135,11 +135,8 @@
@@ -646,7 +739,7 @@ index 69d3250..9e6a556 100644
  #undef USE_VTX_MSP
  #undef USE_CAMERA_CONTROL
  #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
-@@ -171,6 +163,24 @@
+@@ -171,6 +163,25 @@
  #undef USE_I2C
  #undef USE_SPI
  
@@ -658,6 +751,7 @@ index 69d3250..9e6a556 100644
 +#define USE_ESC_SENSOR
 +#endif
 +#define USE_OSD
++#define USE_OSD_SD
 +#ifndef USE_MSP_DISPLAYPORT
 +#define USE_MSP_DISPLAYPORT
 +#endif
@@ -671,7 +765,7 @@ index 69d3250..9e6a556 100644
  #define TARGET_FLASH_SIZE 2048
  
  #define DEFIO_NO_PORTS   // suppress 'no pins defined' warning
-@@ -263,6 +273,15 @@ uint64_t millis64(void);
+@@ -263,6 +274,15 @@ uint64_t millis64(void);
  
  int lockMainPID(void);
  

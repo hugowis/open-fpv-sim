@@ -56,6 +56,54 @@ fn feed(shared: Arc<Shared>, rate_hz: u32, bind: Option<u64>) -> (ReceiverStream
     (ReceiverStream::new(rx), ended)
 }
 
+/// Spec §5.2: the OSD refreshes with the video frame rate, about 60 Hz.
+pub const MAX_OSD_RATE_HZ: u32 = 60;
+
+pub fn osd_rate(hz: u32) -> Result<u32, Status> {
+    match hz {
+        0 => Ok(MAX_OSD_RATE_HZ),
+        1..=MAX_OSD_RATE_HZ => Ok(hz),
+        _ => Err(error("invalid_argument", Code::InvalidArgument, format!("OSD rate must be 1..={MAX_OSD_RATE_HZ} Hz (got {hz})"))),
+    }
+}
+
+/// OSD frames: the current one at once, then whenever the sequence number or the presence changes (or another
+/// session is loaded), checked at `rate_hz` from a plain thread. Ends like `state_feed`: the client went away, the
+/// server is stopping, or the session was unloaded (then with a not_loaded error).
+pub fn osd_feed(shared: Arc<Shared>, rate_hz: u32) -> ReceiverStream<Result<pb::OsdFrame, Status>> {
+    let (tx, rx) = mpsc::channel(4);
+    let period = Duration::from_secs_f64(1.0 / f64::from(rate_hz));
+    std::thread::spawn(move || {
+        let mut sent: Option<(u64, bool, u64)> = None; // (seq, present, session id)
+        loop {
+            if tx.is_closed() || shared.stopping() {
+                break;
+            }
+            let sample = match shared.lock().as_ref() {
+                Some(s) => Ok((s.id, s.osd_msg())),
+                None => Err(not_loaded()),
+            };
+            match sample {
+                Ok((id, frame)) => {
+                    let key = (frame.seq, frame.present, id);
+                    if sent != Some(key) {
+                        sent = Some(key);
+                        if tx.blocking_send(Ok(frame)).is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
+                    break;
+                }
+            }
+            std::thread::sleep(period);
+        }
+    });
+    ReceiverStream::new(rx)
+}
+
 /// Runs `f` off the async runtime (it locks the session, which can wait for a runner step).
 fn off_runtime(f: impl FnOnce() + Send + 'static) {
     match tokio::runtime::Handle::try_current() {

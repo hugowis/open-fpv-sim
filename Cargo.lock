@@ -842,12 +842,23 @@ dependencies = [
  "ofs-proto",
  "ofs-radio",
  "ofs-sensors",
+ "ofs-video",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ofs-video"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "ofs-core",
+ "ofs-fc",
+ "tempfile",
 ]
 
 [[package]]

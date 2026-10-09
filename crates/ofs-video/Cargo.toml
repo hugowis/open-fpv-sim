@@ -1,0 +1,14 @@
+[package]
+name = "ofs-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ofs-core.workspace = true
+ofs-fc.workspace = true
+
+[dev-dependencies]
+glam.workspace = true
+tempfile.workspace = true

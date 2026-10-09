@@ -1,0 +1,7 @@
+# SmartAudio VTX on UART5 (serial index 4); MSP (UART1) reads and sets it. SITL has no vtxtable.
+serial 4 2048 115200 57600 0 115200
+set vtx_band = 5
+set vtx_channel = 1
+set vtx_power = 2
+set motor_pwm_protocol = PWM
+set small_angle = 180

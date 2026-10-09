@@ -9,12 +9,13 @@
 |---|---|
 | All Rust tests | `cargo test --workspace` |
 | Live SITL tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1` |
+| Live video tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-video --test vtx_live -- --ignored --test-threads=1`, and `python -m pytest python/tests/test_sitl_video.py` |
 | Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL) |
 | Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` |
 | Godot client tests | `bash scripts/run-godot-tests.sh` (see "Godot pilot client" below) |
 | Real-time session (for Configurator) | `OFS_SITL_LAUNCH=<cmd> python python/examples/serve_realtime.py` |
 | Regenerate Python stubs | `python -m grpc_tools.protoc -I proto --python_out=python --pyi_out=python --grpc_python_out=python proto/ofs/v1/sim.proto` |
-| Regenerate the SITL patch | start from the M1 patch (`third_party/betaflight/ofs-sitl.patch` at commit c1514e2) applied to the pinned Betaflight checkout, run `add_serial_in_datagram.py` then `deterministic_boot.py` (both in `third_party/betaflight/tools/`; see their docstrings). The generators are not idempotent: running them on a tree that already has the current patch inserts duplicates |
+| Regenerate the SITL patch | start from the M1 patch (`third_party/betaflight/ofs-sitl.patch` at commit c1514e2) applied to the pinned Betaflight checkout, run `add_serial_in_datagram.py` then `deterministic_boot.py` (both in `third_party/betaflight/tools/`; see their docstrings), then `add_serial_out_datagram.py` (M3a: UART TX bytes in the reply). Run the generators in that order. |
 
 ## Environment variables
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
@@ -44,6 +45,28 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
   3. Fly, then cut the radio (K, or switch the transmitter off): the HUD reports the link lost and Betaflight fails safe within a few seconds. R reloads the quad.
   4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761`), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
 - **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views plus the help and controls screens (`start_fpv.png`, `start_chase.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`); review them by eye. Without `--out=` they go to the project's user data dir.
+
+## OSD, VTX and battery telemetry (M3a)
+
+Schema-3 quad files have three video sections (all optional; see `quads/opendrone-5f-freestyle.toml`):
+- `[esc_telemetry]` — UART 3. The simulated battery is encoded as KISS ESC-telemetry frames (the diff sets `battery_meter = ESC` and `current_meter = ESC`), so Betaflight's battery meter, OSD elements and warnings run on the simulated battery.
+- `[osd]` — UART 4. Betaflight draws its OSD over MSP DisplayPort (`osd_displayport_device = MSP`); the simulator decodes the frames into a `cols` x `rows` character grid (30x16, the analog PAL grid).
+- `[vtx]` — UART 5. A SmartAudio v2.1 VTX (`kind = "smartaudio"`) answers Betaflight's requests; the state carries its band, channel, frequency and power, and changes arrive as `vtx_changed` events.
+
+The quad's Betaflight diff must configure the matching serial ports (UART3 = serial 2, UART4 = serial 3, UART5 = serial 4), the OSD element positions, `vcd_video_system = PAL` (AUTO would leave a 13-row NTSC grid) and `force_battery_cell_count` matching `battery.cells` (Betaflight otherwise guesses from the first voltage it sees, and a part-charged 6S pack never raises the low-battery warning); the shipped quad's diff is the example. SITL has no `vtxtable`: Betaflight takes the VTX power list from the VTX itself, so the diff has no `vtxtable` lines. A diff that enables SmartAudio (`serial 4 2048 …`) needs a matching `[vtx]` section — without one the quad fails to load, because Betaflight SITL crashes when its OSD draws the VTX channel and no VTX answers. The diff is applied on first boot only: after changing it, delete the firmware directory's `eeprom.bin` (see "Firmware state" below).
+
+Wiring: SITL buffers the bytes it writes to its UARTs (UART1, the MSP/Configurator port, is excluded) in 4096-byte per-UART capture buffers and returns them in the reply datagram — a dropped count, then `[uart index][len][bytes]` blocks, at most 512 bytes per reply — so OSD and SmartAudio traffic is deterministic in lockstep. Bytes that don't fit are dropped and counted (`State.serial_dropped_bytes`); a rise raises `serial_overflow` events (see `docs/research/sitl-interface.md` §9).
+
+From Python: `s.get_osd().text` is the OSD as text (`present` is False without an OSD; Betaflight's symbols show as `?`), and `state.vtx` carries the VTX's band, channel, frequency and power; `stream_osd()` yields frames as they change.
+
+The OSD is drawn with Betaflight's own font: `tools/make_osd_font.py` converts the Configurator's `default.mcm` into the glyph atlas `godot/ui/osd_font.png`; `godot/ui/OSD_FONT_LICENSE.md` records the source commit and the licence.
+
+Manual video check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` set, and the game):
+1. Fly with the game and see the OSD battery, flight time and craft name in the FPV view.
+2. Open the OSD stick menu (throttle centre + yaw left + pitch forward, disarmed).
+3. Change the VTX channel or power in the OSD menu and watch the HUD VTX line and a toast.
+4. Change the same from Betaflight Configurator's VTX tab and Save.
+5. Lower `battery.initial_soc` to 0.02 and see LOW BATTERY.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.

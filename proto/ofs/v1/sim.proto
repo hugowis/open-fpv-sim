@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 2: lockstep and real-time sessions, state and event streams, the
-// pilot link and fault injection. One session (loaded quad) per server.
+// Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
+// pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
@@ -24,6 +24,11 @@ service Sim {
   rpc Watch(Empty) returns (stream Event);
   rpc InjectFault(Fault) returns (Empty);
   rpc ClearFaults(Empty) returns (Empty);
+  // Betaflight's OSD as a character grid (present = false, 0 columns, when the quad has no OSD).
+  rpc GetOsd(Empty) returns (OsdFrame);
+  // OSD frames: the current one at once, then each time the grid changes or the OSD appears or disappears,
+  // checked at up to rate_hz (1..60; 0 means 60).
+  rpc StreamOsd(StreamRequest) returns (stream OsdFrame);
 }
 
 message Empty {}
@@ -99,6 +104,27 @@ message RadioLink {
   double rssi_dbm = 4;
 }
 
+// One OSD screen. cells are row-major (rows * cols entries), each `char | font_page << 8 | blink << 10`; the
+// character codes index Betaflight's OSD font (printable ASCII is ASCII, symbols are font glyphs).
+message OsdFrame {
+  uint64 seq = 1;      // moves when the cells change
+  double time_s = 2;   // simulated time of the sample
+  bool present = 3;    // false: no OSD, released, or silent for a second
+  uint32 cols = 4;
+  uint32 rows = 5;
+  repeated uint32 cells = 6;
+}
+
+// The video transmitter.
+message Vtx {
+  bool present = 1;     // a VTX is wired to the flight controller
+  uint32 band = 2;      // 1..6 = A, B, E, F, R, L; 0 in user-frequency mode
+  uint32 channel = 3;   // 1..8; 0 in user-frequency mode
+  uint32 freq_mhz = 4;
+  uint32 power_mw = 5;
+  bool pit_mode = 6;
+}
+
 message State {
   double time_s = 1;
   Vec3 position_ned_m = 2;
@@ -113,6 +139,8 @@ message State {
   bool running = 11;        // a real-time session paced to the wall clock right now
   uint64 overruns = 12;     // real-time overruns so far
   uint32 fc_restarts = 13;  // Betaflight reboots so far
+  Vtx vtx = 14;
+  uint64 serial_dropped_bytes = 15;  // Betaflight UART output dropped because a consumer fell behind
 }
 
 enum EventKind {
@@ -125,6 +153,8 @@ enum EventKind {
   EVENT_KIND_PILOT_CONNECTED = 6;
   EVENT_KIND_PILOT_DISCONNECTED = 7;
   EVENT_KIND_SESSION_ENDED = 8;
+  EVENT_KIND_VTX_CHANGED = 9;
+  EVENT_KIND_SERIAL_OVERFLOW = 10;
 }
 
 message Event {

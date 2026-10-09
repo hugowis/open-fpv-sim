@@ -31,6 +31,14 @@ func test_before_start_everything_is_inert() -> void:
 	client.queue_free()
 
 
+func test_osd_and_vtx_getters_are_inert_before_start() -> void:
+	var client := await _client()
+	eq(client.get_osd(), {}, "no OSD frame")
+	eq(client.get_osd_version(), 0, "no OSD updates")
+	eq(client.get_telemetry(), {}, "no telemetry, so no VTX keys")
+	client.queue_free()
+
+
 func test_invalid_settings_are_reported_as_text() -> void:
 	var client := await _client()
 	ok(client.start({}).contains("quad_path"), "a quad is required")

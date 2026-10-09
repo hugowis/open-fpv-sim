@@ -14,6 +14,7 @@ ofs-config.workspace = true
 ofs-fc.workspace = true
 ofs-radio.workspace = true
 ofs-proto.workspace = true
+ofs-video.workspace = true
 glam.workspace = true
 tonic.workspace = true
 tokio.workspace = true

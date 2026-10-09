@@ -1,4 +1,4 @@
-use ofs_client::{ClientError, ErrorKind, Event, EventKind, Sticks, Telemetry};
+use ofs_client::{ClientError, ErrorKind, Event, EventKind, OsdFrame, Sticks, Telemetry, VtxInfo};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -83,4 +83,27 @@ fn event_kinds_map_and_unknown_kinds_survive() {
     let e = Event::from_pb(pb::Event { time_s: 1.5, kind: pb::EventKind::LinkDown as i32, message: "down".into() });
     assert_eq!((e.kind, e.kind.as_str(), e.time_s, e.message.as_str()), (EventKind::LinkDown, "link_down", 1.5, "down"));
     assert_eq!(Event::from_pb(pb::Event { kind: 999, ..Default::default() }).kind, EventKind::Unknown);
+}
+
+#[test]
+fn vtx_and_osd_messages_convert() {
+    let vtx = VtxInfo::from_pb(&pb::Vtx { present: true, band: 5, channel: 3, freq_mhz: 5732, power_mw: 600, pit_mode: false });
+    assert_eq!(vtx, VtxInfo { present: true, band: 5, channel: 3, freq_mhz: 5732, power_mw: 600, pit_mode: false });
+    assert_eq!(vtx.channel_name(), "R3");
+    assert_eq!(VtxInfo { band: 0, channel: 0, ..vtx }.channel_name(), "", "user-frequency mode has no channel name");
+    assert_eq!(VtxInfo::default().channel_name(), "");
+
+    let osd = OsdFrame::from_pb(pb::OsdFrame { seq: 4, time_s: 1.5, present: true, cols: 2, rows: 1, cells: vec![0x20, 0x441] });
+    assert_eq!((osd.seq, osd.cols, osd.rows, osd.present), (4, 2, 1, true));
+    assert_eq!(osd.cells, vec![0x20, 0x441]);
+}
+
+#[test]
+fn new_event_kinds_have_names() {
+    use ofs_client::{Event, EventKind};
+    let e = Event::from_pb(pb::Event { time_s: 1.0, kind: pb::EventKind::VtxChanged as i32, message: "R3 5732 MHz 600 mW".into() });
+    assert_eq!(e.kind, EventKind::VtxChanged);
+    assert_eq!(e.kind.as_str(), "vtx_changed");
+    let e = Event::from_pb(pb::Event { time_s: 1.0, kind: pb::EventKind::SerialOverflow as i32, message: String::new() });
+    assert_eq!(e.kind.as_str(), "serial_overflow");
 }

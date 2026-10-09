@@ -50,6 +50,58 @@ impl Sticks {
     }
 }
 
+/// The video transmitter as of the last state message (all zero without a VTX).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VtxInfo {
+    pub present: bool,
+    /// 1..=6 (A, B, E, F, R, L), 0 in user-frequency mode.
+    pub band: u8,
+    /// 1..=8, 0 in user-frequency mode.
+    pub channel: u8,
+    pub freq_mhz: u32,
+    pub power_mw: u32,
+    pub pit_mode: bool,
+}
+
+impl VtxInfo {
+    pub fn from_pb(v: &pb::Vtx) -> VtxInfo {
+        VtxInfo {
+            present: v.present,
+            band: v.band as u8,
+            channel: v.channel as u8,
+            freq_mhz: v.freq_mhz,
+            power_mw: v.power_mw,
+            pit_mode: v.pit_mode,
+        }
+    }
+
+    /// "R3"; empty in user-frequency mode or without a VTX.
+    pub fn channel_name(&self) -> String {
+        const BANDS: [char; 6] = ['A', 'B', 'E', 'F', 'R', 'L'];
+        match self.band {
+            1..=6 if self.present => format!("{}{}", BANDS[usize::from(self.band) - 1], self.channel),
+            _ => String::new(),
+        }
+    }
+}
+
+/// Betaflight's OSD as a character grid. `cells` are row-major, each `char | font_page << 8 | blink << 10`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OsdFrame {
+    pub seq: u64,
+    pub time_s: f64,
+    pub present: bool,
+    pub cols: u32,
+    pub rows: u32,
+    pub cells: Vec<u32>,
+}
+
+impl OsdFrame {
+    pub fn from_pb(f: pb::OsdFrame) -> OsdFrame {
+        OsdFrame { seq: f.seq, time_s: f.time_s, present: f.present, cols: f.cols, rows: f.rows, cells: f.cells }
+    }
+}
+
 /// Everything the HUD shows, from one state message.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Telemetry {
@@ -72,6 +124,7 @@ pub struct Telemetry {
     pub running: bool,
     pub overruns: u64,
     pub fc_restarts: u32,
+    pub vtx: VtxInfo,
     /// Seconds since this state message arrived (filled in when the telemetry is read).
     pub age_s: f64,
 }
@@ -97,6 +150,7 @@ impl Telemetry {
             running: s.running,
             overruns: s.overruns,
             fc_restarts: s.fc_restarts,
+            vtx: s.vtx.as_ref().map(VtxInfo::from_pb).unwrap_or_default(),
             age_s: 0.0,
         }
     }
@@ -112,6 +166,8 @@ pub enum EventKind {
     PilotConnected,
     PilotDisconnected,
     SessionEnded,
+    VtxChanged,
+    SerialOverflow,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -127,6 +183,8 @@ impl EventKind {
             EventKind::PilotConnected => "pilot_connected",
             EventKind::PilotDisconnected => "pilot_disconnected",
             EventKind::SessionEnded => "session_ended",
+            EventKind::VtxChanged => "vtx_changed",
+            EventKind::SerialOverflow => "serial_overflow",
             EventKind::Unknown => "unknown",
         }
     }
@@ -151,6 +209,8 @@ impl Event {
             Ok(pb::EventKind::PilotConnected) => EventKind::PilotConnected,
             Ok(pb::EventKind::PilotDisconnected) => EventKind::PilotDisconnected,
             Ok(pb::EventKind::SessionEnded) => EventKind::SessionEnded,
+            Ok(pb::EventKind::VtxChanged) => EventKind::VtxChanged,
+            Ok(pb::EventKind::SerialOverflow) => EventKind::SerialOverflow,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

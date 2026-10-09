@@ -1,6 +1,7 @@
 *.sh text eol=lf
 *.patch text eol=lf
 *.diff text eol=lf
+*.toml text eol=lf
 # Godot reads these as LF: a CR inside a multi-line string literal would render as an extra line break.
 *.gd text eol=lf
 *.gdshader text eol=lf

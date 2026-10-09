@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// 2: adds the required `[radio]` section (M2).
-pub const SCHEMA_VERSION: u32 = 2;
+/// 3: adds the optional `[esc_telemetry]`, `[osd]` and `[vtx]` sections (M3a). 2: the required `[radio]` section (M2).
+pub const SCHEMA_VERSION: u32 = 3;
+/// Oldest schema this build still reads (schema-2 files have no video sections).
+pub const MIN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +27,12 @@ pub struct QuadConfig {
     pub initial: InitialSection,
     pub fc: FcSection,
     pub radio: RadioSection,
+    #[serde(default)]
+    pub esc_telemetry: Option<EscTelemetrySection>,
+    #[serde(default)]
+    pub osd: Option<OsdSection>,
+    #[serde(default)]
+    pub vtx: Option<VtxSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
 }
@@ -220,6 +228,84 @@ fn default_link_stats_interval_packets() -> u32 {
     50
 }
 
+/// The battery as Betaflight's ESC sensor: KISS telemetry frames into a Betaflight UART.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EscTelemetrySection {
+    /// Betaflight UART number (1-based).
+    pub uart: u8,
+    #[serde(default = "default_esc_rate_hz")]
+    pub rate_hz: u32,
+}
+
+fn default_esc_rate_hz() -> u32 {
+    100
+}
+
+/// Betaflight's OSD over MSP DisplayPort, decoded into a character grid.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OsdSection {
+    /// Betaflight UART number (1-based).
+    pub uart: u8,
+    #[serde(default = "default_osd_cols")]
+    pub cols: u32,
+    #[serde(default = "default_osd_rows")]
+    pub rows: u32,
+}
+
+fn default_osd_cols() -> u32 {
+    30
+}
+
+fn default_osd_rows() -> u32 {
+    16
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VtxKind {
+    /// SmartAudio v2.1 (fidelity level 1).
+    Smartaudio,
+}
+
+/// The video transmitter, controlled by Betaflight over SmartAudio.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VtxSection {
+    pub kind: VtxKind,
+    /// Betaflight UART number (1-based).
+    pub uart: u8,
+    /// Power-up band: A, B, E, F, R (Raceband) or L (Lowband).
+    #[serde(default = "default_vtx_band")]
+    pub default_band: String,
+    /// Power-up channel, 1..=8.
+    #[serde(default = "default_vtx_channel")]
+    pub default_channel: u8,
+    /// Output power of each level in mW and in dBm (SmartAudio v2.1 reports dBm); the same length. Betaflight builds
+    /// its power list from the dBm values the VTX reports (the SITL build has no vtxtable).
+    pub power_levels_mw: Vec<u32>,
+    pub power_levels_dbm: Vec<u8>,
+    /// Power-up level (0-based index into the lists).
+    #[serde(default)]
+    pub default_power_index: usize,
+    /// How long the VTX takes to answer a request.
+    #[serde(default = "default_vtx_reply_latency_ms")]
+    pub reply_latency_ms: f64,
+}
+
+fn default_vtx_band() -> String {
+    "R".into()
+}
+
+fn default_vtx_channel() -> u8 {
+    1
+}
+
+fn default_vtx_reply_latency_ms() -> f64 {
+    5.0
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
     pub field: String,
@@ -249,14 +335,14 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
     let parse_err = |message: String| ConfigError::Parse { path: path.to_path_buf(), message };
     let raw: toml::Value = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
-        Some(v) if v == i64::from(SCHEMA_VERSION) => {}
+        Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
         Some(v @ ..=1) => {
             let message = format!(
-                "unsupported schema_version {v} (this build reads {SCHEMA_VERSION}); schema 2 adds the required [radio] section                  and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and                  quads/opendrone-5f-freestyle.betaflight.diff"
+                "unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 2 adds the required [radio] section                  and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and                  quads/opendrone-5f-freestyle.betaflight.diff"
             );
             return Err(parse_err(message));
         }
-        Some(v) => return Err(parse_err(format!("unsupported schema_version {v} (this build reads {SCHEMA_VERSION})"))),
+        Some(v) => return Err(parse_err(format!("unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION})"))),
         None => return Err(parse_err("missing integer schema_version".into())),
     }
     let mut cfg: QuadConfig = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
@@ -368,11 +454,6 @@ impl QuadConfig {
         }
         let r = &self.radio;
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
-        c.check(
-            (2..=8).contains(&r.uart),
-            "radio.uart",
-            format!("must be 2..=8; UART1 is Betaflight's MSP port, tcp:5761 (got {})", r.uart),
-        );
         for (p, field) in [
             (r.loss_good, "radio.loss_good"),
             (r.loss_bad, "radio.loss_bad"),
@@ -384,11 +465,99 @@ impl QuadConfig {
         c.check(r.rssi_dbm.is_finite() && r.rssi_dbm <= 0.0, "radio.rssi_dbm", format!("must be <= 0 dBm (got {})", r.rssi_dbm));
         c.check(r.snr_db.is_finite(), "radio.snr_db", "must be finite");
         c.check(r.link_stats_interval_packets > 0, "radio.link_stats_interval_packets", "must be > 0");
+        if self.schema_version < 3 && (self.esc_telemetry.is_some() || self.osd.is_some() || self.vtx.is_some()) {
+            c.check(false, "schema_version", "the [esc_telemetry], [osd] and [vtx] sections need schema_version = 3");
+        }
+        let uart_ok = |u: u8| (2..=8).contains(&u);
+        let range = |what: &str, u: u8| format!("must be 2..=8; UART1 is Betaflight's MSP port, tcp:5761 (got {u}) in {what}");
+        c.check(uart_ok(r.uart), "radio.uart", range("radio.uart", r.uart));
+        let mut uarts: Vec<(&str, u8)> = vec![("radio.uart", r.uart)];
+        if let Some(e) = &self.esc_telemetry {
+            c.check(uart_ok(e.uart), "esc_telemetry.uart", range("esc_telemetry.uart", e.uart));
+            c.divides(self.sim.base_hz, e.rate_hz, "esc_telemetry.rate_hz");
+            c.check(e.rate_hz <= 1000, "esc_telemetry.rate_hz", format!("must be <= 1000 (got {})", e.rate_hz));
+            uarts.push(("esc_telemetry.uart", e.uart));
+        }
+        if let Some(o) = &self.osd {
+            c.check(uart_ok(o.uart), "osd.uart", range("osd.uart", o.uart));
+            c.check((1..=64).contains(&o.cols), "osd.cols", format!("must be 1..=64 (got {})", o.cols));
+            c.check((1..=32).contains(&o.rows), "osd.rows", format!("must be 1..=32 (got {})", o.rows));
+            uarts.push(("osd.uart", o.uart));
+        }
+        if let Some(v) = &self.vtx {
+            c.check(uart_ok(v.uart), "vtx.uart", range("vtx.uart", v.uart));
+            uarts.push(("vtx.uart", v.uart));
+            c.check(
+                matches!(v.default_band.as_str(), "A" | "B" | "E" | "F" | "R" | "L"),
+                "vtx.default_band",
+                format!("must be one of A, B, E, F, R, L (got {})", v.default_band),
+            );
+            c.check((1..=8).contains(&v.default_channel), "vtx.default_channel", format!("must be 1..=8 (got {})", v.default_channel));
+            c.check(
+                !v.power_levels_mw.is_empty() && v.power_levels_mw.len() <= 8 && v.power_levels_mw.iter().all(|m| *m > 0),
+                "vtx.power_levels_mw",
+                "must have 1 to 8 entries, all > 0",
+            );
+            c.check(
+                v.power_levels_dbm.len() == v.power_levels_mw.len()
+                    && v.power_levels_dbm.iter().all(|d| (1..=40).contains(d))
+                    && v.power_levels_dbm.windows(2).all(|w| w[1] > w[0]),
+                "vtx.power_levels_dbm",
+                format!("needs one entry per power_levels_mw entry ({}), strictly increasing, each in 1..=40 dBm", v.power_levels_mw.len()),
+            );
+            c.check(
+                v.default_power_index < v.power_levels_mw.len(),
+                "vtx.default_power_index",
+                format!("must be < {} (got {})", v.power_levels_mw.len(), v.default_power_index),
+            );
+            c.check(
+                v.reply_latency_ms.is_finite() && (0.0..=100.0).contains(&v.reply_latency_ms),
+                "vtx.reply_latency_ms",
+                format!("must be in [0, 100] ms (got {})", v.reply_latency_ms),
+            );
+        }
+        for (i, (field, uart)) in uarts.iter().enumerate() {
+            if let Some((other, _)) = uarts[..i].iter().find(|(_, u)| u == uart) {
+                c.check(false, field, format!("UART{uart} is already used by {other}"));
+            }
+        }
         if self.fc.kind == FcKind::Sitl {
             c.check(!self.fc.launch.is_empty(), "fc.launch", "must not be empty for kind = \"sitl\"");
             let diff = self.resolve(&self.fc.betaflight_diff);
             c.check(diff.is_file(), "fc.betaflight_diff", format!("file not found: {}", diff.display()));
+            if let Ok(text) = std::fs::read_to_string(&diff) {
+                let vtx_uart = self.vtx.as_ref().map(|v| v.uart);
+                for (index, functions) in serial_functions(&text) {
+                    if functions & SERIAL_FUNCTION_SMARTAUDIO != 0 && vtx_uart != Some(index + 1) {
+                        c.check(
+                            false,
+                            "fc.betaflight_diff",
+                            format!(
+                                "the diff enables SmartAudio on UART{0} but the quad has no [vtx] section with uart = {0}; \
+                                 Betaflight SITL crashes when its OSD shows the VTX channel and no VTX answers",
+                                index + 1
+                            ),
+                        );
+                    }
+                }
+            }
         }
         c.0
     }
+}
+
+/// Betaflight's serial function bit for a SmartAudio VTX.
+const SERIAL_FUNCTION_SMARTAUDIO: u32 = 2048;
+
+/// The `serial <index> <function mask> ...` lines of a Betaflight diff: (0-based UART index, function mask).
+fn serial_functions(diff: &str) -> Vec<(u8, u32)> {
+    diff.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next()? == "serial").then_some(())?;
+            let index = words.next()?.parse().ok()?;
+            let functions = words.next()?.parse().ok()?;
+            Some((index, functions))
+        })
+        .collect()
 }

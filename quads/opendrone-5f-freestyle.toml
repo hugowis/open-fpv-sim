@@ -1,6 +1,6 @@
 # OpenDrone 5" freestyle — M1 estimates. Units are in the key suffixes (SI).
 # Provenance tracking per parameter arrives with the component library (M4); all values here are estimates.
-schema_version = 2
+schema_version = 3
 name = "OpenDrone 5F freestyle (M1 estimates)"
 
 [sim]
@@ -89,3 +89,27 @@ uart = 2
 latency_packets = 1
 rssi_dbm = -50.0
 snr_db = 10.0
+
+# M3a: video. Betaflight UART numbers are 1-based (as in the Configurator's Ports tab); UART1 is the MSP port.
+# The battery as Betaflight's ESC sensor (KISS telemetry frames, 4 identical frames carry a quarter of the pack
+# current and consumed charge each, see docs/superpowers/specs/2026-10-08-m3a-osd-vtx-design.md section 5).
+[esc_telemetry]
+uart = 3
+rate_hz = 100
+
+# Betaflight's OSD over MSP DisplayPort; 30x16 is the analog PAL grid (the diff sets vcd_video_system = PAL).
+[osd]
+uart = 4
+cols = 30
+rows = 16
+
+# A SmartAudio v2.1 VTX. Betaflight builds its power list from the dBm values this VTX reports (SITL has no vtxtable).
+[vtx]
+kind = "smartaudio"
+uart = 5
+default_band = "R"
+default_channel = 1
+power_levels_mw = [25, 200, 600, 1000]
+power_levels_dbm = [14, 23, 28, 30]
+default_power_index = 1
+reply_latency_ms = 5.0

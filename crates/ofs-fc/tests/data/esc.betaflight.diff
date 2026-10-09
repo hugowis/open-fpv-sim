@@ -1,0 +1,8 @@
+# ESC sensor (KISS frames) on UART3 (serial index 2), fed by serial blocks in the state datagram.
+feature -GPS
+feature ESC_SENSOR
+serial 2 1024 115200 57600 0 115200
+set battery_meter = ESC
+set current_meter = ESC
+set motor_pwm_protocol = PWM
+set small_angle = 180

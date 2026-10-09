@@ -12,6 +12,7 @@ pub const MSP_API_VERSION: u8 = 1;
 pub const MSP_REBOOT: u8 = 68;
 pub const MSP_STATUS: u8 = 101;
 pub const MSP_RC: u8 = 105;
+pub const MSP_BATTERY_STATE: u8 = 130;
 
 fn checksum(len: u8, cmd: u8, payload: &[u8]) -> u8 {
     payload.iter().fold(len ^ cmd, |c, b| c ^ b)

@@ -114,6 +114,11 @@ func _run() -> void:
 	_check(app.drone.position.y < 0.2, "and the drone is back on the ground: y = %.2f" % app.drone.position.y)
 	_check(app.client.get_telemetry()["tx_enabled"], "the pilot link is back")
 
+	var osd: Dictionary = app.client.get_osd()
+	_check(osd.has("present") and not osd["present"] and osd["cols"] == 0, "open loop: the OSD is absent: %s" % str(osd.keys()))
+	var t: Dictionary = app.client.get_telemetry()
+	_check(t.has("vtx_present") and not t["vtx_present"], "open loop: no VTX")
+
 	app.queue_free()
 	await process_frame
 	await process_frame
