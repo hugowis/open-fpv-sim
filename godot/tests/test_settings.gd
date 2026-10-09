@@ -76,3 +76,16 @@ func test_a_setting_saved_in_the_game_keeps_the_rest_of_the_file() -> void:
 	eq(back.get_value("client", "video_effects"), false, "the new value")
 	eq(back.get_value("client", "seed"), 7, "the other values stay")
 	DirAccess.remove_absolute(path)
+
+
+func test_saving_a_setting_never_overwrites_a_config_file_it_cannot_read() -> void:
+	var path := "user://test_broken_ofs_client.cfg"
+	var broken := "[client]\nseed = 7\nthis line is not valid = = =\n"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(broken)
+	file.close()
+	ok(not AppSettings.save_value("video_effects", false, path), "refused")
+	eq(FileAccess.get_file_as_string(path), broken, "the hand-edited file is left as it was")
+	DirAccess.remove_absolute(path)
+	ok(AppSettings.save_value("video_effects", false, path), "a missing file is created")
+	DirAccess.remove_absolute(path)

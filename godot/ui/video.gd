@@ -8,6 +8,8 @@ extends CanvasLayer
 const VIDEO_SHADER := preload("res://ui/video.gdshader")
 ## How fast a picture without sync rolls, in screen heights per second.
 const ROLL_SPEED := 0.7
+## How fast the tear band of an unstable sync drifts down the picture, in screen heights per second.
+const TEAR_SPEED := 0.3
 
 ## The "Video effects" setting.
 var effects := true:
@@ -20,6 +22,7 @@ var _material := ShaderMaterial.new()
 var _rect := ColorRect.new()
 var _uniforms := uniforms_for({})
 var _roll := 0.0
+var _tear := 0.0
 
 
 func _ready() -> void:
@@ -56,11 +59,14 @@ static func is_clean(u: Dictionary) -> bool:
 func update_view(t: Dictionary, delta: float) -> void:
 	_uniforms = uniforms_for(t)
 	_roll = fposmod(_roll + ROLL_SPEED * delta, 1.0) if _uniforms["sync"] == 2 else 0.0
+	if _uniforms["sync"] == 1:
+		_tear = fposmod(_tear + TEAR_SPEED * delta, 1.0)
 	_material.set_shader_parameter("noise", _uniforms["noise"])
 	_material.set_shader_parameter("sparkles", _uniforms["sparkles"])
 	_material.set_shader_parameter("chroma", _uniforms["chroma"])
 	_material.set_shader_parameter("tear", 1.0 if _uniforms["sync"] == 1 else 0.0)
 	_material.set_shader_parameter("roll", _roll)
+	_material.set_shader_parameter("tear_at", _tear)
 	_material.set_shader_parameter("seed", randf())
 	_refresh()
 

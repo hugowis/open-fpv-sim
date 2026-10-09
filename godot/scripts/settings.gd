@@ -109,7 +109,9 @@ static func load_settings() -> Dictionary:
 ## "Video effects"), keeping the rest of the file. Returns false when the file cannot be written.
 static func save_value(key: String, value, path := CONFIG_PATH) -> bool:
 	var file := ConfigFile.new()
-	file.load(path)  # a missing file starts empty
+	# A missing file starts empty; one that exists but does not parse (a hand edit gone wrong) is left alone.
+	if FileAccess.file_exists(path) and file.load(path) != OK:
+		return false
 	file.set_value("client", key, value)
 	return file.save(path) == OK
 

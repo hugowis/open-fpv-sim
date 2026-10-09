@@ -9,6 +9,7 @@ uniform float sparkles = 0.0;  // density of FM threshold sparkles, 0 to 1
 uniform float chroma = 1.0;    // colour saturation, 1 full, 0 black and white
 uniform float tear = 0.0;      // 1 while the sync is unstable: line jitter and a drifting tear band
 uniform float roll = 0.0;      // vertical picture offset (0 to 1) while the sync is lost
+uniform float tear_at = 0.0;   // where the tear band is (0 top, 1 bottom); it drifts down while the sync is unstable
 uniform float seed = 0.0;      // changes every rendered frame
 
 // Analog lines the effects work on (a PAL field has about 288).
@@ -24,8 +25,7 @@ void fragment() {
 	vec2 uv = SCREEN_UV;
 	float line = floor(uv.y * LINES);
 	// Tearing: every line jitters sideways a little; inside a band drifting down the picture it shifts a lot.
-	float band_at = fract(seed * 0.173);
-	float band = 1.0 - smoothstep(0.0, 0.05, abs(uv.y - band_at));
+	float band = 1.0 - smoothstep(0.0, 0.05, abs(uv.y - tear_at));
 	uv.x += tear * ((hash(vec2(line, 3.0)) - 0.5) * 0.008 + band * 0.05);
 	// Rolling: the picture slides up through the frame.
 	uv.y = fract(uv.y + roll);

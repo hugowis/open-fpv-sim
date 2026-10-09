@@ -64,3 +64,20 @@ func test_a_lost_picture_rolls_and_a_locked_one_does_not() -> void:
 	layer.update_view(_telemetry({"video_noise": 0.3}), 0.1)
 	near(material.get_shader_parameter("tear"), 0.0, "locked: no tearing")
 	layer.queue_free()
+
+
+func test_the_tear_band_drifts_down_while_the_sync_is_unstable() -> void:
+	var layer := await _layer()
+	var material: ShaderMaterial = layer.get_node("VideoRect").material
+	layer.update_view(_telemetry({"video_sync": "unstable", "video_noise": 0.7}), 0.1)
+	var first: float = material.get_shader_parameter("tear_at")
+	layer.update_view(_telemetry({"video_sync": "unstable", "video_noise": 0.7}), 0.1)
+	var second: float = material.get_shader_parameter("tear_at")
+	near(second - first, Video.TEAR_SPEED * 0.1, "the band moves down at its speed", 1e-5)
+	for i in 50:
+		layer.update_view(_telemetry({"video_sync": "unstable", "video_noise": 0.7}), 0.1)
+	var later: float = material.get_shader_parameter("tear_at")
+	ok(later >= 0.0 and later < 1.0, "it wraps from the bottom to the top: %f" % later)
+	layer.update_view(_telemetry({"video_noise": 0.3}), 0.1)
+	near(material.get_shader_parameter("tear_at"), later, "locked: the band stays put (and is not drawn)")
+	layer.queue_free()
