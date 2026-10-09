@@ -1,7 +1,8 @@
 extends SceneTree
 ## Renders the game to PNG files with a real renderer (a window opens briefly), to check the visuals by eye:
 ##   godot --path godot -s res://tests/shots.gd -- --out=C:/some/dir
-## Flies the open-loop drone forward for a moment, then saves fpv.png, chase.png, help.png and controls.png.
+## Flies the open-loop drone forward for a moment, then saves start_fpv.png, start_chase.png, osd_fpv.png, hop_fpv.png,
+## hop_chase.png, help.png and controls.png.
 
 func _initialize() -> void:
 	_run()
@@ -49,6 +50,21 @@ func _run() -> void:
 	await _frames(20)
 	await _save("start_chase")
 	app.set_chase_view(false)
+	await _frames(30)
+	var cells := PackedInt32Array()
+	cells.resize(30 * 16)
+	cells.fill(0x20)
+	var put := func(row: int, col: int, text: String) -> void:
+		for i in text.length():
+			cells[row * 30 + col + i] = text.unicode_at(i)
+	put.call(0, 10, "OPENFPV")
+	put.call(1, 1, "ACRO")
+	put.call(1, 22, "R1 5658")
+	put.call(8, 9, "LOW BATTERY")
+	put.call(14, 1, "24.6 0.5 1.2A")
+	put.call(15, 1, "01:23 LQ100 12M")
+	app.osd.set_frame({"seq": 1, "time_s": 0.0, "present": true, "cols": 30, "rows": 16, "cells": cells})
+	await _save("osd_fpv")
 	# A short low hop so the picture moves: climb a little, then let the drone settle forward.
 	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.32, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
 	var until := Time.get_ticks_msec() + 1200

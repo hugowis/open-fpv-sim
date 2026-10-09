@@ -30,6 +30,7 @@ var _status := Label.new()
 var _sim := Label.new()
 var _link := Label.new()
 var _battery := Label.new()
+var _vtx := Label.new()
 var _flight := Label.new()
 var _configurator := Label.new()
 var _banner := Label.new()
@@ -51,6 +52,7 @@ func _ready() -> void:
 	_place(root, _sim, 0.0, 0.0, 14.0, 44.0, false)
 	_place(root, _link, 1.0, 0.0, 14.0, 14.0, true)
 	_place(root, _battery, 1.0, 0.0, 14.0, 44.0, true)
+	_place(root, _vtx, 1.0, 0.0, 14.0, 74.0, true)
 	_place(root, _flight, 0.0, 1.0, 14.0, 14.0, false)
 	_place(root, _configurator, 1.0, 1.0, 14.0, 14.0, true)
 	_place(root, _toasts, 1.0, 0.5, 14.0, 0.0, true)
@@ -72,7 +74,7 @@ func _ready() -> void:
 	_place(root, _help, 0.5, 0.5, 0.0, 0.0, false)
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.grow_vertical = Control.GROW_DIRECTION_BOTH
-	for label in [_status, _sim, _link, _battery, _flight, _configurator]:
+	for label in [_status, _sim, _link, _battery, _vtx, _flight, _configurator]:
 		_style(label, 18)
 
 
@@ -125,7 +127,7 @@ func help_visible() -> bool:
 
 func set_hud_visible(visible_now: bool) -> void:
 	_shown = visible_now
-	for node in [_status, _sim, _link, _battery, _flight, _configurator, _sticks_view, _toasts]:
+	for node in [_status, _sim, _link, _battery, _vtx, _flight, _configurator, _sticks_view, _toasts]:
 		node.visible = visible_now
 
 
@@ -170,6 +172,10 @@ func banner_text() -> String:
 	return _banner.text
 
 
+func vtx_text() -> String:
+	return _vtx.text
+
+
 ## view: {phase, detail, telemetry: Dictionary (empty before the first state), sticks: Dictionary from Controls.read,
 ## controls_status, configurator, quad, camera, radio_cut}
 func update_view(view: Dictionary) -> void:
@@ -180,6 +186,7 @@ func update_view(view: Dictionary) -> void:
 		_sim.text = phase.capitalize()
 		_link.text = ""
 		_battery.text = ""
+		_vtx.text = ""
 		_flight.text = ""
 	else:
 		var running: bool = t["running"]
@@ -191,6 +198,11 @@ func update_view(view: Dictionary) -> void:
 		_link.text = "LINK %s   LQ %d %%   %d dBm" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"]]
 		_link.add_theme_color_override("font_color", GREEN if up and t["lq_pct"] >= 80.0 else (YELLOW if up else RED))
 		_battery.text = "%.2f V   %.1f A" % [t["battery_voltage_v"], t["battery_current_a"]]
+		if t.get("vtx_present", false):
+			var channel: String = t.get("vtx_channel_name", "")
+			_vtx.text = "VTX %s  %d MHz  %d mW%s" % [channel if channel != "" else "user", t["vtx_freq_mhz"], t["vtx_power_mw"], "  PIT" if t["vtx_pit_mode"] else ""]
+		else:
+			_vtx.text = ""
 		_flight.text = "ALT   %.1f m
 SPEED %.1f m/s
 CLIMB %+.1f m/s

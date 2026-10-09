@@ -90,6 +90,19 @@ func test_the_hud_can_be_hidden_and_the_help_shown() -> void:
 	hud.queue_free()
 
 
+func test_the_vtx_line_shows_channel_frequency_and_power() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	eq(hud.vtx_text(), "", "no VTX in the telemetry")
+	hud.update_view(_view({"telemetry": _telemetry({"vtx_present": true, "vtx_channel_name": "R3", "vtx_freq_mhz": 5732, "vtx_power_mw": 600, "vtx_pit_mode": false})}))
+	eq(hud.vtx_text(), "VTX R3  5732 MHz  600 mW", "the line")
+	hud.update_view(_view({"telemetry": _telemetry({"vtx_present": true, "vtx_channel_name": "", "vtx_freq_mhz": 5800, "vtx_power_mw": 25, "vtx_pit_mode": true})}))
+	eq(hud.vtx_text(), "VTX user  5800 MHz  25 mW  PIT", "user frequency in pit mode")
+	hud.update_view(_view({"telemetry": {}}))
+	eq(hud.vtx_text(), "", "cleared with the telemetry")
+	hud.queue_free()
+
+
 func test_updates_cope_with_missing_data() -> void:
 	var hud := await _hud()
 	hud.update_view({})

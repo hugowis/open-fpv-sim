@@ -68,6 +68,14 @@ func _run() -> void:
 	app.sticks_override = _sticks(0.0, true)
 	var armed: bool = await _wait_for(func(): return app.client.get_telemetry().get("motors_spinning", false), 10.0)
 	_check(armed, "the arm switch arms Betaflight (motors idle): %s" % str(app.client.get_telemetry().get("motor_cmd")))
+	var osd_up: bool = await _wait_for(func(): return app.osd.is_drawing(), 20.0)
+	_check(osd_up, "Betaflight's OSD reaches the screen")
+	var osd: Dictionary = app.client.get_osd()
+	_check(osd.get("cols", 0) == 30 and osd.get("rows", 0) == 16, "a 30 x 16 grid: %s x %s" % [osd.get("cols"), osd.get("rows")])
+	_check(app.osd.drawn_cell_count() > 20, "with content to draw: %d cells" % app.osd.drawn_cell_count())
+	var telemetry0: Dictionary = app.client.get_telemetry()
+	_check(telemetry0.get("vtx_present", false) and telemetry0.get("vtx_freq_mhz", 0) == 5658, "the VTX is on R1 (5658 MHz): %s" % str(telemetry0.get("vtx_freq_mhz")))
+	_check(app.hud.vtx_text().contains("5658"), "the HUD shows it: %s" % app.hud.vtx_text())
 
 	app.sticks_override = _sticks(0.6, true)
 	var climbed: bool = await _wait_for(func(): return app.drone.position.y > 2.0, 20.0)
@@ -85,6 +93,11 @@ func _run() -> void:
 	_check(disarmed, "Betaflight fails safe: the motors stop within 6 s of the cut")
 	_press(app, KEY_K)  # the pilot's own failsafe test works through the key too
 	_press(app, KEY_K)
+
+	app.set_chase_view(true)
+	_check(not app.osd.is_drawing(), "the OSD is hidden in the chase view")
+	app.set_chase_view(false)
+	_check(app.osd.is_drawing(), "and back in the FPV view")
 
 	# Reload: Betaflight is stopped and started again, and the pilot link comes back.
 	app.sticks_override = _sticks(0.0, false)
