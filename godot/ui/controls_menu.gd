@@ -10,6 +10,9 @@ const LABELS := {
 }
 const BIND_THRESHOLD := 0.6
 
+## The "Video effects" box changed (the game applies and saves it).
+signal video_effects_toggled(on: bool)
+
 var controls = null  # Controls
 var save_path := ""
 
@@ -18,6 +21,7 @@ var _preset := OptionButton.new()
 var _deadzone := HSlider.new()
 var _deadzone_label := Label.new()
 var _hint := Label.new()
+var _video_effects := CheckBox.new()
 var _rows := {}  # channel -> {description, bind, invert, live}
 var _listening := ""
 
@@ -94,6 +98,11 @@ func _ready() -> void:
 	dz_row.add_child(_deadzone)
 	dz_row.add_child(_deadzone_label)
 
+	_video_effects.text = "Video effects (analog breakup with distance and obstacles)"
+	_video_effects.button_pressed = true
+	_video_effects.toggled.connect(func(on: bool) -> void: video_effects_toggled.emit(on))
+	box.add_child(_video_effects)
+
 	_hint.text = "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
 	box.add_child(_hint)
 
@@ -115,6 +124,15 @@ func toggle() -> void:
 
 func is_open() -> bool:
 	return visible
+
+
+## Shows the "Video effects" setting without emitting `video_effects_toggled`.
+func set_video_effects(on: bool) -> void:
+	_video_effects.set_pressed_no_signal(on)
+
+
+func video_effects_checked() -> bool:
+	return _video_effects.button_pressed
 
 
 ## The channel being bound ("" when none).

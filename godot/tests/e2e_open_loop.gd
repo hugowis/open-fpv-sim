@@ -119,6 +119,24 @@ func _run() -> void:
 	var t: Dictionary = app.client.get_telemetry()
 	_check(t.get("vtx_present", false) and t.get("vtx_freq_mhz", 0) == 5658, "open loop: the VTX transmits R1: %s" % str(t.get("vtx_freq_mhz")))
 
+	# The world file and the video link.
+	var world: Dictionary = app.client.get_world()
+	_check(world.get("name", "") == "Flat field", "the shipped world is loaded: %s" % world.get("name", ""))
+	var building = app.world.get_node_or_null("BuildingA")
+	_check(building != null and building.position.is_equal_approx(Vector3(-45.0, 7.0, -110.0)), "building A stands where it always did")
+	_check(app.world.get_node_or_null("Pilot") != null and app.world.get_node_or_null("Emitter_parked-quad") != null, "the pilot and the parked quad are marked")
+	_check(t.get("video_present", false) and t.get("video_sync", "") == "locked", "the video link is locked on the pad: %s" % str(t.get("video_sync")))
+	_check(app.hud.video_text().begins_with("VID "), "the HUD shows the video line: '%s'" % app.hud.video_text())
+	_check(not app.video.is_active(), "a clean link draws nothing over the picture")
+	app.set_process(false)  # the next frame would feed the real (clean) telemetry
+	app.video.update_view({"video_present": true, "video_sync": "lost", "video_noise": 1.0, "video_sparkles": 1.0, "video_chroma": 0.0}, 0.016)
+	_check(app.video.is_active(), "a lost link draws static")
+	app.set_chase_view(true)
+	_check(not app.video.is_active(), "the chase view is clean")
+	app.set_chase_view(false)
+	_check(app.video.is_active(), "and the FPV view degraded again")
+	app.set_process(true)
+
 	app.queue_free()
 	await process_frame
 	await process_frame

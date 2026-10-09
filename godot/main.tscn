@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://ui/hud.gd" id="7"]
 [ext_resource type="Script" path="res://ui/controls_menu.gd" id="8"]
 [ext_resource type="Script" path="res://ui/osd.gd" id="9"]
+[ext_resource type="Script" path="res://ui/video.gd" id="10"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1")
@@ -33,6 +34,10 @@ script = ExtResource("6")
 [node name="Osd" type="CanvasLayer" parent="."]
 layer = 2
 script = ExtResource("9")
+
+[node name="Video" type="CanvasLayer" parent="."]
+layer = 3
+script = ExtResource("10")
 
 [node name="Hud" type="CanvasLayer" parent="."]
 layer = 4

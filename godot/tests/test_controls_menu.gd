@@ -108,3 +108,16 @@ func test_the_live_bars_follow_the_sticks_only_while_open() -> void:
 	menu.update_live({"roll": -1.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.0, "aux": [-1.0, -1.0, -1.0, -1.0]})
 	near(menu._rows["roll"]["live"].value, 0.5, "a closed screen does not update")
 	menu.queue_free()
+
+
+func test_the_video_effects_box_reports_changes_but_not_its_setup() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	var seen := []
+	menu.video_effects_toggled.connect(func(on: bool) -> void: seen.append(on))
+	menu.set_video_effects(false)
+	ok(not menu.video_effects_checked(), "set from the settings")
+	eq(seen, [], "without a signal")
+	menu._video_effects.button_pressed = true
+	eq(seen, [true], "a click is reported")
+	menu.queue_free()

@@ -76,6 +76,8 @@ func _run() -> void:
 	var telemetry0: Dictionary = app.client.get_telemetry()
 	_check(telemetry0.get("vtx_present", false) and telemetry0.get("vtx_freq_mhz", 0) == 5658, "the VTX is on R1 (5658 MHz): %s" % str(telemetry0.get("vtx_freq_mhz")))
 	_check(app.hud.vtx_text().contains("5658"), "the HUD shows it: %s" % app.hud.vtx_text())
+	_check(telemetry0.get("video_sync", "") == "locked" and app.hud.video_text().begins_with("VID "), "the goggles are locked on it: %s" % app.hud.video_text())
+	_check(app.world.get_node_or_null("BuildingB") != null, "the world file's buildings are drawn")
 
 	app.sticks_override = _sticks(0.6, true)
 	var climbed: bool = await _wait_for(func(): return app.drone.position.y > 2.0, 20.0)

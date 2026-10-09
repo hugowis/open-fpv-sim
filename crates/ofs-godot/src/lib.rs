@@ -183,7 +183,10 @@ impl OfsClient {
     /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` (PackedFloat32Array), `motors_spinning`,
     /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `running`, `overruns`, `fc_restarts`, `age_s`, and the VTX's
     /// `vtx_present`, `vtx_band`, `vtx_channel`, `vtx_channel_name` (a String, empty without a VTX), `vtx_freq_mhz`,
-    /// `vtx_power_mw` and `vtx_pit_mode`.
+    /// `vtx_power_mw` and `vtx_pit_mode`, and the video link's `video_present`, `video_snr_db`,
+    /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
+    /// `video_sparkles`, `video_chroma`, `video_antenna` (the antenna in use) and `video_rssi` (a Dictionary of dBm by
+    /// antenna name).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -211,6 +214,20 @@ impl OfsClient {
         d.set("vtx_freq_mhz", i64::from(t.vtx.freq_mhz));
         d.set("vtx_power_mw", i64::from(t.vtx.power_mw));
         d.set("vtx_pit_mode", t.vtx.pit_mode);
+        let v = &t.video;
+        d.set("video_present", v.present);
+        d.set("video_snr_db", v.snr_db);
+        d.set("video_interference_dbm", v.interference_dbm);
+        d.set("video_sync", &GString::from(v.sync.as_str()));
+        d.set("video_noise", v.noise);
+        d.set("video_sparkles", v.sparkles);
+        d.set("video_chroma", v.chroma);
+        d.set("video_antenna", &GString::from(v.active_antenna.as_str()));
+        let mut rssi = VarDictionary::new();
+        for (name, dbm) in &v.rssi_dbm {
+            rssi.set(&GString::from(name.as_str()), *dbm);
+        }
+        d.set("video_rssi", &rssi);
         d.set("age_s", t.age_s);
         d
     }
