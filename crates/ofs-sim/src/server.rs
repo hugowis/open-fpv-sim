@@ -14,7 +14,7 @@ use tonic::{Code, Request, Response, Status, Streaming};
 use crate::pacer::OverrunPolicy;
 use crate::pb::{self, sim_server::Sim};
 use crate::runner;
-use crate::session::{event, panic_message, RunMode, Session, Shared, Slot};
+use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
 
@@ -155,7 +155,12 @@ impl Sim for SimService {
             }
         };
         let cfg = ofs_config::load(Path::new(&req.quad_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?;
-        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world: WorldConfig::open_field() };
+        let world = if req.world_path.is_empty() {
+            WorldConfig::open_field()
+        } else {
+            ofs_config::world::load(Path::new(&req.world_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
+        };
+        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world };
         let keep_alive = req.keep_alive;
         self.blocking(move |shared, slot| {
             *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
@@ -258,6 +263,10 @@ impl Sim for SimService {
 
     async fn get_osd(&self, _req: Request<pb::Empty>) -> Result<Response<pb::OsdFrame>, Status> {
         self.blocking(|_, slot| Ok(loaded(slot)?.osd_msg())).await
+    }
+
+    async fn get_world(&self, _req: Request<pb::Empty>) -> Result<Response<pb::World>, Status> {
+        self.blocking(|_, slot| Ok(world_msg(loaded(slot)?.vehicle.world()))).await
     }
 
     async fn unload(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
@@ -373,6 +382,23 @@ mod tests {
         let vtx = state.vtx.expect("State.vtx is always set");
         assert!(vtx.present && vtx.freq_mhz == 5658, "open loop: the VTX transmits its power-up channel: {vtx:?}");
         assert_eq!(state.serial_dropped_bytes, 0);
+        let video = state.video.expect("State.video is always set");
+        assert!(video.present);
+        assert_eq!(video.sync(), pb::VideoSync::Locked, "{video:?}");
+        assert_eq!(video.rssi.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["omni"]);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn get_world_returns_the_sessions_world() {
+        let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
+        assert_eq!(kind_of(&svc.get_world(Request::new(pb::Empty {})).await.unwrap_err()), "not_loaded");
+        *svc.shared.lock() = Some(open_loop_session(RunMode::Lockstep));
+        let world = svc.get_world(Request::new(pb::Empty {})).await.unwrap().into_inner();
+        assert_eq!(world.name, "open field");
+        assert_eq!(world.antennas.len(), 1);
+        assert_eq!((world.antennas[0].kind.as_str(), world.antennas[0].aim_el_deg), ("omni", 90.0));
+        assert!(world.objects.is_empty() && world.emitters.is_empty());
         svc.shutdown();
     }
 

@@ -18,7 +18,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}

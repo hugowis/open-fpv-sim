@@ -4,7 +4,7 @@ use ofs_sim::pb::sim_client::SimClient;
 use ofs_sim::pb::sim_server::SimServer;
 use ofs_sim::pb::{
     fault, Empty, EventKind, Fault, HandshakeRequest, LoadRequest, Mode, PilotInput, RadioLinkLoss, RunRequest, Sticks,
-    StreamRequest,
+    StreamRequest, VideoSync,
 };
 use ofs_sim::server::{SimService, PROTOCOL_VERSION};
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
@@ -73,6 +73,36 @@ async fn bad_quad_path_is_a_config_error() {
     assert_eq!(err.code(), Code::InvalidArgument);
     assert_eq!(kind(&err), "config");
     assert!(err.message().contains("does/not/exist.toml"), "{}", err.message());
+}
+
+const WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml");
+
+#[tokio::test]
+async fn a_bad_world_path_is_a_config_error_and_loads_nothing() {
+    let mut c = start().await;
+    let req = LoadRequest { world_path: "no/such/world.toml".into(), ..open_loop(Mode::Lockstep) };
+    let err = c.load(req).await.unwrap_err();
+    assert_eq!(kind(&err), "config");
+    assert!(err.message().contains("no/such/world.toml"), "{}", err.message());
+    assert_eq!(kind(&c.get_world(Empty {}).await.unwrap_err()), "not_loaded");
+}
+
+#[tokio::test]
+async fn a_session_flies_in_the_world_it_was_loaded_with() {
+    let mut c = start().await;
+    c.load(LoadRequest { world_path: WORLD.into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    let world = c.get_world(Empty {}).await.unwrap().into_inner();
+    assert_eq!(world.name, "Flat field");
+    assert_eq!(world.objects.len(), 30);
+    assert_eq!(world.antennas.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["omni", "patch"]);
+    let s = c.run(RunRequest { seconds: 0.5 }).await.unwrap().into_inner();
+    let video = s.video.unwrap();
+    assert!(video.present);
+    assert_eq!(video.rssi.len(), 2);
+    assert_eq!(video.sync(), VideoSync::Locked, "on the launch pad: {video:?}");
+    assert!(video.snr_db > 40.0, "{video:?}");
+    c.load(open_loop(Mode::Lockstep)).await.unwrap();
+    assert_eq!(c.get_world(Empty {}).await.unwrap().into_inner().name, "open field", "a load without a world: the open field");
 }
 
 #[tokio::test]

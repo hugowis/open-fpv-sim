@@ -168,6 +168,8 @@ pub enum EventKind {
     SessionEnded,
     VtxChanged,
     SerialOverflow,
+    VideoLost,
+    VideoRestored,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -185,6 +187,8 @@ impl EventKind {
             EventKind::SessionEnded => "session_ended",
             EventKind::VtxChanged => "vtx_changed",
             EventKind::SerialOverflow => "serial_overflow",
+            EventKind::VideoLost => "video_lost",
+            EventKind::VideoRestored => "video_restored",
             EventKind::Unknown => "unknown",
         }
     }
@@ -211,6 +215,8 @@ impl Event {
             Ok(pb::EventKind::SessionEnded) => EventKind::SessionEnded,
             Ok(pb::EventKind::VtxChanged) => EventKind::VtxChanged,
             Ok(pb::EventKind::SerialOverflow) => EventKind::SerialOverflow,
+            Ok(pb::EventKind::VideoLost) => EventKind::VideoLost,
+            Ok(pb::EventKind::VideoRestored) => EventKind::VideoRestored,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }
@@ -297,6 +303,8 @@ pub struct Settings {
     /// Started on `server_addr` when nothing answers there; `None` fails instead.
     pub launch: Option<LaunchSpec>,
     pub quad_path: String,
+    /// A world file (`worlds/flat.toml`); empty flies in the server's built-in open field.
+    pub world_path: String,
     pub seed: u64,
     /// Fly without Betaflight: motor commands follow the throttle stick (a testing aid).
     pub open_loop_fc: bool,
@@ -315,6 +323,7 @@ impl Settings {
             server_addr: "127.0.0.1:50051".into(),
             launch: None,
             quad_path: quad_path.into(),
+            world_path: String::new(),
             seed: 1,
             open_loop_fc: false,
             overrun_policy: OverrunPolicy::Warn,

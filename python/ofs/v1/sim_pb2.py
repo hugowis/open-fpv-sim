@@ -24,19 +24,21 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10ofs/v1/sim.proto\x12\x06ofs.v1\"\x07\n\x05\x45mpty\",\n\x10HandshakeRequest\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\"B\n\x0eHandshakeReply\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x16\n\x0eserver_version\x18\x02 \x01(\t\"\xa3\x01\n\x0bLoadRequest\x12\x11\n\tquad_path\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x04\x12\x1a\n\x04mode\x18\x03 \x01(\x0e\x32\x0c.ofs.v1.Mode\x12\x14\n\x0copen_loop_fc\x18\x04 \x01(\x08\x12-\n\x0eoverrun_policy\x18\x05 \x01(\x0e\x32\x15.ofs.v1.OverrunPolicy\x12\x12\n\nkeep_alive\x18\x06 \x01(\x08\"M\n\tLoadReply\x12\x11\n\tquad_name\x18\x01 \x01(\t\x12\x0f\n\x07\x62\x61se_hz\x18\x02 \x01(\r\x12\x1c\n\x14\x63onfigurator_address\x18\x03 \x01(\t\"Q\n\x06Sticks\x12\x0c\n\x04roll\x18\x01 \x01(\x01\x12\r\n\x05pitch\x18\x02 \x01(\x01\x12\x0b\n\x03yaw\x18\x03 \x01(\x01\x12\x10\n\x08throttle\x18\x04 \x01(\x01\x12\x0b\n\x03\x61ux\x18\x05 \x03(\x01\"\x1d\n\nRunRequest\x12\x0f\n\x07seconds\x18\x01 \x01(\x01\" \n\rStreamRequest\x12\x0f\n\x07rate_hz\x18\x01 \x01(\r\"C\n\nPilotInput\x12\x1e\n\x06sticks\x18\x01 \x01(\x0b\x32\x0e.ofs.v1.Sticks\x12\x15\n\rstate_rate_hz\x18\x02 \x01(\r\"\'\n\x04Vec3\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\"2\n\x04Quat\x12\t\n\x01w\x18\x01 \x01(\x01\x12\t\n\x01x\x18\x02 \x01(\x01\x12\t\n\x01y\x18\x03 \x01(\x01\x12\t\n\x01z\x18\x04 \x01(\x01\"R\n\tRadioLink\x12\x12\n\ntx_enabled\x18\x01 \x01(\x08\x12\x0f\n\x07link_up\x18\x02 \x01(\x08\x12\x0e\n\x06lq_pct\x18\x03 \x01(\x01\x12\x10\n\x08rssi_dbm\x18\x04 \x01(\x01\"c\n\x08OsdFrame\x12\x0b\n\x03seq\x18\x01 \x01(\x04\x12\x0e\n\x06time_s\x18\x02 \x01(\x01\x12\x0f\n\x07present\x18\x03 \x01(\x08\x12\x0c\n\x04\x63ols\x18\x04 \x01(\r\x12\x0c\n\x04rows\x18\x05 \x01(\r\x12\r\n\x05\x63\x65lls\x18\x06 \x03(\r\"k\n\x03Vtx\x12\x0f\n\x07present\x18\x01 \x01(\x08\x12\x0c\n\x04\x62\x61nd\x18\x02 \x01(\r\x12\x0f\n\x07\x63hannel\x18\x03 \x01(\r\x12\x10\n\x08\x66req_mhz\x18\x04 \x01(\r\x12\x10\n\x08power_mw\x18\x05 \x01(\r\x12\x10\n\x08pit_mode\x18\x06 \x01(\x08\"\x99\x03\n\x05State\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12$\n\x0eposition_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12&\n\x10velocity_ned_mps\x18\x03 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x1e\n\x08\x61ttitude\x18\x04 \x01(\x0b\x32\x0c.ofs.v1.Quat\x12$\n\x0erate_frd_radps\x18\x05 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x19\n\x11\x62\x61ttery_voltage_v\x18\x06 \x01(\x01\x12\x19\n\x11\x62\x61ttery_current_a\x18\x07 \x01(\x01\x12\x11\n\tmotor_rpm\x18\x08 \x03(\x01\x12\x11\n\tmotor_cmd\x18\t \x03(\x01\x12 \n\x05radio\x18\n \x01(\x0b\x32\x11.ofs.v1.RadioLink\x12\x0f\n\x07running\x18\x0b \x01(\x08\x12\x10\n\x08overruns\x18\x0c \x01(\x04\x12\x13\n\x0b\x66\x63_restarts\x18\r \x01(\r\x12\x18\n\x03vtx\x18\x0e \x01(\x0b\x32\x0b.ofs.v1.Vtx\x12\x1c\n\x14serial_dropped_bytes\x18\x0f \x01(\x04\"I\n\x05\x45vent\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12\x1f\n\x04kind\x18\x02 \x01(\x0e\x32\x11.ofs.v1.EventKind\x12\x0f\n\x07message\x18\x03 \x01(\t\"\x0f\n\rRadioLinkLoss\"A\n\x05\x46\x61ult\x12\x30\n\x0fradio_link_loss\x18\x01 \x01(\x0b\x32\x15.ofs.v1.RadioLinkLossH\x00\x42\x06\n\x04kind*B\n\x04Mode\x12\x14\n\x10MODE_UNSPECIFIED\x10\x00\x12\x11\n\rMODE_LOCKSTEP\x10\x01\x12\x11\n\rMODE_REALTIME\x10\x02*a\n\rOverrunPolicy\x12\x1e\n\x1aOVERRUN_POLICY_UNSPECIFIED\x10\x00\x12\x17\n\x13OVERRUN_POLICY_WARN\x10\x01\x12\x17\n\x13OVERRUN_POLICY_SLOW\x10\x02*\xcb\x02\n\tEventKind\x12\x1a\n\x16\x45VENT_KIND_UNSPECIFIED\x10\x00\x12\x16\n\x12\x45VENT_KIND_OVERRUN\x10\x01\x12!\n\x1d\x45VENT_KIND_FIRMWARE_RESTARTED\x10\x02\x12\x18\n\x14\x45VENT_KIND_SIM_ERROR\x10\x03\x12\x18\n\x14\x45VENT_KIND_LINK_DOWN\x10\x04\x12\x16\n\x12\x45VENT_KIND_LINK_UP\x10\x05\x12\x1e\n\x1a\x45VENT_KIND_PILOT_CONNECTED\x10\x06\x12!\n\x1d\x45VENT_KIND_PILOT_DISCONNECTED\x10\x07\x12\x1c\n\x18\x45VENT_KIND_SESSION_ENDED\x10\x08\x12\x1a\n\x16\x45VENT_KIND_VTX_CHANGED\x10\t\x12\x1e\n\x1a\x45VENT_KIND_SERIAL_OVERFLOW\x10\n2\xb7\x05\n\x03Sim\x12=\n\tHandshake\x12\x18.ofs.v1.HandshakeRequest\x1a\x16.ofs.v1.HandshakeReply\x12.\n\x04Load\x12\x13.ofs.v1.LoadRequest\x1a\x11.ofs.v1.LoadReply\x12*\n\tSetSticks\x12\x0e.ofs.v1.Sticks\x1a\r.ofs.v1.Empty\x12(\n\x03Run\x12\x12.ofs.v1.RunRequest\x1a\r.ofs.v1.State\x12%\n\x05Start\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12%\n\x05Pause\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12(\n\x08GetState\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.State\x12&\n\x06Unload\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12\x35\n\x0bStreamState\x12\x15.ofs.v1.StreamRequest\x1a\r.ofs.v1.State0\x01\x12.\n\x05Pilot\x12\x12.ofs.v1.PilotInput\x1a\r.ofs.v1.State(\x01\x30\x01\x12\'\n\x05Watch\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Event0\x01\x12+\n\x0bInjectFault\x12\r.ofs.v1.Fault\x1a\r.ofs.v1.Empty\x12+\n\x0b\x43learFaults\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12)\n\x06GetOsd\x12\r.ofs.v1.Empty\x1a\x10.ofs.v1.OsdFrame\x12\x36\n\tStreamOsd\x12\x15.ofs.v1.StreamRequest\x1a\x10.ofs.v1.OsdFrame0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10ofs/v1/sim.proto\x12\x06ofs.v1\"\x07\n\x05\x45mpty\",\n\x10HandshakeRequest\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\"B\n\x0eHandshakeReply\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x16\n\x0eserver_version\x18\x02 \x01(\t\"\xb7\x01\n\x0bLoadRequest\x12\x11\n\tquad_path\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x04\x12\x1a\n\x04mode\x18\x03 \x01(\x0e\x32\x0c.ofs.v1.Mode\x12\x14\n\x0copen_loop_fc\x18\x04 \x01(\x08\x12-\n\x0eoverrun_policy\x18\x05 \x01(\x0e\x32\x15.ofs.v1.OverrunPolicy\x12\x12\n\nkeep_alive\x18\x06 \x01(\x08\x12\x12\n\nworld_path\x18\x07 \x01(\t\"M\n\tLoadReply\x12\x11\n\tquad_name\x18\x01 \x01(\t\x12\x0f\n\x07\x62\x61se_hz\x18\x02 \x01(\r\x12\x1c\n\x14\x63onfigurator_address\x18\x03 \x01(\t\"Q\n\x06Sticks\x12\x0c\n\x04roll\x18\x01 \x01(\x01\x12\r\n\x05pitch\x18\x02 \x01(\x01\x12\x0b\n\x03yaw\x18\x03 \x01(\x01\x12\x10\n\x08throttle\x18\x04 \x01(\x01\x12\x0b\n\x03\x61ux\x18\x05 \x03(\x01\"\x1d\n\nRunRequest\x12\x0f\n\x07seconds\x18\x01 \x01(\x01\" \n\rStreamRequest\x12\x0f\n\x07rate_hz\x18\x01 \x01(\r\"C\n\nPilotInput\x12\x1e\n\x06sticks\x18\x01 \x01(\x0b\x32\x0e.ofs.v1.Sticks\x12\x15\n\rstate_rate_hz\x18\x02 \x01(\r\"\'\n\x04Vec3\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\"2\n\x04Quat\x12\t\n\x01w\x18\x01 \x01(\x01\x12\t\n\x01x\x18\x02 \x01(\x01\x12\t\n\x01y\x18\x03 \x01(\x01\x12\t\n\x01z\x18\x04 \x01(\x01\"R\n\tRadioLink\x12\x12\n\ntx_enabled\x18\x01 \x01(\x08\x12\x0f\n\x07link_up\x18\x02 \x01(\x08\x12\x0e\n\x06lq_pct\x18\x03 \x01(\x01\x12\x10\n\x08rssi_dbm\x18\x04 \x01(\x01\"c\n\x08OsdFrame\x12\x0b\n\x03seq\x18\x01 \x01(\x04\x12\x0e\n\x06time_s\x18\x02 \x01(\x01\x12\x0f\n\x07present\x18\x03 \x01(\x08\x12\x0c\n\x04\x63ols\x18\x04 \x01(\r\x12\x0c\n\x04rows\x18\x05 \x01(\r\x12\r\n\x05\x63\x65lls\x18\x06 \x03(\r\"k\n\x03Vtx\x12\x0f\n\x07present\x18\x01 \x01(\x08\x12\x0c\n\x04\x62\x61nd\x18\x02 \x01(\r\x12\x0f\n\x07\x63hannel\x18\x03 \x01(\r\x12\x10\n\x08\x66req_mhz\x18\x04 \x01(\r\x12\x10\n\x08power_mw\x18\x05 \x01(\r\x12\x10\n\x08pit_mode\x18\x06 \x01(\x08\"-\n\x0b\x41ntennaRssi\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08rssi_dbm\x18\x02 \x01(\x01\"\xd3\x01\n\tVideoLink\x12\x0f\n\x07present\x18\x01 \x01(\x08\x12\x0e\n\x06snr_db\x18\x02 \x01(\x01\x12\x18\n\x10interference_dbm\x18\x03 \x01(\x01\x12!\n\x04rssi\x18\x04 \x03(\x0b\x32\x13.ofs.v1.AntennaRssi\x12\x16\n\x0e\x61\x63tive_antenna\x18\x05 \x01(\t\x12\r\n\x05noise\x18\x06 \x01(\x01\x12\x10\n\x08sparkles\x18\x07 \x01(\x01\x12\x0e\n\x06\x63hroma\x18\x08 \x01(\x01\x12\x1f\n\x04sync\x18\t \x01(\x0e\x32\x11.ofs.v1.VideoSync\"\xbb\x03\n\x05State\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12$\n\x0eposition_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12&\n\x10velocity_ned_mps\x18\x03 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x1e\n\x08\x61ttitude\x18\x04 \x01(\x0b\x32\x0c.ofs.v1.Quat\x12$\n\x0erate_frd_radps\x18\x05 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x19\n\x11\x62\x61ttery_voltage_v\x18\x06 \x01(\x01\x12\x19\n\x11\x62\x61ttery_current_a\x18\x07 \x01(\x01\x12\x11\n\tmotor_rpm\x18\x08 \x03(\x01\x12\x11\n\tmotor_cmd\x18\t \x03(\x01\x12 \n\x05radio\x18\n \x01(\x0b\x32\x11.ofs.v1.RadioLink\x12\x0f\n\x07running\x18\x0b \x01(\x08\x12\x10\n\x08overruns\x18\x0c \x01(\x04\x12\x13\n\x0b\x66\x63_restarts\x18\r \x01(\r\x12\x18\n\x03vtx\x18\x0e \x01(\x0b\x32\x0b.ofs.v1.Vtx\x12\x1c\n\x14serial_dropped_bytes\x18\x0f \x01(\x04\x12 \n\x05video\x18\x10 \x01(\x0b\x32\x11.ofs.v1.VideoLink\"I\n\x05\x45vent\x12\x0e\n\x06time_s\x18\x01 \x01(\x01\x12\x1f\n\x04kind\x18\x02 \x01(\x0e\x32\x11.ofs.v1.EventKind\x12\x0f\n\x07message\x18\x03 \x01(\t\"\x0f\n\rRadioLinkLoss\"A\n\x05\x46\x61ult\x12\x30\n\x0fradio_link_loss\x18\x01 \x01(\x0b\x32\x15.ofs.v1.RadioLinkLossH\x00\x42\x06\n\x04kind\"\x94\x01\n\x0fReceiverAntenna\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12\x10\n\x08gain_dbi\x18\x03 \x01(\x01\x12\x15\n\rbeamwidth_deg\x18\x04 \x01(\x01\x12\x14\n\x0cpolarization\x18\x05 \x01(\t\x12\x12\n\naim_az_deg\x18\x06 \x01(\x01\x12\x12\n\naim_el_deg\x18\x07 \x01(\x01\"\xc1\x01\n\x0bWorldObject\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\r\n\x05shape\x18\x02 \x01(\t\x12\"\n\x0c\x63\x65nter_ned_m\x18\x03 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x1c\n\x06size_m\x18\x04 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x10\n\x08radius_m\x18\x05 \x01(\x01\x12\x10\n\x08height_m\x18\x06 \x01(\x01\x12\x1b\n\x05\x63olor\x18\x07 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x12\n\nrf_loss_db\x18\x08 \x01(\x01\"a\n\x07\x45mitter\x12\x0c\n\x04name\x18\x01 \x01(\t\x12$\n\x0eposition_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x10\n\x08\x66req_mhz\x18\x03 \x01(\x01\x12\x10\n\x08power_mw\x18\x04 \x01(\x01\"\xcf\x01\n\x05World\x12\x0c\n\x04name\x18\x01 \x01(\t\x12*\n\x14pilot_position_ned_m\x18\x02 \x01(\x0b\x32\x0c.ofs.v1.Vec3\x12\x18\n\x10pilot_facing_deg\x18\x03 \x01(\x01\x12)\n\x08\x61ntennas\x18\x04 \x03(\x0b\x32\x17.ofs.v1.ReceiverAntenna\x12$\n\x07objects\x18\x05 \x03(\x0b\x32\x13.ofs.v1.WorldObject\x12!\n\x08\x65mitters\x18\x06 \x03(\x0b\x32\x0f.ofs.v1.Emitter*B\n\x04Mode\x12\x14\n\x10MODE_UNSPECIFIED\x10\x00\x12\x11\n\rMODE_LOCKSTEP\x10\x01\x12\x11\n\rMODE_REALTIME\x10\x02*a\n\rOverrunPolicy\x12\x1e\n\x1aOVERRUN_POLICY_UNSPECIFIED\x10\x00\x12\x17\n\x13OVERRUN_POLICY_WARN\x10\x01\x12\x17\n\x13OVERRUN_POLICY_SLOW\x10\x02*l\n\tVideoSync\x12\x1a\n\x16VIDEO_SYNC_UNSPECIFIED\x10\x00\x12\x15\n\x11VIDEO_SYNC_LOCKED\x10\x01\x12\x17\n\x13VIDEO_SYNC_UNSTABLE\x10\x02\x12\x13\n\x0fVIDEO_SYNC_LOST\x10\x03*\x85\x03\n\tEventKind\x12\x1a\n\x16\x45VENT_KIND_UNSPECIFIED\x10\x00\x12\x16\n\x12\x45VENT_KIND_OVERRUN\x10\x01\x12!\n\x1d\x45VENT_KIND_FIRMWARE_RESTARTED\x10\x02\x12\x18\n\x14\x45VENT_KIND_SIM_ERROR\x10\x03\x12\x18\n\x14\x45VENT_KIND_LINK_DOWN\x10\x04\x12\x16\n\x12\x45VENT_KIND_LINK_UP\x10\x05\x12\x1e\n\x1a\x45VENT_KIND_PILOT_CONNECTED\x10\x06\x12!\n\x1d\x45VENT_KIND_PILOT_DISCONNECTED\x10\x07\x12\x1c\n\x18\x45VENT_KIND_SESSION_ENDED\x10\x08\x12\x1a\n\x16\x45VENT_KIND_VTX_CHANGED\x10\t\x12\x1e\n\x1a\x45VENT_KIND_SERIAL_OVERFLOW\x10\n\x12\x19\n\x15\x45VENT_KIND_VIDEO_LOST\x10\x0b\x12\x1d\n\x19\x45VENT_KIND_VIDEO_RESTORED\x10\x0c\x32\xe1\x05\n\x03Sim\x12=\n\tHandshake\x12\x18.ofs.v1.HandshakeRequest\x1a\x16.ofs.v1.HandshakeReply\x12.\n\x04Load\x12\x13.ofs.v1.LoadRequest\x1a\x11.ofs.v1.LoadReply\x12*\n\tSetSticks\x12\x0e.ofs.v1.Sticks\x1a\r.ofs.v1.Empty\x12(\n\x03Run\x12\x12.ofs.v1.RunRequest\x1a\r.ofs.v1.State\x12%\n\x05Start\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12%\n\x05Pause\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12(\n\x08GetState\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.State\x12&\n\x06Unload\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12\x35\n\x0bStreamState\x12\x15.ofs.v1.StreamRequest\x1a\r.ofs.v1.State0\x01\x12.\n\x05Pilot\x12\x12.ofs.v1.PilotInput\x1a\r.ofs.v1.State(\x01\x30\x01\x12\'\n\x05Watch\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Event0\x01\x12+\n\x0bInjectFault\x12\r.ofs.v1.Fault\x1a\r.ofs.v1.Empty\x12+\n\x0b\x43learFaults\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Empty\x12)\n\x06GetOsd\x12\r.ofs.v1.Empty\x1a\x10.ofs.v1.OsdFrame\x12\x36\n\tStreamOsd\x12\x15.ofs.v1.StreamRequest\x1a\x10.ofs.v1.OsdFrame0\x01\x12(\n\x08GetWorld\x12\r.ofs.v1.Empty\x1a\r.ofs.v1.Worldb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'ofs.v1.sim_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MODE']._serialized_start=1571
-  _globals['_MODE']._serialized_end=1637
-  _globals['_OVERRUNPOLICY']._serialized_start=1639
-  _globals['_OVERRUNPOLICY']._serialized_end=1736
-  _globals['_EVENTKIND']._serialized_start=1739
-  _globals['_EVENTKIND']._serialized_end=2070
+  _globals['_MODE']._serialized_start=2542
+  _globals['_MODE']._serialized_end=2608
+  _globals['_OVERRUNPOLICY']._serialized_start=2610
+  _globals['_OVERRUNPOLICY']._serialized_end=2707
+  _globals['_VIDEOSYNC']._serialized_start=2709
+  _globals['_VIDEOSYNC']._serialized_end=2817
+  _globals['_EVENTKIND']._serialized_start=2820
+  _globals['_EVENTKIND']._serialized_end=3209
   _globals['_EMPTY']._serialized_start=28
   _globals['_EMPTY']._serialized_end=35
   _globals['_HANDSHAKEREQUEST']._serialized_start=37
@@ -44,35 +46,47 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HANDSHAKEREPLY']._serialized_start=83
   _globals['_HANDSHAKEREPLY']._serialized_end=149
   _globals['_LOADREQUEST']._serialized_start=152
-  _globals['_LOADREQUEST']._serialized_end=315
-  _globals['_LOADREPLY']._serialized_start=317
-  _globals['_LOADREPLY']._serialized_end=394
-  _globals['_STICKS']._serialized_start=396
-  _globals['_STICKS']._serialized_end=477
-  _globals['_RUNREQUEST']._serialized_start=479
-  _globals['_RUNREQUEST']._serialized_end=508
-  _globals['_STREAMREQUEST']._serialized_start=510
-  _globals['_STREAMREQUEST']._serialized_end=542
-  _globals['_PILOTINPUT']._serialized_start=544
-  _globals['_PILOTINPUT']._serialized_end=611
-  _globals['_VEC3']._serialized_start=613
-  _globals['_VEC3']._serialized_end=652
-  _globals['_QUAT']._serialized_start=654
-  _globals['_QUAT']._serialized_end=704
-  _globals['_RADIOLINK']._serialized_start=706
-  _globals['_RADIOLINK']._serialized_end=788
-  _globals['_OSDFRAME']._serialized_start=790
-  _globals['_OSDFRAME']._serialized_end=889
-  _globals['_VTX']._serialized_start=891
-  _globals['_VTX']._serialized_end=998
-  _globals['_STATE']._serialized_start=1001
-  _globals['_STATE']._serialized_end=1410
-  _globals['_EVENT']._serialized_start=1412
-  _globals['_EVENT']._serialized_end=1485
-  _globals['_RADIOLINKLOSS']._serialized_start=1487
-  _globals['_RADIOLINKLOSS']._serialized_end=1502
-  _globals['_FAULT']._serialized_start=1504
-  _globals['_FAULT']._serialized_end=1569
-  _globals['_SIM']._serialized_start=2073
-  _globals['_SIM']._serialized_end=2768
+  _globals['_LOADREQUEST']._serialized_end=335
+  _globals['_LOADREPLY']._serialized_start=337
+  _globals['_LOADREPLY']._serialized_end=414
+  _globals['_STICKS']._serialized_start=416
+  _globals['_STICKS']._serialized_end=497
+  _globals['_RUNREQUEST']._serialized_start=499
+  _globals['_RUNREQUEST']._serialized_end=528
+  _globals['_STREAMREQUEST']._serialized_start=530
+  _globals['_STREAMREQUEST']._serialized_end=562
+  _globals['_PILOTINPUT']._serialized_start=564
+  _globals['_PILOTINPUT']._serialized_end=631
+  _globals['_VEC3']._serialized_start=633
+  _globals['_VEC3']._serialized_end=672
+  _globals['_QUAT']._serialized_start=674
+  _globals['_QUAT']._serialized_end=724
+  _globals['_RADIOLINK']._serialized_start=726
+  _globals['_RADIOLINK']._serialized_end=808
+  _globals['_OSDFRAME']._serialized_start=810
+  _globals['_OSDFRAME']._serialized_end=909
+  _globals['_VTX']._serialized_start=911
+  _globals['_VTX']._serialized_end=1018
+  _globals['_ANTENNARSSI']._serialized_start=1020
+  _globals['_ANTENNARSSI']._serialized_end=1065
+  _globals['_VIDEOLINK']._serialized_start=1068
+  _globals['_VIDEOLINK']._serialized_end=1279
+  _globals['_STATE']._serialized_start=1282
+  _globals['_STATE']._serialized_end=1725
+  _globals['_EVENT']._serialized_start=1727
+  _globals['_EVENT']._serialized_end=1800
+  _globals['_RADIOLINKLOSS']._serialized_start=1802
+  _globals['_RADIOLINKLOSS']._serialized_end=1817
+  _globals['_FAULT']._serialized_start=1819
+  _globals['_FAULT']._serialized_end=1884
+  _globals['_RECEIVERANTENNA']._serialized_start=1887
+  _globals['_RECEIVERANTENNA']._serialized_end=2035
+  _globals['_WORLDOBJECT']._serialized_start=2038
+  _globals['_WORLDOBJECT']._serialized_end=2231
+  _globals['_EMITTER']._serialized_start=2233
+  _globals['_EMITTER']._serialized_end=2330
+  _globals['_WORLD']._serialized_start=2333
+  _globals['_WORLD']._serialized_end=2540
+  _globals['_SIM']._serialized_start=3212
+  _globals['_SIM']._serialized_end=3949
 # @@protoc_insertion_point(module_scope)

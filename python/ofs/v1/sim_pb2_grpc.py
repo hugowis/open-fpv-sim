@@ -26,8 +26,9 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
+    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
+    per server.
     """
 
     def __init__(self, channel):
@@ -111,11 +112,17 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
                 _registered_method=True)
+        self.GetWorld = channel.unary_unary(
+                '/ofs.v1.Sim/GetWorld',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.World.FromString,
+                _registered_method=True)
 
 
 class SimServicer:
-    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
+    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
+    per server.
     """
 
     def Handshake(self, request, context):
@@ -217,6 +224,13 @@ class SimServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetWorld(self, request, context):
+        """The world the session flies in, as loaded and validated (the built-in open field when Load named none).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SimServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -295,6 +309,11 @@ def add_SimServicer_to_server(servicer, server):
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.StreamRequest.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.OsdFrame.SerializeToString,
             ),
+            'GetWorld': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetWorld,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.World.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'ofs.v1.Sim', rpc_method_handlers)
@@ -304,8 +323,9 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
+    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
+    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
+    per server.
     """
 
     @staticmethod
@@ -703,6 +723,33 @@ class Sim:
             '/ofs.v1.Sim/StreamOsd',
             ofs_dot_v1_dot_sim__pb2.StreamRequest.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.OsdFrame.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetWorld(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/GetWorld',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.World.FromString,
             options,
             channel_credentials,
             insecure,

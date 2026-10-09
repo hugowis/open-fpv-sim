@@ -2,8 +2,9 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 3: lockstep and real-time sessions, state and event streams, the
-// pilot link, fault injection, and OSD and VTX state. One session (loaded quad) per server.
+// Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
+// pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
+// per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
@@ -29,6 +30,8 @@ service Sim {
   // OSD frames: the current one at once, then each time the grid changes or the OSD appears or disappears,
   // checked at up to rate_hz (1..60; 0 means 60).
   rpc StreamOsd(StreamRequest) returns (stream OsdFrame);
+  // The world the session flies in, as loaded and validated (the built-in open field when Load named none).
+  rpc GetWorld(Empty) returns (World);
 }
 
 message Empty {}
@@ -59,6 +62,7 @@ message LoadRequest {
   bool open_loop_fc = 4;  // testing aid: replace the configured FC with throttle-only open loop
   OverrunPolicy overrun_policy = 5;
   bool keep_alive = 6;  // keep the session when its last watcher disconnects
+  string world_path = 7;  // a world file (worlds/flat.toml); empty: the built-in open field
 }
 message LoadReply {
   string quad_name = 1;
@@ -125,6 +129,31 @@ message Vtx {
   bool pit_mode = 6;
 }
 
+// The analog video link at the goggles (present = false without a VTX).
+enum VideoSync {
+  VIDEO_SYNC_UNSPECIFIED = 0;  // no video link
+  VIDEO_SYNC_LOCKED = 1;
+  VIDEO_SYNC_UNSTABLE = 2;     // tearing, line jitter
+  VIDEO_SYNC_LOST = 3;         // rolling, static
+}
+
+message AntennaRssi {
+  string name = 1;
+  double rssi_dbm = 2;
+}
+
+message VideoLink {
+  bool present = 1;
+  double snr_db = 2;             // at the antenna in use
+  double interference_dbm = 3;   // other emitters after the channel filter, at the antenna in use
+  repeated AntennaRssi rssi = 4; // every goggle antenna, in the world file's order
+  string active_antenna = 5;
+  double noise = 6;     // picture grain, 0 (clean) to 1 (static)
+  double sparkles = 7;  // 0 to 1
+  double chroma = 8;    // colour, 1 (full) to 0 (black and white)
+  VideoSync sync = 9;
+}
+
 message State {
   double time_s = 1;
   Vec3 position_ned_m = 2;
@@ -141,6 +170,7 @@ message State {
   uint32 fc_restarts = 13;  // Betaflight reboots so far
   Vtx vtx = 14;
   uint64 serial_dropped_bytes = 15;  // Betaflight UART output dropped because a consumer fell behind
+  VideoLink video = 16;
 }
 
 enum EventKind {
@@ -155,6 +185,8 @@ enum EventKind {
   EVENT_KIND_SESSION_ENDED = 8;
   EVENT_KIND_VTX_CHANGED = 9;
   EVENT_KIND_SERIAL_OVERFLOW = 10;
+  EVENT_KIND_VIDEO_LOST = 11;      // the goggles lost sync
+  EVENT_KIND_VIDEO_RESTORED = 12;  // and found it again
 }
 
 message Event {
@@ -169,4 +201,43 @@ message Fault {
   oneof kind {
     RadioLinkLoss radio_link_loss = 1;  // every uplink packet is lost while active
   }
+}
+
+// The world file, NED metres from home (up is negative). Strings name the kinds: antenna "omni" or "patch";
+// polarization "rhcp", "lhcp" or "linear"; shape "box" or "cylinder".
+message ReceiverAntenna {
+  string name = 1;
+  string kind = 2;
+  double gain_dbi = 3;
+  double beamwidth_deg = 4;  // patch only, else 0
+  string polarization = 5;
+  double aim_az_deg = 6;     // relative to the pilot's facing, clockwise
+  double aim_el_deg = 7;     // up
+}
+
+message WorldObject {
+  string name = 1;
+  string shape = 2;
+  Vec3 center_ned_m = 3;
+  Vec3 size_m = 4;      // box: north, east, height
+  double radius_m = 5;  // cylinder
+  double height_m = 6;  // cylinder
+  Vec3 color = 7;       // r, g, b in 0..1
+  double rf_loss_db = 8;
+}
+
+message Emitter {
+  string name = 1;
+  Vec3 position_ned_m = 2;
+  double freq_mhz = 3;
+  double power_mw = 4;
+}
+
+message World {
+  string name = 1;
+  Vec3 pilot_position_ned_m = 2;
+  double pilot_facing_deg = 3;  // degrees clockwise from north
+  repeated ReceiverAntenna antennas = 4;
+  repeated WorldObject objects = 5;
+  repeated Emitter emitters = 6;
 }
