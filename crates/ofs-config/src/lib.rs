@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+pub mod world;
+pub use world::{AntennaKind, Polarization, WorldConfig};
+
 /// 3: adds the optional `[esc_telemetry]`, `[osd]` and `[vtx]` sections (M3a). 2: the required `[radio]` section (M2).
 pub const SCHEMA_VERSION: u32 = 3;
 /// Oldest schema this build still reads (schema-2 files have no video sections).
@@ -292,7 +295,67 @@ pub struct VtxSection {
     /// How long the VTX takes to answer a request.
     #[serde(default = "default_vtx_reply_latency_ms")]
     pub reply_latency_ms: f64,
+    /// The antenna on the quad (default: a 2 dBi RHCP omni pointing up and back).
+    #[serde(default)]
+    pub antenna: VtxAntennaSection,
+    /// Output power in pit mode.
+    #[serde(default = "default_pit_power_mw")]
+    pub pit_power_mw: f64,
 }
+
+/// The VTX antenna, for the video link model.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VtxAntennaSection {
+    #[serde(default = "default_vtx_antenna_kind")]
+    pub kind: AntennaKind,
+    #[serde(default = "default_vtx_antenna_gain_dbi")]
+    pub gain_dbi: f64,
+    /// Patch only.
+    #[serde(default)]
+    pub beamwidth_deg: Option<f64>,
+    #[serde(default = "default_vtx_polarization")]
+    pub polarization: Polarization,
+    /// The omni's axis (or the patch's boresight) in the body frame: FRD, x forward, y right, z down.
+    #[serde(default = "default_vtx_mount_frd")]
+    pub mount_frd: [f64; 3],
+}
+
+impl Default for VtxAntennaSection {
+    fn default() -> Self {
+        Self {
+            kind: default_vtx_antenna_kind(),
+            gain_dbi: default_vtx_antenna_gain_dbi(),
+            beamwidth_deg: None,
+            polarization: default_vtx_polarization(),
+            mount_frd: default_vtx_mount_frd(),
+        }
+    }
+}
+
+fn default_vtx_antenna_kind() -> AntennaKind {
+    AntennaKind::Omni
+}
+
+fn default_vtx_antenna_gain_dbi() -> f64 {
+    2.0
+}
+
+fn default_vtx_polarization() -> Polarization {
+    Polarization::Rhcp
+}
+
+/// Up and back, about 27 degrees from upright, as on a typical 5" quad.
+fn default_vtx_mount_frd() -> [f64; 3] {
+    [-0.5, 0.0, -1.0]
+}
+
+fn default_pit_power_mw() -> f64 {
+    0.1
+}
+
+/// The video link model runs once per PAL field.
+pub const VIDEO_FIELD_RATE_HZ: u32 = 50;
 
 fn default_vtx_band() -> String {
     "R".into()
@@ -515,6 +578,20 @@ impl QuadConfig {
                 "vtx.reply_latency_ms",
                 format!("must be in [0, 100] ms (got {})", v.reply_latency_ms),
             );
+            c.check(
+                self.sim.base_hz % VIDEO_FIELD_RATE_HZ == 0,
+                "sim.base_hz",
+                format!("must be a multiple of {VIDEO_FIELD_RATE_HZ} when the quad has [vtx]: the video link runs once per PAL field (got {})", self.sim.base_hz),
+            );
+            c.positive(v.pit_power_mw, "vtx.pit_power_mw");
+            let a = &v.antenna;
+            c.check(a.gain_dbi.is_finite(), "vtx.antenna.gain_dbi", "must be finite");
+            c.check(
+                a.mount_frd.iter().all(|x| x.is_finite()) && a.mount_frd.iter().any(|x| *x != 0.0),
+                "vtx.antenna.mount_frd",
+                "must be a finite, non-zero direction",
+            );
+            world::check_beamwidth(&mut c, a.kind, a.beamwidth_deg, "vtx.antenna.beamwidth_deg");
         }
         for (i, (field, uart)) in uarts.iter().enumerate() {
             if let Some((other, _)) = uarts[..i].iter().find(|(_, u)| u == uart) {

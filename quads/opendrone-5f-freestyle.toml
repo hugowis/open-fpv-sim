@@ -113,3 +113,12 @@ power_levels_mw = [25, 200, 600, 1000]
 power_levels_dbm = [14, 23, 28, 30]
 default_power_index = 1
 reply_latency_ms = 5.0
+# Pit mode (0 dBm in SmartAudio) leaves a trickle: a picture only next to the pilot.
+pit_power_mw = 0.1
+
+# The video link model's view of the VTX antenna: a 2 dBi RHCP omni on the back of the frame, leaning back.
+[vtx.antenna]
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+mount_frd = [-0.5, 0.0, -1.0]
