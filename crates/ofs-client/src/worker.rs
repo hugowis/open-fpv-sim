@@ -1,5 +1,6 @@
 //! The supervisor task: connects (starting the server when allowed), loads the quad, opens the event stream and
 //! the pilot link, and keeps flying until it is told to reload or quit.
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -16,7 +17,7 @@ use crate::error::{ClientError, ErrorKind};
 use crate::frames::{quat_to_godot, vec_to_godot};
 use crate::interp::{Sample, StateBuffer};
 use crate::launch::ServerProcess;
-use crate::model::{Command, Event, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update};
+use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update};
 
 /// The server frees a disconnected pilot's slot asynchronously, so a pilot that reconnects at once (a reload) can
 /// meet `pilot_busy` for a moment.
@@ -33,6 +34,8 @@ pub(crate) struct Shared {
     pub sticks: watch::Sender<Sticks>,
     pub buffer: Mutex<StateBuffer>,
     pub telemetry: Mutex<Option<(Telemetry, Instant)>>,
+    pub osd: Mutex<Option<OsdFrame>>,
+    pub osd_version: AtomicU64,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -55,6 +58,12 @@ impl Shared {
     fn reset_state(&self) {
         lock(&self.buffer).clear();
         *lock(&self.telemetry) = None;
+        self.store_osd(None);
+    }
+
+    fn store_osd(&self, frame: Option<OsdFrame>) {
+        *lock(&self.osd) = frame;
+        self.osd_version.fetch_add(1, Ordering::AcqRel);
     }
 
     fn ingest(&self, state: pb::State) {
@@ -143,6 +152,15 @@ fn watch_events(mut stream: tonic::Streaming<pb::Event>, shared: Arc<Shared>) ->
     tokio::spawn(async move {
         while let Ok(Some(event)) = stream.message().await {
             let _ = shared.updates.send(Update::Event(Event::from_pb(event)));
+        }
+    })
+}
+
+/// Keeps the newest OSD frame until the stream ends (the session was unloaded or the server went away).
+fn watch_osd(mut stream: tonic::Streaming<pb::OsdFrame>, shared: Arc<Shared>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Ok(Some(frame)) = stream.message().await {
+            shared.store_osd(Some(OsdFrame::from_pb(frame)));
         }
     })
 }
@@ -246,6 +264,13 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
         Err(error) => return Fly::Failed(error),
     };
     shared.phase(Phase::Flying, "");
+    let osd_task = match client.stream_osd(pb::StreamRequest { rate_hz: 60 }).await {
+        Ok(stream) => Some(watch_osd(stream.into_inner(), shared.clone())),
+        Err(status) => {
+            shared.error(status_error(status)); // the flight goes on without an OSD
+            None
+        }
+    };
     let outcome = loop {
         tokio::select! {
             command = commands.recv() => match command {
@@ -280,6 +305,9 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
             }
         }
     };
+    if let Some(task) = osd_task {
+        task.abort();
+    }
     link.stop().await;
     outcome
 }

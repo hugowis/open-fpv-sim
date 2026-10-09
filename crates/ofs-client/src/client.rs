@@ -1,4 +1,5 @@
 //! The client handle: a supervisor running on its own threads, polled without blocking from a game loop.
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -6,7 +7,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::error::{ClientError, ErrorKind};
 use crate::interp::{Pose, StateBuffer};
-use crate::model::{Command, Phase, Settings, Sticks, Telemetry, Update};
+use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update};
 use crate::worker::{lock, run, Shared};
 
 /// How long `shutdown` waits for the supervisor (it unloads the session of a server it launched).
@@ -58,6 +59,8 @@ impl Client {
             sticks: sticks_tx,
             buffer: Mutex::new(StateBuffer::new(delay_s)),
             telemetry: Mutex::new(None),
+            osd: Mutex::new(None),
+            osd_version: AtomicU64::new(0),
         });
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (finished_tx, finished_rx) = std_mpsc::channel();
@@ -138,6 +141,16 @@ impl Client {
     pub fn telemetry(&self) -> Option<Telemetry> {
         let (telemetry, received) = lock(&self.shared.telemetry).clone()?;
         Some(Telemetry { age_s: received.elapsed().as_secs_f64(), ..telemetry })
+    }
+
+    /// The newest OSD frame; `None` before the first one arrives and right after a reload.
+    pub fn osd(&self) -> Option<OsdFrame> {
+        lock(&self.shared.osd).clone()
+    }
+
+    /// Counts OSD updates (and clears): a changed value means [`osd`](Self::osd) has something new to draw.
+    pub fn osd_version(&self) -> u64 {
+        self.shared.osd_version.load(Ordering::Acquire)
     }
 
     /// Ends the session (unloading it first when this client launched the server) and stops the supervisor.
