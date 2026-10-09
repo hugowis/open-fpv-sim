@@ -218,7 +218,7 @@ Caveats:
 
 **Open items:**
 - **Configurator connection** (plan Task 2 Step 5) was not run; it needs the user. Implications are listed in §2.
-- **SmartAudio reply side** was not emulated.
+- **SmartAudio reply side** was not emulated (closed in M3a, see §9).
 - **Heading/quaternion** is unverified.
 - **Intermittent MSP timeout:** after the review fixes, one of six Task 3 runs timed out on the trailing pumped `MSP_ATTITUDE` read-back. The motor checks still passed 8/8, and five reruns, three of them right after Task 4 runs, were clean, with no `bind … failed` lines. The cause is unknown; that run's SITL log was overwritten. Watch for it when M2 uses MSP and the Configurator.
 
@@ -279,3 +279,33 @@ Two cross-cutting findings that also affect M2:
   - `failsafe_delay` defaults to 1.5 s (`failsafeOnValidDataFailed`);
   - then `JUST_DISARM` at low throttle, or `DROP`.
 - **Live test:** `a_radio_cut_fails_safe_on_betaflight_timing`.
+
+## 9. M3a changes (OSD, VTX, battery telemetry)
+
+M3a wired three more live links, all riding the state/reply datagrams (never TCP, so the traffic is deterministic in lockstep): the battery as KISS ESC telemetry on UART3, Betaflight's OSD over MSP DisplayPort on UART4, and a SmartAudio v2.1 VTX on UART5. Design: `docs/superpowers/specs/2026-10-08-m3a-osd-vtx-design.md`.
+
+### The reply datagram
+
+After the 16-byte `servo_packet`, a reply on UDP 9002 carries a `u16` bytes-dropped count, then blocks of `[uart index (0-based)][len lo][len hi][bytes]` for the UARTs SITL wrote to — at most 512 bytes of blocks per reply (headers included; `REPLY_MAX` = 530 on the simulator side). SITL buffers each UART's TX bytes in a 4096-byte capture buffer (`TX_CAPTURE_SIZE`, added by `third_party/betaflight/tools/add_serial_out_datagram.py`) and drains them across exchanges; bytes that don't fit are dropped and counted in the `u16`. UART1 (MSP, tcp:5761, Configurator) is never captured (the capture branch checks the port id). A reply without a trailer is a SITL built without the capture and is treated as a legacy reply; a malformed trailer is a firmware error that stops the simulator. Betaflight reboots relaunch SITL and the taps keep working (Task 11's e2e).
+
+### Probe results
+
+- **DisplayPort capture (Task 3):** 176 checksum-valid `MSP_DISPLAYPORT` frames, 1,669 bytes, in 3 s of simulated time on UART4, 0 bytes dropped — the plan's binding numbers, reproduced on the first attempt.
+- **ESC telemetry → battery (Task 5):** a fixed 24.6 V / 8 A / 120 mAh battery encoded as KISS frames on UART3 read back over `MSP_BATTERY_STATE` as `cells 6, 120 mAh, 8.00 A, 24.59 V` (24.59 V for 24.6 V sent, 6 cells detected).
+- **SmartAudio VTX (Task 7):** with the `VtxModel` answering, `MSP_VTX_CONFIG` reported `VTXDEV_SMARTAUDIO` with the device ready (byte 7 = 1) at band 5 (R), channel 1, power index 2, frequency 5658 MHz — the shipped diff's band, channel and frequency. `MSP_SET_VTX_CONFIG` for R3 / level 3 moved the model to 5732 MHz / 600 mW, and pit mode switched on and off. Over one ~10 s scenario Betaflight sent 23 clean requests (18 GET_SETTINGS burst-reads every 200 ms until the first v2.1 reply, 3 SET_POWER, 1 SET_CHANNEL, 1 SET_MODE), never GET_PIT (v2.1 devices don't get it), 0 bad frames.
+- **Ruling (Tasks 4 and 7): the diff's `set vtx_power = 2` against the quad's `default_power_index = 1` is not a defect** — it is the power-numbering offset below, confirmed live (`MSP_VTX_CONFIG` reports power index 2 for the model's index 1).
+- Reboot survival (the OSD returns `present`, the VTX keeps its state) and OSD determinism (two identical lockstep loads draw identical frames) are e2e-tested against real Betaflight (Task 11, `python/tests/test_sitl_video.py`).
+
+### Betaflight facts the design rests on
+
+- **The craft name setting is `craft_name`** (not `name`); the shipped diff sets `craft_name = OpenFPV`.
+- **The patch defines `USE_OSD_SD`** next to `USE_OSD`. Without it, `displayPortMspInit()` runs both of its fallback blocks and always leaves `vcd_video_system` at AUTO, so the OSD is a 13-row NTSC grid whatever the diff says (OSD elements at rows 14 and 15 piled up on row 12). With it defined, the diff's `vcd_video_system = PAL` takes effect and the grid is 30 x 16, which the shipped OSD element positions are laid out for.
+- **No `vtxtable` in SITL**: the build has no `USE_VTX_TABLE`, and `MSP_VTX_CONFIG` reports "table available" = 0. Betaflight uses the factory bands (A, B, E, F, R, L — the same frequencies as `ofs-video`) and builds its power list from the dBm values the VTX reports in its settings reply, so the diff has no `vtxtable` lines.
+- **A diff that enables SmartAudio without a VTX answering crashes Betaflight SITL** (SIGSEGV) when the OSD draws the VTX channel element — seen about 13 s into a run, at radio loss. The quad's config check rejects a diff that enables SmartAudio without a `[vtx]` section at load; with the model answering, long runs are stable.
+- **The SmartAudio response CRC excludes the preamble**: a response is `AA 55 <code> <len> <payload> <crc8 over <code> <len> <payload>>`, polynomial 0xD5, initial 0, while a request's CRC covers all bytes before the CRC (from `vtx_smartaudio.c`).
+- **The v2.1 power table skips the leading zero level**: Betaflight reads `saSupportedPowerValues[i] = buf[9 + i + 1]` ("+ 1 to skip the first power level"), so its power indexes are 1-based over the VTX's 0-based list — the shipped quad's `default_power_index = 1` (200 mW) is the diff's `vtx_power = 2`.
+- **The ESC sensor sums current and consumption** across motors (`esc_sensor.c`; only voltage and RPM are averaged), so the simulator sends four identical frames that each carry a quarter of the pack current and consumed charge, not the pack current in one frame (the §5 caveat, addressed by the wiring).
+
+### M0 open item
+
+"SmartAudio reply side was not emulated" (§7) is now closed: the `VtxModel` answers, Betaflight accepts the replies, and MSP changes flow down into the model (Task 7's probe, Task 11's e2e).

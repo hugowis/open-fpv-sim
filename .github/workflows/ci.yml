@@ -59,9 +59,10 @@ jobs:
           python-version: "3.12"
       - run: bash scripts/build-sitl.sh
       - run: cargo test -p ofs-fc -p ofs-sim --test sitl_live --locked -- --ignored --test-threads=1
+      - run: cargo test -p ofs-video --test vtx_live --locked -- --ignored --test-threads=1
       - run: cargo build -p ofs-sim --locked
       - run: python -m pip install -e "python[dev]"
-      - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py -v
+      - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py python/tests/test_sitl_video.py -v
       # The game against real Betaflight (OFS_SITL_LAUNCH is set above): arm, climb, failsafe on a radio cut, reload.
       # The runner builds ofs-sim and ofs-godot and downloads the pinned Godot itself.
       - run: bash scripts/run-godot-tests.sh e2e

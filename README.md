@@ -31,7 +31,9 @@ Status: **M2b — the Godot pilot client.**
 
 A game window on top of the same simulator: FPV and chase cameras, an HUD (phase, radio link, battery, sticks),
 and Betaflight flying through the simulated ExpressLRS/CRSF link into real firmware — failsafe, reboots and the
-Configurator port all behave as in the Python session. A USB radio in joystick mode, a gamepad or the keyboard
+Configurator port all behave as in the Python session. Betaflight's own OSD is drawn in the FPV view, the VTX is
+controlled by Betaflight over SmartAudio and shown in the HUD, and the battery reaches Betaflight so its OSD shows
+real voltage and warnings. A USB radio in joystick mode, a gamepad or the keyboard
 flies it; the F2 screen sets the bindings, and they persist to `user://controls.json` (Godot's per-user data dir,
 `%APPDATA%\Godot\app_userdata\Open FPV Sim\` on Windows, `~/.local/share/godot/app_userdata/Open FPV Sim/` on Linux).
 
