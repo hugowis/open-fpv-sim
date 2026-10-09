@@ -49,6 +49,62 @@ class Vtx:
 
 
 @dataclass(frozen=True)
+class VideoLink:
+    """The analog video link at the goggles (`present` is False when the quad has no VTX)."""
+    present: bool = False
+    snr_db: float = 0.0
+    interference_dbm: float = 0.0
+    rssi: dict = field(default_factory=dict)  # dBm by goggle antenna name, in the world file's order
+    active_antenna: str = ""
+    noise: float = 0.0  # grain, 0 (clean) to 1 (static)
+    sparkles: float = 0.0
+    chroma: float = 1.0  # colour, 1 (full) to 0 (black and white)
+    sync: str = ""  # "locked", "unstable" (tearing), "lost" (rolling, static); "" without a VTX
+
+
+@dataclass(frozen=True)
+class ReceiverAntenna:
+    name: str
+    kind: str  # "omni" or "patch"
+    gain_dbi: float
+    beamwidth_deg: float  # patch only, else 0
+    polarization: str  # "rhcp", "lhcp" or "linear"
+    aim_az_deg: float
+    aim_el_deg: float
+
+
+@dataclass(frozen=True)
+class WorldObject:
+    name: str
+    shape: str  # "box" or "cylinder"
+    center_ned_m: tuple
+    size_m: tuple  # box: (north, east, height)
+    radius_m: float  # cylinder
+    height_m: float  # cylinder
+    color: tuple  # (r, g, b) in 0..1
+    rf_loss_db: float
+
+
+@dataclass(frozen=True)
+class Emitter:
+    name: str
+    position_ned_m: tuple
+    freq_mhz: float
+    power_mw: float
+
+
+@dataclass(frozen=True)
+class World:
+    """The field a session flies in: where the pilot stands, the goggles' antennas, the objects, other transmitters."""
+    name: str
+    pilot_position_ned_m: tuple
+    pilot_facing_deg: float
+    antennas: tuple
+    objects: tuple
+    emitters: tuple
+
+
+@dataclass(frozen=True)
 class Osd:
     """Betaflight's OSD as a character grid. `cells` are row-major, each `char | page << 8 | blink << 10`."""
     seq: int
@@ -96,6 +152,7 @@ class State:
     fc_restarts: int = 0
     vtx: Vtx = field(default_factory=Vtx)
     serial_dropped_bytes: int = 0
+    video: VideoLink = field(default_factory=VideoLink)
 
     @property
     def altitude_m(self) -> float:
@@ -113,12 +170,34 @@ class State:
 @dataclass(frozen=True)
 class Event:
     time_s: float
-    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended", "vtx_changed", "serial_overflow"
+    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended", "vtx_changed", "video_lost"
     message: str
 
 
 def _v(m) -> tuple:
     return (m.x, m.y, m.z)
+
+
+_SYNC_NAMES = {pb.VIDEO_SYNC_LOCKED: "locked", pb.VIDEO_SYNC_UNSTABLE: "unstable", pb.VIDEO_SYNC_LOST: "lost"}
+
+
+def _video(m) -> VideoLink:
+    return VideoLink(present=m.present, snr_db=m.snr_db, interference_dbm=m.interference_dbm,
+                     rssi={r.name: r.rssi_dbm for r in m.rssi}, active_antenna=m.active_antenna, noise=m.noise,
+                     sparkles=m.sparkles, chroma=m.chroma, sync=_SYNC_NAMES.get(m.sync, ""))
+
+
+def _world(m) -> World:
+    return World(
+        name=m.name,
+        pilot_position_ned_m=_v(m.pilot_position_ned_m),
+        pilot_facing_deg=m.pilot_facing_deg,
+        antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
+                                       a.aim_el_deg) for a in m.antennas),
+        objects=tuple(WorldObject(o.name, o.shape, _v(o.center_ned_m), _v(o.size_m), o.radius_m, o.height_m, _v(o.color),
+                                  o.rf_loss_db) for o in m.objects),
+        emitters=tuple(Emitter(e.name, _v(e.position_ned_m), e.freq_mhz, e.power_mw) for e in m.emitters),
+    )
 
 
 def _state(m) -> State:
@@ -138,6 +217,7 @@ def _state(m) -> State:
         fc_restarts=m.fc_restarts,
         vtx=Vtx(m.vtx.present, m.vtx.band, m.vtx.channel, m.vtx.freq_mhz, m.vtx.power_mw, m.vtx.pit_mode),
         serial_dropped_bytes=m.serial_dropped_bytes,
+        video=_video(m.video),
     )
 
 
@@ -203,9 +283,10 @@ class Sim:
         threading.Thread(target=pump, name="ofs-watch", daemon=True).start()
 
     def load(self, quad_path: str, seed: int = 0, mode: str = "lockstep", open_loop_fc: bool = False,
-             overrun_policy: str = "warn", keep_alive: bool = False) -> str:
+             overrun_policy: str = "warn", keep_alive: bool = False, world: str | None = None) -> str:
         """Loads a quad. `mode` is "lockstep" (advance with `run`) or "realtime" (loads paused; `start` paces it
-        to the wall clock). Returns the quad's name; `configurator_address` is set when it runs Betaflight."""
+        to the wall clock). `world` is a world file (e.g. "worlds/flat.toml"); without one the quad flies in the
+        open field. Returns the quad's name; `configurator_address` is set when it runs Betaflight."""
         if mode not in _MODES:
             raise ValueError(f"mode must be one of {sorted(_MODES)}")
         if overrun_policy not in _POLICIES:
@@ -213,7 +294,7 @@ class Sim:
         self._ensure_watch()
         reply = self._call(self._stub.Load, pb.LoadRequest(
             quad_path=str(quad_path), seed=seed, mode=_MODES[mode], open_loop_fc=open_loop_fc,
-            overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive))
+            overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or "")))
         self.configurator_address = reply.configurator_address
         return reply.quad_name
 
@@ -244,6 +325,10 @@ class Sim:
     def get_osd(self) -> Osd:
         """The current OSD frame (`present` is False without an OSD)."""
         return _osd(self._call(self._stub.GetOsd, pb.Empty()))
+
+    def get_world(self) -> World:
+        """The world the session flies in, as the server loaded it (the open field when `load` named none)."""
+        return _world(self._call(self._stub.GetWorld, pb.Empty()))
 
     def stream_states(self, rate_hz: int = 60):
         """Yields the state at `rate_hz` (1..240) until you stop iterating or the session ends."""
