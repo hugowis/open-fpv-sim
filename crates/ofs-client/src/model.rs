@@ -2,9 +2,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use glam::DVec3;
 use ofs_proto::pb;
 
 use crate::error::{ClientError, ErrorKind};
+use crate::frames::vec_to_godot;
 
 pub const AUX_COUNT: usize = 4;
 
@@ -85,6 +87,178 @@ impl VtxInfo {
     }
 }
 
+/// The goggles' hold on the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VideoSync {
+    /// No video link (the quad has no VTX).
+    #[default]
+    None,
+    Locked,
+    /// Tearing, line jitter.
+    Unstable,
+    /// Rolling, static.
+    Lost,
+}
+
+impl VideoSync {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VideoSync::None => "",
+            VideoSync::Locked => "locked",
+            VideoSync::Unstable => "unstable",
+            VideoSync::Lost => "lost",
+        }
+    }
+}
+
+/// The analog video link at the goggles as of the last state message (`present = false` without a VTX).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoInfo {
+    pub present: bool,
+    pub snr_db: f64,
+    pub interference_dbm: f64,
+    /// Received power by goggle antenna, in the world file's order.
+    pub rssi_dbm: Vec<(String, f64)>,
+    pub active_antenna: String,
+    /// Grain, 0 (clean) to 1 (static).
+    pub noise: f64,
+    pub sparkles: f64,
+    /// Colour, 1 (full) to 0 (black and white).
+    pub chroma: f64,
+    pub sync: VideoSync,
+}
+
+impl Default for VideoInfo {
+    fn default() -> Self {
+        VideoInfo {
+            present: false,
+            snr_db: 0.0,
+            interference_dbm: 0.0,
+            rssi_dbm: Vec::new(),
+            active_antenna: String::new(),
+            noise: 0.0,
+            sparkles: 0.0,
+            chroma: 1.0,
+            sync: VideoSync::None,
+        }
+    }
+}
+
+impl VideoInfo {
+    pub fn from_pb(v: &pb::VideoLink) -> VideoInfo {
+        let sync = match pb::VideoSync::try_from(v.sync) {
+            Ok(pb::VideoSync::Locked) => VideoSync::Locked,
+            Ok(pb::VideoSync::Unstable) => VideoSync::Unstable,
+            Ok(pb::VideoSync::Lost) => VideoSync::Lost,
+            Ok(pb::VideoSync::Unspecified) | Err(_) => VideoSync::None,
+        };
+        VideoInfo {
+            present: v.present,
+            snr_db: v.snr_db,
+            interference_dbm: v.interference_dbm,
+            rssi_dbm: v.rssi.iter().map(|r| (r.name.clone(), r.rssi_dbm)).collect(),
+            active_antenna: v.active_antenna.clone(),
+            noise: v.noise,
+            sparkles: v.sparkles,
+            chroma: v.chroma,
+            sync,
+        }
+    }
+}
+
+/// A goggle antenna; `aim` is where it points (an omni's axis), a unit vector in Godot's frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldAntenna {
+    pub name: String,
+    /// "omni" or "patch".
+    pub kind: String,
+    pub aim: DVec3,
+}
+
+/// An object on the field, in Godot's frame: a box's `size` is (east, height, north).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldObject {
+    pub name: String,
+    /// "box" or "cylinder".
+    pub shape: String,
+    pub center: DVec3,
+    pub size: DVec3,
+    pub radius_m: f64,
+    pub height_m: f64,
+    /// r, g, b in 0..1.
+    pub color: [f64; 3],
+    pub rf_loss_db: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldEmitter {
+    pub name: String,
+    pub position: DVec3,
+    pub freq_mhz: f64,
+    pub power_mw: f64,
+}
+
+/// The world the session flies in, converted to Godot's frame (+Y up, north is -Z).
+#[derive(Debug, Clone, PartialEq)]
+pub struct World {
+    pub name: String,
+    pub pilot_position: DVec3,
+    pub pilot_facing_deg: f64,
+    pub antennas: Vec<WorldAntenna>,
+    pub objects: Vec<WorldObject>,
+    pub emitters: Vec<WorldEmitter>,
+}
+
+fn ned(v: Option<pb::Vec3>) -> DVec3 {
+    let v = v.unwrap_or_default();
+    DVec3::new(v.x, v.y, v.z)
+}
+
+/// A direction in NED from a heading (degrees clockwise from north) and an elevation (degrees up).
+fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
+    let (h, e) = (heading_deg.to_radians(), elevation_deg.to_radians());
+    DVec3::new(e.cos() * h.cos(), e.cos() * h.sin(), -e.sin())
+}
+
+impl World {
+    pub fn from_pb(w: pb::World) -> World {
+        let facing = w.pilot_facing_deg;
+        World {
+            name: w.name,
+            pilot_position: vec_to_godot(ned(w.pilot_position_ned_m)),
+            pilot_facing_deg: facing,
+            antennas: w
+                .antennas
+                .into_iter()
+                .map(|a| WorldAntenna { aim: vec_to_godot(aim_ned(facing + a.aim_az_deg, a.aim_el_deg)), name: a.name, kind: a.kind })
+                .collect(),
+            objects: w
+                .objects
+                .into_iter()
+                .map(|o| {
+                    let s = ned(o.size_m); // north, east, height
+                    let c = o.color.unwrap_or_default();
+                    WorldObject {
+                        name: o.name,
+                        shape: o.shape,
+                        center: vec_to_godot(ned(o.center_ned_m)),
+                        size: DVec3::new(s.y, s.z, s.x),
+                        radius_m: o.radius_m,
+                        height_m: o.height_m,
+                        color: [c.x, c.y, c.z],
+                        rf_loss_db: o.rf_loss_db,
+                    }
+                })
+                .collect(),
+            emitters: w
+                .emitters
+                .into_iter()
+                .map(|e| WorldEmitter { name: e.name, position: vec_to_godot(ned(e.position_ned_m)), freq_mhz: e.freq_mhz, power_mw: e.power_mw })
+                .collect(),
+        }
+    }
+}
+
 /// Betaflight's OSD as a character grid. `cells` are row-major, each `char | font_page << 8 | blink << 10`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct OsdFrame {
@@ -125,6 +299,7 @@ pub struct Telemetry {
     pub overruns: u64,
     pub fc_restarts: u32,
     pub vtx: VtxInfo,
+    pub video: VideoInfo,
     /// Seconds since this state message arrived (filled in when the telemetry is read).
     pub age_s: f64,
 }
@@ -151,6 +326,7 @@ impl Telemetry {
             overruns: s.overruns,
             fc_restarts: s.fc_restarts,
             vtx: s.vtx.as_ref().map(VtxInfo::from_pb).unwrap_or_default(),
+            video: s.video.as_ref().map(VideoInfo::from_pb).unwrap_or_default(),
             age_s: 0.0,
         }
     }

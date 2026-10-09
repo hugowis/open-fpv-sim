@@ -17,7 +17,7 @@ use crate::error::{ClientError, ErrorKind};
 use crate::frames::{quat_to_godot, vec_to_godot};
 use crate::interp::{Sample, StateBuffer};
 use crate::launch::ServerProcess;
-use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update};
+use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update, World};
 
 /// The server frees a disconnected pilot's slot asynchronously, so a pilot that reconnects at once (a reload) can
 /// meet `pilot_busy` for a moment.
@@ -36,6 +36,8 @@ pub(crate) struct Shared {
     pub telemetry: Mutex<Option<(Telemetry, Instant)>>,
     pub osd: Mutex<Option<OsdFrame>>,
     pub osd_version: AtomicU64,
+    pub world: Mutex<Option<World>>,
+    pub world_version: AtomicU64,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -59,6 +61,12 @@ impl Shared {
         lock(&self.buffer).clear();
         *lock(&self.telemetry) = None;
         self.store_osd(None);
+        self.store_world(None);
+    }
+
+    fn store_world(&self, world: Option<World>) {
+        *lock(&self.world) = world;
+        self.world_version.fetch_add(1, Ordering::AcqRel);
     }
 
     fn store_osd(&self, frame: Option<OsdFrame>) {
@@ -256,6 +264,10 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
         Ok(reply) => reply.into_inner(),
         Err(status) => return Fly::Failed(status_error(status)),
     };
+    match client.get_world(pb::Empty {}).await {
+        Ok(world) => shared.store_world(Some(World::from_pb(world.into_inner()))),
+        Err(status) => return Fly::Failed(status_error(status)),
+    }
     let _ = shared.updates.send(Update::Session { quad_name: reply.quad_name, configurator_address: reply.configurator_address });
     if let Err(status) = client.start(pb::Empty {}).await {
         return Fly::Failed(status_error(status));
