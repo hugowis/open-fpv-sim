@@ -3,7 +3,7 @@
 These items were deliberately left out of M3a, or surfaced while building it. They are listed so M3b/M4 planning and the maintainer can pick them up.
 
 ## Deferred features
-- **Tramp.** The VTX model is protocol-independent; only a SmartAudio codec is missing, so adding Tramp is a codec behind the same `VtxModel`.
+- **Tramp.** The VTX model is protocol-independent; only a Tramp codec is missing, so adding Tramp is a codec behind the same `VtxModel`.
 - **The analog link model and degradation shader (M3b).** Layer 3 of the FPV render path (between the OSD and the HUD) and the `vtx.*` bus signals the model will read are already in place.
 - **Font page 1 and the HD/digital OSD.** Only the first 256 glyphs (Betaflight's analog font) are converted and drawn from the atlas; HD/digital OSDs use more pages and a different element set.
 - **An OSD aspect-ratio setting.** The OSD draws in a fixed 4:3 box fitted to the window height today.
