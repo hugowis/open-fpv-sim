@@ -25,7 +25,8 @@ impl Rig {
         assert!(std::env::var("OFS_SITL_LAUNCH").is_ok(), "set OFS_SITL_LAUNCH");
         let dir = tempfile::tempdir().unwrap();
         let cfg = load(Path::new(QUAD)).unwrap();
-        let v = build(&cfg, &BuildOptions { seed: 1, data_dir: dir.path().to_path_buf(), fc_override: None }).unwrap();
+        let opts = BuildOptions { seed: 1, data_dir: dir.path().to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
+        let v = build(&cfg, &opts).unwrap();
         Self { v, _dir: dir }
     }
 }

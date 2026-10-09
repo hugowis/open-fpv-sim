@@ -157,13 +157,14 @@ fn shutting_down_stops_the_supervisor() {
 }
 
 #[test]
-fn a_quad_without_firmware_has_an_absent_osd_and_no_vtx() {
+fn a_quad_without_firmware_has_an_absent_osd_but_its_vtx_transmits() {
     let server = TestServer::start();
     let mut probe = flying(&server);
     probe.wait("the OSD stream delivers its first frame", SHORT, |p| p.client.osd().is_some());
     let osd = probe.client.osd().unwrap();
     assert!(!osd.present && osd.cols == 0 && osd.cells.is_empty(), "{osd:?}");
     assert!(probe.client.osd_version() >= 1);
-    probe.wait("states arrive", SHORT, |p| p.client.telemetry().is_some());
-    assert_eq!(probe.client.telemetry().unwrap().vtx, VtxInfo::default());
+    probe.wait("states with the VTX arrive", SHORT, |p| p.client.telemetry().is_some_and(|t| t.vtx.present));
+    let t = probe.client.telemetry().unwrap();
+    assert_eq!(t.vtx, VtxInfo { present: true, band: 5, channel: 1, freq_mhz: 5658, power_mw: 200, pit_mode: false });
 }

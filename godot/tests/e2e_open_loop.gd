@@ -117,7 +117,7 @@ func _run() -> void:
 	var osd: Dictionary = app.client.get_osd()
 	_check(osd.has("present") and not osd["present"] and osd["cols"] == 0, "open loop: the OSD is absent: %s" % str(osd.keys()))
 	var t: Dictionary = app.client.get_telemetry()
-	_check(t.has("vtx_present") and not t["vtx_present"], "open loop: no VTX")
+	_check(t.get("vtx_present", false) and t.get("vtx_freq_mhz", 0) == 5658, "open loop: the VTX transmits R1: %s" % str(t.get("vtx_freq_mhz")))
 
 	app.queue_free()
 	await process_frame

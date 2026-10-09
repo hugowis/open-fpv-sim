@@ -270,7 +270,12 @@ pub(crate) mod testing {
     pub fn open_loop_session(mode: RunMode) -> Session {
         let quad = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
         let cfg = ofs_config::load(std::path::Path::new(quad)).unwrap();
-        let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-unit-test-data"), fc_override: Some(FcKind::OpenLoop) };
+        let opts = BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-unit-test-data"),
+            fc_override: Some(FcKind::OpenLoop),
+            world: ofs_config::WorldConfig::open_field(),
+        };
         Session::new(vehicle::build(&cfg, &opts).unwrap(), mode, OverrunPolicy::Warn, false)
     }
 }

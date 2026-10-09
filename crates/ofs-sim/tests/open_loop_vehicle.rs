@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use ofs_config::{load, FcKind};
+use ofs_config::{load, FcKind, WorldConfig};
 use ofs_sim::vehicle::{build, firmware_dir, BuildOptions, Fault, Sticks, Vehicle};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
 
 fn vehicle(seed: u64) -> Vehicle {
     let cfg = load(Path::new(QUAD)).unwrap();
-    let opts = BuildOptions { seed, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop) };
+    let opts = BuildOptions { seed, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
     build(&cfg, &opts).unwrap()
 }
 

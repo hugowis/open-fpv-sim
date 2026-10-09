@@ -128,13 +128,13 @@ def test_pilot_busy_and_internal_are_typed():
     assert isinstance(from_rpc_error(FakeRpcError("internal", "boom")), ofs.InternalError)
 
 
-def test_osd_and_vtx_are_absent_without_firmware(sim):
+def test_without_firmware_the_osd_is_absent_but_the_vtx_transmits(sim):
     sim.load(QUAD, open_loop_fc=True)
     osd = sim.get_osd()
     assert (osd.present, osd.cols, osd.rows) == (False, 0, 0)
     assert osd.rows_text() == [] and osd.text == ""
-    state = sim.state()
-    assert state.vtx == ofs.Vtx() and not state.vtx.present
+    state = sim.run(0.1)
+    assert state.vtx == ofs.Vtx(present=True, band=5, channel=1, freq_mhz=5658, power_mw=200, pit_mode=False)
     assert state.serial_dropped_bytes == 0
 
 

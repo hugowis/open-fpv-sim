@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use ofs_config::FcKind;
+use ofs_config::{FcKind, WorldConfig};
 use ofs_core::{names::RC_AUX_COUNT, SimError};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::ReceiverStream;
@@ -155,7 +155,7 @@ impl Sim for SimService {
             }
         };
         let cfg = ofs_config::load(Path::new(&req.quad_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?;
-        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop) };
+        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world: WorldConfig::open_field() };
         let keep_alive = req.keep_alive;
         self.blocking(move |shared, slot| {
             *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
@@ -368,9 +368,10 @@ mod tests {
         assert!(!frame.present);
         assert_eq!((frame.cols, frame.rows, frame.seq), (0, 0, 0));
         assert!(frame.cells.is_empty());
+        svc.run(Request::new(pb::RunRequest { seconds: 0.05 })).await.unwrap();
         let state = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner();
         let vtx = state.vtx.expect("State.vtx is always set");
-        assert!(!vtx.present);
+        assert!(vtx.present && vtx.freq_mhz == 5658, "open loop: the VTX transmits its power-up channel: {vtx:?}");
         assert_eq!(state.serial_dropped_bytes, 0);
         svc.shutdown();
     }
