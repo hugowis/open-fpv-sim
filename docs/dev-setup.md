@@ -44,7 +44,7 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
   2. Wait for the HUD to show a flying state, put the throttle low and arm with aux 1; switch aux 2 for Angle mode.
   3. Fly, then cut the radio (K, or switch the transmitter off): the HUD reports the link lost and Betaflight fails safe within a few seconds. R reloads the quad.
   4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761`), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
-- **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views plus the help and controls screens (`start_fpv.png`, `start_chase.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`); review them by eye. Without `--out=` they go to the project's user data dir.
+- **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views, the OSD, the three looks of the analog video link (`video_grain.png`, `video_unstable.png`, `video_lost.png`), and the help and controls screens (`start_fpv.png`, `start_chase.png`, `osd_fpv.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`); review them by eye. Without `--out=` they go to the project's user data dir.
 
 ## OSD, VTX and battery telemetry (M3a)
 
@@ -67,6 +67,44 @@ Manual video check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` s
 3. Change the VTX channel or power in the OSD menu and watch the HUD VTX line and a toast.
 4. Change the same from Betaflight Configurator's VTX tab and Save.
 5. Lower `battery.initial_soc` to 0.02 and see LOW BATTERY.
+
+## The world file and the analog video link (M3b)
+
+A session flies in a world: `LoadRequest.world_path` (Python `load(..., world=...)`, the game's `world_path` setting,
+`OFS_WORLD`, `--world=`) names a world file, and without one the server uses a built-in open field (the pilot at home,
+one omni, nothing else). The game loads `worlds/flat.toml` by default.
+
+A world file (`schema_version = 1`, NED metres from home like the quad file, sizes `[north, east, height]`) has:
+- `[pilot]` — where the goggles are and which way the pilot faces;
+- `[receiver]` — the noise floor, diversity, and the goggle antennas (`omni` or `patch` with a beamwidth; gain,
+  polarization, aim relative to the pilot's facing);
+- `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal).
+  The game draws them from the world the server loaded (`GetWorld`), so what you see is what the video link sees.
+  Nothing collides with the drone (the simulator's ground is the plane d = 0);
+- `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
+  neighbouring channels. The shipped world has one, on R2, next to the quad's default R1.
+
+The quad file's `[vtx]` describes the VTX antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the
+pit-mode power (`pit_power_mw`). The VTX transmits from load on, also in open loop (it has no Betaflight to answer
+then, so it stays on its power-up channel and power).
+
+The link model runs once per PAL field (50 Hz): path loss, antenna patterns, polarization, the quad's own frame,
+diffraction around objects, the ground bounce, fading and interference give each goggle antenna's signal; diversity
+picks one; the SNR decides the picture (grain, sparkles, colour, tearing, rolling, static). The equations and every
+constant are in `docs/research/video-link.md`. The results are in `State.video` (Python `state.video`), and
+`video_lost` / `video_restored` events mark sync losses. In the game, the HUD's `VID` line shows the SNR, the antenna
+in use and its signal, and the layer `godot/ui/video.gd` draws the breakup over the picture and Betaflight's OSD. The
+**Video effects** box on the F2 screen (also `OFS_VIDEO_EFFECTS`, `--video-effects=`) turns the drawing off; it is
+saved in `user://ofs_client.cfg`.
+
+Manual check (with the game, real Betaflight optional):
+1. Fly away from the pilot (the figure beside the launch pad) and watch grain, then sparkles, colour loss, tearing and
+   static as the HUD's `VID` number drops; come back and the picture relocks.
+2. Fly behind building B (the tall one, east of the course): the picture breaks up within a few metres.
+3. With Betaflight: lower the VTX power in the OSD menu (25 mW) and the picture breaks up much closer; pit mode leaves
+   a picture only next to the pilot.
+4. Switch the VTX to R2 (the parked quad's channel) and the picture gets noisier; any channel far from R2 is clean.
+5. Untick Video effects on the F2 screen: the picture is clean whatever the link does.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
