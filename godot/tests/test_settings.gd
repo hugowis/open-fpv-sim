@@ -11,6 +11,9 @@ func test_defaults_point_into_the_checkout() -> void:
 	ok(FileAccess.file_exists(s["quad_path"]), "the reference quad exists at %s" % s["quad_path"])
 	eq(s["server_addr"], "127.0.0.1:50051", "server address")
 	eq(s["open_loop"], false, "Betaflight by default")
+	ok(s["world_path"].begins_with(root) and s["world_path"].ends_with("flat.toml"), "world path %s" % s["world_path"])
+	ok(FileAccess.file_exists(s["world_path"]), "the shipped world exists at %s" % s["world_path"])
+	eq(s["video_effects"], true, "video effects on by default")
 	ok(s["server_bin"].ends_with("ofs-sim") or s["server_bin"].ends_with("ofs-sim.exe"), "server binary %s" % s["server_bin"])
 
 
@@ -49,3 +52,27 @@ func test_the_client_dictionary_launches_a_server_only_when_one_is_configured() 
 	d = AppSettings.to_client_dict(s)
 	ok(not d.has("server_bin") and not d.has("env"), "attach only")
 	eq(d["quad_path"], s["quad_path"], "quad path")
+
+
+func test_the_world_and_the_video_effects_come_from_every_source() -> void:
+	var s := AppSettings.resolve({"video_effects": false}, {"OFS_WORLD": "worlds/other.toml"}, PackedStringArray())
+	eq(s["world_path"], "worlds/other.toml", "OFS_WORLD")
+	eq(s["video_effects"], false, "the file turns the effects off")
+	var t := AppSettings.resolve({}, {}, PackedStringArray(["--world=w.toml", "--video-effects=no"]))
+	eq(t["world_path"], "w.toml", "--world")
+	eq(t["video_effects"], false, "--video-effects=no")
+	eq(AppSettings.to_client_dict(t)["world_path"], "w.toml", "the client gets the world")
+
+
+func test_a_setting_saved_in_the_game_keeps_the_rest_of_the_file() -> void:
+	var path := "user://test_ofs_client.cfg"
+	DirAccess.remove_absolute(path)
+	var file := ConfigFile.new()
+	file.set_value("client", "seed", 7)
+	file.save(path)
+	ok(AppSettings.save_value("video_effects", false, path), "saved")
+	var back := ConfigFile.new()
+	eq(back.load(path), OK, "the file reads back")
+	eq(back.get_value("client", "video_effects"), false, "the new value")
+	eq(back.get_value("client", "seed"), 7, "the other values stay")
+	DirAccess.remove_absolute(path)

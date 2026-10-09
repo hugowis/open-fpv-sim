@@ -22,6 +22,7 @@ const TIPS := {
 @onready var chase_camera: Camera3D = $ChaseCamera
 @onready var lens: CanvasLayer = $Lens
 @onready var osd: CanvasLayer = $Osd
+@onready var world: Node3D = $World
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 
@@ -36,6 +37,7 @@ var last_sticks := {}
 var phase_kind := ""
 var _link_was_lost := false
 var _osd_version := -1
+var _world_version := -1
 
 
 func _ready() -> void:
@@ -78,6 +80,10 @@ func _process(delta: float) -> void:
 	if osd_version != _osd_version:
 		_osd_version = osd_version
 		osd.set_frame(client.get_osd())
+	var world_version: int = client.get_world_version()
+	if world_version != _world_version:
+		_world_version = world_version
+		world.build(client.get_world())
 	var telemetry: Dictionary = client.get_telemetry()
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)

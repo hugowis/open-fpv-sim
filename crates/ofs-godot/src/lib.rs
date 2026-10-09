@@ -79,9 +79,10 @@ impl OfsClient {
     fn request_failed(kind: GString, message: GString);
 
     /// Starts connecting; returns at once. Returns an empty string when it started, otherwise why it did not
-    /// ("already started", or which setting is invalid). Keys: `quad_path` (required), `server_addr`, `server_bin` (a program to start when nothing
-    /// answers), `data_dir`, `log_file`, `env` (Dictionary of String to String for the started server), `seed`,
-    /// `open_loop`, `overrun_policy` ("warn" or "slow"), `state_rate_hz`, `stick_rate_hz`.
+    /// ("already started", or which setting is invalid). Keys: `quad_path` (required), `world_path` (empty or absent:
+    /// the open field), `server_addr`, `server_bin` (a program to start when nothing answers), `data_dir`, `log_file`,
+    /// `env` (Dictionary of String to String for the started server), `seed`, `open_loop`, `overrun_policy` ("warn" or
+    /// "slow"), `state_rate_hz`, `stick_rate_hz`.
     #[func]
     fn start(&mut self, settings: VarDictionary) -> GString {
         if self.client.is_some() {
@@ -235,6 +236,58 @@ impl OfsClient {
     fn get_osd_version(&self) -> i64 {
         self.client.as_ref().map_or(0, |c| c.osd_version() as i64)
     }
+
+    /// The loaded session's world in Godot's frame, or an empty Dictionary before it arrives: `name`,
+    /// `pilot_position` (Vector3), `antennas` (Array of {`name`, `kind`, `aim`: Vector3}), `objects` (Array of {`name`,
+    /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
+    /// `color`: Color, `rf_loss_db`}) and `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}).
+    #[func]
+    fn get_world(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(world) = self.client.as_ref().and_then(|c| c.world()) else { return d };
+        let mut antennas = VarArray::new();
+        for a in &world.antennas {
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(a.name.as_str()));
+            e.set("kind", &GString::from(a.kind.as_str()));
+            e.set("aim", vector3(a.aim.x, a.aim.y, a.aim.z));
+            antennas.push(&e.to_variant());
+        }
+        let mut objects = VarArray::new();
+        for o in &world.objects {
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(o.name.as_str()));
+            e.set("shape", &GString::from(o.shape.as_str()));
+            e.set("center", vector3(o.center.x, o.center.y, o.center.z));
+            e.set("size", vector3(o.size.x, o.size.y, o.size.z));
+            e.set("radius", o.radius_m);
+            e.set("height", o.height_m);
+            e.set("color", Color::from_rgb(o.color[0] as f32, o.color[1] as f32, o.color[2] as f32));
+            e.set("rf_loss_db", o.rf_loss_db);
+            objects.push(&e.to_variant());
+        }
+        let mut emitters = VarArray::new();
+        for x in &world.emitters {
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(x.name.as_str()));
+            e.set("position", vector3(x.position.x, x.position.y, x.position.z));
+            e.set("freq_mhz", x.freq_mhz);
+            e.set("power_mw", x.power_mw);
+            emitters.push(&e.to_variant());
+        }
+        d.set("name", &GString::from(world.name.as_str()));
+        d.set("pilot_position", vector3(world.pilot_position.x, world.pilot_position.y, world.pilot_position.z));
+        d.set("antennas", &antennas);
+        d.set("objects", &objects);
+        d.set("emitters", &emitters);
+        d
+    }
+
+    /// Counts world updates; when it changes, `get_world()` has a new world (or none, while a load is under way).
+    #[func]
+    fn get_world_version(&self) -> i64 {
+        self.client.as_ref().map_or(0, |c| c.world_version() as i64)
+    }
 }
 
 impl OfsClient {
@@ -243,6 +296,10 @@ impl OfsClient {
             client.send(command);
         }
     }
+}
+
+fn vector3(x: f64, y: f64, z: f64) -> Vector3 {
+    Vector3::new(x as f32, y as f32, z as f32)
 }
 
 fn string_key(d: &VarDictionary, key: &str) -> Option<String> {
@@ -256,6 +313,9 @@ fn number_key(d: &VarDictionary, key: &str) -> Option<i64> {
 fn parse_settings(d: &VarDictionary) -> Result<Settings, String> {
     let quad_path = string_key(d, "quad_path").ok_or("`quad_path` is required")?;
     let mut settings = Settings::new(quad_path);
+    if let Some(world) = string_key(d, "world_path") {
+        settings.world_path = world;
+    }
     if let Some(addr) = string_key(d, "server_addr") {
         settings.server_addr = addr;
     }

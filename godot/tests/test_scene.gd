@@ -8,26 +8,72 @@ const ChaseCamera = preload("res://drone/chase_camera.gd")
 const Lens = preload("res://ui/lens.gd")
 
 
-func test_the_world_has_ground_pad_and_landmarks() -> void:
+## A world like the one `OfsClient.get_world()` returns (Godot's frame).
+func _world_dict() -> Dictionary:
+	return {
+		"name": "Test field",
+		"pilot_position": Vector3(2.0, 1.7, 3.0),
+		"antennas": [
+			{"name": "omni", "kind": "omni", "aim": Vector3.UP},
+			{"name": "patch", "kind": "patch", "aim": Vector3(0.0, 0.17, -0.98).normalized()},
+		],
+		"objects": [
+			{"name": "BuildingA", "shape": "box", "center": Vector3(-45.0, 7.0, -110.0), "size": Vector3(14.0, 14.0, 12.0),
+				"radius": 0.0, "height": 0.0, "color": Color(0.62, 0.64, 0.66), "rf_loss_db": 25.0},
+			{"name": "Pylon1L", "shape": "cylinder", "center": Vector3(-6.0, 1.5, -15.0), "size": Vector3.ZERO,
+				"radius": 0.15, "height": 3.0, "color": Color(0.92, 0.92, 0.9), "rf_loss_db": 0.0},
+		],
+		"emitters": [{"name": "parked-quad", "position": Vector3(-60.0, 1.0, -30.0), "freq_mhz": 5695.0, "power_mw": 25.0}],
+	}
+
+
+func test_the_world_draws_sky_and_ground_and_builds_the_rest_from_the_world_file() -> void:
 	var world := World.new()
 	await add_to_tree(world)
 	ok(world.get_node_or_null("Ground") is MeshInstance3D, "ground")
-	ok(world.get_node_or_null("LaunchPad") != null, "launch pad")
-	ok(world.get_node_or_null("Pylon1L") != null and world.get_node_or_null("Pylon8R") != null, "pylons")
-	ok(world.get_node_or_null("Gate0Bar") != null and world.get_node_or_null("Gate2PostR") != null, "gates")
-	ok(world.get_node_or_null("BuildingA") != null, "buildings")
-	var environments := world.find_children("*", "WorldEnvironment", false, false)
-	var suns := world.find_children("*", "DirectionalLight3D", false, false)
-	eq(environments.size(), 1, "one environment")
-	eq(suns.size(), 1, "one sun")
 	var ground: MeshInstance3D = world.get_node("Ground")
 	ok(ground.material_override is ShaderMaterial, "the ground is drawn by the grid shader")
+	eq(world.find_children("*", "WorldEnvironment", false, false).size(), 1, "one environment")
+	eq(world.find_children("*", "DirectionalLight3D", false, false).size(), 1, "one sun")
+	eq(world.built_names(), PackedStringArray(), "no objects before the simulator sends a world")
+	world.build(_world_dict())
+	var building: MeshInstance3D = world.get_node("BuildingA")
+	eq(building.position, Vector3(-45.0, 7.0, -110.0), "a box where the world file puts it")
+	eq((building.mesh as BoxMesh).size, Vector3(14.0, 14.0, 12.0), "at its size")
+	eq((building.material_override as StandardMaterial3D).albedo_color, Color(0.62, 0.64, 0.66), "in its colour")
+	var pylon: MeshInstance3D = world.get_node("Pylon1L")
+	near((pylon.mesh as CylinderMesh).height, 3.0, "a cylinder")
+	near((pylon.mesh as CylinderMesh).top_radius, 0.15, "its radius")
+	var pilot: Node3D = world.get_node("Pilot")
+	eq(pilot.position, Vector3(2.0, 1.7, 3.0), "the pilot marker's head is at the goggles")
+	ok(pilot.get_node_or_null("Aim_patch") != null and pilot.get_node_or_null("Aim_omni") == null, "a pointer for the patch only")
+	var emitter: Node3D = world.get_node("Emitter_parked-quad")
+	eq(emitter.position, Vector3(-60.0, 0.0, -30.0), "the emitter's post stands on the ground below it")
+	ok((emitter.get_node("Label") as Label3D).text.contains("5695 MHz"), "labelled with its frequency")
+	world.queue_free()
+
+
+func test_a_new_world_replaces_the_old_one() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	world.build(_world_dict())
+	eq(world.built_names().size(), 4, "two objects, the pilot, one emitter")
+	var smaller := _world_dict()
+	smaller["objects"] = [smaller["objects"][1]]
+	smaller["emitters"] = []
+	world.build(smaller)
+	eq(world.built_names(), PackedStringArray(["Pylon1L", "Pilot"]), "only the new world's nodes")
+	ok(world.get_node_or_null("BuildingA") == null, "the old building is gone at once")
+	world.build({})
+	eq(world.built_names(), PackedStringArray(), "an empty world clears the field")
+	ok(world.get_node_or_null("Ground") != null, "but keeps the ground")
 	world.queue_free()
 
 
 func test_the_world_is_only_scenery() -> void:
 	var world := World.new()
 	await add_to_tree(world)
+	world.build(_world_dict())
 	eq(world.find_children("*", "CollisionObject3D", true, false).size(), 0, "nothing to collide with: the simulator knows only the ground")
 	world.queue_free()
 
