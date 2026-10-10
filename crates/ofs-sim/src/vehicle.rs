@@ -486,6 +486,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             damping_nspm: cfg.ground.damping_nspm,
             friction_coeff: cfg.ground.friction_coeff,
         },
+        objects: Vec::new(), // the world's objects are wired in with the collision milestone
     };
     let initial = BodyState {
         pos_ned_m: v3(cfg.initial.position_ned_m),

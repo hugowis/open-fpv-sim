@@ -1,6 +1,7 @@
 use glam::{DQuat, DVec3};
 use ofs_core::{consts::GRAVITY_MPS2, names, Bus, Scheduler};
-use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody};
+use ofs_core::shape::Shape;
+use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
 
 const A: f64 = 0.08;
 
@@ -32,7 +33,70 @@ fn params(mounts: Vec<MotorMount>, contacts: Vec<DVec3>) -> AirframeParams {
         mounts,
         contact_points_frd_m: contacts,
         ground: GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: 0.6 },
+        objects: Vec::new(),
     }
+}
+
+/// A box occupying x in [0, 2], y in [-2, 2], z in [-1, 0]: a wall the quad's feet can press into.
+fn wall() -> Vec<WorldObject> {
+    vec![WorldObject { name: "wall".into(), shape: Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5) } }]
+}
+
+/// A roof to land on: a box whose top face is the plane z = -1.
+fn roof() -> Vec<WorldObject> {
+    vec![WorldObject { name: "roof".into(), shape: Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5) } }]
+}
+
+#[test]
+fn a_foot_pressed_into_a_wall_pushes_back_along_its_normal() {
+    // One foot 5 mm inside the wall's near face (x = 0), level with the wall (z in [-1, 0]); the spring-damper
+    // pushes it out along -x.
+    let mut p = params(vec![], vec![DVec3::new(0.08, 0.0, 0.0)]);
+    p.objects = wall();
+    let mut s = sim(p, at(DVec3::new(-0.075, 0.0, -0.5)));
+    s.step().unwrap();
+    let vel = vec3(&s, names::BODY_VEL_NED);
+    let push = 3000.0 * 0.005 / 0.65; // k * depth / mass, in m/s^2
+    assert!((vel.x + push / 8000.0).abs() < push / 8000.0 * 0.2, "one tick of push: vel {vel}");
+    assert!((vel.z - GRAVITY_MPS2 / 8000.0).abs() < 1e-9, "gravity still acts: vel {vel}");
+}
+
+#[test]
+fn a_quad_lands_and_rests_on_a_roof() {
+    let mut p = params(vec![], feet());
+    p.objects = roof();
+    let mut s = sim(p, at(DVec3::new(0.0, 0.0, -1.05)));
+    s.run_for(3.0).unwrap();
+    let vel = vec3(&s, names::BODY_VEL_NED);
+    assert!(vel.length() < 1e-3, "settled: vel {vel}");
+    let pos = vec3(&s, names::BODY_POS_NED);
+    // The legs (0.03 below the CoM) carry it 2 mm into the surface (mg/k), never through it.
+    let height = pos.z + 0.03;
+    assert!(height > -1.0 && height < -0.995, "resting on the roof: legs at {height}, roof top at -1");
+}
+
+#[test]
+fn a_quad_rests_on_a_roof_for_ten_seconds_without_drift_or_jitter() {
+    let mut p = params(vec![], feet());
+    p.objects = roof();
+    let mut s = sim(p, at(DVec3::new(0.0, 0.0, -1.05)));
+    let mut samples = Vec::new();
+    for _ in 0..20 {
+        s.run_for(0.5).unwrap();
+        samples.push(vec3(&s, names::BODY_POS_NED));
+    }
+    let last = &samples[10..];
+    for axis in 0..3 {
+        let mut min = f64::MAX;
+        let mut max = f64::MIN;
+        for p in last {
+            min = min.min(p[axis]);
+            max = max.max(p[axis]);
+        }
+        assert!(max - min < 1e-3, "axis {axis} jitters {} mm over the last 5 s", (max - min) * 1000.0);
+    }
+    let (first, end) = (last[0], last[last.len() - 1]);
+    assert!((end - first).length() < 1e-3, "no drift over the last 5 s: {} -> {}", first, end);
 }
 
 fn at(pos: DVec3) -> BodyState {
