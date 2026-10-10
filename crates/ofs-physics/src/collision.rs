@@ -50,10 +50,8 @@ impl TouchState {
 struct Contact {
     /// Out of the solid, unit.
     normal: DVec3,
-    /// The sphere's surface point along the normal (its deepest point into the solid), as of collection;
-    /// the impulse loop recomputes it from the post-correction centre.
-    point: DVec3,
-    /// The sphere's centre in the body frame and its radius, to recompute `point` after position correction.
+    /// The sphere's centre in the body frame and its radius: the impulse loop recomputes the surface point
+    /// from the post-correction centre.
     centre_frd: DVec3,
     radius: f64,
     penetration: f64,
@@ -152,7 +150,7 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
             let normal = DVec3::NEG_Z;
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
-            contacts.push(Contact { normal, point, centre_frd: *centre_frd, radius: *radius, penetration, object: GROUND_OBJECT_INDEX, inward });
+            contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: GROUND_OBJECT_INDEX, inward });
         }
         for (i, object) in p.objects.iter().enumerate() {
             // Broad phase: the quad's centre inside the object's box, grown by the quad's bounding radius.
@@ -167,7 +165,7 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
             let normal = object.shape.normal(centre);
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
-            contacts.push(Contact { normal, point, centre_frd: *centre_frd, radius: *radius, penetration, object: i as i32, inward });
+            contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: i as i32, inward });
         }
     }
     contacts

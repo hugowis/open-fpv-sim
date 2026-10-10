@@ -151,6 +151,9 @@ pub struct ElrsLink {
     handset_diversity: Diversity,
     quad_faders: Vec<Fader>,
     handset_faders: Vec<Fader>,
+    /// Reused per-packet scratch: the per-antenna RSSI vectors (no allocation in the hot loop).
+    rssi: Vec<f64>,
+    downlink: Vec<f64>,
     last_pos: Option<DVec3>,
 }
 
@@ -182,6 +185,7 @@ impl ElrsLink {
         for f in quad_faders.iter_mut().chain(handset_faders.iter_mut()) {
             f.next(&mut rng, 0.0, LOS_K_DB); // a fresh scatter state for the first packet
         }
+        let (quad_antennas, handset_antennas) = (params.quad_antennas.len(), params.handset_antennas.len());
         Self {
             params,
             div: rate_divisor,
@@ -199,6 +203,8 @@ impl ElrsLink {
             handset_diversity: Diversity::default(),
             quad_faders,
             handset_faders,
+            rssi: vec![NO_SIGNAL_RSSI_DBM; quad_antennas],
+            downlink: vec![NO_SIGNAL_RSSI_DBM; handset_antennas],
             last_pos: None,
         }
     }
@@ -255,11 +261,13 @@ impl Model for ElrsLink {
         // fades (two normals per quad antenna), the uplink loss draw, the downlink fades, the downlink draw.
         let rho = (-moved / (wavelength_m(ELRS_FREQ_MHZ) * 0.5)).exp();
         let shadow = body_shadow_db(att, pos, self.params.handset_position);
-        let mut rssi = vec![NO_SIGNAL_RSSI_DBM; self.params.quad_antennas.len()];
-        for j in 0..self.params.quad_antennas.len() {
-            let configured = self.params.quad_antennas[j];
-            let rx_ant = Antenna { axis: (att * configured.axis).normalize(), ..configured };
-            let tx_ant = self.params.handset_antennas[self.handset_diversity.active().min(self.params.handset_antennas.len() - 1)];
+        // The handset transmits on its active antenna: invariant across the quad's antennas.
+        let tx_ant = self.params.handset_antennas[self.handset_diversity.active().min(self.params.handset_antennas.len() - 1)];
+        self.rssi.clear();
+        self.rssi.resize(self.params.quad_antennas.len(), NO_SIGNAL_RSSI_DBM);
+        let rssi = &mut self.rssi;
+        for (j, configured) in self.params.quad_antennas.iter().enumerate() {
+            let rx_ant = Antenna { axis: (att * configured.axis).normalize(), ..*configured };
             let path = path_gain(
                 &Endpoint { position: self.params.handset_position, antenna: tx_ant },
                 &Endpoint { position: pos, antenna: rx_ant },
@@ -274,7 +282,7 @@ impl Model for ElrsLink {
             };
             rssi[j] = (mw_to_dbm(self.params.tx_power_mw) + path.gain_db + fade - shadow).max(NO_SIGNAL_RSSI_DBM);
         }
-        let active = self.quad_diversity.choose(&rssi);
+        let active = self.quad_diversity.choose(rssi);
         let draw: f64 = self.rng.gen();
         let received = transmitting && draw >= packet_error_rate(rssi[active], sensitivity);
 
@@ -282,12 +290,13 @@ impl Model for ElrsLink {
         // received on the handset's best antenna.
         let configured = self.params.quad_antennas[active];
         let tx_ant = Antenna { axis: (att * configured.axis).normalize(), ..configured };
-        let mut downlink = vec![NO_SIGNAL_RSSI_DBM; self.params.handset_antennas.len()];
-        for a in 0..self.params.handset_antennas.len() {
-            let rx_ant = self.params.handset_antennas[a];
+        self.downlink.clear();
+        self.downlink.resize(self.params.handset_antennas.len(), NO_SIGNAL_RSSI_DBM);
+        let downlink = &mut self.downlink;
+        for (a, rx_ant) in self.params.handset_antennas.iter().enumerate() {
             let path = path_gain(
                 &Endpoint { position: pos, antenna: tx_ant },
-                &Endpoint { position: self.params.handset_position, antenna: rx_ant },
+                &Endpoint { position: self.params.handset_position, antenna: *rx_ant },
                 ELRS_FREQ_MHZ,
                 &self.params.obstacles,
                 self.params.ground_bounce,
@@ -299,7 +308,7 @@ impl Model for ElrsLink {
             };
             downlink[a] = (mw_to_dbm(DOWNLINK_TX_POWER_MW) + path.gain_db + fade - shadow).max(NO_SIGNAL_RSSI_DBM);
         }
-        let downlink_active = self.handset_diversity.choose(&downlink);
+        let downlink_active = self.handset_diversity.choose(downlink);
         let downlink_draw: f64 = self.rng.gen();
         let downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity);
 
