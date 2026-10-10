@@ -145,3 +145,14 @@ fn a_relaunch_appends_to_the_sitl_log() {
     assert_eq!(both, format!("{first}--- relaunch after reboot ---
 {first}"), "the relaunch appends");
 }
+
+#[test]
+fn more_than_four_motors_is_a_config_error_not_a_panic() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path(), &["ofs-definitely-missing-binary"]);
+    cfg.motor_count = 6;
+    let err = SitlBridge::start(cfg, &mut Bus::new()).err().unwrap();
+    assert!(matches!(err, FcError::Config(_)), "{err}");
+    assert!(err.to_string().contains("4 motors"), "{err}");
+}

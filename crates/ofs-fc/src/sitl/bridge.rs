@@ -86,7 +86,12 @@ pub const FIRST_RESEND_INTERVAL: Duration = Duration::from_millis(250);
 
 impl SitlBridge {
     pub fn start(cfg: BridgeConfig, bus: &mut Bus) -> Result<Self, FcError> {
-        assert!(cfg.motor_count <= 4, "Betaflight SITL's servo_packet carries 4 motors");
+        if cfg.motor_count > 4 {
+            return Err(FcError::Config(format!(
+                "Betaflight SITL's servo_packet carries 4 motors; the quad has {}",
+                cfg.motor_count
+            )));
+        }
         let net = cfg.net;
         let rx = UdpSocket::bind(SocketAddr::from((net.bind_ip, PORT_PWM)))
             .map_err(|_| FcError::PortInUse { port: PORT_PWM, hint: "another simulator instance may be running" })?;

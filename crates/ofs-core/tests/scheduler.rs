@@ -138,3 +138,24 @@ fn run_for_steps_whole_ticks_and_rejects_bad_durations() {
     assert!(matches!(s.run_for(f64::NAN), Err(SimError::InvalidArgument(_))));
     assert_eq!(s.tick(), 4000);
 }
+
+#[test]
+#[should_panic(expected = "model name 'imu' is already registered")]
+fn two_models_cannot_share_a_name() {
+    // Model RNG streams are seeded from the model name: a duplicate would make two models draw the same noise.
+    let mut bus = Bus::new();
+    let a = Counter::new("imu", 1, &mut bus);
+    let b = Counter::new("imu", 2, &mut bus);
+    let mut s = Scheduler::new(8000, bus);
+    s.add(Box::new(a));
+    s.add(Box::new(b));
+}
+
+#[test]
+fn run_for_refuses_durations_longer_than_a_simulated_day() {
+    let mut s = Scheduler::new(8000, Bus::new());
+    let err = s.run_for(86_400.0 + 1.0).unwrap_err();
+    assert!(matches!(&err, SimError::InvalidArgument(m) if m.contains("86400")), "{err}");
+    assert!(matches!(s.run_for(1e300), Err(SimError::InvalidArgument(_))));
+    assert_eq!(s.tick(), 0);
+}
