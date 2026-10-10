@@ -194,6 +194,8 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast(message)
 		"vtx_changed":
 			hud.add_toast("VTX: %s" % message)
+		"collision":
+			hud.add_toast(message, "warn")
 		"video_lost":
 			hud.add_toast("Video lost - %s" % message.trim_prefix("video lost: "), "warn")
 		"video_restored":

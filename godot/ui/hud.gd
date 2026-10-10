@@ -182,6 +182,11 @@ func video_text() -> String:
 	return _video.text
 
 
+## The radio link line (for the tests).
+func link_text() -> String:
+	return _link.text
+
+
 ## view: {phase, detail, telemetry: Dictionary (empty before the first state), sticks: Dictionary from Controls.read,
 ## controls_status, configurator, quad, camera, radio_cut}
 func update_view(view: Dictionary) -> void:
@@ -202,7 +207,7 @@ func update_view(view: Dictionary) -> void:
 			"   Betaflight restarts %d" % t["fc_restarts"] if t["fc_restarts"] > 0 else ""]
 		_sim.add_theme_color_override("font_color", WHITE if running else YELLOW)
 		var up: bool = t["link_up"] and t["tx_enabled"]
-		_link.text = "LINK %s   LQ %d %%   %d dBm" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"]]
+		_link.text = "LINK %s   LQ %d %%   %d dBm   SNR %d" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"], roundi(t.get("radio_snr_db", 0.0))]
 		_link.add_theme_color_override("font_color", GREEN if up and t["lq_pct"] >= 80.0 else (YELLOW if up else RED))
 		_battery.text = "%.2f V   %.1f A" % [t["battery_voltage_v"], t["battery_current_a"]]
 		if t.get("vtx_present", false):

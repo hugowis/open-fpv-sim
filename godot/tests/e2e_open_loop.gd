@@ -125,9 +125,20 @@ func _run() -> void:
 	var building = app.world.get_node_or_null("BuildingA")
 	_check(building != null and building.position.is_equal_approx(Vector3(-45.0, 7.0, -110.0)), "building A stands where it always did")
 	_check(app.world.get_node_or_null("Pilot") != null and app.world.get_node_or_null("Emitter_parked-quad") != null, "the pilot and the parked quad are marked")
+	_check(app.world.get_node_or_null("Handset") != null, "the pilot's handset is marked beside him")
 	_check(t.get("video_present", false) and t.get("video_sync", "") == "locked", "the video link is locked on the pad: %s" % str(t.get("video_sync")))
 	_check(app.hud.video_text().begins_with("VID "), "the HUD shows the video line: '%s'" % app.hud.video_text())
 	_check(not app.video.is_active(), "a clean link draws nothing over the picture")
+
+	# A hard touchdown raises the collision toast (the quad falls back onto the launch pad or the ground).
+	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.9, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	var up: bool = await _wait_for(func(): return app.drone.position.y > 2.0, 20.0)
+	_check(up, "climbs for the landing test: y = %.2f" % app.drone.position.y)
+	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.0, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	var hit: bool = await _wait_for(func():
+		var toasts := " ".join(app.hud.toast_texts())
+		return toasts.contains("HIT LaunchPad") or toasts.contains("HARD LANDING"), 20.0)
+	_check(hit, "the fall raises a collision toast: %s" % str(app.hud.toast_texts()))
 	app.set_process(false)  # the next frame would feed the real (clean) telemetry
 	app.video.update_view({"video_present": true, "video_sync": "lost", "video_noise": 1.0, "video_sparkles": 1.0, "video_chroma": 0.0}, 0.016)
 	_check(app.video.is_active(), "a lost link draws static")
