@@ -129,6 +129,13 @@ impl Bus {
 
     /// Name of the first signal (in name order) holding NaN or infinity.
     pub fn first_non_finite(&self) -> Option<&str> {
+        // Checked every tick: scan the contiguous arenas, and search by name only when something is wrong.
+        let all_finite = self.scalars.iter().all(|v| v.is_finite())
+            && self.vec3s.iter().all(|v| v.is_finite())
+            && self.quats.iter().all(|q| q.is_finite());
+        if all_finite {
+            return None;
+        }
         self.names
             .iter()
             .find(|&(_, &(kind, i))| match kind {

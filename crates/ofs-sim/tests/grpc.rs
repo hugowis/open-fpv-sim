@@ -17,7 +17,10 @@ const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5
 async fn start_with_service() -> (SimClient<Channel>, SimService) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let data_dir = std::env::temp_dir().join("ofs-grpc-test-data");
+    // One data directory per server, so tests that run in parallel never share firmware state.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let data_dir = std::env::temp_dir().join(format!("ofs-grpc-test-data-{}-{n}", std::process::id()));
     let service = SimService::new(data_dir);
     tokio::spawn(
         tonic::transport::Server::builder()

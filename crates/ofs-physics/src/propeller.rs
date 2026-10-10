@@ -38,6 +38,11 @@ pub struct Propeller {
 
 impl Propeller {
     pub fn new(index: usize, p: PropParams, bus: &mut Bus) -> Self {
+        for (table, what) in [(&p.ct_table, "prop.ct_table"), (&p.cp_table, "prop.cp_table")] {
+            if let Err(e) = interp::check_table(table, what) {
+                panic!("{e}");
+            }
+        }
         Self {
             name: format!("prop.{index}"),
             p,

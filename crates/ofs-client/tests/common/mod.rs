@@ -30,7 +30,7 @@ impl TestServer {
         let data_dir = std::env::temp_dir().join(format!("ofs-client-test-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
         let thread = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
-            runtime.block_on(async {
+            let service = runtime.block_on(async {
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 ready_tx.send(listener.local_addr().unwrap().to_string()).unwrap();
                 let service = SimService::new(data_dir);
@@ -41,9 +41,12 @@ impl TestServer {
                     _ = server => {}
                     _ = stop_rx => {}
                 }
-                service.shutdown();
+                service
             });
-            runtime.shutdown_background(); // abrupt, like a crashed server: open streams die with the runtime
+            // Abrupt, like a crashed server: open streams die with the runtime. Only then is the session stopped; the
+            // other order let a client see its session unloaded (not_loaded) before the connection dropped.
+            runtime.shutdown_background();
+            service.shutdown();
         });
         TestServer { addr: ready_rx.recv().unwrap(), stop: Some(stop_tx), thread: Some(thread) }
     }
