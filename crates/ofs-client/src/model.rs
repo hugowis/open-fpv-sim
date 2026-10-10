@@ -234,7 +234,7 @@ impl World {
                 .into_iter()
                 .map(|a| WorldAntenna { aim: vec_to_godot(aim_ned(facing + a.aim_az_deg, a.aim_el_deg)), name: a.name, kind: a.kind })
                 .collect(),
-            handset_position: vec_to_godot(ned(w.handset.as_ref().map_or(None, |h| h.position_ned_m))),
+            handset_position: vec_to_godot(ned(w.handset.as_ref().and_then(|h| h.position_ned_m))),
             handset_antennas: w
                 .handset
                 .map(|h| {
