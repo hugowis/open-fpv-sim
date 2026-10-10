@@ -111,10 +111,11 @@ pub fn resolve(p: &AirframeParams, bounds: &[Aabb], s: &mut BodyState, touch: &m
     events
 }
 
-/// An impulse at a world point: linear velocity along the impulse, angular velocity through the inertia tensor.
+/// An impulse at a world point: linear velocity along the impulse, body-frame angular velocity through the
+/// body-frame (diagonal) inverse inertia — the torque is rotated into the body frame before the diagonal acts.
 fn apply(s: &mut BodyState, inv_mass: f64, inv_inertia: DVec3, lever: DVec3, impulse: DVec3) {
     s.vel_ned_mps += impulse * inv_mass;
-    s.rate_frd_radps += s.att.inverse() * (inv_inertia * lever.cross(impulse));
+    s.rate_frd_radps += inv_inertia * (s.att.inverse() * lever.cross(impulse));
 }
 
 /// Every sphere's contacts with every near object and with the ground.

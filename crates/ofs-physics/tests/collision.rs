@@ -176,6 +176,51 @@ fn a_new_touch_within_the_rearm_window_raises_nothing() {
 }
 
 #[test]
+fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
+    // The wall's near face is the plane x = 0 (its contact normal is -x) and the quad is pitched 90 deg up
+    // (att = from_rotation_x(FRAC_PI_2), so R maps body (x, y, z) to world (x, -z, y)). It carries one sphere
+    // at body (0.1, 0.06, 0.03), r = 0.02: at pos (-0.11, 0.03, -0.16) the sphere's centre sits at
+    // (-0.01, 0, -0.1), 1 cm into the face and clear of the ground, and the body slides into the wall at
+    // 1 m/s with no tangential speed, so the step raises exactly one normal impulse.
+    let p = params(
+        vec![WorldObject {
+            name: "wall".into(),
+            shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -5.0), half: DVec3::new(1.0, 2.0, 5.0) },
+        }],
+        vec![(DVec3::new(0.1, 0.06, 0.03), 0.02)],
+        0.3,
+    );
+    let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect::<Vec<_>>();
+    let mut touch = TouchState::new(p.objects.len());
+    let mut s = state(DVec3::new(-0.11, 0.03, -0.16), DVec3::new(1.0, 0.0, 0.0));
+    s.att = DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2);
+    let events = ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.0);
+    assert_eq!(events.len(), 1, "one hard touch");
+
+    // Hand-computed, with inv_mass = 20/13, inv_inertia = (400, 400, 2000/9), e = 0.3. The position correction
+    // (0.01 along -x) leaves the lever at point - pos = (0.13, -0.03, 0.06), and the normal impulse is J = n*j:
+    //   lever x n = (0, -0.06, -0.03)
+    //   kn = inv_mass + n . ((R diag(I^-1) R^T (lever x n)) x lever):
+    //     R^T . -> (0, -0.03, 0.06); diag . -> (0, -12, 13.33); R . -> (0, -13.33, -12);
+    //     . x lever -> (-1.16, -1.56, 1.73); n . -> 1.16   =>  kn = 20/13 + 1.16, j = 1.3/kn = 0.4818
+    // That spin gives the contact point a tangential speed, so a Coulomb friction impulse follows at the same
+    // lever; both impulses are recovered exactly from the linear velocity change (whose update carries no
+    // attitude): J_total = m * dv, with J_total . n = j (the friction impulse is tangential). The stored rate is
+    // body-frame, so it must be diag(I^-1) (R^T (lever x J_total)) — for the normal impulse alone that is
+    // (0, -12 j, 13.33 j), while applying the diagonal in the world frame instead would give
+    // R^T (diag(I^-1) (lever x J_total)) = (0, -6.67 j, 24 j): a different direction, not just a magnitude.
+    let v0 = DVec3::new(1.0, 0.0, 0.0);
+    let dv = s.vel_ned_mps - v0;
+    let j = p.mass_kg * dv.dot(DVec3::NEG_X);
+    assert!((j - 1.3 / (1.0 / 0.65 + 1.16)).abs() < 1e-9, "normal impulse {j}");
+    let impulse = p.mass_kg * dv;
+    let lever = DVec3::new(0.13, -0.03, 0.06);
+    let expected =
+        DVec3::new(400.0, 400.0, 2000.0 / 9.0) * (DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2).inverse() * lever.cross(impulse));
+    assert!((s.rate_frd_radps - expected).length() < 1e-9, "rate {} expected {expected}", s.rate_frd_radps);
+}
+
+#[test]
 fn contacts_with_no_objects_leave_the_body_alone() {
     // A body far from any object behaves exactly as with an empty world.
     let far = vec![WorldObject {
