@@ -1,6 +1,6 @@
 use glam::DVec3;
 use ofs_core::shape::Shape;
-use ofs_video::propagation::*;
+use ofs_rf::propagation::*;
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");

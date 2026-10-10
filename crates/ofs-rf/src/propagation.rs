@@ -1,7 +1,6 @@
 //! Radio propagation as pure functions: free-space path loss, antenna patterns, polarization, knife-edge
-//! diffraction around obstacles and the two-ray ground bounce. No bus and no state, so the video link uses them
-//! today and the ELRS link can adopt them later. Positions and directions are NED metres (down is +z, the ground
-//! is the plane z = 0).
+//! diffraction around obstacles and the two-ray ground bounce. Positions and directions are NED metres (down is
+//! +z, the ground is the plane z = 0).
 use glam::DVec3;
 use ofs_core::shape::Shape;
 
