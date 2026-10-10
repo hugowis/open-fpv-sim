@@ -625,6 +625,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
                     serial,
+                    erpm: (0..n).map(|i| bus.signal(&names::motor_omega(i))).collect(),
                     taps: video.taps,
                 },
                 &mut bus,

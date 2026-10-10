@@ -53,6 +53,7 @@ pub fn still_quad(
             home: Home { lat_deg: 50.85, lon_deg: 4.35, alt_m: 30.0 },
             motor_count: 4,
             serial,
+            erpm: Vec::new(),
             taps,
         },
         &mut bus,
