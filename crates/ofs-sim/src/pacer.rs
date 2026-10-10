@@ -21,12 +21,16 @@ pub const YIELD_S: f64 = 0.001;
 /// Longest sleep while ahead of the wall clock, so pause/resume and new work are picked up quickly.
 pub const MAX_SLEEP_S: f64 = 0.005;
 
+/// What real-time running does when the simulation cannot keep up with the wall clock (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverrunPolicy {
+    /// Catch up in bursts; drop a backlog beyond [`MAX_LAG_S`] and count an overrun.
     Warn,
+    /// Never burst: let simulated time stretch, counting an overrun per [`MAX_LAG_S`] of stretch.
     Slow,
 }
 
+/// One pacing step: what the runner does next.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Plan {
     /// Base ticks to run now.
@@ -37,6 +41,8 @@ pub struct Plan {
     pub overrun: bool,
 }
 
+/// Keeps simulated time aligned with the wall clock: anchored at the last (re)start, it says how many ticks the runner
+/// should run at each step.
 #[derive(Debug, Clone)]
 pub struct Pacer {
     policy: OverrunPolicy,
@@ -48,6 +54,7 @@ pub struct Pacer {
 }
 
 impl Pacer {
+    /// A pacer for a simulation stepped at `base_hz`; call [`Pacer::restart`] before the first [`Pacer::plan`].
     pub fn new(policy: OverrunPolicy, base_hz: u32) -> Self {
         assert!(base_hz > 0, "base_hz must be > 0");
         Self { policy, base_hz, anchor_wall_s: 0.0, anchor_sim_s: 0.0, stretched_s: 0.0, overruns: 0 }
@@ -60,15 +67,22 @@ impl Pacer {
         self.stretched_s = 0.0;
     }
 
+    /// Overruns counted since the pacer was made.
     pub fn overruns(&self) -> u64 {
         self.overruns
     }
 
+    /// Ticks in one chunk; at least one, so a base rate below 20 Hz still advances.
     fn chunk_ticks(&self) -> u64 {
-        (CHUNK_S * f64::from(self.base_hz)).round() as u64
+        ((CHUNK_S * f64::from(self.base_hz)).round() as u64).max(1)
     }
 
+    /// The next step, given the wall clock `now_s` and simulated time `sim_s` (both in seconds). A non-finite clock
+    /// runs nothing and changes nothing; a wall clock behind the anchor (it went backwards) waits.
     pub fn plan(&mut self, now_s: f64, sim_s: f64) -> Plan {
+        if !now_s.is_finite() || !sim_s.is_finite() {
+            return Plan { ticks: 0, sleep_s: MAX_SLEEP_S, overrun: false };
+        }
         let mut lag = self.anchor_sim_s + (now_s - self.anchor_wall_s) - sim_s;
         let allowed = match self.policy {
             OverrunPolicy::Warn => MAX_LAG_S,
@@ -97,7 +111,7 @@ impl Pacer {
         if lag < MIN_BATCH_S {
             return Plan { ticks: 0, sleep_s: (MIN_BATCH_S - lag).clamp(YIELD_S, MAX_SLEEP_S), overrun };
         }
-        let ticks = ((lag * f64::from(self.base_hz)).floor() as u64).min(self.chunk_ticks());
+        let ticks = ((lag * f64::from(self.base_hz)).floor() as u64).clamp(1, self.chunk_ticks());
         Plan { ticks, sleep_s: YIELD_S, overrun }
     }
 }

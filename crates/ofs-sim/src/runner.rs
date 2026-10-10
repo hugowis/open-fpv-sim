@@ -86,4 +86,21 @@ mod tests {
         assert!(e.message.contains("test panic in step"), "{}", e.message);
         assert_eq!(pace_once(&shared), IDLE, "a poisoned session is left alone");
     }
+
+    #[test]
+    fn a_session_that_falls_behind_publishes_an_overrun() {
+        let shared = Shared::new();
+        let mut events = shared.events.subscribe();
+        let mut s = open_loop_session(RunMode::Realtime);
+        s.running = true;
+        s.pacer.restart(shared.wall_s() - 1.0, 0.0); // a second behind: beyond the allowed lag
+        *shared.lock() = Some(s);
+        pace_once(&shared);
+        let mut kinds = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            kinds.push(e.kind());
+        }
+        assert!(kinds.contains(&pb::EventKind::Overrun), "{kinds:?}");
+        assert_eq!(shared.lock().as_ref().unwrap().pacer.overruns(), 1);
+    }
 }

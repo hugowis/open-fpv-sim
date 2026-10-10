@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use ofs_config::{FcKind, WorldConfig};
+use ofs_core::scheduler::MAX_RUN_FOR_S;
 use ofs_core::{names::RC_AUX_COUNT, SimError};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::ReceiverStream;
@@ -24,6 +25,8 @@ pub use ofs_proto::PROTOCOL_VERSION;
 pub struct SimService {
     shared: Arc<Shared>,
     data_dir: PathBuf,
+    /// The real-time runner thread, joined by `shutdown`.
+    runner: Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
 /// A status carrying the machine-readable `ofs-error-kind` metadata that clients map to typed errors.
@@ -70,7 +73,7 @@ pub(crate) fn parse_sticks(s: pb::Sticks) -> Result<Sticks, Status> {
     Ok(sticks)
 }
 
-/// Sets its flag when dropped: a Run whose client went away (tonic drops its future) stops at the next chunk.
+/// Sets its flag when dropped: a call whose client went away (tonic drops its future) does not start its work.
 struct CancelOnDrop(Arc<AtomicBool>);
 
 impl Drop for CancelOnDrop {
@@ -82,8 +85,8 @@ impl Drop for CancelOnDrop {
 impl SimService {
     pub fn new(data_dir: PathBuf) -> Self {
         let shared = Shared::new();
-        runner::spawn(shared.clone());
-        Self { shared, data_dir }
+        let runner = Arc::new(std::sync::Mutex::new(Some(runner::spawn(shared.clone()))));
+        Self { shared, data_dir, runner }
     }
 
     /// Every event published from now on (the Watch RPC reads the same channel).
@@ -91,20 +94,54 @@ impl SimService {
         self.shared.events.subscribe()
     }
 
-    /// Stops the real-time runner and unloads the session, stopping Betaflight SITL. For server shutdown.
+    /// Stops the real-time runner (and waits for it) and unloads the session, stopping Betaflight SITL. For server
+    /// shutdown.
     pub fn shutdown(&self) {
         self.shared.stop();
+        let runner = self.runner.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(handle) = runner {
+            let _ = handle.join();
+        }
         *self.shared.lock() = None;
     }
 
+    #[cfg(test)]
+    fn runner_finished(&self) -> bool {
+        self.runner.lock().unwrap().as_ref().is_none_or(|h| h.is_finished())
+    }
+
+    /// Runs `f` with the session locked, on a blocking thread. If the caller goes away (its client cancelled the
+    /// call) before `f` gets the lock, `f` does not run.
     async fn blocking<T, F>(&self, f: F) -> Result<Response<T>, Status>
     where
         T: Send + 'static,
         F: FnOnce(&Shared, &mut Slot) -> Result<T, Status> + Send + 'static,
     {
+        self.locked(f, true).await
+    }
+
+    /// Like `blocking`, but `f` runs even when the caller went away (Unload: Betaflight must stop either way).
+    async fn blocking_always<T, F>(&self, f: F) -> Result<Response<T>, Status>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Shared, &mut Slot) -> Result<T, Status> + Send + 'static,
+    {
+        self.locked(f, false).await
+    }
+
+    async fn locked<T, F>(&self, f: F, skip_if_cancelled: bool) -> Result<Response<T>, Status>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Shared, &mut Slot) -> Result<T, Status> + Send + 'static,
+    {
         let shared = self.shared.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let _cancel_on_drop = CancelOnDrop(cancelled.clone());
         let joined = tokio::task::spawn_blocking(move || {
             let mut slot = shared.lock();
+            if skip_if_cancelled && cancelled.load(Ordering::Acquire) {
+                return Err(Status::cancelled("the client went away"));
+            }
             f(&shared, &mut slot)
         })
         .await;
@@ -183,48 +220,60 @@ impl Sim for SimService {
         .await
     }
 
+    /// Steps a lockstep (or paused real-time) session in 50 ms chunks of simulated time. The session is locked per
+    /// chunk, so other calls (GetState, SetSticks, streams) get in between; a Run whose session is unloaded or
+    /// replaced meanwhile stops with not_loaded.
     async fn run(&self, req: Request<pb::RunRequest>) -> Result<Response<pb::State>, Status> {
         let seconds = req.into_inner().seconds;
-        if !seconds.is_finite() || seconds < 0.0 {
-            let message = format!("seconds must be finite and >= 0 (got {seconds})");
+        if !seconds.is_finite() || !(0.0..=MAX_RUN_FOR_S).contains(&seconds) {
+            let message = format!("seconds must be finite and in [0, {MAX_RUN_FOR_S}] (got {seconds})");
             return Err(error("invalid_argument", Code::InvalidArgument, message));
         }
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let _cancel_on_drop = CancelOnDrop(cancelled.clone());
-        self.blocking(move |shared, slot| {
-            let s = loaded(slot)?;
-            if let Some(f) = &s.failure {
-                return Err(sim_error(f)); // also for a duration of zero ticks, which never reaches `step`
-            }
-            if s.mode == RunMode::Realtime && s.running {
-                return Err(invalid_state("pause the real-time session before calling Run"));
-            }
-            let hz = u64::from(s.vehicle.base_hz());
-            let total = (seconds * hz as f64).round() as u64;
-            let chunk = (hz / 20).max(1); // 50 ms of simulated time between cancellation checks
-            let healthy = s.failure.is_none();
-            let mut done = 0;
-            while done < total {
-                if cancelled.load(Ordering::Acquire) {
-                    return Err(Status::cancelled("the client went away"));
+        let (id, total, chunk) = self
+            .blocking(move |_, slot| {
+                let s = loaded(slot)?;
+                if let Some(f) = &s.failure {
+                    return Err(sim_error(f)); // also for a duration of zero ticks, which never reaches `step`
                 }
-                if shared.stopping() {
-                    return Err(Status::unavailable("server shutting down")); // `shutdown` waits for this lock
-                }
-                let n = chunk.min(total - done);
-                let result = s.step(n);
-                shared.publish(s.changes());
-                if let Err(e) = result {
-                    if healthy && s.failure.is_some() {
-                        shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string())]);
+                let hz = u64::from(s.vehicle.base_hz());
+                let total = (seconds * hz as f64).round() as u64;
+                Ok((s.id, total, (hz / 20).max(1))) // 50 ms of simulated time per chunk
+            })
+            .await?
+            .into_inner();
+        let mut done = 0;
+        loop {
+            let n = chunk.min(total - done);
+            let last = done + n == total;
+            let reply = self
+                .blocking(move |shared, slot| {
+                    if shared.stopping() {
+                        return Err(Status::unavailable("server shutting down"));
                     }
-                    return Err(sim_error(&e));
-                }
-                done += n;
+                    let s = slot.as_mut().filter(|s| s.id == id).ok_or_else(not_loaded)?;
+                    if s.mode == RunMode::Realtime && s.running {
+                        return Err(invalid_state("pause the real-time session before calling Run"));
+                    }
+                    if let Some(f) = &s.failure {
+                        return Err(sim_error(f));
+                    }
+                    let result = s.step(n);
+                    shared.publish(s.changes());
+                    if let Err(e) = result {
+                        if s.failure.is_some() {
+                            shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string())]);
+                        }
+                        return Err(sim_error(&e));
+                    }
+                    Ok(last.then(|| s.state_msg()))
+                })
+                .await?
+                .into_inner();
+            done += n;
+            if let Some(state) = reply {
+                return Ok(Response::new(state));
             }
-            Ok(s.state_msg())
-        })
-        .await
+        }
     }
 
     async fn start(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
@@ -270,7 +319,7 @@ impl Sim for SimService {
     }
 
     async fn unload(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
-        self.blocking(|_, slot| {
+        self.blocking_always(|_, slot| {
             *slot = None;
             Ok(pb::Empty {})
         })
@@ -411,6 +460,110 @@ mod tests {
             assert_eq!(kind_of(&err), "invalid_argument", "rate {hz}");
         }
         assert!(svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: 0 })).await.is_ok(), "0 means the default rate");
+        svc.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_long_run_lets_other_calls_in_between_its_chunks() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let runner = svc.clone();
+        let run = tokio::spawn(async move { runner.run(Request::new(pb::RunRequest { seconds: 5.0 })).await });
+        let mut seen_mid_run = None;
+        while !run.is_finished() {
+            let t = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner().time_s;
+            if t > 0.0 && t < 5.0 {
+                seen_mid_run = Some(t);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(seen_mid_run.is_some(), "GetState waited for the whole Run");
+        let state = run.await.unwrap().unwrap().into_inner();
+        assert!((state.time_s - 5.0).abs() < 1e-9, "{}", state.time_s);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_run_stops_when_its_session_is_replaced() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let runner = svc.clone();
+        let run = tokio::spawn(async move { runner.run(Request::new(pb::RunRequest { seconds: 5.0 })).await });
+        while svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner().time_s == 0.0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        svc.unload(Request::new(pb::Empty {})).await.unwrap();
+        *svc.shared.lock() = Some(open_loop_session(RunMode::Lockstep));
+        let err = run.await.unwrap().unwrap_err();
+        assert_eq!(kind_of(&err), "not_loaded", "{err:?}");
+        let t = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner().time_s;
+        assert_eq!(t, 0.0, "the old Run stepped the new session");
+        svc.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_call_whose_client_left_before_it_got_the_session_does_nothing() {
+        let wait = std::time::Duration::from_millis(100);
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let held = svc.shared.lock(); // a long call holds the session
+        let sticks = svc.set_sticks(Request::new(pb::Sticks { throttle: 1.0, ..Default::default() }));
+        assert!(tokio::time::timeout(wait, sticks).await.is_err(), "the client gives up while it waits");
+        drop(held);
+        tokio::time::sleep(wait * 2).await;
+        let state = svc.run(Request::new(pb::RunRequest { seconds: 0.2 })).await.unwrap().into_inner();
+        assert!(state.motor_cmd.iter().all(|m| *m == 0.0), "the abandoned SetSticks ran later: {:?}", state.motor_cmd);
+
+        // Unload is the exception: it still runs, so a dropped Unload never leaves Betaflight running.
+        let held = svc.shared.lock();
+        let unload = svc.unload(Request::new(pb::Empty {}));
+        assert!(tokio::time::timeout(wait, unload).await.is_err());
+        drop(held);
+        tokio::time::sleep(wait * 2).await;
+        assert!(svc.shared.lock().is_none(), "a cancelled Unload still unloads");
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn run_refuses_more_than_a_simulated_day() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let err = svc.run(Request::new(pb::RunRequest { seconds: 86_401.0 })).await.unwrap_err();
+        assert_eq!(kind_of(&err), "invalid_argument");
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_numerical_failure_is_published_as_a_sim_error_event() {
+        let mut session = open_loop_session(RunMode::Lockstep);
+        session.vehicle.set_sticks(&crate::vehicle::Sticks { throttle: f64::NAN, ..Default::default() });
+        let svc = service_with(session);
+        let mut events = svc.subscribe();
+        let err = svc.run(Request::new(pb::RunRequest { seconds: 0.1 })).await.unwrap_err();
+        assert_eq!(kind_of(&err), "numerical", "{err:?}");
+        let mut kinds = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            kinds.push(e.kind());
+        }
+        assert!(kinds.contains(&pb::EventKind::SimError), "{kinds:?}");
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_the_real_time_runner() {
+        let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
+        svc.shutdown();
+        assert!(svc.runner_finished(), "the runner thread is still going after shutdown");
+    }
+
+    /// A Watch whose client gives up while it waits for the session (e.g. behind a long call) must not register a
+    /// watcher later: the session would then never end with its last real watcher.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_watch_cancelled_while_it_waits_for_the_session_leaves_no_watcher() {
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let held = svc.shared.lock();
+        let watch = svc.watch(Request::new(pb::Empty {}));
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(100), watch).await.is_err());
+        drop(held);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(svc.shared.watchers.load(Ordering::Acquire), 0);
         svc.shutdown();
     }
 }
