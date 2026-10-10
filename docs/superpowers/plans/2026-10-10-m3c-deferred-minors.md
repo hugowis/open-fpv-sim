@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Clear the 16 deferred minors the M3c final review triaged past merge — event counting, lever-arm accuracy, radio hot-loop allocations, test-robustness margins, NaN error attribution, and a handful of stale docs — with the two load-bearing ones (event counting, lever arms) implemented and pinned by tests.
+**Goal:** Clear the 16 deferred minors the M3c final review triaged past merge — event counting, lever-arm accuracy, radio hot-loop allocations, test-robustness margins, NaN error attribution, and a handful of stale docs — and get CI green again after the M3c merge push failed the clippy gate (fixed inside Task 3) and the live sitl job (reproduced-then-routed in Task 6). Two minors are implemented rather than tidied (event counting, lever arms), each pinned by a test.
 
 **Architecture:** Five small tasks, grouped by crate, each independently green and committable. Two touch simulation semantics deliberately: `body.collision_count` becomes a true event counter (`events.len()`, the server's inequality edge detector is unaffected), and the impulse resolver recomputes its lever arms from the post-correction centre (removing the sub-cm approximation). Everything else is hygiene: a dead dependency, hot-loop hoisting, comment fixes, margin widows, and the HUD showing a dash instead of a bogus SNR while the link is down.
 
@@ -486,9 +486,9 @@ polarization = "rhcp"
 Run: `cargo test -p ofs-config --test world a_nan_pilot --locked`
 Expected: FAIL — the message contains `handset.position_ned_m: values must be finite` (derived from the NaN pilot).
 
-- [ ] **Step 3: Skip the finite check for the derived position**
+- [ ] **Step 3: Skip the finite check for the derived position (and fix the clippy needless borrow)**
 
-In `crates/ofs-config/src/world.rs`, replace:
+The same lines carry the `needless_borrow` that failed CI's clippy gate (`crates/ofs-config/src/world.rs:250`, `h.position(&p)` where `p` is already `&PilotSection`). In `crates/ofs-config/src/world.rs`, replace:
 
 ```rust
         let h = &self.handset;
@@ -500,7 +500,7 @@ with:
 
 ```rust
         let h = &self.handset;
-        let handset_at = h.position(&p);
+        let handset_at = h.position(p);
         // A given position is the handset's own fault; a derived one inherits the pilot's, whose finite
         // check already fired — report the pilot only.
         if h.position_ned_m.is_some() {
@@ -510,16 +510,16 @@ with:
 
 (The below-ground check on the effective position stays exactly as it is — NaN is exempt there by the existing `is_nan() ||` arm, and a legitimately derived above-ground handset still reports.)
 
-- [ ] **Step 4: Run the config suite and the workspace**
+- [ ] **Step 4: Run the config suite, clippy, and the workspace**
 
-Run: `cargo test -p ofs-config --locked && cargo test --workspace --locked`
-Expected: PASS — the new test passes, the pre-existing NaN-pilot test and the bare-`[handset]` guard test are unchanged and green.
+Run: `cargo test -p ofs-config --locked && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked`
+Expected: PASS — the new test passes, the pre-existing NaN-pilot test and the bare-`[handset]` guard test are unchanged and green, clippy is clean (the `needless_borrow` that failed CI's core job is gone).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add crates/ofs-config
-git commit -m "fix(config): a NaN pilot height no longer reports the derived handset position as non-finite
+git commit -m "fix(config): a NaN pilot height no longer reports the derived handset position; needless borrow gone
 
 Co-Authored-By: <model> <noreply@anthropic.com>"
 ```
@@ -792,7 +792,56 @@ Co-Authored-By: <model> <noreply@anthropic.com>"
 
 ---
 
+### Task 6: CI — get the branch green again, and reproduce the sitl VTX timeout before diagnosing it
+
+The push of the M3c merge (`4b0fb8f`) failed two CI jobs ([run 38078545752](https://github.com/hugowis/open-fpv-sim/actions/runs/38078545752)):
+
+1. **core (deterministic, fixed by Task 3):** `cargo clippy --workspace --all-targets --locked -- -D warnings` fails with `needless_borrow` at `crates/ofs-config/src/world.rs:250` (`h.position(&p)`; `p` is already `&PilotSection`). The line came verbatim from the M3c plan; Task 3 of this plan removes it. Everything else in core is green.
+2. **sitl (live, needs reproduction):** `python/tests/test_sitl_video.py::test_moving_off_the_parked_quads_channel_lowers_the_interference` failed with `TimeoutError: no MSP reply to command 89` (`MSP_SET_VTX_CONFIG`) after 4.5 s, on the last test of the module; every other live test passed (Windows suite green too). Precedent: the M2b merge run failed the same job and the fix was real (serialising the process-spawning `sitl_errors` tests), so a flake must be *demonstrated*, not assumed.
+
+**Files:**
+- Modify: nothing yet — this task verifies, reproduces, and only then routes.
+- Create (only if the flake reproduces): a diagnosis note in `docs/superpowers/m3c-carried-debt.md` naming the reproduction recipe.
+
+- [ ] **Step 1: Verify clippy locally after Task 3**
+
+Run: `cargo clippy --workspace --all-targets --locked -- -D warnings`
+Expected: PASS (exit 0), no warnings.
+
+- [ ] **Step 2: Reproduce the sitl timeout locally before touching anything**
+
+With the WSL SITL environment (per `docs/dev-setup.md`, option 2 as used in M3c Task 9 — ephemeral `uv` env, `OFS_SITL_LAUNCH`, Linux-built sim), run the failing test alone, three times:
+
+```bash
+wsl_run python -m pytest python/tests/test_sitl_video.py::test_moving_off_the_parked_quads_channel_lowers_the_interference -v
+wsl_run python -m pytest python/tests/test_sitl_video.py::test_moving_off_the_parked_quads_channel_lowers_the_interference -v
+wsl_run python -m pytest python/tests/test_sitl_video.py -v
+```
+
+(First two: the test in isolation. Third: the whole module in CI's order — the timeout may depend on the preceding tests' state, e.g. a Betaflight UART backed up by the reboot test.)
+
+- [ ] **Step 3: Route on the evidence**
+
+- **0 of 3 reproduce:** record in the plan-handoff message (and a one-line `docs/superpowers/m3c-carried-debt.md` note under a "Flakes observed" heading: test, run id 38078545752, date, "not reproduced in 3 local attempts after the clippy fix; CI re-run awaited"). Push the branch and watch CI; if the sitl job passes, the flake is confirmed rare and the note stays as its record. If it fails on CI again, go to the next bullet.
+- **1+ of 3 reproduce:** do NOT guess a fix. Capture the failing output plus the SITL stderr (the `uv`/WSL run's full log), and report NEEDS_CONTEXT to the controller with the reproduction rate — the diagnosis (a Betaflight SITL VTX-config race, an MSP pump budget too small in `test_sitl_video.py`'s helper, or an M3c-caused slow-down) needs the reproduction transcript and is a follow-up change on its own.
+
+- [ ] **Step 4: Commit (only the debt-doc note of the 0-of-3 route)**
+
+```bash
+git add docs/superpowers/m3c-carried-debt.md
+git commit -m "docs: record the sitl VTX-config MSP timeout observed once on CI, not reproduced locally
+
+Co-Authored-By: <model> <noreply@anthropic.com>"
+```
+
+---
+
 ## Coverage of the deferred-minor list
+
+| Minor | Where |
+|---|---|
+| CI core: clippy `needless_borrow` at `world.rs:250` | Task 3 (folded into the Step 3 edit) |
+| CI sitl: VTX-config MSP timeout (flake, unproven) | Task 6 (reproduce → route) |
 
 | Minor | Where |
 |---|---|
@@ -804,7 +853,7 @@ Co-Authored-By: <model> <noreply@anthropic.com>"
 | Per-packet allocations + loop-invariant hoist in `ElrsLink::step` | Task 2 |
 | `FAULT_RADIO_LINK_LOSS` doc ignores the downlink | Task 2 |
 | NaN pilot height misattributes the handset error | Task 3 (+ test) |
-| Python/Rust drop-height margins ~5 % | Task 4 (mid-window 0.51 m, derived) |
+| Python/Rust drop-height margins ~5 % | Task 4 (mid-window drop 0.54 m, derived with the 3 cm legs offset) |
 | Hardcoded betaflight.diff name | Task 4 (`with_suffix`) |
 | Unused `import ofs` in test_sitl_link.py | Task 4 |
 | `flat_world()` loaded twice | Task 4 |
