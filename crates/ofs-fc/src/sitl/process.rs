@@ -12,6 +12,8 @@ use super::FcError;
 const TAIL_LINES: usize = 200;
 /// How long a missed reply waits for a Betaflight reboot to show itself (see [`SitlProcess::rebooted`]).
 pub const REBOOT_GRACE: Duration = Duration::from_secs(3);
+/// How long after exiting a SITL's last output lines may still be on their way through the pipes.
+const EXIT_FLUSH: Duration = Duration::from_millis(200);
 /// How long after the ready line a late `bind port ... failed` is still waited for.
 const BIND_GRACE: Duration = Duration::from_millis(300);
 
@@ -83,6 +85,9 @@ pub struct SitlProcess {
     child: Child,
     log: SharedLog,
     cleanup: Vec<String>,
+    argv: Vec<String>,
+    /// When the process was first seen to have exited (see [`SitlProcess::rebooted`]).
+    exited_at: Option<Instant>,
 }
 
 impl SitlProcess {
@@ -119,7 +124,7 @@ impl SitlProcess {
         };
         let log: SharedLog = Arc::new(Mutex::new(LogSink { file, ..LogSink::default() }));
         let child = spawn_logged(&cfg.launch, &workdir, &log)?;
-        let mut proc = SitlProcess { child, log, cleanup: cfg.cleanup.clone() };
+        let mut proc = SitlProcess { child, log, cleanup: cfg.cleanup.clone(), argv: cfg.launch.clone(), exited_at: None };
         proc.wait_until_ready(cfg.startup_timeout)?;
         Ok(proc)
     }
@@ -130,7 +135,9 @@ impl SitlProcess {
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(status) = self.exit_status() {
-                return Err(FcError::Startup(format!("exited with {status} during startup"), self.log_tail()));
+                let tail = self.log_tail();
+                let what = format!("exited with {status} during startup{}", super::startup_hint(&self.argv, &tail));
+                return Err(FcError::Startup(what, tail));
             }
             let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
             if bind_failed {
@@ -159,7 +166,11 @@ impl SitlProcess {
     }
 
     pub fn exit_status(&mut self) -> Option<ExitStatus> {
-        self.child.try_wait().ok().flatten()
+        let status = self.child.try_wait().ok().flatten();
+        if status.is_some() && self.exited_at.is_none() {
+            self.exited_at = Some(Instant::now());
+        }
+        status
     }
 
     /// True when SITL announced a reset ([`is_reset_line`]) and exited cleanly: Betaflight rebooted.
@@ -173,6 +184,8 @@ impl SitlProcess {
             let reset_seen = self.log.lock().map(|l| l.reset_seen).unwrap_or(false);
             match self.exit_status() {
                 Some(status) if reset_seen => return status.success(),
+                // Exited without the reset line: a crash, once its last lines have had time to arrive.
+                Some(_) if self.exited_at.is_some_and(|t| t.elapsed() >= EXIT_FLUSH) => return false,
                 _ if Instant::now() >= deadline => return false,
                 _ => std::thread::sleep(Duration::from_millis(20)),
             }

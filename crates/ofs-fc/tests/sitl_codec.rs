@@ -187,3 +187,22 @@ fn the_largest_reply_fits_the_receive_buffer() {
 fn an_oversized_reply_is_refused_by_the_encoder() {
     let _ = encode_reply([0.0; 4], 0, &[(1, vec![0; 510])]);
 }
+
+#[test]
+fn serial_blocks_never_exceed_the_section_sitl_accepts() {
+    use ofs_core::Wire;
+    use ofs_fc::sitl::bridge::{take_serial_blocks, SerialLink};
+    use ofs_fc::sitl::codec::{SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX};
+    let links: Vec<SerialLink> = (1..4).map(|i| SerialLink { uart_index: i, rx: Wire::new(4096) }).collect();
+    for link in &links {
+        link.rx.write(&[0xAA; 400]);
+    }
+    let blocks = take_serial_blocks(&links);
+    let size: usize = blocks.iter().map(|(_, b)| SERIAL_BLOCK_HEADER + b.len()).sum();
+    assert!(size <= SERIAL_SECTION_MAX, "{size} bytes of blocks");
+    assert_eq!(blocks[0].1.len(), 400, "the first UART is sent whole");
+    let left: usize = links.iter().map(|l| l.rx.len()).sum();
+    assert_eq!(left + blocks.iter().map(|(_, b)| b.len()).sum::<usize>(), 1200, "bytes that do not fit wait for the next datagram");
+    // The datagram that carries them is built without tripping SITL's limit.
+    let _ = state_datagram_with_serial(&zero_fdm(), &RcPacket { timestamp_s: 0.0, channels: [0; 16] }, &blocks);
+}

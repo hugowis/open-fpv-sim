@@ -34,3 +34,17 @@ fn overflow_drops_the_oldest_bytes() {
 fn zero_capacity_is_rejected() {
     Wire::new(0);
 }
+
+#[test]
+fn one_write_larger_than_the_wire_keeps_its_newest_bytes() {
+    let w = Wire::new(4);
+    w.write(&[1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(w.take(10), vec![4, 5, 6, 7]);
+    assert_eq!(w.dropped(), 3);
+}
+
+#[test]
+fn a_wire_can_be_shared_between_threads() {
+    fn shared<T: Send + Sync>() {}
+    shared::<Wire>();
+}

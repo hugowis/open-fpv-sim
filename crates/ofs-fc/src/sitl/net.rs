@@ -1,7 +1,9 @@
 //! Where SITL lives on the network: natively on loopback, or inside WSL2 behind NAT (Windows).
 //! See docs/research/sitl-interface.md §6.
+use std::io::Read;
 use std::net::Ipv4Addr;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use super::FcError;
 
@@ -67,15 +69,42 @@ pub fn parse_default_gateway(out: &str) -> Option<Ipv4Addr> {
     None
 }
 
-fn run(prefix: &[String], args: &[&str]) -> Result<String, FcError> {
+/// How long a `wsl.exe` query may take before the vehicle build gives up (a hung WSL would stall it forever).
+pub const WSL_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Runs `prefix args` and returns its stdout, killing it if it has not finished within `timeout`.
+fn run_with_timeout(prefix: &[String], args: &[&str], timeout: Duration) -> Result<String, FcError> {
     let (program, rest) = prefix.split_first().expect("wsl prefix is never empty");
-    let out = Command::new(program)
+    let command = format!("{} {}", prefix.join(" "), args.join(" "));
+    let mut child = Command::new(program)
         .args(rest)
         .args(args)
         .stdin(Stdio::null())
-        .output()
-        .map_err(|source| FcError::Launch { command: format!("{} {}", prefix.join(" "), args.join(" ")), source })?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|source| FcError::Launch { command: command.clone(), source })?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        out
+    });
+    let deadline = Instant::now() + timeout;
+    while child.try_wait()?.is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FcError::Config(format!("`{}` did not finish within {} ms", command.trim_end(), timeout.as_millis())));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let out = reader.join().unwrap_or_default();
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
+fn run(prefix: &[String], args: &[&str]) -> Result<String, FcError> {
+    run_with_timeout(prefix, args, WSL_QUERY_TIMEOUT)
 }
 
 /// Addresses for a launch argv. Native: loopback. WSL2 (NAT): send to the VM IP, bind and `--ip` the
@@ -100,4 +129,36 @@ pub fn resolve(launch: &[String], send_override: Option<Ipv4Addr>, reply_overrid
         net.sitl_ip_arg = Some(ip);
     }
     Ok(net)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sleeper() -> Vec<String> {
+        if cfg!(windows) {
+            ["ping", "-n", "6", "127.0.0.1"].map(String::from).to_vec()
+        } else {
+            ["sleep", "5"].map(String::from).to_vec()
+        }
+    }
+
+    #[test]
+    fn a_hung_wsl_command_times_out() {
+        let started = std::time::Instant::now();
+        let err = run_with_timeout(&sleeper(), &[], std::time::Duration::from_millis(300)).unwrap_err();
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "waited {:?}", started.elapsed());
+        assert!(err.to_string().contains("did not finish within 300 ms"), "{err}");
+    }
+
+    #[test]
+    fn a_quick_command_returns_its_output() {
+        let echo: Vec<String> = if cfg!(windows) {
+            ["cmd", "/C", "echo", "172.28.1.2"].map(String::from).to_vec()
+        } else {
+            ["echo", "172.28.1.2"].map(String::from).to_vec()
+        };
+        let out = run_with_timeout(&echo, &[], std::time::Duration::from_secs(5)).unwrap();
+        assert_eq!(parse_hostname_ips(&out), Some("172.28.1.2".parse().unwrap()));
+    }
 }
