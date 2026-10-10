@@ -136,4 +136,5 @@ func test_the_link_line_carries_the_snr() -> void:
 	eq(hud.link_text(), "LINK UP   LQ 100 %   -50 dBm   SNR 49", "the link line")
 	hud.update_view(_view({"telemetry": _telemetry({"link_up": false})}))
 	ok(hud.link_text().begins_with("LINK DOWN"), "down: '%s'" % hud.link_text())
+	ok(hud.link_text().contains("SNR –"), "down: no bogus SNR number ('%s')" % hud.link_text())
 	hud.queue_free()

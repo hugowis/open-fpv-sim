@@ -148,7 +148,8 @@ func _add_pilot(goggles: Vector3, antennas: Array) -> void:
 	_add_built(pilot)
 
 
-## The pilot's handset: a small dark transmitter on the ground beside the pilot, 0.5 m below the goggles.
+## The pilot's handset: a small dark transmitter, placed at the world dict's handset_position (the config
+## default sits it 0.5 m below the goggles).
 func _add_handset(position: Vector3) -> void:
 	var handset := Node3D.new()
 	handset.name = "Handset"

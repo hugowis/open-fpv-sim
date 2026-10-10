@@ -207,7 +207,8 @@ func update_view(view: Dictionary) -> void:
 			"   Betaflight restarts %d" % t["fc_restarts"] if t["fc_restarts"] > 0 else ""]
 		_sim.add_theme_color_override("font_color", WHITE if running else YELLOW)
 		var up: bool = t["link_up"] and t["tx_enabled"]
-		_link.text = "LINK %s   LQ %d %%   %d dBm   SNR %d" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"], roundi(t.get("radio_snr_db", 0.0))]
+		var snr: String = str(roundi(t.get("radio_snr_db", 0.0))) if up else "–"
+		_link.text = "LINK %s   LQ %d %%   %d dBm   SNR %s" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"], snr]
 		_link.add_theme_color_override("font_color", GREEN if up and t["lq_pct"] >= 80.0 else (YELLOW if up else RED))
 		_battery.text = "%.2f V   %.1f A" % [t["battery_voltage_v"], t["battery_current_a"]]
 		if t.get("vtx_present", false):
