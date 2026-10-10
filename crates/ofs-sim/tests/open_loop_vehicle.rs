@@ -84,10 +84,20 @@ fn the_radio_link_is_up_while_the_transmitter_is_on() {
     let r = v.state().radio;
     assert!(r.tx_enabled && r.link_up, "{r:?}");
     assert_eq!(r.lq_pct, 100.0);
+    assert_eq!(r.rssi_dbm, -50.0, "the quad file's radio.rssi_dbm");
     v.set_transmitter(false);
     v.run_for(0.5).unwrap();
     let r = v.state().radio;
     assert!(!r.tx_enabled && !r.link_up, "{r:?}");
+}
+
+#[test]
+fn step_ticks_advances_exactly_that_many_base_ticks() {
+    let mut v = vehicle(1);
+    v.step_ticks(80).unwrap();
+    assert!((v.time_s() - 80.0 / 8000.0).abs() < 1e-12, "{}", v.time_s());
+    v.step_ticks(0).unwrap();
+    assert!((v.state().time_s - 0.01).abs() < 1e-12);
 }
 
 #[test]
@@ -99,4 +109,12 @@ fn the_link_loss_fault_drops_the_link_until_cleared() {
     v.clear_faults();
     v.run_for(0.1).unwrap();
     assert!(v.state().radio.link_up);
+}
+
+#[test]
+fn a_relative_and_an_absolute_path_to_one_quad_share_a_firmware_dir() {
+    // Tests run in the crate directory.
+    let data = Path::new("data");
+    let absolute = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    assert_eq!(firmware_dir(data, Path::new("Cargo.toml")), firmware_dir(data, &absolute));
 }

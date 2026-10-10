@@ -1,5 +1,20 @@
 //! Table lookups.
 
+/// Checks what [`linear`] relies on: at least one point, `x` strictly increasing, every value finite. Models check
+/// their tables once, when they are built (config validation checks them too, but a model may be built from code).
+pub fn check_table(table: &[(f64, f64)], what: &str) -> Result<(), String> {
+    if table.is_empty() {
+        return Err(format!("{what} is empty"));
+    }
+    if !table.windows(2).all(|w| w[1].0 > w[0].0) {
+        return Err(format!("{what}: x must be strictly increasing"));
+    }
+    if !table.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+        return Err(format!("{what}: values must be finite"));
+    }
+    Ok(())
+}
+
 /// Piecewise-linear interpolation over `(x, y)` points sorted by `x`; clamps outside the range.
 pub fn linear(table: &[(f64, f64)], x: f64) -> f64 {
     assert!(!table.is_empty(), "interpolation table is empty");

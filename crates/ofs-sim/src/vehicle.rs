@@ -349,8 +349,7 @@ fn antenna_kind(kind: world_cfg::AntennaKind, beamwidth_deg: Option<f64>) -> Ant
 
 /// A direction in NED from a heading (degrees clockwise from north) and an elevation (degrees up).
 pub fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
-    let (h, e) = (heading_deg.to_radians(), elevation_deg.to_radians());
-    DVec3::new(e.cos() * h.cos(), e.cos() * h.sin(), -e.sin())
+    DVec3::from_array(ofs_proto::aim_ned(heading_deg, elevation_deg))
 }
 
 /// An emitter's frequency: its `freq_mhz`, or its band and channel in the factory table.
@@ -695,7 +694,29 @@ impl Vehicle {
 
 /// Space-separated argv from an environment variable, if set and non-empty.
 fn env_argv(var: &str) -> Option<Vec<String>> {
-    std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| s.split_whitespace().map(String::from).collect())
+    std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| split_argv(&s))
+}
+
+/// Splits a command line on whitespace; `"..."` or `'...'` keeps a path with spaces in one argument. Backslashes are
+/// ordinary characters (Windows paths).
+fn split_argv(line: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current: Option<String> = None;
+    let mut quote = None;
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.get_or_insert_with(String::new).push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                current.get_or_insert_with(String::new);
+            }
+            None if c.is_whitespace() => args.extend(current.take()),
+            None => current.get_or_insert_with(String::new).push(c),
+        }
+    }
+    args.extend(current);
+    args
 }
 
 /// IPv4 address from an environment variable, if set and non-empty.
@@ -713,6 +734,14 @@ fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, SimError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_argv_from_the_environment_keeps_quoted_paths_whole() {
+        let argv = split_argv(r#"wsl.exe -d Ubuntu -e "/home/me/my builds/betaflight_SITL.elf" --x 'a b'"#);
+        assert_eq!(argv, ["wsl.exe", "-d", "Ubuntu", "-e", "/home/me/my builds/betaflight_SITL.elf", "--x", "a b"]);
+        assert_eq!(split_argv("  plain   words "), ["plain", "words"]);
+        assert_eq!(split_argv(r#"C:\tools\sitl.exe "#), [r"C:\tools\sitl.exe"], "backslashes are kept (Windows paths)");
+    }
 
     fn shipped_quad() -> QuadConfig {
         ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap()

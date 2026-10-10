@@ -11,8 +11,8 @@ use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, StandardNormal};
 
 use crate::propagation::{
-    adjacent_channel_rejection_db, mw_to_dbm, path_gain, power_sum_dbm, wavelength_m, Antenna, Endpoint, Obstacle,
-    PathGain,
+    adjacent_channel_rejection_db, mw_to_dbm, obstruction_db, power_sum_dbm, unobstructed_gain_db, wavelength_m, Antenna,
+    Endpoint, Obstacle, PathGain,
 };
 
 pub const MODEL_NAME: &str = "video.link";
@@ -207,28 +207,32 @@ pub struct LinkParams {
 pub fn vtx_paths(params: &LinkParams, quad_pos: DVec3, att: DQuat, freq_mhz: f64) -> Vec<PathGain> {
     let tx = Endpoint { position: quad_pos, antenna: Antenna { axis: (att * params.vtx_antenna.axis).normalize(), ..params.vtx_antenna } };
     let shadow = body_shadow_db(att, quad_pos, params.world.pilot_position);
+    // Every goggle antenna is at the pilot: one obstruction for all of them.
+    let obstruction = obstruction_db(&params.world.obstacles, quad_pos, params.world.pilot_position, freq_mhz);
     params
         .world
         .antennas
         .iter()
         .map(|a| {
             let rx = Endpoint { position: params.world.pilot_position, antenna: a.antenna };
-            let p = path_gain(&tx, &rx, freq_mhz, &params.world.obstacles, params.ground_bounce);
-            PathGain { gain_db: p.gain_db - shadow, obstruction_db: p.obstruction_db }
+            let gain_db = unobstructed_gain_db(&tx, &rx, freq_mhz, params.ground_bounce) - obstruction - shadow;
+            PathGain { gain_db, obstruction_db: obstruction }
         })
         .collect()
 }
 
 /// Interference at each receiver antenna for a receiver tuned to `freq_mhz`, in dBm.
 pub fn interference_dbm(world: &LinkWorld, freq_mhz: f64, ground_bounce: bool) -> Vec<f64> {
+    let obstructions: Vec<f64> =
+        world.emitters.iter().map(|e| obstruction_db(&world.obstacles, e.position, world.pilot_position, e.freq_mhz)).collect();
     world
         .antennas
         .iter()
         .map(|a| {
             let rx = Endpoint { position: world.pilot_position, antenna: a.antenna };
-            let powers = world.emitters.iter().map(|e| {
+            let powers = world.emitters.iter().zip(&obstructions).map(|(e, obstruction)| {
                 let tx = Endpoint { position: e.position, antenna: e.antenna };
-                mw_to_dbm(e.power_mw) + path_gain(&tx, &rx, e.freq_mhz, &world.obstacles, ground_bounce).gain_db
+                mw_to_dbm(e.power_mw) + unobstructed_gain_db(&tx, &rx, e.freq_mhz, ground_bounce) - obstruction
                     - adjacent_channel_rejection_db(e.freq_mhz - freq_mhz)
             });
             power_sum_dbm(powers.chain([NO_SIGNAL_DBM]))

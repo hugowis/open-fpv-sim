@@ -1,8 +1,9 @@
 //! Streaming RPCs: state at a client rate, the pilot's transmitter link, and session watchers.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{broadcast, mpsc, Notify};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Code, Status, Streaming};
@@ -23,8 +24,9 @@ pub fn state_rate(hz: u32) -> Result<u32, Status> {
     }
 }
 
-/// Sends the session state every 1/rate s from a plain thread, until the client goes away, the server stops,
-/// or the session is unloaded (then the stream ends with a not_loaded error).
+/// Sends the session state at once and then every 1/rate s (on a fixed schedule, so the rate does not drift) from a
+/// plain thread, until the client goes away, the server stops, or the session is unloaded (then the stream ends with a
+/// not_loaded error). A client that does not keep up misses states rather than holding the feed up.
 pub fn state_feed(shared: Arc<Shared>, rate_hz: u32) -> ReceiverStream<Result<pb::State, Status>> {
     feed(shared, rate_hz, None).0
 }
@@ -37,19 +39,31 @@ fn feed(shared: Arc<Shared>, rate_hz: u32, bind: Option<u64>) -> (ReceiverStream
     let signal = ended.clone();
     let period = Duration::from_secs_f64(1.0 / f64::from(rate_hz));
     std::thread::spawn(move || {
+        let started = Instant::now();
+        let mut sent: u32 = 0;
         loop {
-            std::thread::sleep(period);
             if tx.is_closed() || shared.stopping() {
                 break;
             }
             let msg = match shared.lock().as_ref() {
-                Some(s) if bind.map_or(true, |id| s.id == id) => Ok(s.state_msg()),
+                Some(s) if bind.is_none_or(|id| s.id == id) => Ok(s.state_msg()),
                 _ => Err(not_loaded()),
             };
-            let last = msg.is_err();
-            if tx.blocking_send(msg).is_err() || last {
-                break;
+            match msg {
+                Ok(state) => {
+                    if let Err(TrySendError::Closed(_)) = tx.try_send(Ok(state)) {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    // Signal the end first: a pilot whose client is not reading must not keep its slot meanwhile.
+                    signal.notify_one();
+                    let _ = tx.blocking_send(Err(e));
+                    return;
+                }
             }
+            sent = sent.saturating_add(1);
+            std::thread::sleep((started + period * sent).saturating_duration_since(Instant::now()));
         }
         signal.notify_one();
     });
@@ -112,6 +126,9 @@ fn off_runtime(f: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// How long a new pilot waits for the slot of one that has just left.
+const PILOT_SLOT_WAIT: Duration = Duration::from_secs(1);
+
 /// One Pilot connection's state, shared between its call, its input task and the guard's cleanup.
 struct PilotLink {
     /// False once the connection is gone; the setup step then does nothing, whenever it gets the session lock.
@@ -134,17 +151,15 @@ impl Drop for PilotGuard {
         let shared = self.shared.clone();
         let link = self.link.clone();
         off_runtime(move || {
-            let time_s = match shared.lock().as_mut() {
-                Some(s) if s.id == link.session.load(Ordering::Acquire) => {
-                    s.vehicle.set_transmitter(false);
-                    Some(s.vehicle.time_s())
-                }
-                _ => None,
-            };
-            shared.pilot.store(false, Ordering::Release);
-            if let Some(t) = time_s {
+            let mut slot = shared.lock();
+            if let Some(s) = slot.as_mut().filter(|s| s.id == link.session.load(Ordering::Acquire)) {
+                s.vehicle.set_transmitter(false);
+                // Published under the lock, like PilotConnected, so the two can never arrive the wrong way round.
+                let t = s.vehicle.time_s();
                 shared.publish([event(t, pb::EventKind::PilotDisconnected, "pilot disconnected: transmitter off")]);
             }
+            drop(slot);
+            shared.pilot.store(false, Ordering::Release);
         });
     }
 }
@@ -159,8 +174,13 @@ pub async fn pilot(
         .ok_or_else(|| error("invalid_argument", Code::InvalidArgument, "send a PilotInput to start piloting"))?;
     let rate_hz = state_rate(first.state_rate_hz)?;
     let first_sticks = parse_sticks(first.sticks.unwrap_or_default())?;
-    if shared.pilot.swap(true, Ordering::AcqRel) {
-        return Err(error("pilot_busy", Code::AlreadyExists, "a pilot is already connected"));
+    // A pilot that just left frees the slot once its cleanup has run: a reconnect waits for that, briefly.
+    let deadline = tokio::time::Instant::now() + PILOT_SLOT_WAIT;
+    while shared.pilot.swap(true, Ordering::AcqRel) {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(error("pilot_busy", Code::AlreadyExists, "a pilot is already connected"));
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let link = Arc::new(PilotLink { alive: AtomicBool::new(true), session: AtomicU64::new(0) });
     let guard = PilotGuard { shared: shared.clone(), link: link.clone() };
@@ -175,10 +195,8 @@ pub async fn pilot(
         session.vehicle.set_sticks(&first_sticks);
         session.vehicle.set_transmitter(true);
         setup_link.session.store(session.id, Ordering::Release);
-        let (id, t) = (session.id, session.vehicle.time_s());
-        drop(slot);
-        s.publish([event(t, pb::EventKind::PilotConnected, "pilot connected: transmitter on")]);
-        Ok(id)
+        s.publish([event(session.vehicle.time_s(), pb::EventKind::PilotConnected, "pilot connected: transmitter on")]);
+        Ok(session.id)
     })
     .await
     .map_err(|e| error("internal", Code::Internal, e.to_string()))??;
@@ -271,7 +289,10 @@ pub async fn watch(shared: Arc<Shared>) -> ReceiverStream<Result<pb::Event, Stat
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!("a watcher fell behind and missed {missed} event(s)");
+                        continue;
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 _ = tx.closed() => break,
@@ -297,4 +318,20 @@ fn unwatch(shared: &Shared, link: &WatchLink) {
     *slot = None; // stops the vehicle, and Betaflight SITL with it
     drop(slot);
     shared.publish([event(t, pb::EventKind::SessionEnded, "the last watcher disconnected and keep_alive is off")]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_rates_have_a_default_and_a_ceiling() {
+        assert_eq!(state_rate(0).unwrap(), DEFAULT_STATE_RATE_HZ);
+        assert_eq!(state_rate(1).unwrap(), 1);
+        assert_eq!(state_rate(MAX_STATE_RATE_HZ).unwrap(), 240);
+        assert_eq!(state_rate(241).unwrap_err().code(), Code::InvalidArgument);
+        assert_eq!(osd_rate(0).unwrap(), MAX_OSD_RATE_HZ);
+        assert_eq!(osd_rate(60).unwrap(), 60);
+        assert_eq!(osd_rate(61).unwrap_err().code(), Code::InvalidArgument);
+    }
 }

@@ -216,8 +216,7 @@ fn ned(v: Option<pb::Vec3>) -> DVec3 {
 
 /// A direction in NED from a heading (degrees clockwise from north) and an elevation (degrees up).
 fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
-    let (h, e) = (heading_deg.to_radians(), elevation_deg.to_radians());
-    DVec3::new(e.cos() * h.cos(), e.cos() * h.sin(), -e.sin())
+    DVec3::from_array(ofs_proto::aim_ned(heading_deg, elevation_deg))
 }
 
 impl World {

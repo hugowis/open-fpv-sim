@@ -1,4 +1,4 @@
-use ofs_sim::pacer::{OverrunPolicy, Pacer, Plan, MAX_SLEEP_S, YIELD_S};
+use ofs_sim::pacer::{OverrunPolicy, Pacer, Plan, MAX_SLEEP_S, MIN_BATCH_S, YIELD_S};
 
 const HZ: u32 = 8000;
 
@@ -78,12 +78,57 @@ fn slow_counts_one_overrun_per_max_lag_of_large_stall() {
     let plan = p.plan(10.0, 0.0);
     // The plan should run one chunk and report overrun=true
     assert_eq!(plan.ticks, 400);
-    assert_eq!(plan.overrun, true);
+    assert!(plan.overrun);
     // Should have counted 99 overruns from the excess
     assert_eq!(p.overruns(), 99);
     // Following in-time plan adds no more overruns
     let sim_advance = 400.0 / f64::from(HZ); // 0.05 s
     let plan2 = p.plan(10.0 + sim_advance, sim_advance);
-    assert_eq!(plan2.overrun, false);
+    assert!(!plan2.overrun);
     assert_eq!(p.overruns(), 99);
+}
+
+#[test]
+fn a_slow_base_rate_still_runs_at_least_one_tick_per_step() {
+    // 0.05 s chunks hold no whole tick below 20 Hz; the simulation must not stall.
+    let mut p = Pacer::new(OverrunPolicy::Warn, 5);
+    p.restart(0.0, 0.0);
+    assert_eq!(p.plan(0.5, 0.0).ticks, 1);
+}
+
+#[test]
+fn a_non_finite_clock_runs_nothing() {
+    let mut p = pacer(OverrunPolicy::Warn);
+    for (now, sim) in [(f64::NAN, 0.0), (f64::INFINITY, 0.0), (100.5, f64::NAN)] {
+        let plan = p.plan(now, sim);
+        assert_eq!((plan.ticks, plan.overrun), (0, false), "{now} {sim}");
+        assert!(plan.sleep_s.is_finite() && plan.sleep_s > 0.0, "{plan:?}");
+    }
+    assert_eq!(p.overruns(), 0);
+    assert_eq!(p.plan(100.0101, 0.0).ticks, 80, "the pacer is unharmed");
+}
+
+#[test]
+fn a_clock_that_goes_backwards_waits() {
+    let mut p = pacer(OverrunPolicy::Warn);
+    let plan = p.plan(99.0, 0.0);
+    assert_eq!((plan.ticks, plan.overrun), (0, false));
+    assert!(plan.sleep_s <= MAX_SLEEP_S, "{plan:?}");
+}
+
+#[test]
+fn a_backlog_of_exactly_one_batch_runs() {
+    let mut p = pacer(OverrunPolicy::Warn);
+    assert_eq!(p.plan(100.0 + MIN_BATCH_S, 0.0).ticks, 8);
+    let mut p = pacer(OverrunPolicy::Warn);
+    assert_eq!(p.plan(100.0 + MIN_BATCH_S * 0.99, 0.0).ticks, 0);
+}
+
+#[test]
+fn restart_forgets_the_stretch_of_a_slow_session() {
+    let mut p = pacer(OverrunPolicy::Slow);
+    p.plan(100.13, 0.0); // 0.08 s of stretch, below one overrun
+    p.restart(200.0, 0.05);
+    p.plan(200.13, 0.05); // another 0.08 s: still none, had the stretch been kept it would be one
+    assert_eq!(p.overruns(), 0);
 }

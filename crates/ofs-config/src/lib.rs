@@ -401,7 +401,9 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
         Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
         Some(v @ ..=1) => {
             let message = format!(
-                "unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 2 adds the required [radio] section                  and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and                  quads/opendrone-5f-freestyle.betaflight.diff"
+                "unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 2 adds the required [radio] section \
+                 and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and \
+                 quads/opendrone-5f-freestyle.betaflight.diff"
             );
             return Err(parse_err(message));
         }
@@ -440,6 +442,10 @@ impl Checker {
         self.check(t.iter().flatten().all(|v| v.is_finite()), field, "values must be finite");
     }
 
+    fn finite<'a>(&mut self, values: impl IntoIterator<Item = &'a f64>, field: &str) {
+        self.check(values.into_iter().all(|v| v.is_finite()), field, "values must be finite");
+    }
+
     fn divides(&mut self, base_hz: u32, hz: u32, field: &str) {
         self.check(hz > 0 && base_hz % hz == 0, field, format!("must be > 0 and divide sim.base_hz {base_hz} (got {hz})"));
     }
@@ -472,6 +478,13 @@ impl QuadConfig {
         c.check(f.motor_spin.len() == f.motor_positions_frd_m.len(), "frame.motor_spin", "needs one entry per motor");
         c.check(f.motor_spin.iter().all(|s| *s == 1 || *s == -1), "frame.motor_spin", "entries must be 1 or -1");
         c.check(!f.contact_points_frd_m.is_empty(), "frame.contact_points_frd_m", "needs at least one point");
+        c.finite(f.motor_positions_frd_m.iter().flatten(), "frame.motor_positions_frd_m");
+        c.finite(f.contact_points_frd_m.iter().flatten(), "frame.contact_points_frd_m");
+        c.finite(&self.imu.gyro_bias_radps, "imu.gyro_bias_radps");
+        c.finite(&self.imu.accel_bias_mps2, "imu.accel_bias_mps2");
+        c.finite(&self.initial.position_ned_m, "initial.position_ned_m");
+        c.finite([&self.initial.yaw_deg], "initial.yaw_deg");
+        c.finite([&self.home.alt_m], "home.alt_m");
 
         c.positive(self.ground.stiffness_npm, "ground.stiffness_npm");
         c.non_negative(self.ground.damping_nspm, "ground.damping_nspm");
@@ -604,7 +617,31 @@ impl QuadConfig {
             c.check(diff.is_file(), "fc.betaflight_diff", format!("file not found: {}", diff.display()));
             if let Ok(text) = std::fs::read_to_string(&diff) {
                 let vtx_uart = self.vtx.as_ref().map(|v| v.uart);
+                let esc_uart = self.esc_telemetry.as_ref().map(|e| e.uart);
+                let osd_uart = self.osd.as_ref().map(|o| o.uart);
+                let msp_displayport = diff_setting(&text, "osd_displayport_device").is_some_and(|v| v.eq_ignore_ascii_case("MSP"));
+                let mut esc_sensor = false;
                 for (index, functions) in serial_functions(&text) {
+                    let uart = index + 1;
+                    if functions & SERIAL_FUNCTION_ESC_SENSOR != 0 {
+                        esc_sensor = true;
+                        c.check(
+                            esc_uart == Some(uart),
+                            "fc.betaflight_diff",
+                            format!(
+                                "the diff enables the ESC sensor on UART{uart} but the quad has no [esc_telemetry] section with                                  uart = {uart}; the battery would read 0 V in Betaflight"
+                            ),
+                        );
+                    }
+                    if msp_displayport && uart != 1 && functions & SERIAL_FUNCTION_MSP != 0 {
+                        c.check(
+                            osd_uart == Some(uart),
+                            "fc.betaflight_diff",
+                            format!(
+                                "the diff sends the OSD over MSP DisplayPort on UART{uart} but the quad has no [osd] section                                  with uart = {uart}; the OSD would not be drawn"
+                            ),
+                        );
+                    }
                     if functions & SERIAL_FUNCTION_SMARTAUDIO != 0 && vtx_uart != Some(index + 1) {
                         c.check(
                             false,
@@ -617,14 +654,39 @@ impl QuadConfig {
                         );
                     }
                 }
+                if esc_sensor {
+                    let cells = self.battery.cells.to_string();
+                    let forced = diff_setting(&text, "force_battery_cell_count");
+                    c.check(
+                        forced == Some(cells.as_str()),
+                        "fc.betaflight_diff",
+                        format!(
+                            "with the battery as the ESC sensor the diff must `set force_battery_cell_count = {cells}` (battery.cells,                              got {}); Betaflight otherwise guesses the cell count from the first voltage it sees",
+                            forced.unwrap_or("no such line")
+                        ),
+                    );
+                }
             }
         }
         c.0
     }
 }
 
-/// Betaflight's serial function bit for a SmartAudio VTX.
+/// Betaflight's serial function bits: MSP, the ESC sensor (KISS telemetry) and a SmartAudio VTX.
+const SERIAL_FUNCTION_MSP: u32 = 1;
+const SERIAL_FUNCTION_ESC_SENSOR: u32 = 1024;
 const SERIAL_FUNCTION_SMARTAUDIO: u32 = 2048;
+
+/// The value of a `set <name> = <value>` line of a Betaflight diff (the last one wins, as in Betaflight).
+fn diff_setting<'a>(diff: &'a str, name: &str) -> Option<&'a str> {
+    diff.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("set ")?;
+            let (key, value) = rest.split_once('=')?;
+            (key.trim() == name).then(|| value.trim())
+        })
+        .next_back()
+}
 
 /// The `serial <index> <function mask> ...` lines of a Betaflight diff: (0-based UART index, function mask).
 fn serial_functions(diff: &str) -> Vec<(u8, u32)> {

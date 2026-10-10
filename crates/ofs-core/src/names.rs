@@ -77,7 +77,9 @@ pub const RADIO_RSSI: &str = "radio.rssi_dbm";
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 /// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).
 pub const FC_RESTARTS: &str = "fc.restarts";
-/// Cumulative bytes SITL reported dropping from its UART TX capture buffers (a consumer fell behind).
+/// Cumulative serial bytes lost on the way to or from Betaflight: those SITL reported dropping from its UART TX
+/// capture buffers, plus those our own full wires dropped (into SITL's UARTs, or from them to a model that fell
+/// behind).
 pub const FC_SERIAL_DROPPED: &str = "fc.serial_dropped_bytes";
 
 /// 1.0 when the quad has a VTX (it transmits from load on, with or without Betaflight).

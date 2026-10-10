@@ -77,3 +77,15 @@ fn empty_battery_clamps_state_of_charge() {
     assert_eq!(get(&s, names::BATTERY_SOC), 0.0);
     assert!(get(&s, names::BATTERY_VOLTAGE).is_finite());
 }
+
+#[test]
+#[should_panic(expected = "battery.ocv_table")]
+fn an_empty_ocv_table_is_refused_when_the_model_is_built() {
+    sim(BatteryParams { ocv_table: vec![], ..params() });
+}
+
+#[test]
+#[should_panic(expected = "battery.ocv_table")]
+fn an_unsorted_ocv_table_is_refused_when_the_model_is_built() {
+    sim(BatteryParams { ocv_table: vec![(1.0, 4.2), (0.0, 3.3)], ..params() });
+}

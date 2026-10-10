@@ -89,3 +89,35 @@ fn barometer_follows_standard_atmosphere() {
     let p = s.bus().get(s.bus().lookup::<f64>(names::BARO_PRESSURE).unwrap());
     assert!((p - isa_pressure_pa(1010.0)).abs() < 1e-9);
 }
+
+#[test]
+fn standard_atmosphere_is_zero_above_its_top_not_nan() {
+    // The troposphere formula's base goes negative above ~44.3 km; powf of a negative base is NaN.
+    assert_eq!(isa_pressure_pa(50_000.0), 0.0);
+    assert!(isa_pressure_pa(44_000.0) > 0.0);
+}
+
+fn baro_samples(seed: u64, n: usize) -> Vec<f64> {
+    let mut bus = Bus::new();
+    let baro = Baro::new(BaroParams { noise_std_pa: 2.0, home_alt_m: 0.0 }, seed, &mut bus);
+    let mut s = Scheduler::new(1000, bus);
+    s.add(Box::new(baro));
+    let out = s.bus().lookup::<f64>(names::BARO_PRESSURE).unwrap();
+    (0..n)
+        .map(|_| {
+            s.step().unwrap();
+            s.bus().get(out) - isa_pressure_pa(0.0)
+        })
+        .collect()
+}
+
+#[test]
+fn barometer_noise_has_configured_std_and_is_seeded() {
+    let xs = baro_samples(5, 20_000);
+    let mean = xs.iter().sum::<f64>() / xs.len() as f64;
+    let std = (xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / xs.len() as f64).sqrt();
+    assert!(mean.abs() < 0.1, "mean {mean}");
+    assert!((std - 2.0).abs() < 0.1, "std {std}");
+    assert_eq!(baro_samples(5, 10), xs[..10].to_vec());
+    assert_ne!(baro_samples(6, 10), xs[..10].to_vec());
+}

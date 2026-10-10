@@ -18,6 +18,8 @@ Usage (Linux or WSL), from the repository root:
 """
 import sys
 
+if len(sys.argv) != 2:
+    sys.exit(f"usage: python3 {sys.argv[0]} <betaflight checkout>  (see the docstring above)")
 ROOT = sys.argv[1]
 
 
@@ -45,19 +47,23 @@ edit("src/main/drivers/serial_tcp.c", [(
 
 // Lockstep builds: bytes for UART `id` (0-based) that the simulator sent inside the state datagram. They join
 // the port's RX buffer like bytes from a TCP client and reach the driver at this tick's tcpSerialDispatchRx().
-void tcpSerialInject(unsigned id, const uint8_t *data, int size)
+// Returns false when the UART does not exist or is not open (the bytes are dropped).
+bool tcpSerialInject(unsigned id, const uint8_t *data, int size)
 {
-    if (id >= ARRAYLEN(tcpSerialPorts) || !tcpPortInitialized[id] || size <= 0) {
-        return;
+    if (id >= ARRAYLEN(tcpSerialPorts) || !tcpPortInitialized[id]) {
+        return false;
     }
-    tcpDataIn(&tcpSerialPorts[id], (uint8_t *)data, size);
+    if (size > 0) {
+        tcpDataIn(&tcpSerialPorts[id], (uint8_t *)data, size);
+    }
+    return true;
 }
 """)])
 
 edit("src/main/drivers/serial_tcp.h", [(
     "void tcpSerialDispatchRx(void);  // lockstep: deliver buffered RX bytes on the main thread\n",
     "void tcpSerialDispatchRx(void);  // lockstep: deliver buffered RX bytes on the main thread\n"
-    "void tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n",
+    "bool tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n",
 )])
 
 edit("src/platform/SIMULATOR/sitl.c", [
@@ -82,10 +88,16 @@ static void extInjectSerial(const uint8_t *p, int len)
         const int n = p[i + 1] | (p[i + 2] << 8);
         i += 3;
         if (n > len - i) {
-            break;
+            printf("[SITL] malformed serial block for UART%u: %d bytes announced, %d left; rest dropped\n", uart + 1, n, len - i);
+            return;
         }
-        tcpSerialInject(uart, &p[i], n);
+        if (!tcpSerialInject(uart, &p[i], n)) {
+            printf("[SITL] %d serial bytes for UART%u dropped: no such open UART\n", n, uart + 1);
+        }
         i += n;
+    }
+    if (i != len) {
+        printf("[SITL] %d trailing serial bytes dropped (an incomplete block header)\n", len - i);
     }
 }
 """,
@@ -134,10 +146,14 @@ static void extInjectSerial(const uint8_t *p, int len)
         """        extFdmRcValid = false;
     }
     if (extFdmSerialLen > 0) {
-        const int room = EXT_SERIAL_MAX - extSerialPendingLen;
-        const int n = extFdmSerialLen < room ? extFdmSerialLen : room;
-        memcpy(extSerialPending + extSerialPendingLen, extFdmSerial, n);
-        extSerialPendingLen += n;
+        // Whole datagrams only: cutting one short would split a block. (In lockstep the main loop takes each
+        // datagram's bytes before the next arrives, so this never fills.)
+        if (extFdmSerialLen <= EXT_SERIAL_MAX - extSerialPendingLen) {
+            memcpy(extSerialPending + extSerialPendingLen, extFdmSerial, extFdmSerialLen);
+            extSerialPendingLen += extFdmSerialLen;
+        } else {
+            printf("[SITL] %d serial bytes dropped: the staging buffer is full\\n", extFdmSerialLen);
+        }
         extFdmSerialLen = 0;
     }
     extGyroTicks++;
@@ -156,6 +172,9 @@ static void extInjectSerial(const uint8_t *p, int len)
         static struct { fdm_packet fdm; rc_packet rc; uint8_t serial[EXT_SERIAL_MAX]; } __attribute__((packed)) fdmRcPkt;
         const int fdmRcSize = (int)(sizeof(fdm_packet) + sizeof(rc_packet));
         n = udpRecv(&stateLink, &fdmRcPkt, sizeof(fdmRcPkt), 100);
+        // Every packet sets the serial bytes it carries (none for a bare fdm_packet), so bytes of a packet that
+        // updateState() rejected are never staged with a later one.
+        extFdmSerialLen = 0;
         if (n >= fdmRcSize) {
             memcpy(extFdmRcChannels, fdmRcPkt.rc.channels, sizeof(extFdmRcChannels));
             extFdmRcValid = true;

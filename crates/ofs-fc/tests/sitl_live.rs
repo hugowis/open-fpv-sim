@@ -125,7 +125,7 @@ fn crsf_bytes_in_the_state_datagram_reach_betaflight() {
     let mut msp = MspClient::connect(SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT)), Duration::from_secs(5)).unwrap();
     let reply = msp.request(MSP_RC, &[], 500, || s.run_for(0.01)).unwrap();
     // MSP_RC lists roll, pitch, yaw, throttle (Betaflight's internal order).
-    assert_eq!(&rc_channels_us(&reply)[..4], &[1600, 1400, 1500, 1000]);
+    assert_eq!(&rc_channels_us(&reply).unwrap()[..4], &[1600, 1400, 1500, 1000]);
 }
 
 #[test]

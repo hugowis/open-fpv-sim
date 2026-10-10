@@ -15,6 +15,12 @@ struct Fifo {
 #[derive(Debug, Clone)]
 pub struct Wire(Arc<Mutex<Fifo>>);
 
+// Models (and the wires between them) move to the simulation thread.
+const _: () = {
+    const fn shared<T: Send + Sync>() {}
+    shared::<Wire>();
+};
+
 impl Wire {
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "wire capacity must be > 0");

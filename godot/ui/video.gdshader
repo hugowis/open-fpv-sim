@@ -17,8 +17,18 @@ const float LINES = 288.0;
 // Sparkle cells per line.
 const float SPARKLE_CELLS = 96.0;
 
+// Integer hash (PCG). A fract(sin(...)) hash of pixel coordinates needs sin() of large arguments, whose precision
+// varies between GPUs and shows as bands in the static.
+uint pcg(uint v) {
+	uint state = v * 747796405u + 2891336453u;
+	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+	return (word >> 22u) ^ word;
+}
+
+// A value in [0, 1) for the integer cell `p` (fractions are dropped) and this frame's seed.
 float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(12.9898, 78.233)) + seed * 37.719) * 43758.5453);
+	uvec2 q = uvec2(ivec2(floor(p)));
+	return float(pcg(q.x ^ pcg(q.y ^ pcg(uint(seed * 16777216.0))))) / 4294967296.0;
 }
 
 void fragment() {

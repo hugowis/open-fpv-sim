@@ -10,9 +10,10 @@ pub struct BaroParams {
     pub home_alt_m: f64,
 }
 
-/// International Standard Atmosphere pressure (troposphere).
+/// International Standard Atmosphere pressure (the troposphere formula), 0 above the altitude where it reaches 0
+/// (~44.3 km) instead of NaN.
 pub fn isa_pressure_pa(alt_m: f64) -> f64 {
-    101_325.0 * (1.0 - 2.25577e-5 * alt_m).powf(5.25588)
+    101_325.0 * (1.0 - 2.25577e-5 * alt_m).max(0.0).powf(5.25588)
 }
 
 pub struct Baro {

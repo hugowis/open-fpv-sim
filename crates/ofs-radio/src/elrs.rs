@@ -169,7 +169,7 @@ impl Model for ElrsLink {
         // Handset: the pipeline delays samples by `latency_packets` packets.
         let sample = self.sample(bus);
         if self.pipeline.is_empty() {
-            self.pipeline.extend(std::iter::repeat(sample).take(self.params.latency_packets as usize));
+            self.pipeline.extend(std::iter::repeat_n(sample, self.params.latency_packets as usize));
         }
         self.pipeline.push_back(sample);
         let channels = self.pipeline.pop_front().expect("the pipeline holds at least this sample");

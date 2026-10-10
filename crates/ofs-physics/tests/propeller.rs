@@ -51,3 +51,18 @@ fn model_reads_rotor_speed_and_writes_thrust_and_torque() {
     assert_eq!(b.get(b.lookup::<f64>(&names::prop_thrust(2)).unwrap()), t);
     assert_eq!(b.get(b.lookup::<f64>(&names::prop_torque(2)).unwrap()), q);
 }
+
+#[test]
+#[should_panic(expected = "prop.ct_table")]
+fn an_unsorted_coefficient_table_is_refused_when_the_model_is_built() {
+    let mut bus = Bus::new();
+    Propeller::new(0, prop(vec![(10_000.0, 0.1), (5_000.0, 0.12)], vec![(0.0, 0.05)]), &mut bus);
+}
+
+#[test]
+fn each_rotor_has_its_own_model_name_and_runs_every_tick() {
+    use ofs_core::Model;
+    let mut bus = Bus::new();
+    let p = Propeller::new(2, prop(vec![(0.0, 0.1)], vec![(0.0, 0.05)]), &mut bus);
+    assert_eq!((p.name(), p.rate_divisor()), ("prop.2", 1));
+}

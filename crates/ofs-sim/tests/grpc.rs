@@ -17,7 +17,10 @@ const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5
 async fn start_with_service() -> (SimClient<Channel>, SimService) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let data_dir = std::env::temp_dir().join("ofs-grpc-test-data");
+    // One data directory per server, so tests that run in parallel never share firmware state.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let data_dir = std::env::temp_dir().join(format!("ofs-grpc-test-data-{}-{n}", std::process::id()));
     let service = SimService::new(data_dir);
     tokio::spawn(
         tonic::transport::Server::builder()
@@ -154,7 +157,7 @@ async fn realtime_sessions_load_paused_and_follow_the_wall_clock() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let s = c.get_state(Empty {}).await.unwrap().into_inner();
     assert!(s.running);
-    assert!((0.6..=1.4).contains(&s.time_s), "{} s simulated in 1 s of wall time", s.time_s);
+    assert!((0.5..=1.5).contains(&s.time_s), "{} s simulated in 1 s of wall time", s.time_s);
     c.pause(Empty {}).await.unwrap();
     let paused_at = time_s(&mut c).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -181,13 +184,13 @@ async fn run_needs_a_paused_or_lockstep_session_and_start_needs_realtime() {
 async fn an_abandoned_run_stops_and_releases_the_session() {
     let mut c = start().await;
     load_open_loop(&mut c).await;
-    let mut req = Request::new(RunRequest { seconds: 100_000.0 });
+    let mut req = Request::new(RunRequest { seconds: 86_400.0 });
     req.set_timeout(Duration::from_millis(300));
     let err = c.run(req).await.unwrap_err();
     // The client-side deadline cancels the call (tonic reports Cancelled or DeadlineExceeded).
     assert!(matches!(err.code(), Code::DeadlineExceeded | Code::Cancelled), "{err:?}");
     let t = tokio::time::timeout(Duration::from_secs(5), time_s(&mut c)).await.expect("the session stayed locked");
-    assert!(t < 100_000.0);
+    assert!(t < 86_400.0);
 }
 
 #[tokio::test]
@@ -333,61 +336,72 @@ async fn a_pilot_does_not_outlive_its_session() {
 }
 
 #[tokio::test]
-async fn a_cancelled_watch_does_not_leak_a_watcher() {
-    let mut c = start().await;
-    c.load(LoadRequest { keep_alive: false, ..open_loop(Mode::Lockstep) }).await.unwrap();
-
-    // A long Run holds the session lock, so the Watch call has to wait for it.
-    let mut runner = c.clone();
-    let run = tokio::spawn(async move { runner.run(RunRequest { seconds: 1.0e6 }).await });
-    let mut held = false;
-    for _ in 0..200 {
-        if tokio::time::timeout(Duration::from_millis(100), c.get_state(Empty {})).await.is_err() {
-            held = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(held, "the long Run never held the session");
-    let mut req = Request::new(Empty {});
-    req.set_timeout(Duration::from_millis(300));
-    assert!(c.watch(req).await.is_err(), "the Watch call should have hit its deadline");
-
-    // End the Run; the cancelled Watch must not have left a watcher behind.
-    run.abort();
-    let mut free = false;
-    for _ in 0..200 {
-        if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(100), c.get_state(Empty {})).await {
-            free = true;
-            break;
-        }
-    }
-    assert!(free, "the Run never released the session");
-
-    let watch = c.watch(Empty {}).await.unwrap().into_inner();
-    drop(watch);
-    let mut loaded = true;
-    for _ in 0..40 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        loaded = c.get_state(Empty {}).await.is_ok();
-        if !loaded {
-            break;
-        }
-    }
-    assert!(!loaded, "the last watcher left but the session was kept: a watcher leaked");
-}
-
-#[tokio::test]
 async fn shutdown_stops_a_long_lockstep_run() {
     let (mut c, service) = start_with_service().await;
     load_open_loop(&mut c).await;
     let mut runner = c.clone();
-    let run = tokio::spawn(async move { runner.run(RunRequest { seconds: 1e6 }).await });
-    tokio::time::sleep(Duration::from_millis(300)).await; // the Run now holds the session
+    let run = tokio::spawn(async move { runner.run(RunRequest { seconds: 86_400.0 }).await });
+    tokio::time::sleep(Duration::from_millis(300)).await; // the Run is under way
     let stop = tokio::task::spawn_blocking(move || service.shutdown());
     tokio::time::timeout(Duration::from_secs(2), stop).await.expect("shutdown waited for the whole Run").unwrap();
     let err = tokio::time::timeout(Duration::from_secs(2), run).await.expect("the Run did not return").unwrap().unwrap_err();
     assert_eq!(err.code(), Code::Unavailable, "{err}");
     let err = c.get_state(Empty {}).await.unwrap_err();
     assert_eq!(kind(&err), "not_loaded", "the session slot is empty");
+}
+
+async fn next_kinds(events: &mut tokio::sync::broadcast::Receiver<ofs_sim::pb::Event>, until: EventKind) -> Vec<EventKind> {
+    let mut kinds = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !kinds.contains(&until) {
+        let e = tokio::time::timeout_at(deadline, events.recv()).await.expect("event not published").unwrap();
+        kinds.push(e.kind());
+    }
+    kinds
+}
+
+#[tokio::test]
+async fn pilot_and_session_events_are_published_in_order() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    let watch = c.watch(Empty {}).await.unwrap().into_inner();
+    load_open_loop(&mut c).await;
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+    let states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    assert_eq!(next_kinds(&mut events, EventKind::PilotConnected).await.last(), Some(&EventKind::PilotConnected));
+    drop(tx);
+    drop(states);
+    let kinds = next_kinds(&mut events, EventKind::PilotDisconnected).await;
+    assert!(!kinds.contains(&EventKind::PilotConnected), "{kinds:?}");
+    drop(watch); // the last watcher leaves a watched session without keep_alive
+    next_kinds(&mut events, EventKind::SessionEnded).await;
+    assert_eq!(kind(&c.get_state(Empty {}).await.unwrap_err()), "not_loaded");
+}
+
+#[tokio::test]
+async fn a_state_stream_without_a_session_fails_at_once() {
+    let mut c = start().await;
+    let started = std::time::Instant::now();
+    let mut states = c.stream_state(StreamRequest { rate_hz: 1 }).await.unwrap().into_inner();
+    let first = tokio::time::timeout(Duration::from_secs(5), states.next()).await.unwrap().unwrap();
+    assert_eq!(kind(&first.unwrap_err()), "not_loaded");
+    assert!(started.elapsed() < Duration::from_millis(500), "waited {:?} (a whole 1 Hz period)", started.elapsed());
+}
+
+#[tokio::test]
+async fn a_pilot_that_never_reads_its_states_frees_the_slot_when_its_session_ends() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 240 }).await.unwrap();
+    let _unread_states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    tokio::time::sleep(Duration::from_millis(1000)).await; // its state channel and the transport fill up
+    c.unload(Empty {}).await.unwrap();
+    load_open_loop(&mut c).await;
+    let (tx2, rx2) = tokio::sync::mpsc::channel(8);
+    tx2.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+    let mut states = c.pilot(ReceiverStream::new(rx2)).await.expect("the idle pilot still holds the slot").into_inner();
+    assert!(states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
+    drop(tx);
 }

@@ -89,3 +89,52 @@ fn fnv1a_matches_reference_vectors() {
     assert_eq!(rng::fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
     assert_eq!(rng::fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
 }
+
+#[test]
+fn non_finite_scalars_and_quaternions_are_found_first_by_name() {
+    let mut bus = Bus::new();
+    let q = bus.signal::<DQuat>("b.att");
+    let s = bus.signal::<f64>("c.speed");
+    let ok = bus.signal::<DVec3>("a.pos");
+    bus.set(ok, DVec3::ONE);
+    bus.set(s, f64::INFINITY);
+    assert_eq!(bus.first_non_finite(), Some("c.speed"));
+    bus.set(q, DQuat::from_xyzw(f64::NAN, 0.0, 0.0, 1.0));
+    assert_eq!(bus.first_non_finite(), Some("b.att"), "name order, not registration order");
+    bus.set(q, DQuat::IDENTITY);
+    bus.set(s, 1.0);
+    assert_eq!(bus.first_non_finite(), None);
+}
+
+#[test]
+fn digest_covers_every_component_of_vectors_and_quaternions() {
+    let base = || {
+        let mut bus = Bus::new();
+        let v = bus.signal::<DVec3>("v");
+        let q = bus.signal::<DQuat>("q");
+        (bus, v, q)
+    };
+    let (reference, _, _) = base();
+    for component in 0..3 {
+        let (mut bus, v, _) = base();
+        let mut a = [0.0; 3];
+        a[component] = 1e-12;
+        bus.set(v, DVec3::from_array(a));
+        assert_ne!(bus.digest(), reference.digest(), "vec3 component {component}");
+    }
+    for component in 0..4 {
+        let (mut bus, _, q) = base();
+        let mut a = DQuat::default().to_array();
+        a[component] += 1e-12;
+        bus.set(q, DQuat::from_array(a));
+        assert_ne!(bus.digest(), reference.digest(), "quat component {component}");
+    }
+}
+
+#[test]
+fn tables_must_be_non_empty_and_strictly_increasing() {
+    assert!(interp::check_table(&[(0.0, 1.0), (1.0, 2.0)], "t").is_ok());
+    assert!(interp::check_table(&[], "t").unwrap_err().contains("empty"));
+    assert!(interp::check_table(&[(1.0, 1.0), (1.0, 2.0)], "t").unwrap_err().contains("strictly increasing"));
+    assert!(interp::check_table(&[(0.0, f64::NAN)], "t").unwrap_err().contains("finite"));
+}

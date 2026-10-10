@@ -55,7 +55,7 @@ fn crsf_sticks_reach_betaflight() {
     v.run_for(2.0).unwrap();
     let reply = msp().request(MSP_RC, &[], 500, || v.run_for(0.01)).unwrap();
     // MSP_RC lists roll, pitch, yaw, throttle (Betaflight's internal order).
-    assert_eq!(&rc_channels_us(&reply)[..4], &[1600, 1400, 1500, 1000]);
+    assert_eq!(&rc_channels_us(&reply).unwrap()[..4], &[1600, 1400, 1500, 1000]);
 }
 
 fn armed(v: &Vehicle) -> bool {
@@ -85,6 +85,15 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     // Betaflight declares RX loss once frames stop for failsafe_delay (1.5 s by default) and then disarms
     // (src/main/flight/failsafe.c); stage-1 failsafe holds idle until then.
     assert!((1.4..=2.2).contains(&dt), "disarmed {dt:.3} s after the cut");
+
+    // The link comes back: Betaflight recovers once the arm switch is off, and arms again.
+    v.clear_faults();
+    v.set_sticks(&Sticks::default()); // arm switch off
+    v.run_for(2.0).unwrap();
+    assert!(v.state().radio.link_up, "the link is back");
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.run_for(1.0).unwrap();
+    assert!(armed(v), "no re-arm after the failsafe: {:?}", v.state().motor_cmd);
 }
 
 #[test]

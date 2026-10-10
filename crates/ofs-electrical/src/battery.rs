@@ -30,6 +30,9 @@ pub struct Battery {
 
 impl Battery {
     pub fn new(p: BatteryParams, motor_count: usize, rate_divisor: u32, bus: &mut Bus) -> Self {
+        if let Err(e) = interp::check_table(&p.ocv_table, "battery.ocv_table") {
+            panic!("{e}");
+        }
         let b = Self {
             bus_currents: (0..motor_count).map(|i| bus.signal(&names::esc_bus_current(i))).collect(),
             voltage: bus.signal(names::BATTERY_VOLTAGE),

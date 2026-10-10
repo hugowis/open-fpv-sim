@@ -18,6 +18,8 @@ The generator is NOT idempotent: running it on a tree that already has this chan
 """
 import sys
 
+if len(sys.argv) != 2:
+    sys.exit(f"usage: python3 {sys.argv[0]} <betaflight checkout>  (see the docstring above)")
 ROOT = sys.argv[1]
 
 
@@ -119,8 +121,8 @@ void tcpDataOut(tcpPort_t *instance)
 ])
 
 edit("src/main/drivers/serial_tcp.h", [(
-    "void tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n",
-    "void tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n"
+    "bool tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n",
+    "bool tcpSerialInject(unsigned id, const uint8_t *data, int size);  // lockstep: UART bytes from the state datagram\n"
     "int tcpSerialTakeTx(uint8_t *out, int room, uint16_t *dropped);  // lockstep: UART2+ TX blocks for the reply datagram\n",
 )])
 
