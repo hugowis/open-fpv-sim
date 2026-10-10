@@ -248,6 +248,25 @@ def test_the_world_includes_the_handset(sim):
     assert w.handset.antennas[0].polarization == "linear"
 
 
+def test_cutting_the_radio_raises_link_down(sim):
+    sim.load(QUAD, seed=1, open_loop_fc=True)
+    s = sim.run(0.5)
+    assert s.radio.link_up, s.radio
+    sim.inject(ofs.faults.RadioLinkLoss())
+    s = sim.run(0.5)
+    assert not s.radio.link_up
+    assert "link_down" in [e.kind for e in sim.events()], [e.kind for e in sim.events()]
+
+
+def test_two_lockstep_runs_give_identical_body_and_radio_signals(sim):
+    runs = []
+    for _ in range(2):
+        sim.load(QUAD, seed=5, open_loop_fc=True)  # loading again replaces the session (there is no unload)
+        s = sim.run(0.25)
+        runs.append((s.time_s, tuple(s.motor_rpm), s.position_ned_m, s.radio))
+    assert runs[0] == runs[1], "lockstep is deterministic, radio included"
+
+
 def test_a_collision_event_names_the_object(sim, tmp_path):
     import pathlib
     import shutil
