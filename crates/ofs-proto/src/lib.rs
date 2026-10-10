@@ -1,4 +1,4 @@
-//! Protocol 4 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
+//! Protocol 5 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
 //! (`ofs-sim`) and every Rust client (`ofs-client`, the Godot extension) build against this one crate.
 // tonic's `Status` is the error type of every gRPC call (the generated traits fix it); boxing it would only move
 // the size elsewhere.
@@ -9,7 +9,7 @@ pub mod pb {
 }
 
 /// The protocol version this build speaks; the `Handshake` RPC compares it on both sides.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The unit vector (north, east, down) a heading and an elevation point along: how the server builds an antenna's
 /// aim and how clients draw it (`ReceiverAntenna.aim_az_deg` is added to the pilot's facing to give the heading).

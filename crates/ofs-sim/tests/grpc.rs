@@ -255,7 +255,7 @@ async fn a_vanished_pilot_switches_the_transmitter_off() {
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_millis(50)).await;
         radio = c.get_state(Empty {}).await.unwrap().into_inner().radio;
-        if !radio.unwrap().tx_enabled && !radio.unwrap().link_up {
+        if !radio.as_ref().unwrap().tx_enabled && !radio.as_ref().unwrap().link_up {
             break;
         }
     }

@@ -19,7 +19,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -31,7 +31,10 @@ class RadioLink:
     tx_enabled: bool = False
     link_up: bool = False
     lq_pct: float = 0.0
-    rssi_dbm: float = 0.0
+    rssi_dbm: float = 0.0  # at the antenna in use
+    snr_db: float = 0.0  # may be negative: LoRa decodes below the noise
+    active_antenna: str = ""
+    downlink_lq_pct: float = 0.0  # what the handset receives
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,13 @@ class Emitter:
 
 
 @dataclass(frozen=True)
+class Handset:
+    """The pilot's handset: where it is and what transmits from it (the ELRS uplink)."""
+    position_ned_m: tuple
+    antennas: tuple
+
+
+@dataclass(frozen=True)
 class World:
     """The field a session flies in: where the pilot stands, the goggles' antennas, the objects, other transmitters."""
     name: str
@@ -131,6 +141,7 @@ class World:
     antennas: tuple
     objects: tuple
     emitters: tuple
+    handset: Handset = field(default_factory=lambda: Handset((), ()))
 
 
 @dataclass(frozen=True)
@@ -182,6 +193,7 @@ class State:
     vtx: Vtx = field(default_factory=Vtx)
     serial_dropped_bytes: int = 0
     video: VideoLink = field(default_factory=VideoLink)
+    collision_speed_mps: float = 0.0  # the last collision's inward speed (0 until one happens)
 
     @property
     def altitude_m(self) -> float:
@@ -227,6 +239,11 @@ def _world(m) -> World:
         objects=tuple(WorldObject(o.name, o.shape, _v(o.center_ned_m), _v(o.size_m), o.radius_m, o.height_m, _v(o.color),
                                   o.rf_loss_db) for o in m.objects),
         emitters=tuple(Emitter(e.name, _v(e.position_ned_m), e.freq_mhz, e.power_mw) for e in m.emitters),
+        handset=Handset(
+            position_ned_m=_v(m.handset.position_ned_m),
+            antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
+                                           a.aim_el_deg) for a in m.handset.antennas),
+        ) if m.HasField("handset") else Handset((), ()),
     )
 
 
@@ -241,13 +258,15 @@ def _state(m) -> State:
         battery_current_a=m.battery_current_a,
         motor_rpm=tuple(m.motor_rpm),
         motor_cmd=tuple(m.motor_cmd),
-        radio=RadioLink(m.radio.tx_enabled, m.radio.link_up, m.radio.lq_pct, m.radio.rssi_dbm),
+        radio=RadioLink(m.radio.tx_enabled, m.radio.link_up, m.radio.lq_pct, m.radio.rssi_dbm,
+                        m.radio.snr_db, m.radio.active_antenna, m.radio.downlink_lq_pct),
         running=m.running,
         overruns=m.overruns,
         fc_restarts=m.fc_restarts,
         vtx=Vtx(m.vtx.present, m.vtx.band, m.vtx.channel, m.vtx.freq_mhz, m.vtx.power_mw, m.vtx.pit_mode),
         serial_dropped_bytes=m.serial_dropped_bytes,
         video=_video(m.video),
+        collision_speed_mps=m.collision_speed_mps,
     )
 
 

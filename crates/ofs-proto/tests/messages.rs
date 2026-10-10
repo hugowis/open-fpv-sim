@@ -5,7 +5,7 @@ use prost::Message;
 #[test]
 fn the_protocol_version_matches_the_python_client() {
     // python/ofs/client.py PROTOCOL_VERSION must equal this; bump both together.
-    assert_eq!(PROTOCOL_VERSION, 4);
+    assert_eq!(PROTOCOL_VERSION, 5);
     let python = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../python/ofs/client.py")).unwrap();
     assert!(python.contains(&format!("PROTOCOL_VERSION = {PROTOCOL_VERSION}")), "python client speaks another protocol");
 }

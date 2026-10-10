@@ -10,7 +10,8 @@ def test_open_loop_rest_then_climb(sim):
     assert sim.load(QUAD, seed=1, open_loop_fc=True).startswith("OpenDrone")
     s = sim.run(1.0)
     assert abs(s.time_s - 1.0) < 1e-9
-    assert abs(s.altitude_m - 0.0295) < 1e-3
+    # The generated default body sphere (radius 4 cm) carries the rest height (M3c task 6's ruling).
+    assert abs(s.altitude_m - 0.04) < 2e-3
     sim.set_sticks(throttle=1.0)
     s = sim.run(1.0)
     assert s.altitude_m > 1.0
@@ -222,3 +223,45 @@ def test_equal_rssi_mappings_hash_alike_whatever_their_order():
     a, b = AntennaRssi([("omni", -60.0), ("patch", -70.0)]), AntennaRssi([("patch", -70.0), ("omni", -60.0)])
     assert a == b and hash(a) == hash(b)
     assert list(a) == ["omni", "patch"], "the order is still the world file's"
+
+
+def test_the_radio_reports_snr_antenna_and_downlink(sim):
+    sim.load(QUAD, seed=1, open_loop_fc=True)
+    s = sim.run(0.5)
+    assert s.radio.link_up and s.radio.lq_pct == 100.0, s.radio
+    assert s.radio.snr_db > 20.0, f"1.7 m from the handset: strong ({s.radio.snr_db})"
+    assert s.radio.active_antenna == "antenna", s.radio
+    assert s.radio.downlink_lq_pct == 100.0, s.radio
+
+
+def test_the_state_starts_without_a_collision(sim):
+    sim.load(QUAD, seed=1, open_loop_fc=True)
+    s = sim.run(0.5)
+    assert s.collision_speed_mps == 0.0
+
+
+def test_the_world_includes_the_handset(sim):
+    sim.load(QUAD, seed=1, open_loop_fc=True, world=WORLD)
+    w = sim.get_world()
+    assert w.handset.position_ned_m == (-3.0, 2.0, -1.2), "0.5 m below the goggles by default"
+    assert w.handset.antennas[0].name == "handset"
+    assert w.handset.antennas[0].polarization == "linear"
+
+
+def test_a_collision_event_names_the_object(sim, tmp_path):
+    import pathlib
+    import shutil
+    # 0.55 m above the roof: hard enough for the 1 m/s event threshold, while the 0.3 default restitution's
+    # rebound stays under it, so the one touch raises exactly one event (a 1.5 m drop bounces and raises two).
+    text = pathlib.Path(QUAD).read_text().replace(
+        "position_ned_m = [0.0, 0.0, -0.03]", "position_ned_m = [110.0, -45.0, -14.55]")
+    quad = tmp_path / "onto-building-a.toml"
+    quad.write_text(text)
+    # fc.betaflight_diff resolves next to the quad file, so the copy needs the diff beside it.
+    shutil.copy(pathlib.Path(QUAD).with_name("opendrone-5f-freestyle.betaflight.diff"), tmp_path)
+    sim.load(str(quad), seed=1, open_loop_fc=True, world=WORLD)
+    s = sim.run(5.0)
+    collisions = [e for e in sim.events() if e.kind == "collision"]
+    assert len(collisions) == 1, collisions
+    assert "BuildingA" in collisions[0].message and "m/s" in collisions[0].message, collisions[0].message
+    assert s.collision_speed_mps > 3.0, "the fall onto the roof was hard"

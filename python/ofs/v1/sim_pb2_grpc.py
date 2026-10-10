@@ -26,9 +26,10 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
-    per server.
+    """Simulator control, protocol version 5: protocol 4 plus the radio link's SNR, active antenna and downlink,
+    the collision speed, and the world's handset (M3c). Still: lockstep and real-time sessions, state and event
+    streams, the pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session
+    (loaded quad) per server.
     """
 
     def __init__(self, channel):
@@ -120,9 +121,10 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
-    per server.
+    """Simulator control, protocol version 5: protocol 4 plus the radio link's SNR, active antenna and downlink,
+    the collision speed, and the world's handset (M3c). Still: lockstep and real-time sessions, state and event
+    streams, the pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session
+    (loaded quad) per server.
     """
 
     def Handshake(self, request, context):
@@ -323,9 +325,10 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
-    pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
-    per server.
+    """Simulator control, protocol version 5: protocol 4 plus the radio link's SNR, active antenna and downlink,
+    the collision speed, and the world's handset (M3c). Still: lockstep and real-time sessions, state and event
+    streams, the pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session
+    (loaded quad) per server.
     """
 
     @staticmethod

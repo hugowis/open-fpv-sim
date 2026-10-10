@@ -56,13 +56,19 @@ impl Default for Sticks {
 }
 
 /// What the radio receiver reports.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RadioState {
     /// The transmitter is on (a pilot or script is connected).
     pub tx_enabled: bool,
     pub link_up: bool,
     pub lq_pct: f64,
+    /// The active antenna's RSSI.
     pub rssi_dbm: f64,
+    pub snr_db: f64,
+    /// The quad file's name of the antenna in use.
+    pub active_antenna: String,
+    /// What the handset receives.
+    pub downlink_lq_pct: f64,
 }
 
 /// What the VTX model publishes (all zero without a `[vtx]` section or without Betaflight).
@@ -144,6 +150,12 @@ pub struct VehicleState {
     /// TX bytes Betaflight's UART capture dropped because a consumer fell behind.
     pub serial_dropped_bytes: u64,
     pub video: VideoInfo,
+    /// The inward speed of the last collision event (0 until one happens).
+    pub collision_speed_mps: f64,
+    /// The object the last collision event hit (-1 = the ground).
+    pub collision_object: i32,
+    /// Collision events raised so far (the server detects the event's edge on this).
+    pub collision_event_count: u64,
 }
 
 struct VideoHandles {
@@ -219,6 +231,12 @@ struct Handles {
     vtx_power: Signal<f64>,
     vtx_pit: Signal<f64>,
     serial_dropped: Signal<f64>,
+    radio_snr: Signal<f64>,
+    radio_antenna: Signal<f64>,
+    radio_downlink_lq: Signal<f64>,
+    collision_speed: Signal<f64>,
+    collision_object: Signal<f64>,
+    collision_count: Signal<f64>,
     video: VideoHandles,
 }
 
@@ -251,6 +269,12 @@ impl Handles {
             vtx_power: bus.signal(names::VTX_POWER_MW),
             vtx_pit: bus.signal(names::VTX_PIT),
             serial_dropped: bus.signal(names::FC_SERIAL_DROPPED),
+            radio_snr: bus.signal(names::RADIO_SNR),
+            radio_antenna: bus.signal(names::RADIO_ANTENNA),
+            radio_downlink_lq: bus.signal(names::RADIO_DOWNLINK_LQ),
+            collision_speed: bus.signal(names::BODY_COLLISION_SPEED),
+            collision_object: bus.signal(names::BODY_COLLISION_OBJECT),
+            collision_count: bus.signal(names::BODY_COLLISION_COUNT),
             video: VideoHandles::register(bus, world),
         }
     }
@@ -262,6 +286,8 @@ pub struct Vehicle {
     sitl: bool,
     osd: Option<OsdHandle>,
     world: WorldConfig,
+    /// The quad file's radio antenna names, by index (the state's `active_antenna`).
+    radio_antenna_names: Vec<String>,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -621,7 +647,9 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     for m in models {
         scheduler.add(m);
     }
-    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone() };
+    let radio_antenna_names = cfg.radio.antennas.iter().map(|a| a.name.clone()).collect();
+    let mut vehicle =
+        Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone(), radio_antenna_names };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
@@ -706,11 +734,21 @@ impl Vehicle {
             battery_current_a: b.get(h.ibat),
             motor_rpm: h.omega.iter().map(|s| b.get(*s) * 60.0 / (2.0 * PI)).collect(),
             motor_cmd: h.cmd.iter().map(|s| b.get(*s)).collect(),
-            radio: RadioState {
-                tx_enabled: b.get(h.tx_enabled) > 0.5,
-                link_up: b.get(h.link_up) > 0.5,
-                lq_pct: b.get(h.lq),
-                rssi_dbm: b.get(h.rssi),
+            radio: {
+                let active = b.get(h.radio_antenna);
+                RadioState {
+                    tx_enabled: b.get(h.tx_enabled) > 0.5,
+                    link_up: b.get(h.link_up) > 0.5,
+                    lq_pct: b.get(h.lq),
+                    rssi_dbm: b.get(h.rssi),
+                    snr_db: b.get(h.radio_snr),
+                    active_antenna: self
+                        .radio_antenna_names
+                        .get(active.max(0.0) as usize)
+                        .cloned()
+                        .unwrap_or_default(),
+                    downlink_lq_pct: b.get(h.radio_downlink_lq),
+                }
             },
             fc_restarts: b.get(h.fc_restarts) as u32,
             vtx: VtxInfo {
@@ -723,6 +761,9 @@ impl Vehicle {
             },
             serial_dropped_bytes: b.get(h.serial_dropped) as u64,
             video: h.video.read(b),
+            collision_speed_mps: b.get(h.collision_speed),
+            collision_object: b.get(h.collision_object) as i32,
+            collision_event_count: b.get(h.collision_count) as u64,
         }
     }
 

@@ -307,7 +307,7 @@ impl Telemetry {
     pub fn from_pb(s: &pb::State) -> Telemetry {
         let pos = s.position_ned_m.unwrap_or_default();
         let vel = s.velocity_ned_mps.unwrap_or_default();
-        let radio = s.radio.unwrap_or_default();
+        let radio = s.radio.clone().unwrap_or_default();
         Telemetry {
             time_s: s.time_s,
             altitude_m: -pos.z,
@@ -392,6 +392,8 @@ impl Event {
             Ok(pb::EventKind::SerialOverflow) => EventKind::SerialOverflow,
             Ok(pb::EventKind::VideoLost) => EventKind::VideoLost,
             Ok(pb::EventKind::VideoRestored) => EventKind::VideoRestored,
+            // A collision is a protocol 5 event; the client learns it with the protocol 5 client (M3c task 8).
+            Ok(pb::EventKind::Collision) => EventKind::Unknown,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }
