@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import collections.abc
 import math
 import os
 import shutil
@@ -48,13 +49,41 @@ class Vtx:
         return "ABEFRL"[self.band - 1] if 1 <= self.band <= 6 else ""
 
 
+class AntennaRssi(collections.abc.Mapping):
+    """Received signal in dBm by goggle antenna name, in the world file's order. A read-only mapping that, unlike a
+    dict, can be hashed, so a `State` can be a set member or a dictionary key."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, items=()):
+        self._items = tuple((str(k), float(v)) for k, v in (items.items() if isinstance(items, dict) else items))
+
+    def __getitem__(self, name):
+        for k, v in self._items:
+            if k == name:
+                return v
+        raise KeyError(name)
+
+    def __iter__(self):
+        return (k for k, _ in self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __hash__(self):
+        return hash(self._items)
+
+    def __repr__(self):
+        return f"AntennaRssi({dict(self._items)!r})"
+
+
 @dataclass(frozen=True)
 class VideoLink:
     """The analog video link at the goggles (`present` is False when the quad has no VTX)."""
     present: bool = False
     snr_db: float = 0.0
     interference_dbm: float = 0.0
-    rssi: dict = field(default_factory=dict)  # dBm by goggle antenna name, in the world file's order
+    rssi: AntennaRssi = field(default_factory=AntennaRssi)  # dBm by goggle antenna name, in the world file's order
     active_antenna: str = ""
     noise: float = 0.0  # grain, 0 (clean) to 1 (static)
     sparkles: float = 0.0
@@ -170,7 +199,8 @@ class State:
 @dataclass(frozen=True)
 class Event:
     time_s: float
-    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended", "vtx_changed", "video_lost"
+    kind: str  # e.g. "link_down", "firmware_restarted", "overrun", "session_ended", "vtx_changed", "video_lost";
+    # "watch_ended" is the client's own (see Sim.events)
     message: str
 
 
@@ -183,7 +213,7 @@ _SYNC_NAMES = {pb.VIDEO_SYNC_LOCKED: "locked", pb.VIDEO_SYNC_UNSTABLE: "unstable
 
 def _video(m) -> VideoLink:
     return VideoLink(present=m.present, snr_db=m.snr_db, interference_dbm=m.interference_dbm,
-                     rssi={r.name: r.rssi_dbm for r in m.rssi}, active_antenna=m.active_antenna, noise=m.noise,
+                     rssi=AntennaRssi((r.name, r.rssi_dbm) for r in m.rssi), active_antenna=m.active_antenna, noise=m.noise,
                      sparkles=m.sparkles, chroma=m.chroma, sync=_SYNC_NAMES.get(m.sync, ""))
 
 
@@ -268,17 +298,26 @@ class Sim:
             raise from_rpc_error(e) from None
 
     def _ensure_watch(self) -> None:
-        """Opens the event stream (once). It also tells the server this client is alive."""
+        """Opens the event stream, unless it is open. It also tells the server this client is alive.
+
+        A stream that ends while the client is open (the server dropped it) is reported as a `watch_ended` event and
+        opened again by the next `load`."""
         if self._watch is not None:
             return
-        self._watch = self._stub.Watch(pb.Empty())
+        stream = self._stub.Watch(pb.Empty())
+        self._watch = stream
 
-        def pump(stream=self._watch, events=self._events):
+        def pump(events=self._events):
+            reason = "the server closed the event stream"
             try:
                 for m in stream:
                     events.append(_event(m))
-            except grpc.RpcError:
-                pass  # cancelled by close(), or the server went away
+            except grpc.RpcError as e:
+                reason = f"the event stream failed: {e.code().name}"
+            if self._watch is stream:  # not closed by close()
+                self._watch = None
+                events.append(Event(time_s=math.nan, kind="watch_ended", message=f"{reason}; events are missed until "
+                                                                                   "the next load()"))
 
         threading.Thread(target=pump, name="ofs-watch", daemon=True).start()
 
@@ -362,7 +401,10 @@ class Sim:
         self._call(self._stub.ClearFaults, pb.Empty())
 
     def events(self) -> list:
-        """Events received since the last call (radio link up/down, firmware restarts, overruns, ...)."""
+        """Events received since the last call (radio link up/down, firmware restarts, overruns, ...).
+
+        Each event is returned once: a second caller (another thread) does not see the events the first one took.
+        `watch_ended` (time_s NaN) means the client stopped receiving events until its next `load`."""
         out = []
         while self._events:
             out.append(self._events.popleft())

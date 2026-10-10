@@ -187,3 +187,30 @@ def test_the_osd_helpers_read_packed_cells():
     assert osd.rows_text() == [" A ", "   "]
     assert osd.text == " A \n   "
     assert ofs.Vtx(band=5).band_letter == "R" and ofs.Vtx(band=0).band_letter == ""
+
+
+def test_states_are_hashable_values():
+    from ofs.client import _state
+    from ofs.v1 import sim_pb2 as pb
+
+    m = pb.State(video=pb.VideoLink(present=True, rssi=[pb.AntennaRssi(name="omni", rssi_dbm=-60.0)]))
+    a, b = _state(m), _state(m)
+    assert hash(a) == hash(b) and a == b and len({a, b}) == 1
+    assert a.video.rssi["omni"] == -60.0 and a.video.rssi == {"omni": -60.0}
+    assert dict(a.video.rssi) == {"omni": -60.0} and list(a.video.rssi) == ["omni"]
+
+
+def test_a_watch_that_ends_is_reported_and_reopened(sim):
+    import time
+
+    sim.load(QUAD, open_loop_fc=True)
+    first = sim._watch
+    first.cancel()  # as if the server had dropped the event stream
+    deadline = time.monotonic() + 3.0
+    kinds = []
+    while time.monotonic() < deadline and "watch_ended" not in kinds:
+        kinds.extend(e.kind for e in sim.events())
+        time.sleep(0.05)
+    assert "watch_ended" in kinds, kinds
+    sim.load(QUAD, open_loop_fc=True)
+    assert sim._watch is not None and sim._watch is not first, "the next load reopens the event stream"
