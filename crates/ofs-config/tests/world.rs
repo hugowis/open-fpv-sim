@@ -261,4 +261,20 @@ polarization = "linear"
     let message = err.to_string();
     assert!(message.contains("handset.position_ned_m"), "{message}");
     assert!(message.contains("used twice"), "{message}");
+    let bare = written_world(
+        r#"schema_version = 1
+name = "bare handset"
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+[handset]
+position_ned_m = [-3.0, 2.0, -1.2]
+"#,
+    )
+    .unwrap_err();
+    assert!(bare.to_string().contains("handset.antennas"), "{bare}");
 }

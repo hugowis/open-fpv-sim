@@ -255,6 +255,7 @@ impl WorldConfig {
             format!("the handset must not be below the ground (d = {} > 0)", handset_at[2]),
         );
         let mut handset_names = HashSet::new();
+        c.check(!h.antennas.is_empty(), "handset.antennas", "needs at least one antenna");
         for (i, a) in h.antennas.iter().enumerate() {
             let field = |f: &str| format!("handset.antennas[{i}].{f}");
             check_name(&mut c, &a.name, &field("name"), &mut handset_names);
