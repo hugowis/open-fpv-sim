@@ -25,7 +25,8 @@ use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
-use ofs_video::propagation::{Antenna, AntennaKind, Obstacle, Polarization, Shape};
+use ofs_core::shape::Shape;
+use ofs_video::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
 use ofs_video::vtx::{band_index, VtxModel, VtxParams, FREQUENCIES_MHZ};
 
 #[derive(Debug, Clone)]

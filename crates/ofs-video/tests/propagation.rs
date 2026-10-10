@@ -1,4 +1,5 @@
 use glam::DVec3;
+use ofs_core::shape::Shape;
 use ofs_video::propagation::*;
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {

@@ -6,6 +6,7 @@ pub mod model;
 pub mod names;
 pub mod rng;
 pub mod scheduler;
+pub mod shape;
 pub mod wire;
 
 pub use bus::{Bus, BusValue, Signal, SignalKind};

@@ -1,7 +1,8 @@
 use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, StepCtx};
 use ofs_video::link::*;
-use ofs_video::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization, Shape};
+use ofs_core::shape::Shape;
+use ofs_video::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");

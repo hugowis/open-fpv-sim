@@ -3,6 +3,7 @@
 //! today and the ELRS link can adopt them later. Positions and directions are NED metres (down is +z, the ground
 //! is the plane z = 0).
 use glam::DVec3;
+use ofs_core::shape::Shape;
 
 pub const SPEED_OF_LIGHT_MPS: f64 = 299_792_458.0;
 /// Antenna patterns never fall more than this below their peak (real nulls are filled by reflections).
@@ -143,56 +144,6 @@ pub fn knife_edge_loss_db(v: f64) -> f64 {
 pub fn fresnel_v(h: f64, d1: f64, d2: f64, wavelength_m: f64) -> f64 {
     let (d1, d2) = (d1.max(MIN_DISTANCE_M), d2.max(MIN_DISTANCE_M));
     h * (2.0 * (d1 + d2) / (wavelength_m * d1 * d2)).sqrt()
-}
-
-/// A solid in the world, by its signed distance (negative inside).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Shape {
-    /// Axis-aligned box: `half` is half the size along north, east and down.
-    Box { center: DVec3, half: DVec3 },
-    /// Vertical cylinder.
-    Cylinder { center: DVec3, radius: f64, half_height: f64 },
-}
-
-/// How far below the ground a rooted shape reaches (any depth works: nothing travels under the ground).
-const ROOT_DEPTH_M: f64 = 1000.0;
-/// A shape whose bottom is within this of the ground stands on it.
-const ON_GROUND_M: f64 = 0.05;
-
-impl Shape {
-    /// The shape as an obstacle: one that stands on the ground continues below it, so a signal diffracts over its
-    /// top and around its sides, never underneath (its nearest face is never the bottom one).
-    pub fn rooted(self) -> Shape {
-        match self {
-            Shape::Box { center, half } if center.z + half.z >= -ON_GROUND_M => {
-                let top = center.z - half.z;
-                let half_z = (ROOT_DEPTH_M - top) * 0.5;
-                Shape::Box { center: DVec3::new(center.x, center.y, top + half_z), half: DVec3::new(half.x, half.y, half_z) }
-            }
-            Shape::Cylinder { center, radius, half_height } if center.z + half_height >= -ON_GROUND_M => {
-                let top = center.z - half_height;
-                let half_z = (ROOT_DEPTH_M - top) * 0.5;
-                Shape::Cylinder { center: DVec3::new(center.x, center.y, top + half_z), radius, half_height: half_z }
-            }
-            other => other,
-        }
-    }
-
-    pub fn signed_distance(&self, p: DVec3) -> f64 {
-        match *self {
-            Shape::Box { center, half } => {
-                let q = (p - center).abs() - half;
-                q.max(DVec3::ZERO).length() + q.max_element().min(0.0)
-            }
-            Shape::Cylinder { center, radius, half_height } => {
-                let d = p - center;
-                let radial = (d.x * d.x + d.y * d.y).sqrt() - radius;
-                let vertical = d.z.abs() - half_height;
-                let outside = (radial.max(0.0).powi(2) + vertical.max(0.0).powi(2)).sqrt();
-                outside + radial.max(vertical).min(0.0)
-            }
-        }
-    }
 }
 
 /// An object that weakens a signal passing through or near it, by up to `rf_loss_db`.
