@@ -34,6 +34,7 @@ fn params(mounts: Vec<MotorMount>, contacts: Vec<DVec3>) -> AirframeParams {
         contact_points_frd_m: contacts,
         ground: GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: 0.6 },
         objects: Vec::new(),
+        collision: Default::default(),
     }
 }
 

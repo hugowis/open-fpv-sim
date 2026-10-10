@@ -7,6 +7,12 @@ pub const BODY_ATT: &str = "body.att_q";
 pub const BODY_RATE_FRD: &str = "body.rate_frd_radps";
 /// Kinematic acceleration (not specific force), NED.
 pub const BODY_ACCEL_NED: &str = "body.accel_ned_mps2";
+/// Inward speed of the last collision event, m/s (0 before the first one).
+pub const BODY_COLLISION_SPEED: &str = "body.collision_speed";
+/// Object index of the last collision event; -1 is the ground plane.
+pub const BODY_COLLISION_OBJECT: &str = "body.collision_object";
+/// Collision events raised so far; the server detects the event's edge on this counter.
+pub const BODY_COLLISION_COUNT: &str = "body.collision_count";
 
 pub const BATTERY_VOLTAGE: &str = "battery.voltage_v";
 pub const BATTERY_CURRENT: &str = "battery.current_a";

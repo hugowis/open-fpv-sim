@@ -1,6 +1,7 @@
 //! 6-DOF rigid body: prop thrust and reaction torque, quadratic body drag, spring-damper contact against the
 //! ground plane and the world's objects.
 use glam::{DQuat, DVec3};
+use crate::collision::{self, CollisionParams, TouchState};
 use ofs_core::shape::{Aabb, Shape};
 use ofs_core::consts::{AIR_DENSITY_KGPM3, GRAVITY_MPS2};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
@@ -41,6 +42,8 @@ pub struct AirframeParams {
     pub ground: GroundParams,
     /// The world's objects, all of them collidable.
     pub objects: Vec<WorldObject>,
+    /// The collision spheres and their contact behaviour.
+    pub collision: CollisionParams,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +59,14 @@ pub struct RigidBody {
     p: AirframeParams,
     /// Each object's bounding box, computed once at build (the contact broad phase).
     bounds: Vec<Aabb>,
+    /// The quad's bounding radius (the largest sphere centre plus radius): the broad phase's margin.
+    /// Nothing reads it yet — `collision::resolve` recomputes it per step — so the dead-code lint is off until
+    /// the world wiring uses it.
+    #[allow(dead_code)]
+    bounding_radius_m: f64,
+    touch: TouchState,
+    last_collision: Option<(i32, f64)>,
+    collision_events: u64,
     s: BodyState,
     thrust: Vec<Signal<f64>>,
     torque: Vec<Signal<f64>>,
@@ -65,12 +76,17 @@ pub struct RigidBody {
     att: Signal<DQuat>,
     rate: Signal<DVec3>,
     accel: Signal<DVec3>,
+    collision_speed: Signal<f64>,
+    collision_object: Signal<f64>,
+    collision_count: Signal<f64>,
 }
 
 impl RigidBody {
     pub fn new(p: AirframeParams, initial: BodyState, bus: &mut Bus) -> Self {
         let n = p.mounts.len();
         let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect();
+        let bounding_radius_m = p.collision.spheres.iter().map(|(c, r)| c.length() + r).fold(0.0, f64::max);
+        let touch = TouchState::new(p.objects.len());
         let body = Self {
             thrust: (0..n).map(|i| bus.signal(&names::prop_thrust(i))).collect(),
             torque: (0..n).map(|i| bus.signal(&names::prop_torque(i))).collect(),
@@ -80,7 +96,14 @@ impl RigidBody {
             att: bus.signal(names::BODY_ATT),
             rate: bus.signal(names::BODY_RATE_FRD),
             accel: bus.signal(names::BODY_ACCEL_NED),
+            collision_speed: bus.signal(names::BODY_COLLISION_SPEED),
+            collision_object: bus.signal(names::BODY_COLLISION_OBJECT),
+            collision_count: bus.signal(names::BODY_COLLISION_COUNT),
             bounds,
+            bounding_radius_m,
+            touch,
+            last_collision: None,
+            collision_events: 0,
             p,
             s: initial,
         };
@@ -98,6 +121,12 @@ impl RigidBody {
         bus.set(self.att, self.s.att);
         bus.set(self.rate, self.s.rate_frd_radps);
         bus.set(self.accel, accel_ned);
+        bus.set(self.collision_speed, self.last_collision.map_or(0.0, |(_, speed)| speed));
+        bus.set(
+            self.collision_object,
+            self.last_collision.map_or(f64::from(collision::GROUND_OBJECT_INDEX), |(object, _)| f64::from(object)),
+        );
+        bus.set(self.collision_count, self.collision_events as f64);
     }
 
     /// Total contact force and torque about the centre of mass, both in NED. The spring-damper and friction of
@@ -190,6 +219,13 @@ impl Model for RigidBody {
         let att = (s.att * DQuat::from_scaled_axis(w_avg * dt)).normalize();
 
         self.s = BodyState { pos_ned_m: pos, vel_ned_mps: vel, att, rate_frd_radps: rate };
+        // The contacts apply after integration, before publishing, so a contact this tick is visible this tick;
+        // the scheduler's per-step non-finite check catches any non-finite value afterwards.
+        let events = collision::resolve(&self.p, &self.bounds, &mut self.s, &mut self.touch, ctx.time_s);
+        if let Some((object, speed)) = events.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
+            self.last_collision = Some((*object, *speed));
+            self.collision_events += 1;
+        }
         self.publish(bus, accel_ned);
         Ok(())
     }
