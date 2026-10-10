@@ -266,6 +266,19 @@ fn ray_gain_db(tx: &Endpoint, tx_polarization: Polarization, rx: &Endpoint, out_
 /// ground (coefficient -1, which reverses circular polarization), added with their phase difference; then the
 /// diffraction losses of the obstacles on the direct ray.
 pub fn path_gain(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], ground_bounce: bool) -> PathGain {
+    let obstruction_db = obstruction_db(obstacles, tx.position, rx.position, freq_mhz);
+    PathGain { gain_db: unobstructed_gain_db(tx, rx, freq_mhz, ground_bounce) - obstruction_db, obstruction_db }
+}
+
+/// The diffraction losses of the obstacles on the direct ray from `a` to `b`, in dB. It depends on the two positions
+/// only, so receivers that share a position (the goggles' antennas) share it.
+pub fn obstruction_db(obstacles: &[Obstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+    let lambda = wavelength_m(freq_mhz);
+    obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum()
+}
+
+/// [`path_gain`] without the obstacles: the direct ray, plus the ground bounce.
+pub fn unobstructed_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, ground_bounce: bool) -> f64 {
     let lambda = wavelength_m(freq_mhz);
     let direct_vec = rx.position - tx.position;
     let direct_len = direct_vec.length();
@@ -287,8 +300,7 @@ pub fn path_gain(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obsta
         let power = a * a + b * b + 2.0 * a * b * phase.cos();
         gain_db = 10.0 * power.max(1e-30).log10();
     }
-    let obstruction_db: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, tx.position, rx.position, lambda)).sum();
-    PathGain { gain_db: gain_db - obstruction_db, obstruction_db }
+    gain_db
 }
 
 /// Receiver rejection of a transmitter `offset_mhz` away from the tuned channel (estimated for analog 5.8 GHz
