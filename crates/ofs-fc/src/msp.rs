@@ -14,19 +14,25 @@ pub const MSP_STATUS: u8 = 101;
 pub const MSP_RC: u8 = 105;
 pub const MSP_BATTERY_STATE: u8 = 130;
 
+/// How long a request may wait to be written (a peer that stopped reading would otherwise block forever).
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Replies nobody asked for yet are kept up to this many; older ones are dropped.
+pub const MAX_UNCLAIMED_REPLIES: usize = 64;
+
 fn checksum(len: u8, cmd: u8, payload: &[u8]) -> u8 {
     payload.iter().fold(len ^ cmd, |c, b| c ^ b)
 }
 
-/// `$M<` request frame: length, command, payload, XOR checksum of length, command and payload.
-pub fn encode_request(cmd: u8, payload: &[u8]) -> Vec<u8> {
-    let len = u8::try_from(payload.len()).expect("MSP v1 payloads are at most 255 bytes");
+/// `$M<` request frame: length, command, payload, XOR checksum of length, command and payload. MSP v1 payloads are
+/// at most 255 bytes.
+pub fn encode_request(cmd: u8, payload: &[u8]) -> Result<Vec<u8>, MspError> {
+    let len = u8::try_from(payload.len()).map_err(|_| MspError::PayloadTooLong { cmd, len: payload.len() })?;
     let mut out = b"$M<".to_vec();
     out.push(len);
     out.push(cmd);
     out.extend_from_slice(payload);
     out.push(checksum(len, cmd, payload));
-    out
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +97,10 @@ pub enum MspError {
     Io(#[from] std::io::Error),
     #[error("no MSP reply to command {cmd} after {pumps} simulation steps")]
     Timeout { cmd: u8, pumps: usize },
+    #[error("Betaflight rejected MSP command {cmd} (`$M!` reply)")]
+    Rejected { cmd: u8 },
+    #[error("MSP command {cmd}: a {len}-byte payload does not fit MSP v1 (at most 255 bytes)")]
+    PayloadTooLong { cmd: u8, len: usize },
     #[error(transparent)]
     Sim(#[from] SimError),
 }
@@ -105,12 +115,13 @@ impl MspClient {
     pub fn connect(addr: SocketAddr, timeout: Duration) -> Result<Self, MspError> {
         let stream = TcpStream::connect_timeout(&addr, timeout)?;
         stream.set_nodelay(true)?;
+        stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
         stream.set_nonblocking(true)?;
         Ok(Self { stream, parser: MspParser::default(), replies: VecDeque::new() })
     }
 
     pub fn send(&mut self, cmd: u8, payload: &[u8]) -> Result<(), MspError> {
-        let bytes = encode_request(cmd, payload);
+        let bytes = encode_request(cmd, payload)?;
         self.stream.set_nonblocking(false)?;
         let written = self.stream.write_all(&bytes);
         self.stream.set_nonblocking(true)?;
@@ -131,6 +142,8 @@ impl MspClient {
                 Ok(n) => {
                     let replies = self.parser.push(&buf[..n]);
                     self.replies.extend(replies);
+                    let excess = self.replies.len().saturating_sub(MAX_UNCLAIMED_REPLIES);
+                    self.replies.drain(..excess);
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                 Err(e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -147,7 +160,8 @@ impl MspClient {
     }
 
     /// Sends `cmd`, then calls `pump` (which must advance simulated time) until the reply arrives or
-    /// `max_pumps` calls have passed.
+    /// `max_pumps` calls have passed. Replies to `cmd` received before the request (an abandoned earlier request)
+    /// are discarded; a `$M!` reply is [`MspError::Rejected`].
     pub fn request(
         &mut self,
         cmd: u8,
@@ -155,10 +169,15 @@ impl MspClient {
         max_pumps: usize,
         mut pump: impl FnMut() -> Result<(), SimError>,
     ) -> Result<MspReply, MspError> {
+        let _ = self.poll(cmd)?; // read what has arrived so far, then drop the stale answers
+        self.replies.retain(|r| r.cmd != cmd);
         self.send(cmd, payload)?;
         for _ in 0..max_pumps {
             pump()?;
             if let Some(reply) = self.poll(cmd)? {
+                if reply.error {
+                    return Err(MspError::Rejected { cmd });
+                }
                 return Ok(reply);
             }
         }
@@ -166,9 +185,14 @@ impl MspClient {
     }
 }
 
+/// The reply's payload, if it is an accepted reply to `cmd`.
+fn payload_of(reply: &MspReply, cmd: u8) -> Option<&[u8]> {
+    (reply.cmd == cmd && !reply.error).then_some(&reply.payload[..])
+}
+
 /// MSP_API_VERSION: (MSP protocol, API major, API minor).
 pub fn api_version(reply: &MspReply) -> Option<(u8, u8, u8)> {
-    match reply.payload[..] {
+    match *payload_of(reply, MSP_API_VERSION)? {
         [protocol, major, minor, ..] => Some((protocol, major, minor)),
         _ => None,
     }
@@ -176,11 +200,11 @@ pub fn api_version(reply: &MspReply) -> Option<(u8, u8, u8)> {
 
 /// MSP_STATUS: Betaflight's ARM box is bit 0 of the flight-mode flags (u32 at offset 6).
 pub fn armed(reply: &MspReply) -> Option<bool> {
-    let flags = reply.payload.get(6..10)?;
+    let flags = payload_of(reply, MSP_STATUS)?.get(6..10)?;
     Some(u32::from_le_bytes(flags.try_into().ok()?) & 1 == 1)
 }
 
 /// MSP_RC: channel values in microseconds, in Betaflight's internal order (roll, pitch, yaw, throttle, aux...).
-pub fn rc_channels_us(reply: &MspReply) -> Vec<u16> {
-    reply.payload.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+pub fn rc_channels_us(reply: &MspReply) -> Option<Vec<u16>> {
+    Some(payload_of(reply, MSP_RC)?.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
 }

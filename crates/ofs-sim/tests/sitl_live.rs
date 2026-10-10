@@ -55,7 +55,7 @@ fn crsf_sticks_reach_betaflight() {
     v.run_for(2.0).unwrap();
     let reply = msp().request(MSP_RC, &[], 500, || v.run_for(0.01)).unwrap();
     // MSP_RC lists roll, pitch, yaw, throttle (Betaflight's internal order).
-    assert_eq!(&rc_channels_us(&reply)[..4], &[1600, 1400, 1500, 1000]);
+    assert_eq!(&rc_channels_us(&reply).unwrap()[..4], &[1600, 1400, 1500, 1000]);
 }
 
 fn armed(v: &Vehicle) -> bool {
