@@ -266,7 +266,7 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     //   lever x n = (0, -0.06, -0.03)
     //   kn = inv_mass + n . ((R diag(I^-1) R^T (lever x n)) x lever):
     //     R^T . -> (0, -0.03, 0.06); diag . -> (0, -12, 13.33); R . -> (0, -13.33, -12);
-    //     . x lever -> (-1.16, -1.56, 1.73); n . -> 1.16   =>  kn = 20/13 + 1.16, j = 1.3/kn = 0.4818
+    //     . x lever -> (-1.16, -1.44, 1.60); n . -> 1.16   =>  kn = 20/13 + 1.16, j = 1.3/kn = 0.4818
     // That spin gives the contact point a tangential speed, so a Coulomb friction impulse follows at the same
     // lever; both impulses are recovered exactly from the linear velocity change (whose update carries no
     // attitude): J_total = m * dv, with J_total . n = j (the friction impulse is tangential). The stored rate is
