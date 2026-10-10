@@ -373,7 +373,7 @@ index d1288e2..db34ec0 100644
          telemetry/srxl.c \
          io/displayport_oled.c
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..0730934 100644
+index ee216ef..7d54cd4 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -44,6 +44,8 @@
@@ -761,7 +761,7 @@ index ee216ef..0730934 100644
 +    memset(dest, 0, sizeof(*dest));
 +    dest->dataAge = 0;
 +    dest->temperature = 25;
-+    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100 * 100, 0, 32767);  // 0.01 erpm units
++    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100U, 0, 32767);  // 0.01 erpm units (escSensorData_t contract)
 +    return true;
 +}
 +#else
