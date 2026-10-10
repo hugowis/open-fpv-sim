@@ -111,6 +111,24 @@ Manual check (with the game, real Betaflight optional):
 4. Switch the VTX to R2 (the parked quad's channel) and the picture gets noisier; any channel far from R2 is clean.
 5. Untick Video effects on the F2 screen: the picture is clean whatever the link does.
 
+## World collision and the ExpressLRS link (M3c)
+
+Quad files are **schema 4**. A schema-3 file is refused at load with a message naming what changed: the fixed link
+figures (`radio.rssi_dbm`, `radio.snr_db` and the loss parameters `loss_good`, `loss_bad`, `p_good_to_bad`,
+`p_bad_to_good`) are gone — RSSI, SNR and packet loss come from the world's geometry now — and `radio.tx_power_mw`,
+the `[[radio.antennas]]` list and the optional `[collision]` section replace them. `quads/opendrone-5f-freestyle.toml`
+is the example. The world file gains an optional `[handset]` (where the pilot's transmitter is and what it transmits
+with; the default sits 0.5 m below the goggles with one vertical 2 dBi dipole). The contact model and every constant
+are in `docs/research/collision.md` and `docs/research/elrs-link.md`.
+
+### M3c manual checks
+
+1. Hit a wall: fly at BuildingA in the Flat field — the HUD toasts `HIT BuildingA ... m/s` and the quad bounces.
+2. Clip a gate post: brush Gate0PostL at speed — the quad tumbles, one toast.
+3. Land on a roof: settle on BuildingC — the quad rests, no jitter, no toast below 1 m/s.
+4. Watch the link: with a quad file at `tx_power_mw = 10`, fly low behind BuildingB — the HUD's SNR falls,
+   LQ decays, and Betaflight fails safe when the window drains.
+
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
 - **Symptom:** SITL looks silent and runs fail with "no motor output within 5000 ms" or a first-exchange timeout.
