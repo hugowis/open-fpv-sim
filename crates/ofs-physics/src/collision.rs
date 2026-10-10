@@ -31,7 +31,8 @@ impl Default for CollisionParams {
     }
 }
 
-/// Per-object contact memory for the events: who is touching a sphere, and who went free when.
+/// Per-object contact memory for the events: who is touching (a sphere or a landing point), and who went free
+/// when.
 #[derive(Debug, Default)]
 pub struct TouchState {
     touching: Vec<bool>,
@@ -60,21 +61,24 @@ struct Contact {
 
 /// Applies the sphere contacts of one step to `s` and returns the (object index, inward speed) pairs of the
 /// collision events raised this step, hardest last in the vector. `bounding_radius_m` is the quad's bounding
-/// radius (the largest sphere centre plus radius), the broad phase's margin.
+/// radius (the largest sphere centre plus radius), the broad phase's margin. `point_touches` are the landing
+/// contact points' touches, (object index, inward speed >= 0), as `RigidBody::contact` saw them; they feed the
+/// same per-object touch memory as the spheres, so the rearm is shared across both mechanisms.
 pub fn resolve(
     p: &AirframeParams,
     bounds: &[Aabb],
     bounding_radius_m: f64,
     s: &mut BodyState,
+    point_touches: &[(i32, f64)],
     touch: &mut TouchState,
     time_s: f64,
 ) -> Vec<(i32, f64)> {
     let mut contacts = collect(p, bounds, bounding_radius_m, s);
-    if contacts.is_empty() {
+    if contacts.is_empty() && point_touches.is_empty() {
         release_everything(touch, time_s);
         return Vec::new();
     }
-    let events = touch_events(&contacts, touch, time_s);
+    let events = touch_events(&contacts, point_touches, touch, time_s);
     // One order for everything: deepest first, ties by object index (the ground, -1, sorts first), then the
     // order the spheres were collected in (the sort is stable), so the result is deterministic.
     contacts.sort_by(|a, b| {
@@ -82,9 +86,11 @@ pub fn resolve(
             .total_cmp(&a.penetration)
             .then(a.object.cmp(&b.object))
     });
-    // Position correction: the body leaves the deepest contact along its normal, by its penetration.
-    let deepest = contacts.first().expect("checked non-empty");
-    s.pos_ned_m += deepest.normal * deepest.penetration;
+    // Position correction: the body leaves the deepest contact along its normal, by its penetration. There may
+    // be no sphere contact at all (only points touch), in which case the spring-damper does the pushing.
+    if let Some(deepest) = contacts.first() {
+        s.pos_ned_m += deepest.normal * deepest.penetration;
+    }
     let inv_mass = 1.0 / p.mass_kg;
     let inv_inertia = DVec3::new(1.0 / p.inertia_kgm2.x, 1.0 / p.inertia_kgm2.y, 1.0 / p.inertia_kgm2.z);
     for c in &contacts {
@@ -160,16 +166,22 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
     contacts
 }
 
-/// The events of the contacts against the per-object touch memory: one per touching spell that starts hard
-/// enough, and only once the object has been out of contact for `EVENT_REARM_S`.
-fn touch_events(contacts: &[Contact], touch: &mut TouchState, time_s: f64) -> Vec<(i32, f64)> {
+/// The events of the contacts — spheres and landing points alike — against the per-object touch memory: one
+/// per touching spell that starts hard enough, and only once the object has been out of contact for
+/// `EVENT_REARM_S`. Where both mechanisms touch the same object, the faster inward touch raises the event.
+fn touch_events(contacts: &[Contact], point_touches: &[(i32, f64)], touch: &mut TouchState, time_s: f64) -> Vec<(i32, f64)> {
     let mut events = Vec::new();
     let n = touch.touching.len();
     for idx in 0..n {
         let object = if idx + 1 == n { GROUND_OBJECT_INDEX } else { idx as i32 };
-        let touching_now = contacts.iter().any(|c| c.object == object);
+        let touching_now = contacts.iter().any(|c| c.object == object) || point_touches.iter().any(|(o, _)| *o == object);
         if touching_now && !touch.touching[idx] {
-            let inward = contacts.iter().filter(|c| c.object == object).map(|c| c.inward).fold(0.0, f64::max);
+            let inward = contacts
+                .iter()
+                .filter(|c| c.object == object)
+                .map(|c| c.inward)
+                .chain(point_touches.iter().filter(|(o, _)| *o == object).map(|(_, inward)| *inward))
+                .fold(0.0, f64::max);
             if inward >= EVENT_MIN_SPEED_MPS && time_s - touch.free_since[idx] >= EVENT_REARM_S {
                 events.push((object, inward));
             }

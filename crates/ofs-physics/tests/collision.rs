@@ -1,4 +1,5 @@
 use glam::{DQuat, DVec3};
+use ofs_core::consts::GRAVITY_MPS2;
 use ofs_core::{names, Bus, Scheduler};
 use ofs_physics::collision::{CollisionParams, TouchState, GROUND_OBJECT_INDEX};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, RigidBody, WorldObject};
@@ -157,6 +158,42 @@ fn a_bounce_raises_one_event_per_touching_spell() {
     assert_eq!(scalar(&s, names::BODY_COLLISION_OBJECT), f64::from(GROUND_OBJECT_INDEX));
 }
 
+/// A legs-only rig: no collision spheres, just the four standard feet — only the spring-damper contact points
+/// can raise an event.
+fn legs_only(objects: Vec<WorldObject>) -> AirframeParams {
+    let mut p = params(objects, vec![], 0.3);
+    p.contact_points_frd_m = vec![
+        DVec3::new(-0.08, 0.08, 0.03),
+        DVec3::new(0.08, 0.08, 0.03),
+        DVec3::new(-0.08, -0.08, 0.03),
+        DVec3::new(0.08, -0.08, 0.03),
+    ];
+    p
+}
+
+#[test]
+fn a_legs_only_quad_striking_the_ground_raises_the_ground_event() {
+    // Dropped from 0.2 m, the feet (3 cm below the CoM) touch after 0.17 m at sqrt(2 g 0.17) = 1.83 m/s, well
+    // over the 1 m/s threshold; the damped spring rebounds at about a fifth of that, so the next touchdown is
+    // silent: exactly one event, naming the ground and carrying the impact speed.
+    let impact = (2.0 * GRAVITY_MPS2 * 0.17).sqrt();
+    let mut s = sim(legs_only(vec![]), state(DVec3::new(0.0, 0.0, -0.2), DVec3::ZERO));
+    s.run_for(1.0).unwrap();
+    assert_eq!(scalar(&s, names::BODY_COLLISION_COUNT), 1.0, "exactly one event for the touching spell");
+    assert_eq!(scalar(&s, names::BODY_COLLISION_OBJECT), f64::from(GROUND_OBJECT_INDEX), "the event names the ground");
+    let speed = scalar(&s, names::BODY_COLLISION_SPEED);
+    assert!((speed - impact).abs() < 0.05 * impact, "impact speed {speed}, expected {impact} +- 5%");
+}
+
+#[test]
+fn a_legs_only_quad_dropped_on_a_roof_names_the_roof() {
+    // The same drop onto the roof's top face (z = -1): the event names the roof object, index 0.
+    let mut s = sim(legs_only(roof()), state(DVec3::new(0.0, 0.0, -1.2), DVec3::ZERO));
+    s.run_for(1.0).unwrap();
+    assert_eq!(scalar(&s, names::BODY_COLLISION_COUNT), 1.0, "exactly one event for the touching spell");
+    assert_eq!(scalar(&s, names::BODY_COLLISION_OBJECT), 0.0, "the event names the roof");
+}
+
 #[test]
 fn a_new_touch_within_the_rearm_window_raises_nothing() {
     let p = params(vec![], vec![(BODY_SPHERE, R)], 0.0);
@@ -164,15 +201,15 @@ fn a_new_touch_within_the_rearm_window_raises_nothing() {
     let mut touch = TouchState::new(0);
     // Touch hard, leave, touch hard again 10 ms later: still one event. After 20 ms free: the next touch raises.
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.0).len(), 1);
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &[], &mut touch, 0.0).len(), 1);
     let mut s = state(DVec3::new(0.0, 0.0, -R - 0.1), DVec3::ZERO);
-    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.001).is_empty(), "in the air: free");
+    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &[], &mut touch, 0.001).is_empty(), "in the air: free");
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.011).len(), 0, "10 ms after leaving: rearmed not yet");
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &[], &mut touch, 0.011).len(), 0, "10 ms after leaving: rearmed not yet");
     let mut s = state(DVec3::new(0.0, 0.0, -R - 0.1), DVec3::ZERO);
-    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.012).is_empty());
+    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &[], &mut touch, 0.012).is_empty());
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.05).len(), 1, "38 ms after leaving: rearmed");
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &[], &mut touch, 0.05).len(), 1, "38 ms after leaving: rearmed");
 }
 
 #[test]
@@ -195,7 +232,7 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let mut s = state(DVec3::new(-0.11, 0.03, -0.16), DVec3::new(1.0, 0.0, 0.0));
     s.att = DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2);
     // The rig's bounding radius: one sphere at (0.1, 0.06, 0.03), r = 0.02.
-    let events = ofs_physics::collision::resolve(&p, &bounds, DVec3::new(0.1, 0.06, 0.03).length() + 0.02, &mut s, &mut touch, 0.0);
+    let events = ofs_physics::collision::resolve(&p, &bounds, DVec3::new(0.1, 0.06, 0.03).length() + 0.02, &mut s, &[], &mut touch, 0.0);
     assert_eq!(events.len(), 1, "one hard touch");
 
     // Hand-computed, with inv_mass = 20/13, inv_inertia = (400, 400, 2000/9), e = 0.3. The position correction

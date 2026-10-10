@@ -127,18 +127,23 @@ impl RigidBody {
         bus.set(self.collision_count, self.collision_events as f64);
     }
 
-    /// Total contact force and torque about the centre of mass, both in NED. The spring-damper and friction of
-    /// `[ground]` act on every landing contact point against the ground plane and against every world object;
-    /// against an object the depth is minus the signed distance and the normal is the shape's gradient there.
-    fn contact(&self, s: &BodyState) -> (DVec3, DVec3) {
+    /// Total contact force and torque about the centre of mass, both in NED, and the (object index, inward
+    /// speed) touch of every landing point currently inside a solid — the ground plane (`GROUND_OBJECT_INDEX`)
+    /// or a world object — for the collision events. The spring-damper and friction of `[ground]` act on every
+    /// landing contact point against the ground plane and against every world object; against an object the
+    /// depth is minus the signed distance and the normal is the shape's gradient there.
+    fn contact(&self, s: &BodyState) -> (DVec3, DVec3, Vec<(i32, f64)>) {
         let g = &self.p.ground;
         let mut force = DVec3::ZERO;
         let mut torque = DVec3::ZERO;
+        let mut touches: Vec<(i32, f64)> = Vec::new();
         for c in &self.p.contact_points_frd_m {
             let lever = s.att * *c;
             let v = s.vel_ned_mps + s.att * s.rate_frd_radps.cross(*c);
             let depth = s.pos_ned_m.z + lever.z; // ground plane is z = 0, NED z points down
             if depth > 0.0 {
+                // The ground's normal is up, -z: the inward speed is minus the velocity along it.
+                touches.push((collision::GROUND_OBJECT_INDEX, v.z.max(0.0)));
                 let normal = (g.stiffness_npm * depth + g.damping_nspm * v.z).max(0.0);
                 let v_t = DVec3::new(v.x, v.y, 0.0);
                 let friction = -v_t * (g.friction_coeff * normal / v_t.length().max(0.05));
@@ -158,6 +163,7 @@ impl RigidBody {
                 let depth = -sd;
                 let n = object.shape.normal(point);
                 let v_n = v.dot(n);
+                touches.push((i as i32, (-v_n).max(0.0)));
                 let mag = (g.stiffness_npm * depth - g.damping_nspm * v_n).max(0.0);
                 let v_t = v - n * v_n;
                 let friction = -v_t * (g.friction_coeff * mag / v_t.length().max(0.05));
@@ -166,7 +172,7 @@ impl RigidBody {
                 torque += lever.cross(f);
             }
         }
-        (force, torque)
+        (force, torque, touches)
     }
 }
 
@@ -201,7 +207,7 @@ impl Model for RigidBody {
         let v_body = to_body * s.vel_ned_mps;
         force_body -= 0.5 * AIR_DENSITY_KGPM3 * self.p.cda_m2 * v_body.abs() * v_body;
 
-        let (contact_force, contact_torque) = self.contact(&s);
+        let (contact_force, contact_torque, point_touches) = self.contact(&s);
         torque_body += to_body * contact_torque;
 
         // Translation: semi-implicit Euler.
@@ -218,8 +224,18 @@ impl Model for RigidBody {
 
         self.s = BodyState { pos_ned_m: pos, vel_ned_mps: vel, att, rate_frd_radps: rate };
         // The contacts apply after integration, before publishing, so a contact this tick is visible this tick;
-        // the scheduler's per-step non-finite check catches any non-finite value afterwards.
-        let events = collision::resolve(&self.p, &self.bounds, self.bounding_radius_m, &mut self.s, &mut self.touch, ctx.time_s);
+        // the scheduler's per-step non-finite check catches any non-finite value afterwards. The point touches
+        // were collected before integration (with the forces); on the shipped quad the belly sphere usually
+        // fires the event first either way.
+        let events = collision::resolve(
+            &self.p,
+            &self.bounds,
+            self.bounding_radius_m,
+            &mut self.s,
+            &point_touches,
+            &mut self.touch,
+            ctx.time_s,
+        );
         if let Some((object, speed)) = events.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
             self.last_collision = Some((*object, *speed));
             self.collision_events += 1;
