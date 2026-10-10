@@ -181,7 +181,8 @@ impl OfsClient {
 
     /// The newest telemetry, or an empty Dictionary before the first state: `time_s`, `altitude_m`, `speed_mps`,
     /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` (PackedFloat32Array), `motors_spinning`,
-    /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `running`, `overruns`, `fc_restarts`, `age_s`, and the VTX's
+    /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `radio_snr_db`, `radio_antenna`, `downlink_lq_pct`,
+    /// `collision_speed_mps`, `running`, `overruns`, `fc_restarts`, `age_s`, and the VTX's
     /// `vtx_present`, `vtx_band`, `vtx_channel`, `vtx_channel_name` (a String, empty without a VTX), `vtx_freq_mhz`,
     /// `vtx_power_mw` and `vtx_pit_mode`, and the video link's `video_present`, `video_snr_db`,
     /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
@@ -204,6 +205,10 @@ impl OfsClient {
         d.set("link_up", t.link_up);
         d.set("lq_pct", t.lq_pct);
         d.set("rssi_dbm", t.rssi_dbm);
+        d.set("radio_snr_db", t.radio_snr_db);
+        d.set("radio_antenna", &GString::from(t.radio_antenna.as_str()));
+        d.set("downlink_lq_pct", t.downlink_lq_pct);
+        d.set("collision_speed_mps", t.collision_speed_mps);
         d.set("running", t.running);
         d.set("overruns", t.overruns as i64);
         d.set("fc_restarts", i64::from(t.fc_restarts));
@@ -292,9 +297,19 @@ impl OfsClient {
             e.set("power_mw", x.power_mw);
             emitters.push(&e.to_variant());
         }
+        let mut handset_antennas = VarArray::new();
+        for a in &world.handset_antennas {
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(a.name.as_str()));
+            e.set("kind", &GString::from(a.kind.as_str()));
+            e.set("aim", vector3(a.aim.x, a.aim.y, a.aim.z));
+            handset_antennas.push(&e.to_variant());
+        }
         d.set("name", &GString::from(world.name.as_str()));
         d.set("pilot_position", vector3(world.pilot_position.x, world.pilot_position.y, world.pilot_position.z));
         d.set("antennas", &antennas);
+        d.set("handset_position", vector3(world.handset_position.x, world.handset_position.y, world.handset_position.z));
+        d.set("handset_antennas", &handset_antennas);
         d.set("objects", &objects);
         d.set("emitters", &emitters);
         d

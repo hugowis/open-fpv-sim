@@ -37,6 +37,8 @@ func build(world: Dictionary) -> void:
 				_cylinder(o["name"], o["center"], o["radius"], o["height"], o["color"])
 	if world.has("pilot_position"):
 		_add_pilot(world["pilot_position"], world.get("antennas", []))
+	if world.has("handset_position"):
+		_add_handset(world["handset_position"])
 	for e in world.get("emitters", []):
 		_add_emitter(e)
 
@@ -144,6 +146,17 @@ func _add_pilot(goggles: Vector3, antennas: Array) -> void:
 		arrow.basis = Basis.looking_at(aim, Vector3.UP if absf(aim.y) < 0.99 else Vector3.FORWARD)
 		pilot.add_child(arrow)
 	_add_built(pilot)
+
+
+## The pilot's handset: a small dark transmitter on the ground beside the pilot, 0.5 m below the goggles.
+func _add_handset(position: Vector3) -> void:
+	var handset := Node3D.new()
+	handset.name = "Handset"
+	handset.position = position
+	var body := BoxMesh.new()
+	body.size = Vector3(0.07, 0.14, 0.025)
+	handset.add_child(_mesh("Body", body, Color(0.16, 0.16, 0.2), Vector3.ZERO))
+	_add_built(handset)
 
 
 ## A post up to the transmitter, labelled with its frequency.

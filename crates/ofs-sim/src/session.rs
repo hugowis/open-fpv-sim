@@ -39,6 +39,7 @@ pub struct Session {
     /// A watcher has seen this session: only watched sessions end with their watchers.
     pub watched: bool,
     last_link_up: bool,
+    last_collision_count: u64,
     last_restarts: u32,
     last_vtx: Option<VtxInfo>,
     last_dropped: u64,
@@ -105,30 +106,29 @@ fn polarization_name(p: Polarization) -> &'static str {
     }
 }
 
+fn antenna_msg(a: &world_cfg::AntennaSection) -> pb::ReceiverAntenna {
+    pb::ReceiverAntenna {
+        name: a.name.clone(),
+        kind: match a.kind {
+            AntennaKind::Omni => "omni",
+            AntennaKind::Patch => "patch",
+        }
+        .into(),
+        gain_dbi: a.gain_dbi,
+        beamwidth_deg: a.beamwidth_deg.unwrap_or(0.0),
+        polarization: polarization_name(a.polarization).into(),
+        aim_az_deg: a.aim_az_deg,
+        aim_el_deg: a.aim_el(),
+    }
+}
+
 /// The world as the protocol carries it. Emitters given by band and channel carry their frequency.
 pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
     pb::World {
         name: w.name.clone(),
         pilot_position_ned_m: vec3_of(w.pilot.position_ned_m),
         pilot_facing_deg: w.pilot.facing_deg,
-        antennas: w
-            .receiver
-            .antennas
-            .iter()
-            .map(|a| pb::ReceiverAntenna {
-                name: a.name.clone(),
-                kind: match a.kind {
-                    AntennaKind::Omni => "omni",
-                    AntennaKind::Patch => "patch",
-                }
-                .into(),
-                gain_dbi: a.gain_dbi,
-                beamwidth_deg: a.beamwidth_deg.unwrap_or(0.0),
-                polarization: polarization_name(a.polarization).into(),
-                aim_az_deg: a.aim_az_deg,
-                aim_el_deg: a.aim_el(),
-            })
-            .collect(),
+        antennas: w.receiver.antennas.iter().map(antenna_msg).collect(),
         objects: w
             .objects
             .iter()
@@ -157,6 +157,10 @@ pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
                 power_mw: e.power_mw,
             })
             .collect(),
+        handset: Some(pb::Handset {
+            position_ned_m: vec3_of(w.handset.position(&w.pilot)),
+            antennas: w.handset.antennas.iter().map(antenna_msg).collect(),
+        }),
     }
 }
 
@@ -184,6 +188,7 @@ impl Session {
             keep_alive,
             watched: false,
             last_link_up: false,
+            last_collision_count: 0,
             last_restarts: 0,
             last_vtx: None,
             last_dropped: 0,
@@ -235,6 +240,21 @@ impl Session {
                 if s.radio.link_up { (pb::EventKind::LinkUp, "radio link up") } else { (pb::EventKind::LinkDown, "radio link lost") };
             out.push(event(s.time_s, kind, message));
         }
+        if s.collision_event_count != self.last_collision_count {
+            self.last_collision_count = s.collision_event_count;
+            let message = if s.collision_object < 0 {
+                format!("HARD LANDING {:.1} m/s", s.collision_speed_mps)
+            } else {
+                let name = self
+                    .vehicle
+                    .world()
+                    .objects
+                    .get(s.collision_object.max(0) as usize)
+                    .map_or("unknown", |o| o.name.as_str());
+                format!("HIT {name} {:.1} m/s", s.collision_speed_mps)
+            };
+            out.push(event(s.time_s, pb::EventKind::Collision, message));
+        }
         if s.fc_restarts != self.last_restarts {
             self.last_restarts = s.fc_restarts;
             out.push(event(s.time_s, pb::EventKind::FirmwareRestarted, "Betaflight rebooted; SITL relaunched"));
@@ -280,6 +300,9 @@ impl Session {
                 link_up: s.radio.link_up,
                 lq_pct: s.radio.lq_pct,
                 rssi_dbm: s.radio.rssi_dbm,
+                snr_db: s.radio.snr_db,
+                active_antenna: s.radio.active_antenna.clone(),
+                downlink_lq_pct: s.radio.downlink_lq_pct,
             }),
             running: self.running,
             overruns: self.pacer.overruns(),
@@ -294,6 +317,7 @@ impl Session {
             }),
             serial_dropped_bytes: s.serial_dropped_bytes,
             video: Some(video_msg(&s.video)),
+            collision_speed_mps: s.collision_speed_mps,
         }
     }
 
@@ -390,6 +414,7 @@ pub(crate) mod testing {
 mod tests {
     use super::*;
     use crate::vehicle::VtxInfo;
+    use std::path::Path;
 
     #[test]
     fn a_vtx_change_is_described_by_band_channel_frequency_and_power() {
@@ -455,6 +480,61 @@ mod tests {
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].kind, pb::EventKind::VideoRestored as i32);
         assert_eq!(back[0].message, "video restored: SNR 9.0 dB on omni");
+    }
+
+    #[test]
+    fn a_new_collision_count_raises_one_collision_event_naming_the_object() {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"))).unwrap();
+        let building_a = world.objects.iter().position(|o| o.name == "BuildingA").expect("the flat world has BuildingA") as i32;
+        let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+        let opts = crate::vehicle::BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-session-collision-test"),
+            fc_override: Some(ofs_config::FcKind::OpenLoop),
+            world,
+        };
+        let mut session = Session::new(crate::vehicle::build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true);
+        session.last_link_up = true; // the state's link edge is already consumed: only collisions raise here
+        let state = crate::vehicle::VehicleState {
+            time_s: 1.0,
+            pos_ned_m: glam::DVec3::ZERO,
+            vel_ned_mps: glam::DVec3::ZERO,
+            att: glam::DQuat::IDENTITY,
+            rate_frd_radps: glam::DVec3::ZERO,
+            battery_voltage_v: 25.0,
+            battery_current_a: 0.0,
+            motor_rpm: vec![0.0; 4],
+            motor_cmd: vec![0.0; 4],
+            radio: crate::vehicle::RadioState {
+                tx_enabled: true,
+                link_up: true,
+                lq_pct: 100.0,
+                rssi_dbm: -60.0,
+                snr_db: 49.0,
+                active_antenna: "antenna".into(),
+                downlink_lq_pct: 100.0,
+            },
+            fc_restarts: 0,
+            vtx: crate::vehicle::VtxInfo { present: false, band: 0, channel: 0, freq_mhz: 0, power_mw: 0, pit_mode: false },
+            serial_dropped_bytes: 0,
+            video: crate::vehicle::VideoInfo::default(),
+            collision_speed_mps: 7.2,
+            collision_object: building_a,
+            collision_event_count: 1,
+        };
+        let events = session.events_for(&state);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, pb::EventKind::Collision as i32);
+        assert_eq!(events[0].message, "HIT BuildingA 7.2 m/s");
+        // The same count again raises nothing: the edge is the counter.
+        assert!(session.events_for(&state).is_empty());
+        // A negative object index is the ground.
+        let mut ground = state;
+        ground.collision_object = -1;
+        ground.collision_event_count = 2;
+        let events = session.events_for(&ground);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].message, "HARD LANDING 7.2 m/s");
     }
 
     #[test]

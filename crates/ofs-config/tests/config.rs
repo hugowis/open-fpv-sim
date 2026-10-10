@@ -19,7 +19,7 @@ fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
 #[test]
 fn reference_quad_loads_and_validates() {
     let cfg = load(Path::new(QUAD)).unwrap();
-    assert_eq!(cfg.schema_version, 3);
+    assert_eq!(cfg.schema_version, 4);
     assert_eq!(cfg.radio.kind, RadioKind::Elrs);
     assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
     assert_eq!(cfg.frame.motor_positions_frd_m.len(), 4);
@@ -56,10 +56,10 @@ fn unknown_field_is_a_parse_error_naming_it() {
 #[test]
 fn unsupported_schema_version_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 3", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 4", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("schema_version 1"), "{err}");
-    assert!(err.to_string().contains("[radio]") && err.to_string().contains("betaflight.diff"), "{err}");
+    assert!(err.to_string().contains("radio.rssi_dbm") && err.to_string().contains("[collision]"), "{err}");
 }
 
 #[test]
@@ -100,11 +100,11 @@ fn radio_problems_are_reported_together() {
     let text = quad_text()
         .replace("packet_rate_hz = 500", "packet_rate_hz = 333")
         .replace("uart = 2", "uart = 1")
-        .replace("rssi_dbm = -50.0", "rssi_dbm = -50.0\nloss_good = 1.5");
+        .replace("tx_power_mw = 250", "tx_power_mw = 300");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
     let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
-    for field in ["radio.packet_rate_hz", "radio.uart", "radio.loss_good"] {
+    for field in ["radio.packet_rate_hz", "radio.uart", "radio.tx_power_mw"] {
         assert!(fields.contains(&field), "{field} missing from {fields:?}");
     }
 }
@@ -119,16 +119,11 @@ fn a_quad_without_a_radio_is_a_parse_error_naming_it() {
     assert!(err.to_string().contains("radio"), "{err}");
 }
 
-fn schema_2_text() -> String {
-    let text = quad_text().replace("schema_version = 3", "schema_version = 2");
-    text.split("\n[esc_telemetry]").next().unwrap().to_string() + "\n"
-}
-
 #[test]
 fn the_reference_quad_has_the_video_sections() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = load(&write_quad(dir.path(), &quad_text())).unwrap();
-    assert_eq!(cfg.schema_version, 3);
+    assert_eq!(cfg.schema_version, 4);
     let esc = cfg.esc_telemetry.as_ref().expect("[esc_telemetry]");
     assert_eq!((esc.uart, esc.rate_hz), (3, 100));
     let osd = cfg.osd.as_ref().expect("[osd]");
@@ -138,22 +133,6 @@ fn the_reference_quad_has_the_video_sections() {
     assert_eq!(vtx.power_levels_mw, vec![25, 200, 600, 1000]);
     assert_eq!(vtx.power_levels_dbm, vec![14, 23, 28, 30]);
     assert_eq!(vtx.default_power_index, 1);
-}
-
-#[test]
-fn schema_2_files_still_load_without_the_video_sections() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = load(&write_quad(dir.path(), &schema_2_text())).unwrap();
-    assert_eq!(cfg.schema_version, 2);
-    assert!(cfg.esc_telemetry.is_none() && cfg.osd.is_none() && cfg.vtx.is_none());
-}
-
-#[test]
-fn video_sections_need_schema_3() {
-    let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 3", "schema_version = 2");
-    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
-    assert!(err.to_string().contains("schema_version = 3"), "{err}");
 }
 
 #[test]
@@ -279,7 +258,131 @@ fn an_esc_sensor_battery_needs_the_forced_cell_count() {
 #[test]
 fn the_schema_1_hint_reads_as_one_sentence() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 3", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 4", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err().to_string();
     assert!(!err.contains("  "), "run-on spaces in: {err}");
+}
+
+const SHIPPED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
+
+/// The shipped quad with `edit` applied, loaded from a temporary file.
+fn shipped_with(edit: impl FnOnce(&mut String)) -> Result<ofs_config::QuadConfig, ofs_config::ConfigError> {
+    let mut text = std::fs::read_to_string(Path::new(SHIPPED)).unwrap();
+    edit(&mut text);
+    let dir = tempfile::tempdir().unwrap();
+    ofs_config::load(&write_quad(dir.path(), &text))
+}
+
+#[test]
+fn a_schema_3_quad_file_is_refused_with_the_field_changes() {
+    let err = shipped_with(|t| *t = t.replace("schema_version = 4", "schema_version = 3")).unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("schema_version 3"), "{message}");
+    assert!(message.contains("radio.rssi_dbm"), "{message}");
+    assert!(message.contains("radio.snr_db"), "{message}");
+    assert!(message.contains("radio.loss_good"), "{message}");
+    assert!(message.contains("radio.tx_power_mw"), "{message}");
+    assert!(message.contains("radio.antennas"), "{message}");
+    assert!(message.contains("[collision]"), "{message}");
+}
+
+#[test]
+fn the_old_radio_fields_are_unknown_in_schema_4() {
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 250\nrssi_dbm = -50.0")).unwrap_err();
+    assert!(err.to_string().contains("unknown field `rssi_dbm`"), "{}", err);
+}
+
+#[test]
+fn packet_rate_must_be_an_elrs_lora_mode() {
+    for rate in [10, 75, 100, 1000] {
+        let err = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", &format!("packet_rate_hz = {rate}"))).unwrap_err();
+        assert!(err.to_string().contains("radio.packet_rate_hz"), "{rate}: {err}");
+    }
+    assert!(shipped_with(|t| *t = t.replace("packet_rate_hz = 500", "packet_rate_hz = 250")).is_ok());
+}
+
+#[test]
+fn tx_power_must_be_a_real_handset_power() {
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 300")).unwrap_err();
+    assert!(err.to_string().contains("radio.tx_power_mw"), "{err}");
+    assert!(shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 10")).is_ok());
+}
+
+#[test]
+fn radio_antennas_are_validated() {
+    let three = "[[radio.antennas]]\nname = \"b\"\n\n[[radio.antennas]]\nname = \"c\"\n\n[[radio.antennas]]\nname = \"d\"\n";
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n{three}"))).unwrap_err();
+    assert!(err.to_string().contains("radio.antennas"), "{err}");
+    let patch = "[[radio.antennas]]\nname = \"patchy\"\nkind = \"patch\"\n";
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n{patch}"))).unwrap_err();
+    assert!(err.to_string().contains("radio.antennas[0].kind"), "{err}");
+    let flat = "[[radio.antennas]]\nname = \"flat\"\nmount_frd = [0.0, 0.0, 0.0]\n";
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n{flat}"))).unwrap_err();
+    assert!(err.to_string().contains("radio.antennas[0].mount_frd"), "{err}");
+    let twin = "[[radio.antennas]]\nname = \"a\"\n\n[[radio.antennas]]\nname = \"a\"\n";
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n{twin}"))).unwrap_err();
+    assert!(err.to_string().contains("used twice"), "{err}");
+    // Two named dipoles are fine: receiver diversity.
+    assert!(shipped_with(|t| {
+        *t = t.replace("tx_power_mw = 250", "tx_power_mw = 250\n\n[[radio.antennas]]\nname = \"left\"\n\n[[radio.antennas]]\nname = \"right\"");
+    })
+    .is_ok());
+}
+
+#[test]
+fn the_shipped_quad_gets_25_collision_spheres_with_no_gap_for_a_post() {
+    let cfg = ofs_config::load(Path::new(SHIPPED)).unwrap();
+    let spheres = cfg.collision_spheres();
+    assert_eq!(spheres.len(), 25, "6 spheres per prop tip circle + one body sphere");
+    let (restitution, friction) = cfg.collision_contact();
+    assert_eq!((restitution, friction), (0.3, 0.5), "the spec's defaults");
+    let tip = cfg.prop.diameter_m / 2.0;
+    for m in &cfg.frame.motor_positions_frd_m {
+        let mut ring: Vec<[f64; 4]> = spheres
+            .iter()
+            .filter(|s| (s[2] - m[2]).abs() < 1e-9 && (s[0] - m[0]).hypot(s[1] - m[1]) <= tip + 1e-9)
+            .copied()
+            .collect();
+        ring.sort_by(|a, b| (a[0] - m[0]).atan2(a[1] - m[1]).total_cmp(&(b[0] - m[0]).atan2(b[1] - m[1])));
+        assert_eq!(ring.len(), 6, "six spheres around each motor");
+        for w in ring.windows(2) {
+            let d = (w[0][0] - w[1][0]).hypot(w[0][1] - w[1][1]);
+            assert!((d - tip).abs() < 1e-6, "adjacent spheres are {d} apart, the 60 degree chord is {tip}");
+            assert!(d - w[0][3] - w[1][3] < 0.12, "no 12 cm post passes between two prop spheres");
+        }
+    }
+    let body = spheres.last().unwrap();
+    assert_eq!((body[0], body[1], body[2], body[3]), (0.0, 0.0, 0.0, 0.04), "the body sphere sits at the centre of mass");
+    for s in &spheres[..spheres.len() - 1] {
+        let d = ((s[0] - body[0]).powi(2) + (s[1] - body[1]).powi(2) + (s[2] - body[2]).powi(2)).sqrt();
+        assert!(d - s[3] - body[3] < 0.12, "no 12 cm post passes between a prop sphere and the body sphere");
+    }
+}
+
+#[test]
+fn a_collision_section_is_honoured() {
+    let cfg = shipped_with(|t| {
+        *t = t.replace(
+            "tx_power_mw = 250",
+            "tx_power_mw = 250\n\n[collision]\nrestitution = 0.7\nfriction_coeff = 0.2\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.05]]",
+        )
+    })
+    .unwrap();
+    assert_eq!(cfg.collision_spheres(), vec![[0.0, 0.0, 0.0, 0.05]]);
+    assert_eq!(cfg.collision_contact(), (0.7, 0.2));
+}
+
+#[test]
+fn collision_validation_problems_are_collected() {
+    let err = shipped_with(|t| {
+        *t = t.replace(
+            "tx_power_mw = 250",
+            "tx_power_mw = 250\n\n[collision]\nrestitution = 1.5\nfriction_coeff = -1.0\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.0], [nan, 0.0, 0.0, 0.02]]",
+        )
+    })
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("collision.restitution"), "{message}");
+    assert!(message.contains("collision.friction_coeff"), "{message}");
+    assert!(message.contains("collision.spheres_frd_m"), "{message}");
 }

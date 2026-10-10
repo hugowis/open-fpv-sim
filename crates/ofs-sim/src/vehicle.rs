@@ -18,14 +18,16 @@ use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
+use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
-use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody};
+use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
-use ofs_video::propagation::{Antenna, AntennaKind, Obstacle, Polarization, Shape};
+use ofs_core::shape::Shape;
+use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
 use ofs_video::vtx::{band_index, VtxModel, VtxParams, FREQUENCIES_MHZ};
 
 #[derive(Debug, Clone)]
@@ -54,13 +56,19 @@ impl Default for Sticks {
 }
 
 /// What the radio receiver reports.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RadioState {
     /// The transmitter is on (a pilot or script is connected).
     pub tx_enabled: bool,
     pub link_up: bool,
     pub lq_pct: f64,
+    /// The active antenna's RSSI.
     pub rssi_dbm: f64,
+    pub snr_db: f64,
+    /// The quad file's name of the antenna in use.
+    pub active_antenna: String,
+    /// What the handset receives.
+    pub downlink_lq_pct: f64,
 }
 
 /// What the VTX model publishes (all zero without a `[vtx]` section or without Betaflight).
@@ -142,6 +150,12 @@ pub struct VehicleState {
     /// TX bytes Betaflight's UART capture dropped because a consumer fell behind.
     pub serial_dropped_bytes: u64,
     pub video: VideoInfo,
+    /// The inward speed of the last collision event (0 until one happens).
+    pub collision_speed_mps: f64,
+    /// The object the last collision event hit (-1 = the ground).
+    pub collision_object: i32,
+    /// Collision events raised so far (the server detects the event's edge on this).
+    pub collision_event_count: u64,
 }
 
 struct VideoHandles {
@@ -217,6 +231,12 @@ struct Handles {
     vtx_power: Signal<f64>,
     vtx_pit: Signal<f64>,
     serial_dropped: Signal<f64>,
+    radio_snr: Signal<f64>,
+    radio_antenna: Signal<f64>,
+    radio_downlink_lq: Signal<f64>,
+    collision_speed: Signal<f64>,
+    collision_object: Signal<f64>,
+    collision_count: Signal<f64>,
     video: VideoHandles,
 }
 
@@ -249,6 +269,12 @@ impl Handles {
             vtx_power: bus.signal(names::VTX_POWER_MW),
             vtx_pit: bus.signal(names::VTX_PIT),
             serial_dropped: bus.signal(names::FC_SERIAL_DROPPED),
+            radio_snr: bus.signal(names::RADIO_SNR),
+            radio_antenna: bus.signal(names::RADIO_ANTENNA),
+            radio_downlink_lq: bus.signal(names::RADIO_DOWNLINK_LQ),
+            collision_speed: bus.signal(names::BODY_COLLISION_SPEED),
+            collision_object: bus.signal(names::BODY_COLLISION_OBJECT),
+            collision_count: bus.signal(names::BODY_COLLISION_COUNT),
             video: VideoHandles::register(bus, world),
         }
     }
@@ -260,6 +286,8 @@ pub struct Vehicle {
     sitl: bool,
     osd: Option<OsdHandle>,
     world: WorldConfig,
+    /// The quad file's radio antenna names, by index (the state's `active_antenna`).
+    radio_antenna_names: Vec<String>,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -352,6 +380,34 @@ pub fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
     DVec3::from_array(ofs_proto::aim_ned(heading_deg, elevation_deg))
 }
 
+/// The world's objects as collidable shapes, exactly as the file gives them (not rooted).
+pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
+    world.objects.iter().map(|o| WorldObject { name: o.name.clone(), shape: object_shape(o) }).collect()
+}
+
+/// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.
+pub fn world_obstacles(world: &WorldConfig) -> Vec<Obstacle> {
+    world
+        .objects
+        .iter()
+        .filter(|o| o.rf_loss_db > 0.0)
+        .map(|o| Obstacle { shape: object_shape(o).rooted(), rf_loss_db: o.rf_loss_db })
+        .collect()
+}
+
+fn object_shape(o: &world_cfg::ObjectSection) -> Shape {
+    let center = v3(o.center_ned_m);
+    match o.shape {
+        world_cfg::Shape::Box => {
+            let s = o.size_m.unwrap_or_default();
+            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
+        }
+        world_cfg::Shape::Cylinder => {
+            Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
+        }
+    }
+}
+
 /// An emitter's frequency: its `freq_mhz`, or its band and channel in the factory table.
 pub(crate) fn emitter_freq_mhz(e: &world_cfg::EmitterSection) -> Result<f64, SimError> {
     if let Some(f) = e.freq_mhz {
@@ -381,24 +437,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
             },
         })
         .collect();
-    let obstacles = world
-        .objects
-        .iter()
-        .filter(|o| o.rf_loss_db > 0.0)
-        .map(|o| {
-            let center = v3(o.center_ned_m);
-            let shape = match o.shape {
-                world_cfg::Shape::Box => {
-                    let s = o.size_m.unwrap_or_default();
-                    Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
-                }
-                world_cfg::Shape::Cylinder => {
-                    Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
-                }
-            };
-            Obstacle { shape: shape.rooted(), rf_loss_db: o.rf_loss_db }
-        })
-        .collect();
+    let obstacles = world_obstacles(world);
     let emitters = world
         .emitters
         .iter()
@@ -467,6 +506,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Battery::new(battery, n, base_hz / cfg.battery.rate_hz, &mut bus)));
 
     let f = &cfg.frame;
+    let (restitution, friction_coeff) = cfg.collision_contact();
     let airframe = AirframeParams {
         mass_kg: f.mass_kg,
         inertia_kgm2: v3(f.inertia_kgm2),
@@ -484,6 +524,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             stiffness_npm: cfg.ground.stiffness_npm,
             damping_nspm: cfg.ground.damping_nspm,
             friction_coeff: cfg.ground.friction_coeff,
+        },
+        objects: world_objects(&opts.world),
+        collision: CollisionParams {
+            restitution,
+            friction_coeff,
+            spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
         },
     };
     let initial = BodyState {
@@ -504,18 +550,37 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
 
     let r = &cfg.radio;
+    let facing = opts.world.pilot.facing_deg;
+    let handset = &opts.world.handset;
     let link = LinkParams {
         packet_rate_hz: r.packet_rate_hz,
         latency_packets: r.latency_packets,
-        loss_good: r.loss_good,
-        loss_bad: r.loss_bad,
-        p_good_to_bad: r.p_good_to_bad,
-        p_bad_to_good: r.p_bad_to_good,
-        rssi_dbm: r.rssi_dbm,
-        snr_db: r.snr_db,
+        tx_power_mw: f64::from(r.tx_power_mw),
         link_stats_interval_packets: r.link_stats_interval_packets,
-        rf_mode: r.rf_mode,
-        tx_power: r.tx_power,
+        handset_position: v3(handset.position(&opts.world.pilot)),
+        handset_antennas: handset
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, a.beamwidth_deg),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
+            })
+            .collect(),
+        quad_antennas: r
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, None),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: v3(a.mount_frd).normalize(),
+            })
+            .collect(),
+        obstacles: world_obstacles(&opts.world),
+        fading: true,
+        ground_bounce: true,
     };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
@@ -582,7 +647,9 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     for m in models {
         scheduler.add(m);
     }
-    let mut vehicle = Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone() };
+    let radio_antenna_names = cfg.radio.antennas.iter().map(|a| a.name.clone()).collect();
+    let mut vehicle =
+        Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone(), radio_antenna_names };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
@@ -667,11 +734,21 @@ impl Vehicle {
             battery_current_a: b.get(h.ibat),
             motor_rpm: h.omega.iter().map(|s| b.get(*s) * 60.0 / (2.0 * PI)).collect(),
             motor_cmd: h.cmd.iter().map(|s| b.get(*s)).collect(),
-            radio: RadioState {
-                tx_enabled: b.get(h.tx_enabled) > 0.5,
-                link_up: b.get(h.link_up) > 0.5,
-                lq_pct: b.get(h.lq),
-                rssi_dbm: b.get(h.rssi),
+            radio: {
+                let active = b.get(h.radio_antenna);
+                RadioState {
+                    tx_enabled: b.get(h.tx_enabled) > 0.5,
+                    link_up: b.get(h.link_up) > 0.5,
+                    lq_pct: b.get(h.lq),
+                    rssi_dbm: b.get(h.rssi),
+                    snr_db: b.get(h.radio_snr),
+                    active_antenna: self
+                        .radio_antenna_names
+                        .get(active.max(0.0) as usize)
+                        .cloned()
+                        .unwrap_or_default(),
+                    downlink_lq_pct: b.get(h.radio_downlink_lq),
+                }
             },
             fc_restarts: b.get(h.fc_restarts) as u32,
             vtx: VtxInfo {
@@ -684,6 +761,9 @@ impl Vehicle {
             },
             serial_dropped_bytes: b.get(h.serial_dropped) as u64,
             video: h.video.read(b),
+            collision_speed_mps: b.get(h.collision_speed),
+            collision_object: b.get(h.collision_object) as i32,
+            collision_event_count: b.get(h.collision_count) as u64,
         }
     }
 

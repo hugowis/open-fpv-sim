@@ -1,6 +1,6 @@
 # OpenDrone 5" freestyle — M1 estimates. Units are in the key suffixes (SI).
 # Provenance tracking per parameter arrives with the component library (M4); all values here are estimates.
-schema_version = 3
+schema_version = 4
 name = "OpenDrone 5F freestyle (M1 estimates)"
 
 [sim]
@@ -81,14 +81,14 @@ first_reply_timeout_ms = 5000
 startup_timeout_ms = 15000
 
 [radio]
-# ExpressLRS, behavioural (level 1). The receiver's CRSF output is wired to Betaflight's UART2; the
-# betaflight.diff selects the CRSF receiver there.
+# ExpressLRS 2.4 GHz. The receiver's CRSF output is wired to Betaflight's UART2; the betaflight.diff selects
+# the CRSF receiver there. RSSI, SNR and packet loss come from the geometry of the world file (M3c); the
+# default receiver antenna is a 2 dBi linear dipole leaning up and back (mount_frd = [-0.5, 0.0, -1.0]).
 kind = "elrs"
 packet_rate_hz = 500
 uart = 2
 latency_packets = 1
-rssi_dbm = -50.0
-snr_db = 10.0
+tx_power_mw = 250
 
 # M3a: video. Betaflight UART numbers are 1-based (as in the Configurator's Ports tab); UART1 is the MSP port.
 # The battery as Betaflight's ESC sensor (KISS telemetry frames, 4 identical frames carry a quarter of the pack

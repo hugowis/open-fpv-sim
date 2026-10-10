@@ -205,6 +205,9 @@ pub struct World {
     pub pilot_position: DVec3,
     pub pilot_facing_deg: f64,
     pub antennas: Vec<WorldAntenna>,
+    /// The pilot's handset (in Godot's frame) and its antennas' aims.
+    pub handset_position: DVec3,
+    pub handset_antennas: Vec<WorldAntenna>,
     pub objects: Vec<WorldObject>,
     pub emitters: Vec<WorldEmitter>,
 }
@@ -231,6 +234,16 @@ impl World {
                 .into_iter()
                 .map(|a| WorldAntenna { aim: vec_to_godot(aim_ned(facing + a.aim_az_deg, a.aim_el_deg)), name: a.name, kind: a.kind })
                 .collect(),
+            handset_position: vec_to_godot(ned(w.handset.as_ref().map_or(None, |h| h.position_ned_m))),
+            handset_antennas: w
+                .handset
+                .map(|h| {
+                    h.antennas
+                        .into_iter()
+                        .map(|a| WorldAntenna { aim: vec_to_godot(aim_ned(facing + a.aim_az_deg, a.aim_el_deg)), name: a.name, kind: a.kind })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
             objects: w
                 .objects
                 .into_iter()
@@ -293,6 +306,14 @@ pub struct Telemetry {
     pub link_up: bool,
     pub lq_pct: f64,
     pub rssi_dbm: f64,
+    /// At the antenna in use; may be negative (LoRa decodes below the noise).
+    pub radio_snr_db: f64,
+    /// The quad file's name of the antenna in use.
+    pub radio_antenna: String,
+    /// What the handset receives.
+    pub downlink_lq_pct: f64,
+    /// The inward speed of the last collision (0 until one happens).
+    pub collision_speed_mps: f64,
     /// The session is paced to the wall clock right now (false while paused).
     pub running: bool,
     pub overruns: u64,
@@ -307,7 +328,7 @@ impl Telemetry {
     pub fn from_pb(s: &pb::State) -> Telemetry {
         let pos = s.position_ned_m.unwrap_or_default();
         let vel = s.velocity_ned_mps.unwrap_or_default();
-        let radio = s.radio.unwrap_or_default();
+        let radio = s.radio.clone().unwrap_or_default();
         Telemetry {
             time_s: s.time_s,
             altitude_m: -pos.z,
@@ -321,6 +342,10 @@ impl Telemetry {
             link_up: radio.link_up,
             lq_pct: radio.lq_pct,
             rssi_dbm: radio.rssi_dbm,
+            radio_snr_db: radio.snr_db,
+            radio_antenna: radio.active_antenna.clone(),
+            downlink_lq_pct: radio.downlink_lq_pct,
+            collision_speed_mps: s.collision_speed_mps,
             running: s.running,
             overruns: s.overruns,
             fc_restarts: s.fc_restarts,
@@ -345,6 +370,7 @@ pub enum EventKind {
     SerialOverflow,
     VideoLost,
     VideoRestored,
+    Collision,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -364,6 +390,7 @@ impl EventKind {
             EventKind::SerialOverflow => "serial_overflow",
             EventKind::VideoLost => "video_lost",
             EventKind::VideoRestored => "video_restored",
+            EventKind::Collision => "collision",
             EventKind::Unknown => "unknown",
         }
     }
@@ -392,6 +419,7 @@ impl Event {
             Ok(pb::EventKind::SerialOverflow) => EventKind::SerialOverflow,
             Ok(pb::EventKind::VideoLost) => EventKind::VideoLost,
             Ok(pb::EventKind::VideoRestored) => EventKind::VideoRestored,
+            Ok(pb::EventKind::Collision) => EventKind::Collision,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

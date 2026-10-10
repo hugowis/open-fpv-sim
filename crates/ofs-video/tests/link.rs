@@ -1,7 +1,8 @@
 use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, StepCtx};
 use ofs_video::link::*;
-use ofs_video::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization, Shape};
+use ofs_core::shape::Shape;
+use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -98,29 +99,6 @@ fn a_relock_needs_five_good_fields_in_a_row() {
     assert_eq!(VideoSync::from_signal(2.0), VideoSync::Lost);
     assert_eq!(VideoSync::from_signal(1.0), VideoSync::Unstable);
     assert_eq!(VideoSync::from_signal(0.0), VideoSync::Locked);
-}
-
-#[test]
-fn diversity_switches_only_for_a_clearly_better_antenna() {
-    let mut d = Diversity::default();
-    assert_eq!(d.choose(&[10.0, 11.0]), 0, "1 dB better is not enough");
-    assert_eq!(d.choose(&[10.0, 12.5]), 1, "2.5 dB better: switch");
-    assert_eq!(d.choose(&[11.0, 10.0]), 1, "and stay while the other is only 1 dB better");
-    assert_eq!(d.choose(&[13.0, 10.0]), 0, "back when it is 3 dB better");
-    assert_eq!(d.choose(&[5.0]), 0, "a single antenna");
-}
-
-#[test]
-fn the_frame_shadows_the_vtx_when_the_pilot_is_ahead_and_below() {
-    let level = DQuat::IDENTITY;
-    let quad = DVec3::new(0.0, 0.0, -20.0);
-    close(body_shadow_db(level, quad, DVec3::new(0.0, 0.0, 0.0)), BODY_SHADOW_DB, 1e-9, "straight below");
-    close(body_shadow_db(level, quad, DVec3::new(-100.0, 0.0, -20.0)), 0.0, 1e-12, "behind, level");
-    close(body_shadow_db(level, quad, DVec3::new(0.0, 0.0, -40.0)), 0.0, 1e-12, "above");
-    let ahead = body_shadow_db(level, quad, DVec3::new(100.0, 0.0, -20.0));
-    assert!(ahead > 4.0 && ahead < BODY_SHADOW_DB, "ahead, level: most of it ({ahead})");
-    let turned = DQuat::from_rotation_z(std::f64::consts::PI);
-    close(body_shadow_db(turned, quad, DVec3::new(100.0, 0.0, -20.0)), 0.0, 1e-9, "turned away: the antenna sees the pilot");
 }
 
 fn emitter_world(offset_mhz: f64) -> LinkWorld {

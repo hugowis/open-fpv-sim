@@ -13,6 +13,7 @@ ofs-sensors.workspace = true
 ofs-config.workspace = true
 ofs-fc.workspace = true
 ofs-radio.workspace = true
+ofs-rf.workspace = true
 ofs-proto.workspace = true
 ofs-video.workspace = true
 glam.workspace = true

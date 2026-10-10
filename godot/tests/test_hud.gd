@@ -13,8 +13,9 @@ func _telemetry(overrides := {}) -> Dictionary:
 	var t := {
 		"time_s": 12.3, "altitude_m": 4.5, "speed_mps": 6.7, "climb_mps": -0.4, "battery_voltage_v": 24.1,
 		"battery_current_a": 12.0, "motor_cmd": PackedFloat32Array([0.3, 0.3, 0.3, 0.3]), "motors_spinning": true,
-		"tx_enabled": true, "link_up": true, "lq_pct": 100.0, "rssi_dbm": -50.0, "running": true, "overruns": 0,
-		"fc_restarts": 0, "age_s": 0.01,
+		"tx_enabled": true, "link_up": true, "lq_pct": 100.0, "rssi_dbm": -50.0, "radio_snr_db": 49.0,
+		"radio_antenna": "antenna", "downlink_lq_pct": 100.0, "collision_speed_mps": 0.0, "running": true,
+		"overruns": 0, "fc_restarts": 0, "age_s": 0.01,
 	}
 	t.merge(overrides, true)
 	return t
@@ -126,4 +127,13 @@ func test_the_video_line_shows_the_signal_and_its_antenna() -> void:
 	eq(hud.video_text(), "VID -3 dB  patch  -71 dBm  NO SYNC", "without sync")
 	hud.update_view(_view({"telemetry": {}}))
 	eq(hud.video_text(), "", "cleared with the telemetry")
+	hud.queue_free()
+
+
+func test_the_link_line_carries_the_snr() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	eq(hud.link_text(), "LINK UP   LQ 100 %   -50 dBm   SNR 49", "the link line")
+	hud.update_view(_view({"telemetry": _telemetry({"link_up": false})}))
+	ok(hud.link_text().begins_with("LINK DOWN"), "down: '%s'" % hud.link_text())
 	hud.queue_free()

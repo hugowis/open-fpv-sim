@@ -7,6 +7,12 @@ pub const BODY_ATT: &str = "body.att_q";
 pub const BODY_RATE_FRD: &str = "body.rate_frd_radps";
 /// Kinematic acceleration (not specific force), NED.
 pub const BODY_ACCEL_NED: &str = "body.accel_ned_mps2";
+/// Inward speed of the last collision event, m/s (0 before the first one).
+pub const BODY_COLLISION_SPEED: &str = "body.collision_speed";
+/// Object index of the last collision event; -1 is the ground plane.
+pub const BODY_COLLISION_OBJECT: &str = "body.collision_object";
+/// Collision events raised so far; the server detects the event's edge on this counter.
+pub const BODY_COLLISION_COUNT: &str = "body.collision_count";
 
 pub const BATTERY_VOLTAGE: &str = "battery.voltage_v";
 pub const BATTERY_CURRENT: &str = "battery.current_a";
@@ -71,8 +77,14 @@ pub const RADIO_TX_ENABLED: &str = "radio.tx_enabled";
 pub const RADIO_LINK_UP: &str = "radio.link_up";
 /// Uplink link quality: percent of the last 100 packets received.
 pub const RADIO_LQ: &str = "radio.lq_pct";
-/// Uplink RSSI as the receiver reports it.
+/// Uplink RSSI as the receiver reports it, at the antenna in use.
 pub const RADIO_RSSI: &str = "radio.rssi_dbm";
+/// Uplink SNR in dB at the antenna in use (LoRa decodes below the noise, so it may be negative).
+pub const RADIO_SNR: &str = "radio.snr_db";
+/// Index (into the quad file's radio antennas) of the antenna in use.
+pub const RADIO_ANTENNA: &str = "radio.antenna";
+/// Downlink link quality: percent of the last 100 packets the handset received.
+pub const RADIO_DOWNLINK_LQ: &str = "radio.downlink_lq";
 /// Fault: 1 = every uplink packet is lost.
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 /// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).

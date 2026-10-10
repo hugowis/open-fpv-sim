@@ -6,7 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+glam.workspace = true
 ofs-core.workspace = true
+ofs-rf.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 

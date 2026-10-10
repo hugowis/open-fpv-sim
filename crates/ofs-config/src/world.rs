@@ -10,9 +10,10 @@ use crate::{Checker, ConfigError, Problem};
 
 pub const WORLD_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AntennaKind {
+    #[default]
     Omni,
     Patch,
 }
@@ -41,6 +42,9 @@ pub struct WorldConfig {
     pub name: String,
     pub pilot: PilotSection,
     pub receiver: ReceiverSection,
+    /// The pilot's handset; the ELRS uplink transmits from here.
+    #[serde(default)]
+    pub handset: HandsetSection,
     #[serde(default)]
     pub objects: Vec<ObjectSection>,
     #[serde(default)]
@@ -76,6 +80,44 @@ fn default_noise_floor_dbm() -> f64 {
 
 fn default_true() -> bool {
     true
+}
+
+/// The pilot's handset: where it is and what transmits from it. Optional: the default sits 0.5 m below the
+/// goggles with one vertical 2 dBi linear dipole.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandsetSection {
+    /// Default: the pilot's position, 0.5 m lower.
+    #[serde(default)]
+    pub position_ned_m: Option<[f64; 3]>,
+    /// One or two, like the receiver's.
+    #[serde(default)]
+    pub antennas: Vec<AntennaSection>,
+}
+
+impl Default for HandsetSection {
+    fn default() -> Self {
+        Self {
+            position_ned_m: None,
+            antennas: vec![AntennaSection {
+                name: "handset".into(),
+                kind: AntennaKind::Omni,
+                gain_dbi: 2.0,
+                beamwidth_deg: None,
+                polarization: Polarization::Linear,
+                aim_az_deg: 0.0,
+                aim_el_deg: None,
+            }],
+        }
+    }
+}
+
+impl HandsetSection {
+    /// Where the handset is: its position, or 0.5 m below the pilot's goggles.
+    pub fn position(&self, pilot: &PilotSection) -> [f64; 3] {
+        self.position_ned_m
+            .unwrap_or([pilot.position_ned_m[0], pilot.position_ned_m[1], pilot.position_ned_m[2] + 0.5])
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -179,6 +221,7 @@ impl WorldConfig {
                     aim_el_deg: None,
                 }],
             },
+            handset: HandsetSection::default(),
             objects: Vec::new(),
             emitters: Vec::new(),
             source_path: PathBuf::new(),
@@ -199,6 +242,23 @@ impl WorldConfig {
         for (i, a) in r.antennas.iter().enumerate() {
             let field = |f: &str| format!("receiver.antennas[{i}].{f}");
             check_name(&mut c, &a.name, &field("name"), &mut names);
+            c.check(a.gain_dbi.is_finite(), &field("gain_dbi"), "must be finite");
+            c.check(finite(&[a.aim_az_deg, a.aim_el()]), &field("aim_az_deg"), "aims must be finite");
+            check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));
+        }
+        let h = &self.handset;
+        let handset_at = h.position(&p);
+        c.check(handset_at.iter().all(|v| v.is_finite()), "handset.position_ned_m", "values must be finite");
+        c.check(
+            handset_at[2].is_nan() || handset_at[2] <= 0.0,
+            "handset.position_ned_m",
+            format!("the handset must not be below the ground (d = {} > 0)", handset_at[2]),
+        );
+        let mut handset_names = HashSet::new();
+        c.check(!h.antennas.is_empty(), "handset.antennas", "needs at least one antenna");
+        for (i, a) in h.antennas.iter().enumerate() {
+            let field = |f: &str| format!("handset.antennas[{i}].{f}");
+            check_name(&mut c, &a.name, &field("name"), &mut handset_names);
             c.check(a.gain_dbi.is_finite(), &field("gain_dbi"), "must be finite");
             c.check(finite(&[a.aim_az_deg, a.aim_el()]), &field("aim_az_deg"), "aims must be finite");
             check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));

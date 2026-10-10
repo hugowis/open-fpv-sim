@@ -3,13 +3,16 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-Status: **M3b — the analog video link.**
+Status: **M3c — world collision and the ELRS link.**
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
 - Betaflight Configurator should connect to the running simulator (the manual check with the desktop app is pending). A reboot sent to its port makes the simulator relaunch SITL from its EEPROM (verified live).
 - A Godot pilot client flies the simulator from a game window, through the same radio link (see below).
 - Betaflight's own OSD, a SmartAudio VTX and the battery reach the FPV view (M3a), and a 5.8 GHz analog link model
   breaks the picture up with distance, attitude, buildings and interference (M3b, `docs/research/video-link.md`).
+- The world's objects are solid: the quad bounces off buildings and gates, lands on roofs and raises `COLLISION`
+  events, and the ExpressLRS link is geometric — its RSSI, SNR and LQ come from the world's geometry, so Betaflight
+  fails safe on a real RX loss (M3c, `docs/research/collision.md` and `docs/research/elrs-link.md`).
 
 - Design: `docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`
 - SITL interface findings: `docs/research/sitl-interface.md`

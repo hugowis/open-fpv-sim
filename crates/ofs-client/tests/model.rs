@@ -62,7 +62,7 @@ fn telemetry_is_derived_from_a_state_message() {
         battery_voltage_v: 24.5,
         battery_current_a: 10.0,
         motor_cmd: vec![0.0, 0.055, 0.0, 0.0],
-        radio: Some(pb::RadioLink { tx_enabled: true, link_up: true, lq_pct: 98.0, rssi_dbm: -50.0 }),
+        radio: Some(pb::RadioLink { tx_enabled: true, link_up: true, lq_pct: 98.0, rssi_dbm: -50.0, ..Default::default() }),
         running: true,
         overruns: 3,
         fc_restarts: 1,
@@ -156,6 +156,7 @@ fn the_world_converts_to_godots_frame() {
             ..Default::default()
         }],
         emitters: vec![pb::Emitter { name: "parked-quad".into(), position_ned_m: v(30.0, -60.0, -1.0), freq_mhz: 5695.0, power_mw: 25.0 }],
+        ..Default::default()
     });
     assert_eq!(w.pilot_position, DVec3::new(2.0, 1.7, 3.0), "east, up, south");
     let b = &w.objects[0];

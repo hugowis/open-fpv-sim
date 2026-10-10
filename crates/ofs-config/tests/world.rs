@@ -187,3 +187,94 @@ fn a_nan_pilot_height_is_reported_as_not_finite_only() {
     assert!(found.iter().any(|p| p.starts_with("pilot.position_ned_m") && p.contains("finite")), "{found:#?}");
     assert!(!found.iter().any(|p| p.contains("below the ground")), "a NaN height is not below the ground: {found:#?}");
 }
+
+fn written_world(text: &str) -> Result<WorldConfig, ConfigError> {
+    let dir = tempfile::tempdir().unwrap();
+    world::load(&write(dir.path(), text))
+}
+
+#[test]
+fn the_default_handset_sits_half_a_metre_below_the_goggles() {
+    let world = WorldConfig::open_field();
+    assert_eq!(world.handset.position(&world.pilot), [0.0, 0.0, -1.2]);
+    let a = &world.handset.antennas[0];
+    assert_eq!((a.name.as_str(), a.kind, a.polarization, a.gain_dbi), ("handset", AntennaKind::Omni, Polarization::Linear, 2.0));
+    assert_eq!(a.aim_el(), 90.0, "the default dipole stands upright");
+}
+
+#[test]
+fn a_world_file_may_place_and_aim_the_handset() {
+    let world = written_world(
+        r#"schema_version = 1
+name = "handset field"
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 90.0
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+[handset]
+position_ned_m = [-3.0, 2.0, -1.2]
+[[handset.antennas]]
+name = "left"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+aim_az_deg = -30.0
+"#,
+    )
+    .unwrap();
+    assert_eq!(world.handset.position(&world.pilot), [-3.0, 2.0, -1.2]);
+    assert_eq!(world.handset.antennas.len(), 1);
+    assert_eq!(world.handset.antennas[0].name, "left");
+}
+
+#[test]
+fn handset_validation_problems_are_collected() {
+    let err = written_world(
+        r#"schema_version = 1
+name = "bad handset"
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+[handset]
+position_ned_m = [-3.0, 2.0, 0.5]
+[[handset.antennas]]
+name = "same"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "linear"
+[[handset.antennas]]
+name = "same"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "linear"
+"#,
+    )
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("handset.position_ned_m"), "{message}");
+    assert!(message.contains("used twice"), "{message}");
+    let bare = written_world(
+        r#"schema_version = 1
+name = "bare handset"
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+[handset]
+position_ned_m = [-3.0, 2.0, -1.2]
+"#,
+    )
+    .unwrap_err();
+    assert!(bare.to_string().contains("handset.antennas"), "{bare}");
+}

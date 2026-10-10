@@ -2,9 +2,10 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 4: lockstep and real-time sessions, state and event streams, the
-// pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session (loaded quad)
-// per server.
+// Simulator control, protocol version 5: protocol 4 plus the radio link's SNR, active antenna and downlink,
+// the collision speed, and the world's handset (M3c). Still: lockstep and real-time sessions, state and event
+// streams, the pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session
+// (loaded quad) per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
@@ -105,7 +106,10 @@ message RadioLink {
   bool tx_enabled = 1;  // a pilot or script is connected
   bool link_up = 2;
   double lq_pct = 3;
-  double rssi_dbm = 4;
+  double rssi_dbm = 4;         // at the antenna in use
+  double snr_db = 5;           // may be negative: LoRa decodes below the noise
+  string active_antenna = 6;   // the quad file's antenna name
+  double downlink_lq_pct = 7;  // what the handset receives
 }
 
 // One OSD screen. cells are row-major (rows * cols entries), each `char | font_page << 8 | blink << 10`; the
@@ -171,6 +175,7 @@ message State {
   Vtx vtx = 14;
   uint64 serial_dropped_bytes = 15;  // Betaflight UART output dropped because a consumer fell behind
   VideoLink video = 16;
+  double collision_speed_mps = 17;   // the last collision's inward speed (0 until one happens)
 }
 
 enum EventKind {
@@ -187,6 +192,7 @@ enum EventKind {
   EVENT_KIND_SERIAL_OVERFLOW = 10;
   EVENT_KIND_VIDEO_LOST = 11;      // the goggles lost sync
   EVENT_KIND_VIDEO_RESTORED = 12;  // and found it again
+  EVENT_KIND_COLLISION = 13;       // the quad hit something: the message names the object and the speed
 }
 
 message Event {
@@ -233,6 +239,12 @@ message Emitter {
   double power_mw = 4;
 }
 
+// The pilot's handset: where it is and what transmits from it (the ELRS uplink).
+message Handset {
+  Vec3 position_ned_m = 1;
+  repeated ReceiverAntenna antennas = 2;
+}
+
 message World {
   string name = 1;
   Vec3 pilot_position_ned_m = 2;
@@ -240,4 +252,5 @@ message World {
   repeated ReceiverAntenna antennas = 4;
   repeated WorldObject objects = 5;
   repeated Emitter emitters = 6;
+  Handset handset = 7;
 }

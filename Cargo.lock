@@ -810,10 +810,23 @@ dependencies = [
 name = "ofs-radio"
 version = "0.1.0"
 dependencies = [
+ "glam 0.29.3",
  "ofs-core",
+ "ofs-rf",
  "proptest",
  "rand 0.8.8",
  "rand_chacha 0.3.1",
+]
+
+[[package]]
+name = "ofs-rf"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "ofs-core",
+ "rand 0.8.8",
+ "rand_chacha 0.3.1",
+ "rand_distr",
 ]
 
 [[package]]
@@ -841,6 +854,7 @@ dependencies = [
  "ofs-physics",
  "ofs-proto",
  "ofs-radio",
+ "ofs-rf",
  "ofs-sensors",
  "ofs-video",
  "tempfile",
@@ -858,9 +872,8 @@ dependencies = [
  "glam 0.29.3",
  "ofs-core",
  "ofs-fc",
- "rand 0.8.8",
+ "ofs-rf",
  "rand_chacha 0.3.1",
- "rand_distr",
  "tempfile",
 ]
 

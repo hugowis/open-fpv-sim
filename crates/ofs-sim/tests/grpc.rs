@@ -115,7 +115,7 @@ async fn open_loop_session_runs_and_reports_state() {
     assert_eq!(reply.configurator_address, "", "no Betaflight, no Configurator");
     let s = c.run(RunRequest { seconds: 1.0 }).await.unwrap().into_inner();
     assert!((s.time_s - 1.0).abs() < 1e-9);
-    assert!((s.position_ned_m.unwrap().z + 0.0295).abs() < 1e-3);
+    assert!((s.position_ned_m.unwrap().z + 0.04).abs() < 2e-3, "rests on the body sphere: {:?}", s.position_ned_m);
     assert_eq!(s.motor_rpm.len(), 4);
     let radio = s.radio.unwrap();
     assert!(radio.tx_enabled && radio.link_up, "{radio:?}");
@@ -255,7 +255,7 @@ async fn a_vanished_pilot_switches_the_transmitter_off() {
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_millis(50)).await;
         radio = c.get_state(Empty {}).await.unwrap().into_inner().radio;
-        if !radio.unwrap().tx_enabled && !radio.unwrap().link_up {
+        if !radio.as_ref().unwrap().tx_enabled && !radio.as_ref().unwrap().link_up {
             break;
         }
     }
