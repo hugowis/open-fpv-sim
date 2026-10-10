@@ -373,7 +373,7 @@ index d1288e2..db34ec0 100644
          telemetry/srxl.c \
          io/displayport_oled.c
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..7d54cd4 100644
+index ee216ef..341fe23 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -44,6 +44,8 @@
@@ -385,7 +385,7 @@ index ee216ef..7d54cd4 100644
  #include "drivers/light_led.h"
  
  #include "drivers/timer.h"
-@@ -101,6 +103,136 @@ static bool fdm_received = false;
+@@ -101,6 +103,151 @@ static bool fdm_received = false;
  
  static struct timespec start_time;
  static double simRate = 1.0;
@@ -434,10 +434,15 @@ index ee216ef..7d54cd4 100644
 +static int extFdmSerialLen = 0;
 +static uint8_t extSerialPending[EXT_SERIAL_MAX];
 +static int extSerialPendingLen = 0;
++// The simulator's per-motor eRPM block (index 250), staged with the packet like the serial
++// bytes. Main thread only (extInjectSerial runs there, as does the consumer in pwmCompleteMotorUpdate).
++static uint16_t extErpm[4];
++static bool extErpmValid = false;
 +
 +static void extInjectSerial(const uint8_t *p, int len)
 +{
 +    int i = 0;
++    extErpmValid = false;  // the eRPM block is per datagram; the bridge sends it every datagram
 +    while (i + 3 <= len) {
 +        const unsigned uart = p[i];
 +        const int n = p[i + 1] | (p[i + 2] << 8);
@@ -445,6 +450,16 @@ index ee216ef..7d54cd4 100644
 +        if (n > len - i) {
 +            printf("[SITL] malformed serial block for UART%u: %d bytes announced, %d left; rest dropped\n", uart + 1, n, len - i);
 +            return;
++        }
++        if (uart == 250) {  // M3d: the simulator's per-motor eRPM block
++            if (n != 8) {
++                printf("[SITL] malformed eRPM block: %d bytes, expected 8; dropped\n", n);
++            } else {
++                memcpy(extErpm, &p[i], sizeof(extErpm));
++                extErpmValid = true;
++            }
++            i += n;
++            continue;
 +        }
 +        if (!tcpSerialInject(uart, &p[i], n)) {
 +            printf("[SITL] %d serial bytes for UART%u dropped: no such open UART\n", n, uart + 1);
@@ -522,7 +537,7 @@ index ee216ef..7d54cd4 100644
  static pthread_t tcpWorker, udpWorker, udpWorkerRC;
  static bool workerRunning = true;
  static udpLink_t stateLink, pwmLink, pwmRawLink, rcLink;
-@@ -205,6 +337,11 @@ static void gpxTrackClose(void)
+@@ -205,6 +352,11 @@ static void gpxTrackClose(void)
  
  int targetParseArgs(int argc, char * argv[])
  {
@@ -534,7 +549,7 @@ index ee216ef..7d54cd4 100644
      for (int i = 1; i < argc; i++) {
          if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
              printf("Betaflight SITL\n");
-@@ -282,6 +419,23 @@ static void updateState(const fdm_packet* pkt)
+@@ -282,6 +434,23 @@ static void updateState(const fdm_packet* pkt)
      clock_gettime(CLOCK_MONOTONIC, &now_ts);
  
      const uint64_t realtime_now = micros64_real();
@@ -558,7 +573,7 @@ index ee216ef..7d54cd4 100644
      if (realtime_now > last_realtime + 500*1e3) { // 500ms timeout
          last_timestamp = pkt->timestamp;
          last_realtime = realtime_now;
-@@ -483,8 +637,13 @@ static void updateState(const fdm_packet* pkt)
+@@ -483,8 +652,13 @@ static void updateState(const fdm_packet* pkt)
  
      // Periodic status (about 1 Hz)
      static uint64_t lastDebugTimeUs = 0;
@@ -574,7 +589,7 @@ index ee216ef..7d54cd4 100644
  
          const armingDisableFlags_e flags = getArmingDisableFlags();
          if (flags) {
-@@ -512,6 +671,31 @@ static void updateState(const fdm_packet* pkt)
+@@ -512,6 +686,31 @@ static void updateState(const fdm_packet* pkt)
      }
  
      pthread_mutex_unlock(&updateLock); // can send PWM output now
@@ -606,7 +621,7 @@ index ee216ef..7d54cd4 100644
  
  #if ENABLE_SIMULATOR_GYROPID_SYNC
      pthread_mutex_unlock(&mainLoopLock); // can run main loop
-@@ -524,8 +708,31 @@ static void* udpThread(void* data)
+@@ -524,8 +723,31 @@ static void* udpThread(void* data)
      int n = 0;
  
      while (workerRunning) {
@@ -638,7 +653,7 @@ index ee216ef..7d54cd4 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -584,6 +791,16 @@ void systemInit(void)
+@@ -584,6 +806,16 @@ void systemInit(void)
      int ret;
  
      clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -655,7 +670,7 @@ index ee216ef..7d54cd4 100644
      printf("[system]Init...\n");
  
      // Close the GPX track file cleanly on exit
-@@ -691,7 +908,16 @@ uint64_t millis64_real(void)
+@@ -691,7 +923,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
@@ -672,7 +687,7 @@ index ee216ef..7d54cd4 100644
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +931,11 @@ uint64_t micros64(void)
+@@ -705,6 +946,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
@@ -684,7 +699,7 @@ index ee216ef..7d54cd4 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +951,87 @@ uint32_t micros(void)
+@@ -720,6 +966,85 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
@@ -723,11 +738,9 @@ index ee216ef..7d54cd4 100644
 +
 +static void sitlDshotTelemetryFeed(void)
 +{
-+    for (int i = 0; i < 4; i++) {  // servo_packet carries 4 motor values
-+        const float throttle = pwmPkt.motor_speed[i];  // throttle 0..1 ((us - 1000) / 1000)
-+        const uint32_t erpm = (uint32_t)(throttle * 120000.0f * (1.0f + 0.25f * i));
-+        sitlDshotErpm[i] = erpm;
-+        sitlMotorFrequencyHz[i] = erpmToRpm(erpm / 100U) / 60.0f;
++    for (int i = 0; i < 4; i++) {  // the datagram block's eRPM/100 (zeros until one arrives)
++        sitlDshotErpm[i] = extErpmValid ? (uint32_t)extErpm[i] * 100U : 0U;
++        sitlMotorFrequencyHz[i] = erpmToRpm(sitlDshotErpm[i] / 100U) / 60.0f;
 +    }
 +    dshotTelemetryState.readCount++;
 +}
@@ -751,7 +764,7 @@ index ee216ef..7d54cd4 100644
 +    }
 +    return m;
 +}
-+bool isDshotMotorTelemetryActive(uint8_t motorIndex) { return sitlDshotErpm[motorIndex] > 0; }
++bool isDshotMotorTelemetryActive(uint8_t motorIndex) { UNUSED(motorIndex); return extErpmValid; }
 +bool isDshotTelemetryActive(void) { return true; }
 +void dshotCleanTelemetryData(void) { memset(sitlDshotErpm, 0, sizeof(sitlDshotErpm)); }
 +int16_t getDshotTelemetryMotorInvalidPercent(uint8_t motorIndex) { UNUSED(motorIndex); return 0; }
@@ -772,7 +785,7 @@ index ee216ef..7d54cd4 100644
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +1072,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +1085,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -785,7 +798,7 @@ index ee216ef..7d54cd4 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +1088,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +1101,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -798,7 +811,7 @@ index ee216ef..7d54cd4 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1197,74 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1210,74 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
