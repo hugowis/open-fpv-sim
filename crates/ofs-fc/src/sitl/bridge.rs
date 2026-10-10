@@ -199,14 +199,14 @@ impl SitlBridge {
         Ok(n)
     }
 
-    /// Adds the bytes the serial links into SITL dropped (a full link, e.g. a stalled exchange) to
-    /// `fc.serial_dropped_bytes`, so they are reported like the bytes SITL drops.
+    /// Adds the bytes our own serial wires dropped to `fc.serial_dropped_bytes`, so they are reported like the bytes
+    /// SITL drops.
     fn count_link_drops(&mut self, bus: &mut Bus) {
-        let dropped: u64 = self.cfg.serial.iter().map(|l| l.rx.dropped()).sum();
+        let dropped = wire_drops(&self.cfg.serial, &self.cfg.taps);
         if dropped > self.links_dropped {
             let new = dropped - self.links_dropped;
             self.links_dropped = dropped;
-            tracing::warn!("{new} byte(s) for Betaflight's UARTs were dropped: a serial link was full");
+            tracing::warn!("{new} byte(s) to or from Betaflight's UARTs were dropped: a serial wire was full");
             bus.set(self.serial_dropped, bus.get(self.serial_dropped) + new as f64);
         }
     }
@@ -254,6 +254,12 @@ fn probe_state_port(ip: Ipv4Addr, cleanup: &[String]) -> Result<(), FcError> {
         port: PORT_STATE,
         hint: "a Betaflight SITL instance may still be running (see fc.cleanup / OFS_SITL_CLEANUP)",
     })
+}
+
+/// Bytes dropped so far by the wires into SITL's UARTs (a stalled exchange) and by the taps of its output (a model
+/// that did not keep up).
+pub fn wire_drops(serial: &[SerialLink], taps: &[SerialTap]) -> u64 {
+    serial.iter().map(|l| l.rx.dropped()).sum::<u64>() + taps.iter().map(|t| t.tx.dropped()).sum::<u64>()
 }
 
 /// Takes pending UART bytes for one datagram, within SITL's serial section limit; what does not fit stays in the

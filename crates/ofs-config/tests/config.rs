@@ -100,8 +100,7 @@ fn radio_problems_are_reported_together() {
     let text = quad_text()
         .replace("packet_rate_hz = 500", "packet_rate_hz = 333")
         .replace("uart = 2", "uart = 1")
-        .replace("rssi_dbm = -50.0", "rssi_dbm = -50.0
-loss_good = 1.5");
+        .replace("rssi_dbm = -50.0", "rssi_dbm = -50.0\nloss_good = 1.5");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
     let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();

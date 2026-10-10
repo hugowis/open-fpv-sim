@@ -26,7 +26,10 @@ fn fake(then: &[&str]) -> Vec<String> {
 fn launch(dir: &std::path::Path, argv: Vec<String>) -> LaunchConfig {
     let workdir = dir.join("fc");
     std::fs::create_dir_all(&workdir).unwrap();
-    std::fs::write(workdir.join("eeprom.bin"), b"").unwrap(); // already configured: no first-boot diff run
+    // Already configured with this diff: no first-boot diff run.
+    std::fs::write(workdir.join("eeprom.bin"), b"").unwrap();
+    std::fs::write(workdir.join("betaflight.diff"), "feature -GPS\n").unwrap();
+    std::fs::write(dir.join("quad.diff"), "feature -GPS\n").unwrap();
     LaunchConfig { launch: argv, cleanup: vec![], workdir, diff_file: dir.join("quad.diff"), startup_timeout: Duration::from_secs(20) }
 }
 

@@ -16,6 +16,8 @@ idempotent: running this one on a tree that already has the current patch insert
 """
 import sys
 
+if len(sys.argv) != 2:
+    sys.exit(f"usage: python3 {sys.argv[0]} <betaflight checkout>  (see the docstring above)")
 ROOT = sys.argv[1]
 
 

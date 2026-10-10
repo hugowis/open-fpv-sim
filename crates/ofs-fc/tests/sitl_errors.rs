@@ -156,3 +156,45 @@ fn more_than_four_motors_is_a_config_error_not_a_panic() {
     assert!(matches!(err, FcError::Config(_)), "{err}");
     assert!(err.to_string().contains("4 motors"), "{err}");
 }
+
+/// A firmware directory that has already booted once with `applied` as its diff.
+fn booted_with(dir: &std::path::Path, applied: Option<&str>) {
+    std::fs::create_dir_all(dir.join("fc")).unwrap();
+    std::fs::write(dir.join("fc/eeprom.bin"), [0u8; 16]).unwrap();
+    if let Some(text) = applied {
+        std::fs::write(dir.join("fc/betaflight.diff"), text).unwrap();
+    }
+}
+
+#[test]
+fn an_unchanged_diff_reuses_the_eeprom() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["ofs-definitely-missing-binary"]);
+    booted_with(dir.path(), Some("feature -GPS\n"));
+    let err = SitlBridge::start(cfg, &mut Bus::new()).err().unwrap();
+    assert!(matches!(err, FcError::Launch { .. }), "the guard let it through to the launch: {err}");
+}
+
+#[test]
+fn a_diff_that_only_changed_its_line_endings_is_unchanged() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["ofs-definitely-missing-binary"]);
+    booted_with(dir.path(), Some("feature -GPS\r\n")); // e.g. checked out with CRLF on Windows since
+    let err = SitlBridge::start(cfg, &mut Bus::new()).err().unwrap();
+    assert!(matches!(err, FcError::Launch { .. }), "{err}");
+}
+
+#[test]
+fn an_eeprom_whose_diff_is_unknown_is_refused() {
+    // Firmware directories from before M2a kept no copy of the applied diff: their EEPROM may still select the UDP
+    // receiver, and Betaflight would then fail safe with no explanation.
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["ofs-definitely-missing-binary"]);
+    booted_with(dir.path(), None);
+    let err = SitlBridge::start(cfg, &mut Bus::new()).err().unwrap();
+    assert!(matches!(err, FcError::Config(_)), "{err}");
+    assert!(err.to_string().contains("eeprom.bin"), "{err}");
+}

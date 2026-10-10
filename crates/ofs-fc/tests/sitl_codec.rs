@@ -206,3 +206,15 @@ fn serial_blocks_never_exceed_the_section_sitl_accepts() {
     // The datagram that carries them is built without tripping SITL's limit.
     let _ = state_datagram_with_serial(&zero_fdm(), &RcPacket { timestamp_s: 0.0, channels: [0; 16] }, &blocks);
 }
+
+#[test]
+fn bytes_dropped_by_any_wire_to_or_from_sitl_are_counted() {
+    use ofs_core::Wire;
+    use ofs_fc::sitl::bridge::{wire_drops, SerialLink, SerialTap};
+    let into = SerialLink { uart_index: 1, rx: Wire::new(4) };
+    let out = SerialTap { uart_index: 3, tx: Wire::new(2) };
+    assert_eq!(wire_drops(std::slice::from_ref(&into), std::slice::from_ref(&out)), 0);
+    into.rx.write(&[0; 6]); // 2 dropped
+    out.tx.write(&[0; 5]); // 3 dropped
+    assert_eq!(wire_drops(&[into], &[out]), 5);
+}

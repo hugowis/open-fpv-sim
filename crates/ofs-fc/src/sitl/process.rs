@@ -222,12 +222,20 @@ fn spawn_logged(argv: &[String], workdir: &Path, log: &SharedLog) -> Result<Chil
 }
 
 /// The quad's diff is applied on first boot only, so an EEPROM made from an older diff no longer matches the
-/// quad file. Refuse to start rather than fly a stale configuration.
+/// quad file. Refuse to start rather than fly a stale configuration. Line endings do not count as a change.
 fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
-    let Ok(applied) = std::fs::read(workdir.join("betaflight.diff")) else {
-        return Ok(()); // first booted before copies of the applied diff were kept
+    let Ok(applied) = std::fs::read_to_string(workdir.join("betaflight.diff")) else {
+        // Booted before copies of the applied diff were kept (before M2a): its EEPROM may select the UDP receiver,
+        // and Betaflight would fail safe without a word.
+        return Err(FcError::Config(format!(
+            "{} was made by an older Open FPV Sim that did not record which diff it applied; delete it to apply {} \
+             again (this also discards settings changed in Betaflight Configurator)",
+            workdir.join("eeprom.bin").display(),
+            cfg.diff_file.display()
+        )));
     };
-    if applied != std::fs::read(&cfg.diff_file)? {
+    let lines = |text: &str| text.lines().map(str::to_owned).collect::<Vec<_>>();
+    if lines(&applied) != lines(&std::fs::read_to_string(&cfg.diff_file)?) {
         return Err(FcError::Config(format!(
             "{} changed since this quad's first boot; delete {} to apply it again (this also discards settings \
              changed in Betaflight Configurator)",

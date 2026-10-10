@@ -85,6 +85,15 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     // Betaflight declares RX loss once frames stop for failsafe_delay (1.5 s by default) and then disarms
     // (src/main/flight/failsafe.c); stage-1 failsafe holds idle until then.
     assert!((1.4..=2.2).contains(&dt), "disarmed {dt:.3} s after the cut");
+
+    // The link comes back: Betaflight recovers once the arm switch is off, and arms again.
+    v.clear_faults();
+    v.set_sticks(&Sticks::default()); // arm switch off
+    v.run_for(2.0).unwrap();
+    assert!(v.state().radio.link_up, "the link is back");
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.run_for(1.0).unwrap();
+    assert!(armed(v), "no re-arm after the failsafe: {:?}", v.state().motor_cmd);
 }
 
 #[test]
