@@ -825,15 +825,6 @@ mod fc_telemetry {
 
     /// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
     fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {
-
-```rust
-mod fc_telemetry {
-    use super::*;
-    use ofs_radio::crsf::{FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE};
-    use ofs_radio::elrs::FcTelemetry;
-
-    /// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
-    fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {
         let mut f = vec![0xC8, (payload.len() + 2) as u8, frame_type];
         f.extend_from_slice(payload);
         f.push(ofs_radio::crsf::crc8_dvb_s2(&f[2..]));
