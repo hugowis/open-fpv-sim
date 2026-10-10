@@ -190,7 +190,7 @@ impl WorldConfig {
         let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
         let p = &self.pilot;
         c.check(finite(&p.position_ned_m), "pilot.position_ned_m", "values must be finite");
-        c.check(p.position_ned_m[2] <= 0.0, "pilot.position_ned_m", format!("the pilot must not be below the ground (d = {} > 0)", p.position_ned_m[2]));
+        c.check(!(p.position_ned_m[2] > 0.0), "pilot.position_ned_m", format!("the pilot must not be below the ground (d = {} > 0)", p.position_ned_m[2]));
         c.check(p.facing_deg.is_finite(), "pilot.facing_deg", "must be finite");
         let r = &self.receiver;
         c.check(r.noise_floor_dbm.is_finite(), "receiver.noise_floor_dbm", "must be finite");
