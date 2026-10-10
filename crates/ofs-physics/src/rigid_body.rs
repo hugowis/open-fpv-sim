@@ -238,8 +238,8 @@ impl Model for RigidBody {
         );
         if let Some((object, speed)) = events.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
             self.last_collision = Some((*object, *speed));
-            self.collision_events += 1;
         }
+        self.collision_events += events.len() as u64;
         self.publish(bus, accel_ned);
         Ok(())
     }

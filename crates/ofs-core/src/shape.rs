@@ -67,6 +67,7 @@ impl Shape {
                 let axis = if q.x >= q.y && q.x >= q.z { 0 } else if q.y >= q.z { 1 } else { 2 };
                 let mut n = DVec3::ZERO;
                 n[axis] = if d[axis] >= 0.0 { 1.0 } else { -1.0 };
+                // Unreachable defensive fallback: the chosen axis always gets +-1 (glam's signum maps 0.0 to 1.0).
                 n.try_normalize().unwrap_or(DVec3::NEG_Z)
             }
             Shape::Cylinder { center, radius, half_height } => {
@@ -88,6 +89,7 @@ impl Shape {
                 if r >= v && radial_len > 0.0 {
                     radial / radial_len
                 } else {
+                    // Unreachable defensive fallback: signum(+-0.0) is +-1, so `cap` is never zero-length.
                     cap.try_normalize().unwrap_or(DVec3::NEG_Z)
                 }
             }
