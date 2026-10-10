@@ -59,9 +59,17 @@ struct Contact {
 }
 
 /// Applies the sphere contacts of one step to `s` and returns the (object index, inward speed) pairs of the
-/// collision events raised this step, hardest last in the vector.
-pub fn resolve(p: &AirframeParams, bounds: &[Aabb], s: &mut BodyState, touch: &mut TouchState, time_s: f64) -> Vec<(i32, f64)> {
-    let mut contacts = collect(p, bounds, s);
+/// collision events raised this step, hardest last in the vector. `bounding_radius_m` is the quad's bounding
+/// radius (the largest sphere centre plus radius), the broad phase's margin.
+pub fn resolve(
+    p: &AirframeParams,
+    bounds: &[Aabb],
+    bounding_radius_m: f64,
+    s: &mut BodyState,
+    touch: &mut TouchState,
+    time_s: f64,
+) -> Vec<(i32, f64)> {
+    let mut contacts = collect(p, bounds, bounding_radius_m, s);
     if contacts.is_empty() {
         release_everything(touch, time_s);
         return Vec::new();
@@ -118,11 +126,11 @@ fn apply(s: &mut BodyState, inv_mass: f64, inv_inertia: DVec3, lever: DVec3, imp
     s.rate_frd_radps += inv_inertia * (s.att.inverse() * lever.cross(impulse));
 }
 
-/// Every sphere's contacts with every near object and with the ground.
-fn collect(p: &AirframeParams, bounds: &[Aabb], s: &BodyState) -> Vec<Contact> {
+/// Every sphere's contacts with every near object and with the ground. `quad_radius` is the body's bounding
+/// radius, the broad phase's margin around the quad's centre.
+fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState) -> Vec<Contact> {
     let mut contacts = Vec::new();
     let omega = s.att * s.rate_frd_radps;
-    let quad_radius = p.collision.spheres.iter().map(|(c, r)| c.length() + r).fold(0.0, f64::max);
     for (centre_frd, radius) in &p.collision.spheres {
         let centre = s.pos_ned_m + s.att * *centre_frd;
         // The ground plane is the solid z >= 0: its signed distance is -z, its normal is up.

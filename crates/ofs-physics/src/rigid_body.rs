@@ -59,10 +59,8 @@ pub struct RigidBody {
     p: AirframeParams,
     /// Each object's bounding box, computed once at build (the contact broad phase).
     bounds: Vec<Aabb>,
-    /// The quad's bounding radius (the largest sphere centre plus radius): the broad phase's margin.
-    /// Nothing reads it yet — `collision::resolve` recomputes it per step — so the dead-code lint is off until
-    /// the world wiring uses it.
-    #[allow(dead_code)]
+    /// The quad's bounding radius (the largest sphere centre plus radius): the broad phase's margin, handed to
+    /// `collision::resolve` each step.
     bounding_radius_m: f64,
     touch: TouchState,
     last_collision: Option<(i32, f64)>,
@@ -221,7 +219,7 @@ impl Model for RigidBody {
         self.s = BodyState { pos_ned_m: pos, vel_ned_mps: vel, att, rate_frd_radps: rate };
         // The contacts apply after integration, before publishing, so a contact this tick is visible this tick;
         // the scheduler's per-step non-finite check catches any non-finite value afterwards.
-        let events = collision::resolve(&self.p, &self.bounds, &mut self.s, &mut self.touch, ctx.time_s);
+        let events = collision::resolve(&self.p, &self.bounds, self.bounding_radius_m, &mut self.s, &mut self.touch, ctx.time_s);
         if let Some((object, speed)) = events.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
             self.last_collision = Some((*object, *speed));
             self.collision_events += 1;

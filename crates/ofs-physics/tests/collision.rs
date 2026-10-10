@@ -164,15 +164,15 @@ fn a_new_touch_within_the_rearm_window_raises_nothing() {
     let mut touch = TouchState::new(0);
     // Touch hard, leave, touch hard again 10 ms later: still one event. After 20 ms free: the next touch raises.
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.0).len(), 1);
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.0).len(), 1);
     let mut s = state(DVec3::new(0.0, 0.0, -R - 0.1), DVec3::ZERO);
-    assert!(ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.001).is_empty(), "in the air: free");
+    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.001).is_empty(), "in the air: free");
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.011).len(), 0, "10 ms after leaving: rearmed not yet");
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.011).len(), 0, "10 ms after leaving: rearmed not yet");
     let mut s = state(DVec3::new(0.0, 0.0, -R - 0.1), DVec3::ZERO);
-    assert!(ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.012).is_empty());
+    assert!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.012).is_empty());
     let mut s = state(DVec3::new(0.0, 0.0, -R + 0.001), DVec3::new(0.0, 0.0, 2.0));
-    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.05).len(), 1, "38 ms after leaving: rearmed");
+    assert_eq!(ofs_physics::collision::resolve(&p, &bounds, R, &mut s, &mut touch, 0.05).len(), 1, "38 ms after leaving: rearmed");
 }
 
 #[test]
@@ -194,7 +194,8 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let mut touch = TouchState::new(p.objects.len());
     let mut s = state(DVec3::new(-0.11, 0.03, -0.16), DVec3::new(1.0, 0.0, 0.0));
     s.att = DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2);
-    let events = ofs_physics::collision::resolve(&p, &bounds, &mut s, &mut touch, 0.0);
+    // The rig's bounding radius: one sphere at (0.1, 0.06, 0.03), r = 0.02.
+    let events = ofs_physics::collision::resolve(&p, &bounds, DVec3::new(0.1, 0.06, 0.03).length() + 0.02, &mut s, &mut touch, 0.0);
     assert_eq!(events.len(), 1, "one hard touch");
 
     // Hand-computed, with inv_mass = 20/13, inv_inertia = (400, 400, 2000/9), e = 0.3. The position correction
