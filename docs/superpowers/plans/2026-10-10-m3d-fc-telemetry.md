@@ -281,7 +281,7 @@ edit("src/platform/SIMULATOR/sitl.c", [
         "    memset(dest, 0, sizeof(*dest));\n"
         "    dest->dataAge = 0;\n"
         "    dest->temperature = 25;\n"
-        "    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100 * 100, 0, 32767);  // 0.01 erpm units\n"
+        "    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100U, 0, 32767);  // 0.01 erpm units (escSensorData_t contract)\n"
         "    return true;\n"
         "}\n"
         "#else\n"
