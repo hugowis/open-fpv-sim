@@ -584,7 +584,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    models.push(Box::new(ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), &mut bus)));
+    models.push(Box::new(ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), Wire::new(VIDEO_TAP_CAPACITY), &mut bus)));
 
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
