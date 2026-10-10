@@ -106,14 +106,47 @@ static func load_settings() -> Dictionary:
 
 
 ## Stores one setting in the `[client]` section of user://ofs_client.cfg (for settings changed in the game, like
-## "Video effects"), keeping the rest of the file. Returns false when the file cannot be written.
+## "Video effects"). Only that setting's line changes: comments and the rest of the file stay as they are. Returns false
+## when the file cannot be written.
 static func save_value(key: String, value, path := CONFIG_PATH) -> bool:
-	var file := ConfigFile.new()
-	# A missing file starts empty; one that exists but does not parse (a hand edit gone wrong) is left alone.
-	if FileAccess.file_exists(path) and file.load(path) != OK:
+	var text := ""
+	if FileAccess.file_exists(path):
+		# A file that does not parse (a hand edit gone wrong) is left alone.
+		if ConfigFile.new().load(path) != OK:
+			return false
+		text = FileAccess.get_file_as_string(path)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
 		return false
-	file.set_value("client", key, value)
-	return file.save(path) == OK
+	file.store_string(with_value(text, "client", key, "%s=%s" % [key, var_to_str(value)]))
+	file.close()
+	return true
+
+
+## Config file `text` with `line` as `key`'s line in `[section]`: the key's line is replaced where it is, or the line is
+## added after the section's last line (or in a new section at the end). Every other line, comments included, stays.
+static func with_value(text: String, section: String, key: String, line: String) -> String:
+	var lines := text.split("\n")
+	var current := ""
+	var insert_at := -1
+	for i in lines.size():
+		var t := lines[i].strip_edges()
+		if t.begins_with("[") and t.ends_with("]"):
+			current = t.substr(1, t.length() - 2).strip_edges()
+			if current == section:
+				insert_at = i + 1
+			continue
+		if current != section or t == "":
+			continue
+		insert_at = i + 1
+		if not t.begins_with(";") and not t.begins_with("#") and t.split("=", true, 1)[0].strip_edges() == key:
+			lines[i] = line
+			return "\n".join(lines)
+	if insert_at >= 0:
+		lines.insert(insert_at, line)
+		return "\n".join(lines)
+	var head := text if text == "" or text.ends_with("\n") else text + "\n"
+	return head + "[%s]\n%s\n" % [section, line]
 
 
 ## The dictionary `OfsClient.start` takes.

@@ -89,3 +89,32 @@ func test_saving_a_setting_never_overwrites_a_config_file_it_cannot_read() -> vo
 	DirAccess.remove_absolute(path)
 	ok(AppSettings.save_value("video_effects", false, path), "a missing file is created")
 	DirAccess.remove_absolute(path)
+
+
+func test_saving_a_setting_keeps_the_comments_and_layout_of_a_hand_edited_file() -> void:
+	var path := "user://test_commented_ofs_client.cfg"
+	var text := "; my settings\n[client]\n; the quad I fly\nquad_path=\"quads/mine.toml\"\nvideo_effects=true\n\n[other]\nx=1\n"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
+	ok(AppSettings.save_value("video_effects", false, path), "saved")
+	var after := FileAccess.get_file_as_string(path)
+	eq(after, text.replace("video_effects=true", "video_effects=false"), "only the one line changed")
+	ok(AppSettings.save_value("seed", 3, path), "a new key")
+	after = FileAccess.get_file_as_string(path)
+	ok(after.begins_with("; my settings\n[client]\n; the quad I fly\n"), "comments kept: " + after)
+	var back := ConfigFile.new()
+	eq(back.load(path), OK, "still a valid config file")
+	eq(back.get_value("client", "seed"), 3, "the new key is in [client]")
+	eq(back.get_value("other", "x"), 1, "the other section is untouched")
+	DirAccess.remove_absolute(path)
+	var bare := "; only a comment\n"
+	file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(bare)
+	file.close()
+	ok(AppSettings.save_value("video_effects", false, path), "a file without [client]")
+	back = ConfigFile.new()
+	eq(back.load(path), OK, "reads back")
+	eq(back.get_value("client", "video_effects"), false, "the section is added")
+	ok(FileAccess.get_file_as_string(path).begins_with(bare), "the comment stays")
+	DirAccess.remove_absolute(path)
