@@ -1,6 +1,6 @@
 /target/
 /.ofs-data/
-/spikes/m0/runs/
+/spikes/*/runs/
 /.superpowers/
 __pycache__/
 *.egg-info/

@@ -309,3 +309,51 @@ After the 16-byte `servo_packet`, a reply on UDP 9002 carries a `u16` bytes-drop
 ### M0 open item
 
 "SmartAudio reply side was not emulated" (§7) is now closed: the `VtxModel` answers, Betaflight accepts the replies, and MSP changes flow down into the model (Task 7's probe, Task 11's e2e).
+
+## 10. M3d changes (CRSF telemetry out of Betaflight; per-motor eRPM to the RPM filter)
+
+Spike, 2026-10-10, against the patched lockstep build of §5/§9 (pinned 2026.6.2). Probes: `spikes/m3d/t_a5_crsf_telemetry.py`, `spikes/m3d/t_b_dshot_telemetry.py` (plus `t_a4_isolate.py`, a telemetry-off control run); tree edits as `spikes/m3d/apply_spike_b.py`. All findings below verified live unless marked "source, not yet run".
+
+### CRSF telemetry: yes, with a 4-edit shim
+
+`USE_TELEMETRY_CRSF` was off only because our patch turned it off (`target.h` `#undef`, and `mk/SITL.mk` drops `telemetry/crsf.c` via `MCU_EXCLUDES`). The `ATOMIC_BLOCK(NVIC_PRIO_SERIALUART1)` the file uses (one site, in the MSP-over-CRSF path) compiles once `atomic.h` takes its software-BASEPRI branch for simulator builds:
+
+- `src/main/build/atomic.h`: `#if defined(UNIT_TEST)` → `#if defined(UNIT_TEST) || defined(SIMULATOR_BUILD)` (and the matching `#if !defined(UNIT_TEST)` ARM-asm guard above it). Upstreamable.
+- `src/platform/SIMULATOR/sitl.c`: defines `uint8_t atomic_BASEPRI;` (the storage `build/atomic.c` provides for unit tests; `atomic.c` is not in the SITL build).
+- `target.h`: `#define USE_TELEMETRY` + `USE_TELEMETRY_CRSF` (the master `USE_TELEMETRY` was never defined for SITL; `DEFAULT_FEATURES` already includes `FEATURE_TELEMETRY`, so no runtime setting is needed).
+- `mk/SITL.mk`: remove `telemetry/crsf.c` from `MCU_EXCLUDES`.
+
+Runtime (`t_a5`, 6 s flight, CRSF RC at 500 Hz over TCP as in M0 t5):
+
+- **The telemetry rides the lockstep reply datagram, not TCP**: on external-time builds our patch sends UART2+ writes to the TX capture only (`tcpDataOut` → `tcpCaptureTx`), so a TCP client on 5762 sees nothing. 3 536 bytes / 375 CRC-valid frames in 6 s; the reply trailer grows to its 530-byte cap while telemetry is flowing.
+- Frames seen (each ≈9 Hz, the 100 ms CRSF cycle): VARIO_SENSOR 0x07, BATTERY_SENSOR 0x08, BARO_ALTITUDE 0x09 (V3 timed), BARO 0x11, MAG 0x12, ATTITUDE 0x1E, FLIGHT_MODE 0x21. No GPS frames (`feature -GPS` in the diff holds). FLIGHT_MODE payload is the mode string (`AIR*` disarmed with air mode).
+- CRSF RC and CRSF telemetry coexist: `initCrsfTelemetry` enables telemetry automatically once `crsfRxIsActive()`; MSP_RC tracks sticks exactly with telemetry on (control run with `feature -TELEMETRY` behaves the same).
+- Unit quirks to honor when wiring (2026.6): the BATTERY_SENSOR payload's voltage word read 246 for a 24.6 V battery (decivolt-ish, not the 0.01 V CRSF spec), current 128 for 3.2 A, mAh 480 = 120 x 4 (consumption summed over motor slots, as §9 documents for the ESC sensor). Pin units against `sendBattery` in `telemetry/crsf.c` during implementation.
+- An earlier probe run saw MSP time out after a long flight with an undrained 5762 TCP socket; with reader threads draining both TCP ports (the `t_a4`/`t_a5` pattern) MSP answers normally. Keep the sim's TCP drains.
+
+### DShot telemetry: yes, without USE_DSHOT
+
+The RPM filter needs no DShot driver at all — it gates on the `useDshotTelemetry` global that our `sitl.c` ESC-sensor stub already owns, and `dshot.c` (which would pull in DMA/timer hardware) compiles only under `USE_DSHOT`:
+
+- `common_post.h`: keep `USE_DSHOT_TELEMETRY` (and with it `USE_RPM_FILTER`) under `SIMULATOR_BUILD` when `USE_DSHOT` is off — same pattern as the `USE_ESC_SENSOR` exception of §5.
+- `target.h`: `#define USE_DSHOT_TELEMETRY` + `#define USE_RPM_FILTER`.
+- `sitl.c`: the stub grows the API those defines reference (all of `dshot.c`'s public surface that gets linked): `useDshotTelemetry = true`, `dshotTelemetryState`, `dshotDMAHandlerCycleCounters`, `getDshotErpm/getDshotRpm/getDshotRpmAverage`, `getMotorFrequencyHz/getMinMotorFrequencyHz`, `isDshotMotorTelemetryActive/isDshotTelemetryActive`, `dshotCleanTelemetryData`, `getDshotTelemetryMotorInvalidPercent`, `updateDshotTelemetry`, `getDshotSensorData`. ~70 lines.
+- The eRPM feed: `pwmCompleteMotorUpdate` runs per PID loop on the main thread; the spike stored synthetic per-motor eRPM there (throttle x 120 000 x (1 + 0.25 i)) — the real design writes the simulator's per-motor eRPM instead (state datagram or the same hook).
+
+Runtime (`t_b`, arm via CRSF AUX1, throttle 50 % then 75 %):
+
+- `MSP_MOTOR_TELEMETRY` shows **four distinct per-motor RPM** (8 443 / 10 757 / 13 314 / 14 786 at ~50 %, scaling to 12 600 / 16 086 / 19 943 / 22 014 at 75 %), with the KISS ESC-sensor values unchanged in the same reply (24.60 V, 3.20 A) — the two sources coexist, dshot RPM taking precedence (`msp.c` prefers it when `useDshotTelemetry`).
+- The reply layout starts with a **1-byte motor count** before the 13-byte per-motor blocks (u32 rpm, u16 invalidPct x100, u8 temp, u16 V, u16 A, u16 mAh) — easy to mis-parse (we did).
+- `invalidPct` reads 100.00 % without `USE_DSHOT_TELEMETRY_STATS` (msp.c hardcodes 10000); define the stats (or accept the value) in the real design.
+- `pwmPkt.motor_speed[i] = motorsPwm[i] / 1000.0` is **throttle 0..1**, not µs (motorsPwm is µs-1000). Feeds must not subtract 1000.
+- eRPM units: `erpmToRpm` expects the 100-eRPM LSB convention (ERPM_PER_LSB = 100, pole pairs from `motor_poles`, default 14 = the shipped quad); `getDshotErpm` returns rawValue = eRPM/100.
+- With `useDshotTelemetry = true` the RPM filter initializes (`rpm_filter.c` gates on exactly that global; `rpm_filter_harmonics` defaults to 3) and runs in the PID loop off `getMotorFrequencyHz`. Arming, motors and MSP stayed healthy in the probe; a spectral check (motor-frequency notch in the gyro) belongs to the milestone's tests, where the sim can inject noise at motor frequency.
+
+### Two upstream Betaflight bugs found (both SIGSEGV at first arm, both guarded in the spike)
+
+With `USE_ESC_SENSOR` and `USE_DSHOT_TELEMETRY` both compiled and the ESC-sensor feature enabled, `osdEscDataCombined` is dereferenced before it is ever assigned — it is only set in `osdProcessStats2` (osd.c:1335), but the ESC-temperature warning blink (`osd_elements.c`, the `featureIsEnabled(FEATURE_ESC_SENSOR)` branch) and two osd.c sites (`getAverageEscRpm`, the max-ESC-temp stats update) read it during flight. NULL deref at `[rdx+1]` in `osdUpdate`, resolved via the kernel's trap IP + `objdump` (LTO, no symbols). The spike adds NULL guards at all three sites; worth sending upstream with the §5 `storageTotal` fix.
+
+### Build notes
+
+- The §5 warning about stale objects bit again: an incremental `make` after editing only `sitl.c` produced a binary that linked but behaved as before; deleting `sitl.o` (or building clean via `scripts/build-sitl.sh`) is required. Any surprising runtime result on an incremental build: rebuild clean before believing it.
+- The WSL tree carries the spike edits (uncommitted; `build-sitl.sh` resets and re-applies `ofs-sitl.patch`, so the spike state is disposable). The M3d implementation turns these edits into generator scripts under `third_party/betaflight/tools/` plus patch regeneration, M0-style.
