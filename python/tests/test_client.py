@@ -214,3 +214,11 @@ def test_a_watch_that_ends_is_reported_and_reopened(sim):
     assert "watch_ended" in kinds, kinds
     sim.load(QUAD, open_loop_fc=True)
     assert sim._watch is not None and sim._watch is not first, "the next load reopens the event stream"
+
+
+def test_equal_rssi_mappings_hash_alike_whatever_their_order():
+    from ofs.client import AntennaRssi
+
+    a, b = AntennaRssi([("omni", -60.0), ("patch", -70.0)]), AntennaRssi([("patch", -70.0), ("omni", -60.0)])
+    assert a == b and hash(a) == hash(b)
+    assert list(a) == ["omni", "patch"], "the order is still the world file's"

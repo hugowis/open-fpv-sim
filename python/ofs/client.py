@@ -71,7 +71,7 @@ class AntennaRssi(collections.abc.Mapping):
         return len(self._items)
 
     def __hash__(self):
-        return hash(self._items)
+        return hash(frozenset(self._items))  # equal mappings (compared as dicts) hash alike, in any order
 
     def __repr__(self):
         return f"AntennaRssi({dict(self._items)!r})"
