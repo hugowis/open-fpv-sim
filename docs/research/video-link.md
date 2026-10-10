@@ -28,7 +28,7 @@ each, named, so they can be replaced by measured values.
 | Omni antenna | dipole doughnut `gain + 20 log10(sin θ)` from its axis | floor 20 dB below the peak |
 | Patch antenna | `cos^n` main lobe, n set so the gain is -3 dB at half the beamwidth | back lobe 20 dB below the peak |
 | Polarization | same-hand circular 0 dB, opposite hands 20 dB, circular to linear 3 dB, linear to linear `-20 log10|cos Δ|` | cap 20 dB |
-| Body shadow | up to 8 dB when the pilot is ahead of and below the quad (the frame, stack and battery are between the VTX antenna and the goggles) | `BODY_SHADOW_DB` = 8 |
+| Body shadow | up to 8 dB when the pilot is ahead of and below the quad (the frame, stack and battery are between the VTX antenna and the goggles); the lobe is wide, so a level quad flying straight at the pilot already takes 6.75 dB of it | `BODY_SHADOW_DB` = 8 |
 | Obstruction | ITU-R P.526 single knife edge, `J(v) = 6.9 + 20 log10(√((v-0.1)²+1) + v - 0.1)` for v > -0.78, capped at the object's `rf_loss_db` | buildings 20-30 dB in `worlds/flat.toml` |
 | Ground bounce | two rays: the direct one and one reflected off the ground (coefficient -1), added with their phase difference | — |
 | Fading | Rician, an AR(1) complex Gaussian scatter correlated over λ/2 of quad movement | K = 10 dB with line of sight, minus the obstruction loss |
@@ -71,14 +71,15 @@ and beyond, linear in between. The next Raceband channel (37 MHz away) is reject
 fading off, falls to 8 dB SNR at 580 m; 600 mW reaches about 3 km (a unit test pins both). In the shipped world
 (diversity goggles: an omni and an 8 dBi patch), with the quad on the ground straight ahead of the pilot:
 
-| VTX power | Clean to | Sync lost by |
+| VTX power | Clean to | Sync lost |
 |---|---|---|
-| 25 mW | about 100 m | 2 km |
-| 200 mW | about 300 m | 4 km |
+| 25 mW | about 100 m | at 2 km in most cases (SNR about 0.5 dB: the fade decides); always at 4 km |
+| 200 mW | about 300 m | borderline at 4 km (SNR about 3.5 dB, just above the 3 dB loss threshold: the fade decides) |
 | 600 mW | about 500 m | beyond 4 km |
 
 ("Clean" is SNR ≥ 25 dB, no grain at all; the picture stays easily flyable well beyond, with grain and then
-sparkles.)
+sparkles. The SNRs are for R1 with the parked quad of `worlds/flat.toml` raising the patch's noise floor to about
+-92.3 dBm.)
 
 ## Where it shows
 

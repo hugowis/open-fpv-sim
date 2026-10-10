@@ -46,7 +46,7 @@ fn feed(shared: Arc<Shared>, rate_hz: u32, bind: Option<u64>) -> (ReceiverStream
                 break;
             }
             let msg = match shared.lock().as_ref() {
-                Some(s) if bind.map_or(true, |id| s.id == id) => Ok(s.state_msg()),
+                Some(s) if bind.is_none_or(|id| s.id == id) => Ok(s.state_msg()),
                 _ => Err(not_loaded()),
             };
             match msg {

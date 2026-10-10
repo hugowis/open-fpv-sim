@@ -456,7 +456,7 @@ mod tests {
         let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
         assert_eq!(kind_of(&svc.get_osd(Request::new(pb::Empty {})).await.unwrap_err()), "not_loaded");
         for hz in [61, 1000] {
-            let err = svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: hz })).await.err().expect("rate rejected");
+            let err = svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: hz })).await.expect_err("rate rejected");
             assert_eq!(kind_of(&err), "invalid_argument", "rate {hz}");
         }
         assert!(svc.stream_osd(Request::new(pb::StreamRequest { rate_hz: 0 })).await.is_ok(), "0 means the default rate");
@@ -500,6 +500,7 @@ mod tests {
         svc.shutdown();
     }
 
+    #[allow(clippy::await_holding_lock)] // the test holds the session on purpose, as a long call would
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_call_whose_client_left_before_it_got_the_session_does_nothing() {
         let wait = std::time::Duration::from_millis(100);
@@ -555,6 +556,7 @@ mod tests {
 
     /// A Watch whose client gives up while it waits for the session (e.g. behind a long call) must not register a
     /// watcher later: the session would then never end with its last real watcher.
+    #[allow(clippy::await_holding_lock)] // the test holds the session on purpose, as a long call would
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_watch_cancelled_while_it_waits_for_the_session_leaves_no_watcher() {
         let svc = service_with(open_loop_session(RunMode::Lockstep));

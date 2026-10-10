@@ -15,11 +15,16 @@
 | Godot client tests | `bash scripts/run-godot-tests.sh` (see "Godot pilot client" below) |
 | Real-time session (for Configurator) | `OFS_SITL_LAUNCH=<cmd> python python/examples/serve_realtime.py` |
 | Regenerate Python stubs | `python -m grpc_tools.protoc -I proto --python_out=python --pyi_out=python --grpc_python_out=python proto/ofs/v1/sim.proto` |
+| Lint (CI runs it) | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | Regenerate the SITL patch | start from the M1 patch (`third_party/betaflight/ofs-sitl.patch` at commit c1514e2) applied to the pinned Betaflight checkout, run `add_serial_in_datagram.py` then `deterministic_boot.py` (both in `third_party/betaflight/tools/`; see their docstrings), then `add_serial_out_datagram.py` (M3a: UART TX bytes in the reply). Run the generators in that order. |
+
+Commands written `VAR=value command` are for bash (Linux, WSL, Git Bash). In PowerShell set the variable first, for
+the rest of the session: `$env:OFS_SITL_LAUNCH = "wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf"`,
+then run the command.
 
 ## Environment variables
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
-- `OFS_SITL_LAUNCH` — SITL argv (space-separated, so no spaces inside paths), overrides `fc.launch` in quad files.
+- `OFS_SITL_LAUNCH` — SITL argv, space-separated (quote a path with spaces: `"..."` or `'...'`), overrides `fc.launch` in quad files.
   Windows: `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf`. Works with WSL's default NAT networking: the bridge discovers the WSL VM and host IPs and passes `--ip` (see `docs/research/sitl-interface.md` §6).
 - `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes (also when a native SITL's UDP 9003 is still held). It defaults to `pkill -x betaflight_SITL` on Linux and to `<wsl prefix> pkill -x betaflight_SITL` under WSL (required there: a stale SITL would otherwise answer instead of the new one). It matches the process name: never use `pkill -f`, which also matches the shell running it.
 - `OFS_SITL_HOST`, `OFS_SITL_REPLY_IP` — override the address state datagrams go to, and the address SITL replies to (`--ip`, motor socket bind).
@@ -115,8 +120,9 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   ```
   cd /mnt/c/<repo path>
   CARGO_TARGET_DIR=$HOME/ofs/target cargo test --workspace --locked
-  CARGO_TARGET_DIR=$HOME/ofs/target OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1
+  CARGO_TARGET_DIR=$HOME/ofs/target OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf cargo test --workspace --locked -- --include-ignored --test-threads=1
   ```
+  The second command runs every Rust test, the live ones (`sitl_live`, `vtx_live`) included.
   WSL has no Python grpc module, so the Python tests need Windows.
 
 ## Sessions

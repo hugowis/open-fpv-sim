@@ -78,13 +78,13 @@ fn slow_counts_one_overrun_per_max_lag_of_large_stall() {
     let plan = p.plan(10.0, 0.0);
     // The plan should run one chunk and report overrun=true
     assert_eq!(plan.ticks, 400);
-    assert_eq!(plan.overrun, true);
+    assert!(plan.overrun);
     // Should have counted 99 overruns from the excess
     assert_eq!(p.overruns(), 99);
     // Following in-time plan adds no more overruns
     let sim_advance = 400.0 / f64::from(HZ); // 0.05 s
     let plan2 = p.plan(10.0 + sim_advance, sim_advance);
-    assert_eq!(plan2.overrun, false);
+    assert!(!plan2.overrun);
     assert_eq!(p.overruns(), 99);
 }
 

@@ -685,7 +685,7 @@ fn diff_setting<'a>(diff: &'a str, name: &str) -> Option<&'a str> {
             let (key, value) = rest.split_once('=')?;
             (key.trim() == name).then(|| value.trim())
         })
-        .last()
+        .next_back()
 }
 
 /// The `serial <index> <function mask> ...` lines of a Betaflight diff: (0-based UART index, function mask).

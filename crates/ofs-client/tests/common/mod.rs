@@ -1,5 +1,6 @@
 //! An in-process `ofs-sim` server (open-loop sessions, no Betaflight) and helpers for driving a `Client` in tests.
 #![allow(dead_code)]
+#![allow(clippy::result_large_err)] // tonic's `Status`, fixed by the gRPC traits
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};

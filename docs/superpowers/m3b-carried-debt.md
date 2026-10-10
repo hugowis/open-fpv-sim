@@ -21,4 +21,4 @@ These items were deliberately left out of M3b, or surfaced while building it. Th
 - **The obstruction is found by a search, not 32 samples.** A golden-section search on the convex shape's signed distance finds the deepest point exactly, so a thin post on a long path is not stepped over (the spec's risk table named this).
 - **Objects standing on the ground are rooted below it.** Otherwise the nearest face of a building to a low path is its bottom face, and the knife edge measured under the building.
 - **Emitter frequencies may be 5300 to 6000 MHz.** The spec said 5600 to 6000; Lowband (5362 to 5621 MHz) is one of the VTX's own bands, so it is accepted for emitters too.
-- **The sync-loss test is at 4 km and 25 mW**, not 2 km: with the shipped diversity goggles (8 dBi patch), 25 mW at 2 km is still marginal rather than lost.
+- **The sync-loss test is at 4 km and 25 mW**, not 2 km: with the shipped diversity goggles (8 dBi patch), 25 mW at 2 km is at the edge (SNR about 0.5 dB), so whether the sync is lost there depends on the fade; at 4 km it is lost with any fade (see docs/research/video-link.md, "Link budget check").
