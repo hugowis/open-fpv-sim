@@ -7,7 +7,6 @@ import shutil
 
 import pytest
 
-import ofs
 from conftest import QUAD
 
 pytestmark = pytest.mark.skipif(not os.environ.get("OFS_SITL_LAUNCH"),
