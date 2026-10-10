@@ -7,10 +7,13 @@ use serde::Deserialize;
 pub mod world;
 pub use world::{AntennaKind, Polarization, WorldConfig};
 
-/// 3: adds the optional `[esc_telemetry]`, `[osd]` and `[vtx]` sections (M3a). 2: the required `[radio]` section (M2).
-pub const SCHEMA_VERSION: u32 = 3;
-/// Oldest schema this build still reads (schema-2 files have no video sections).
-pub const MIN_SCHEMA_VERSION: u32 = 2;
+/// 4: the `[radio]` section describes the real link (power, antennas) instead of fixed RSSI and loss figures, and
+/// the optional `[collision]` section arrives (M3c). 3: the optional `[esc_telemetry]`, `[osd]` and `[vtx]`
+/// sections (M3a). 2: the required `[radio]` section (M2).
+pub const SCHEMA_VERSION: u32 = 4;
+/// Oldest schema this build still reads: only 4 (the radio section's meaning changed, so older files cannot be
+/// mapped onto it).
+pub const MIN_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +33,8 @@ pub struct QuadConfig {
     pub initial: InitialSection,
     pub fc: FcSection,
     pub radio: RadioSection,
+    #[serde(default)]
+    pub collision: Option<CollisionSection>,
     #[serde(default)]
     pub esc_telemetry: Option<EscTelemetrySection>,
     #[serde(default)]
@@ -183,52 +188,78 @@ pub enum RadioKind {
 #[serde(deny_unknown_fields)]
 pub struct RadioSection {
     pub kind: RadioKind,
+    /// The ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 packets per second.
     pub packet_rate_hz: u32,
     /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
     pub uart: u8,
     #[serde(default = "default_latency_packets")]
     pub latency_packets: u32,
-    /// Per-packet loss probability in the good and the bad (burst) channel state.
-    #[serde(default)]
-    pub loss_good: f64,
-    #[serde(default)]
-    pub loss_bad: f64,
-    /// Per-packet probability of entering and of leaving the bad state (Gilbert-Elliott burst loss).
-    #[serde(default)]
-    pub p_good_to_bad: f64,
-    #[serde(default = "default_p_bad_to_good")]
-    pub p_bad_to_good: f64,
-    #[serde(default = "default_rssi_dbm")]
-    pub rssi_dbm: f64,
-    #[serde(default = "default_snr_db")]
-    pub snr_db: f64,
+    /// The handset's TX power in mW: one of 10, 25, 50, 100, 250, 500, 1000.
+    #[serde(default = "default_tx_power_mw")]
+    pub tx_power_mw: u32,
     #[serde(default = "default_link_stats_interval_packets")]
     pub link_stats_interval_packets: u32,
-    /// Reported as-is in CRSF link statistics.
-    #[serde(default)]
-    pub rf_mode: u8,
-    #[serde(default)]
-    pub tx_power: u8,
+    /// The receiver's antennas: one, or two for receiver diversity.
+    #[serde(default = "default_radio_antennas")]
+    pub antennas: Vec<RadioAntennaSection>,
 }
 
 fn default_latency_packets() -> u32 {
     1
 }
 
-fn default_p_bad_to_good() -> f64 {
-    1.0
-}
-
-fn default_rssi_dbm() -> f64 {
-    -50.0
-}
-
-fn default_snr_db() -> f64 {
-    10.0
+fn default_tx_power_mw() -> u32 {
+    250
 }
 
 fn default_link_stats_interval_packets() -> u32 {
     50
+}
+
+fn default_radio_antennas() -> Vec<RadioAntennaSection> {
+    vec![RadioAntennaSection::default()]
+}
+
+/// A receiver antenna on the quad: a 2.4 GHz dipole.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadioAntennaSection {
+    /// Unique; it names the antenna in the state stream.
+    pub name: String,
+    #[serde(default)]
+    pub kind: AntennaKind,
+    #[serde(default = "default_radio_antenna_gain_dbi")]
+    pub gain_dbi: f64,
+    #[serde(default = "default_radio_antenna_polarization")]
+    pub polarization: Polarization,
+    /// The dipole's axis in the body frame: FRD, x forward, y right, z down.
+    #[serde(default = "default_radio_antenna_mount_frd")]
+    pub mount_frd: [f64; 3],
+}
+
+impl Default for RadioAntennaSection {
+    fn default() -> Self {
+        Self {
+            name: "antenna".into(),
+            kind: AntennaKind::Omni,
+            gain_dbi: default_radio_antenna_gain_dbi(),
+            polarization: default_radio_antenna_polarization(),
+            mount_frd: default_radio_antenna_mount_frd(),
+        }
+    }
+}
+
+fn default_radio_antenna_gain_dbi() -> f64 {
+    2.0
+}
+
+fn default_radio_antenna_polarization() -> Polarization {
+    Polarization::Linear
+}
+
+/// Up and back, like the VTX antenna: a typical 2.4 GHz dipole on the back of the frame.
+fn default_radio_antenna_mount_frd() -> [f64; 3] {
+    [-0.5, 0.0, -1.0]
 }
 
 /// The battery as Betaflight's ESC sensor: KISS telemetry frames into a Betaflight UART.
@@ -354,6 +385,35 @@ fn default_pit_power_mw() -> f64 {
     0.1
 }
 
+/// How the quad collides with the world. Optional: the defaults generate a sphere per prop tip and one for the body.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollisionSection {
+    #[serde(default = "default_restitution")]
+    pub restitution: f64,
+    #[serde(default = "default_friction_coeff")]
+    pub friction_coeff: f64,
+    /// Collision spheres as `[x, y, z, radius]` in the body frame (FRD, metres). Default: generated from the
+    /// motor positions and the prop diameter (see [`QuadConfig::collision_spheres`]).
+    #[serde(default)]
+    pub spheres_frd_m: Option<Vec<[f64; 4]>>,
+}
+
+fn default_restitution() -> f64 {
+    0.3
+}
+
+fn default_friction_coeff() -> f64 {
+    0.5
+}
+
+/// The radius of each generated prop-tip sphere.
+pub const PROP_SPHERE_RADIUS_M: f64 = 0.02;
+/// The radius of the generated body sphere at the centre of mass.
+pub const BODY_SPHERE_RADIUS_M: f64 = 0.04;
+/// Generated spheres per prop tip circle.
+pub const SPHERES_PER_PROP: usize = 6;
+
 /// The video link model runs once per PAL field.
 pub const VIDEO_FIELD_RATE_HZ: u32 = 50;
 
@@ -399,11 +459,11 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
     let raw: toml::Value = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
-        Some(v @ ..=1) => {
+        Some(v @ ..=3) => {
             let message = format!(
-                "unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 2 adds the required [radio] section \
-                 and the CRSF receiver lines in the quad's betaflight.diff, see quads/opendrone-5f-freestyle.toml and \
-                 quads/opendrone-5f-freestyle.betaflight.diff"
+                "unsupported schema_version {v} (this build reads schema {SCHEMA_VERSION}); schema 4 removes radio.rssi_dbm, radio.snr_db, \
+                 radio.loss_good, radio.loss_bad, radio.p_good_to_bad and radio.p_bad_to_good, and adds radio.tx_power_mw, the \
+                 [[radio.antennas]] list and the optional [collision] section, see quads/opendrone-5f-freestyle.toml"
             );
             return Err(parse_err(message));
         }
@@ -459,6 +519,33 @@ impl QuadConfig {
     /// Resolves a path written in the quad file relative to the quad file's directory.
     pub fn resolve(&self, rel: &str) -> PathBuf {
         self.source_dir().join(rel)
+    }
+
+    /// The collision spheres: the file's list, or the generated default — 6 spheres of radius 2 cm evenly
+    /// spaced on each prop's tip circle (in the motor's plane), plus one body sphere of radius 4 cm at the
+    /// centre of mass.
+    pub fn collision_spheres(&self) -> Vec<[f64; 4]> {
+        if let Some(spheres) = self.collision.as_ref().and_then(|c| c.spheres_frd_m.clone()) {
+            return spheres;
+        }
+        let tip = self.prop.diameter_m / 2.0;
+        let mut spheres = Vec::with_capacity(self.frame.motor_positions_frd_m.len() * SPHERES_PER_PROP + 1);
+        for m in &self.frame.motor_positions_frd_m {
+            for k in 0..SPHERES_PER_PROP {
+                let a = 2.0 * std::f64::consts::PI * (k as f64) / SPHERES_PER_PROP as f64;
+                spheres.push([m[0] + tip * a.cos(), m[1] + tip * a.sin(), m[2], PROP_SPHERE_RADIUS_M]);
+            }
+        }
+        spheres.push([0.0, 0.0, 0.0, BODY_SPHERE_RADIUS_M]);
+        spheres
+    }
+
+    /// The restitution and friction coefficients of contacts, defaults filled in.
+    pub fn collision_contact(&self) -> (f64, f64) {
+        match &self.collision {
+            Some(c) => (c.restitution, c.friction_coeff),
+            None => (default_restitution(), default_friction_coeff()),
+        }
     }
 
     pub fn validate(&self) -> Vec<Problem> {
@@ -529,18 +616,51 @@ impl QuadConfig {
             c.check(ms > 0, field, "must be > 0");
         }
         let r = &self.radio;
+        c.check(
+            matches!(r.packet_rate_hz, 50 | 150 | 250 | 500),
+            "radio.packet_rate_hz",
+            format!("must be one of the ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 (got {})", r.packet_rate_hz),
+        );
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
-        for (p, field) in [
-            (r.loss_good, "radio.loss_good"),
-            (r.loss_bad, "radio.loss_bad"),
-            (r.p_good_to_bad, "radio.p_good_to_bad"),
-            (r.p_bad_to_good, "radio.p_bad_to_good"),
-        ] {
-            c.check((0.0..=1.0).contains(&p), field, format!("must be a probability in [0, 1] (got {p})"));
-        }
-        c.check(r.rssi_dbm.is_finite() && r.rssi_dbm <= 0.0, "radio.rssi_dbm", format!("must be <= 0 dBm (got {})", r.rssi_dbm));
-        c.check(r.snr_db.is_finite(), "radio.snr_db", "must be finite");
+        c.check(
+            matches!(r.tx_power_mw, 10 | 25 | 50 | 100 | 250 | 500 | 1000),
+            "radio.tx_power_mw",
+            format!("must be one of 10, 25, 50, 100, 250, 500 or 1000 mW (got {})", r.tx_power_mw),
+        );
         c.check(r.link_stats_interval_packets > 0, "radio.link_stats_interval_packets", "must be > 0");
+        c.check(
+            (1..=2).contains(&r.antennas.len()),
+            "radio.antennas",
+            format!("needs one or two antennas (two = receiver diversity), got {}", r.antennas.len()),
+        );
+        for (i, a) in r.antennas.iter().enumerate() {
+            let field = |f: &str| format!("radio.antennas[{i}].{f}");
+            c.check(matches!(a.kind, AntennaKind::Omni), &field("kind"), "only omni (dipole) antennas are modelled for ELRS");
+            c.check(
+                r.antennas.iter().take(i).all(|other| other.name != a.name),
+                &field("name"),
+                format!("{:?} is used twice", a.name),
+            );
+            c.check(a.gain_dbi.is_finite(), &field("gain_dbi"), "must be finite");
+            c.check(
+                a.mount_frd.iter().all(|x| x.is_finite()) && a.mount_frd.iter().any(|x| *x != 0.0),
+                &field("mount_frd"),
+                "must be a finite, non-zero direction",
+            );
+        }
+        if let Some(x) = &self.collision {
+            c.check(
+                (0.0..=1.0).contains(&x.restitution),
+                "collision.restitution",
+                format!("must be in [0, 1] (got {})", x.restitution),
+            );
+            c.non_negative(x.friction_coeff, "collision.friction_coeff");
+            if let Some(spheres) = &x.spheres_frd_m {
+                c.check(!spheres.is_empty(), "collision.spheres_frd_m", "must not be empty when given");
+                c.check(spheres.iter().flatten().all(|v| v.is_finite()), "collision.spheres_frd_m", "values must be finite");
+                c.check(spheres.iter().all(|s| s[3] > 0.0), "collision.spheres_frd_m", "radii must be > 0");
+            }
+        }
         if self.schema_version < 3 && (self.esc_telemetry.is_some() || self.osd.is_some() || self.vtx.is_some()) {
             c.check(false, "schema_version", "the [esc_telemetry], [osd] and [vtx] sections need schema_version = 3");
         }
