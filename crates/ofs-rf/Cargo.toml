@@ -8,6 +8,5 @@ rust-version.workspace = true
 [dependencies]
 glam.workspace = true
 ofs-core.workspace = true
-rand.workspace = true
 rand_chacha.workspace = true
 rand_distr.workspace = true

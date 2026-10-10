@@ -134,13 +134,16 @@ fn a_relative_and_an_absolute_path_to_one_quad_share_a_firmware_dir() {
 
 #[test]
 fn a_quad_dropped_onto_building_a_raises_one_collision_and_rests_on_the_roof() {
-    // Open loop cannot steer, so the quad falls 0.55 m onto BuildingA's roof (its top is the plane z = -14). The
-    // 0.3 default restitution's rebound of a 0.55 m drop stays under the 1 m/s event threshold, so the one touch
-    // raises exactly one event (a 1.5 m drop bounces and raises two, and the state keeps the last one's speed).
+    // Open loop cannot steer, so the quad falls onto BuildingA's roof (its top is the plane z = -14). Drop
+    // 0.54 m is the midpoint of the one-event window: the generated belly sphere (4 cm, 1 cm past the legs)
+    // touches after falling 0.50 m, so the impact sqrt(2*g*0.50) = 3.13 m/s clears the 3.0 assertion and the
+    // 0.3-restitution rebound (0.94) stays under the 1 m/s event threshold (collision_speed_mps carries the
+    // LAST event's speed, so a second event would break it).
     let mut cfg = load(Path::new(QUAD)).unwrap();
-    cfg.initial.position_ned_m = [110.0, -45.0, -14.55];
-    let building_a = flat_world().objects.iter().position(|o| o.name == "BuildingA").unwrap() as i32;
-    let mut v = vehicle_in(&cfg, flat_world());
+    cfg.initial.position_ned_m = [110.0, -45.0, -14.54];
+    let world = flat_world();
+    let building_a = world.objects.iter().position(|o| o.name == "BuildingA").unwrap() as i32;
+    let mut v = vehicle_in(&cfg, world);
     v.run_for(5.0).unwrap();
     let s = v.state();
     assert_eq!(s.collision_object, building_a, "the event names BuildingA");

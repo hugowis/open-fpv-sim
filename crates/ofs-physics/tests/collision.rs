@@ -158,6 +158,31 @@ fn a_bounce_raises_one_event_per_touching_spell() {
     assert_eq!(scalar(&s, names::BODY_COLLISION_OBJECT), f64::from(GROUND_OBJECT_INDEX));
 }
 
+/// Two posts side by side, two prop spheres flying into them symmetrically: both objects start touching
+/// on the same tick, so one step raises two events.
+#[test]
+fn two_objects_touched_on_one_tick_count_two_events() {
+    let objects = vec![
+        WorldObject {
+            name: "postL".into(),
+            shape: ofs_core::shape::Shape::Cylinder { center: DVec3::new(5.0, -0.5, -1.5), radius: 0.06, half_height: 1.5 },
+        },
+        WorldObject {
+            name: "postR".into(),
+            shape: ofs_core::shape::Shape::Cylinder { center: DVec3::new(5.0, 0.5, -1.5), radius: 0.06, half_height: 1.5 },
+        },
+    ];
+    let spheres = vec![(DVec3::new(0.5, -0.5, 0.0), 0.015), (DVec3::new(0.5, 0.5, 0.0), 0.015)];
+    let mut p = params(objects, spheres, 0.3);
+    p.contact_points_frd_m = vec![DVec3::new(0.0, 0.0, 0.03)];
+    let mut s = sim(p, state(DVec3::new(0.0, 0.0, -1.5), DVec3::new(10.0, 0.0, 0.0)));
+    // Both posts touch on one tick (t = 0.4425 s); the run ends before the toppled quad reaches the
+    // ground (t = 0.549 s), whose event would pollute the count.
+    s.run_for(0.45).unwrap();
+    assert_eq!(scalar(&s, names::BODY_COLLISION_COUNT), 2.0, "one event per object, both this spell");
+    assert!(scalar(&s, names::BODY_COLLISION_SPEED) > 9.0, "the reported speed is the touch's");
+}
+
 /// A legs-only rig: no collision spheres, just the four standard feet — only the spring-damper contact points
 /// can raise an event.
 fn legs_only(objects: Vec<WorldObject>) -> AirframeParams {
@@ -235,12 +260,13 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let events = ofs_physics::collision::resolve(&p, &bounds, DVec3::new(0.1, 0.06, 0.03).length() + 0.02, &mut s, &[], &mut touch, 0.0);
     assert_eq!(events.len(), 1, "one hard touch");
 
-    // Hand-computed, with inv_mass = 20/13, inv_inertia = (400, 400, 2000/9), e = 0.3. The position correction
-    // (0.01 along -x) leaves the lever at point - pos = (0.13, -0.03, 0.06), and the normal impulse is J = n*j:
+    // Hand-computed, with inv_mass = 20/13, inv_inertia = (400, 400, 2000/9), e = 0.3. The lever is recomputed
+    // from the post-correction centre: point_new = pos_new + R*centre_frd - n*r = (0, 0, -0.1), so lever =
+    // point_new - pos_new = (0.12, -0.03, 0.06), and the normal impulse is J = n*j:
     //   lever x n = (0, -0.06, -0.03)
     //   kn = inv_mass + n . ((R diag(I^-1) R^T (lever x n)) x lever):
     //     R^T . -> (0, -0.03, 0.06); diag . -> (0, -12, 13.33); R . -> (0, -13.33, -12);
-    //     . x lever -> (-1.16, -1.56, 1.73); n . -> 1.16   =>  kn = 20/13 + 1.16, j = 1.3/kn = 0.4818
+    //     . x lever -> (-1.16, -1.44, 1.60); n . -> 1.16   =>  kn = 20/13 + 1.16, j = 1.3/kn = 0.4818
     // That spin gives the contact point a tangential speed, so a Coulomb friction impulse follows at the same
     // lever; both impulses are recovered exactly from the linear velocity change (whose update carries no
     // attitude): J_total = m * dv, with J_total . n = j (the friction impulse is tangential). The stored rate is
@@ -252,7 +278,7 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let j = p.mass_kg * dv.dot(DVec3::NEG_X);
     assert!((j - 1.3 / (1.0 / 0.65 + 1.16)).abs() < 1e-9, "normal impulse {j}");
     let impulse = p.mass_kg * dv;
-    let lever = DVec3::new(0.13, -0.03, 0.06);
+    let lever = DVec3::new(0.12, -0.03, 0.06);
     let expected =
         DVec3::new(400.0, 400.0, 2000.0 / 9.0) * (DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2).inverse() * lever.cross(impulse));
     assert!((s.rate_frd_radps - expected).length() < 1e-9, "rate {} expected {expected}", s.rate_frd_radps);

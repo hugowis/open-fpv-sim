@@ -47,18 +47,21 @@ fn a_cylinder_normals_out_of_its_side_caps_and_rim() {
 fn normals_are_unit_length_everywhere_around_a_shape() {
     for shape in [BOX, CYL] {
         let (lo, hi) = (shape.bounds().min, shape.bounds().max);
-        for i in 0..20 {
-            for j in 0..20 {
-                let p = DVec3::new(
-                    lo.x + (hi.x - lo.x) * i as f64 / 19.0,
-                    lo.y + (hi.y - lo.y) * j as f64 / 19.0,
-                    lo.z - 1.0,
-                );
-                let n = shape.normal(p);
-                assert!((n.length() - 1.0).abs() < 1e-9, "normal at {p} is {n}");
-                // The gradient points towards increasing signed distance: stepping along it never goes deeper in.
-                let step = shape.signed_distance(p + n * 1e-6) - shape.signed_distance(p);
-                assert!(step >= -1e-9, "gradient points inward at {p}");
+        // One plane above the top, one through the middle (beside the sides), one below the bottom.
+        for z in [lo.z - 1.0, (lo.z + hi.z) * 0.5, hi.z + 1.0] {
+            for i in 0..20 {
+                for j in 0..20 {
+                    let p = DVec3::new(
+                        lo.x + (hi.x - lo.x) * i as f64 / 19.0,
+                        lo.y + (hi.y - lo.y) * j as f64 / 19.0,
+                        z,
+                    );
+                    let n = shape.normal(p);
+                    assert!((n.length() - 1.0).abs() < 1e-9, "normal at {p} is {n}");
+                    // The gradient points towards increasing signed distance: stepping along it never goes deeper in.
+                    let step = shape.signed_distance(p + n * 1e-6) - shape.signed_distance(p);
+                    assert!(step >= -1e-9, "gradient points inward at {p}");
+                }
             }
         }
     }

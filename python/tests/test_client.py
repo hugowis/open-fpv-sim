@@ -270,14 +270,16 @@ def test_two_lockstep_runs_give_identical_body_and_radio_signals(sim):
 def test_a_collision_event_names_the_object(sim, tmp_path):
     import pathlib
     import shutil
-    # 0.55 m above the roof: hard enough for the 1 m/s event threshold, while the 0.3 default restitution's
-    # rebound stays under it, so the one touch raises exactly one event (a 1.5 m drop bounces and raises two).
+    # 0.54 m above the roof is the midpoint of the one-event window: the generated belly sphere (4 cm, 1 cm
+    # past the legs) touches after falling 0.50 m, so the impact (3.13 m/s) clears the 3.0 assertion while
+    # the 0.3-restitution rebound (0.94 m/s) stays under the 1 m/s event threshold (a second event would
+    # carry the last touch's speed).
     text = pathlib.Path(QUAD).read_text().replace(
-        "position_ned_m = [0.0, 0.0, -0.03]", "position_ned_m = [110.0, -45.0, -14.55]")
+        "position_ned_m = [0.0, 0.0, -0.03]", "position_ned_m = [110.0, -45.0, -14.54]")
     quad = tmp_path / "onto-building-a.toml"
     quad.write_text(text)
     # fc.betaflight_diff resolves next to the quad file, so the copy needs the diff beside it.
-    shutil.copy(pathlib.Path(QUAD).with_name("opendrone-5f-freestyle.betaflight.diff"), tmp_path)
+    shutil.copy(pathlib.Path(QUAD).with_suffix(".betaflight.diff"), tmp_path)
     sim.load(str(quad), seed=1, open_loop_fc=True, world=WORLD)
     s = sim.run(5.0)
     collisions = [e for e in sim.events() if e.kind == "collision"]

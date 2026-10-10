@@ -85,7 +85,7 @@ pub const RADIO_SNR: &str = "radio.snr_db";
 pub const RADIO_ANTENNA: &str = "radio.antenna";
 /// Downlink link quality: percent of the last 100 packets the handset received.
 pub const RADIO_DOWNLINK_LQ: &str = "radio.downlink_lq";
-/// Fault: 1 = every uplink packet is lost.
+/// Fault: 1 = every packet is lost, uplink and downlink alike (the receiver and the handset both go silent).
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 /// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).
 pub const FC_RESTARTS: &str = "fc.restarts";

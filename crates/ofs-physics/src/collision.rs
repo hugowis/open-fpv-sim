@@ -50,8 +50,10 @@ impl TouchState {
 struct Contact {
     /// Out of the solid, unit.
     normal: DVec3,
-    /// The sphere's surface point along the normal (its deepest point into the solid).
-    point: DVec3,
+    /// The sphere's centre in the body frame and its radius: the impulse loop recomputes the surface point
+    /// from the post-correction centre.
+    centre_frd: DVec3,
+    radius: f64,
     penetration: f64,
     /// `GROUND_OBJECT_INDEX` for the ground, else the object's index.
     object: i32,
@@ -94,7 +96,10 @@ pub fn resolve(
     let inv_mass = 1.0 / p.mass_kg;
     let inv_inertia = DVec3::new(1.0 / p.inertia_kgm2.x, 1.0 / p.inertia_kgm2.y, 1.0 / p.inertia_kgm2.z);
     for c in &contacts {
-        let lever = c.point - s.pos_ned_m;
+        // The lever arm runs from the post-correction centre to the surface point, recomputed for the
+        // corrected body position (the collection-time point is up to one penetration stale).
+        let point = s.pos_ned_m + s.att * c.centre_frd - c.normal * c.radius;
+        let lever = point - s.pos_ned_m;
         let mut j = 0.0;
         let v_point = s.vel_ned_mps + (s.att * s.rate_frd_radps).cross(lever);
         let v_n = v_point.dot(c.normal);
@@ -145,7 +150,7 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
             let normal = DVec3::NEG_Z;
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
-            contacts.push(Contact { normal, point, penetration, object: GROUND_OBJECT_INDEX, inward });
+            contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: GROUND_OBJECT_INDEX, inward });
         }
         for (i, object) in p.objects.iter().enumerate() {
             // Broad phase: the quad's centre inside the object's box, grown by the quad's bounding radius.
@@ -160,7 +165,7 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
             let normal = object.shape.normal(centre);
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
-            contacts.push(Contact { normal, point, penetration, object: i as i32, inward });
+            contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: i as i32, inward });
         }
     }
     contacts

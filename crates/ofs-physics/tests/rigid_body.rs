@@ -71,7 +71,8 @@ fn a_quad_lands_and_rests_on_a_roof() {
     let vel = vec3(&s, names::BODY_VEL_NED);
     assert!(vel.length() < 1e-3, "settled: vel {vel}");
     let pos = vec3(&s, names::BODY_POS_NED);
-    // The legs (0.03 below the CoM) carry it 2 mm into the surface (mg/k), never through it.
+    // The legs (0.03 below the CoM) carry it ~0.5 mm into the surface (mg/(4k): four feet share the weight),
+    // never through it.
     let height = pos.z + 0.03;
     assert!(height > -1.0 && height < -0.995, "resting on the roof: legs at {height}, roof top at -1");
 }

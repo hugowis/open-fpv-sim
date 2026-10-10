@@ -247,8 +247,12 @@ impl WorldConfig {
             check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));
         }
         let h = &self.handset;
-        let handset_at = h.position(&p);
-        c.check(handset_at.iter().all(|v| v.is_finite()), "handset.position_ned_m", "values must be finite");
+        let handset_at = h.position(p);
+        // A given position is the handset's own fault; a derived one inherits the pilot's, whose finite
+        // check already fired — report the pilot only.
+        if h.position_ned_m.is_some() {
+            c.check(handset_at.iter().all(|v| v.is_finite()), "handset.position_ned_m", "values must be finite");
+        }
         c.check(
             handset_at[2].is_nan() || handset_at[2] <= 0.0,
             "handset.position_ned_m",

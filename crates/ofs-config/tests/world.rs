@@ -182,6 +182,13 @@ fn video_link_problems_in_the_quad_file_are_reported() {
 }
 
 #[test]
+fn a_nan_pilot_height_reports_the_pilot_not_the_derived_handset() {
+    let found = problems(&world_text().replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [-3.0, 2.0, nan]", 1));
+    assert!(found.iter().any(|p| p.starts_with("pilot.position_ned_m") && p.contains("finite")), "{found:#?}");
+    assert!(!found.iter().any(|p| p.starts_with("handset.position_ned_m")), "the derived position is not the fault: {found:#?}");
+}
+
+#[test]
 fn a_nan_pilot_height_is_reported_as_not_finite_only() {
     let found = problems(&world_text().replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [-3.0, 2.0, nan]", 1));
     assert!(found.iter().any(|p| p.starts_with("pilot.position_ned_m") && p.contains("finite")), "{found:#?}");
