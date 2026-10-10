@@ -10,22 +10,33 @@ normals and bounds are `ofs-core::shape`. The design is
 
 The obvious contact model is a **penalty spring**: once a sphere is inside a solid, push back with a force
 proportional to the penetration. The simulator already flies on one — the `[ground]` spring-damper of the landing
-contact points (3000 N/m on the shipped quad, tuned so the quad's 6.4 N of weight sags it 2 mm at rest). Carried to
-a wall it fails twice:
+contact points (3000 N/m on the shipped quad, tuned so the quad's 6.4 N of weight sags it 2 mm at rest). Carried
+to a wall it fails before any retuning is done: the energy balance `½kx² = ½mv²` gives the sink
+`x = v·√(m/k)`, so at 30 m/s the ground spring lets the quad sink `30·√(0.65/3000)` = 44 cm — through the 12 cm
+gate post and out the other side. The stiffness a wall needs grows with the square of the speed and the inverse
+square of the allowed sink, and it is paid for twice:
 
-- **Too soft to stop a crash.** At 30 m/s the quad sinks `x = v·√(m/k) = 30·√(0.65/3000)` = 44 cm before the
-  spring has taken the energy — through the 12 cm gate post and out the other side.
-- **Too stiff to integrate.** Stiffness grows with the square of the speed and the inverse square of the allowed
-  sink. Stopping 30 m/s within the post's 12 cm needs `k = m·(v/x)² ≈ 41 kN/m` (14 times the ground spring);
-  capping the sink at a prop sphere's radius, 2 cm, needs about 1.5 MN/m — 500 times. At that stiffness the
-  contact oscillates at `ω = √(k/m) = v/x = 1500 rad/s`, and the damper a penalty contact needs to shed the
-  energy is unstable in an explicit step unless the step stays below `√(m/k)`: with the 0.07 kg effective mass of
-  an off-centre hit at a prop sphere (see the impulse below), that is about 0.1 ms — beyond the simulator's 8 kHz
-  budget (0.125 ms), and every halving of the allowed sink doubles the required rate again.
+- **The marginal stop has no margin.** Stopping within the post means `x = v·√(m/k) ≤ 12 cm`, i.e.
+  `√(m/k) ≤ 4 ms` — the quad's own transit time through 12 cm at 30 m/s — so `k ≥ 0.65/(4 ms)² ≈ 41 kN/m`
+  (14 times the ground spring). That spring is exactly marginal: its sink is the full 12 cm, the stop ends at the
+  far face, and anything softer tunnels — so does this one against anything faster, since the sink scales with
+  the speed (40 m/s sinks 16 cm). (A square-on hit loads the whole 0.65 kg through whichever sphere touches; an
+  off-centre hit spins the quad instead and sinks it less — its effective mass is lower, see the impulse below —
+  so the square-on case governs.)
+- **The explicit step must fit inside the sink too.** A resting quad on an undamped spring rings on the pad, so
+  the contact carries a damper (near critical, `c = 2√(km)`), and an explicit step stays stable only below
+  `dt < 2m/c` — which at critical damping is exactly `√(m/k) = x/v`, the time the quad takes to cross its own
+  allowed sink at the impact speed. The marginal spring's ceiling is 4 ms and fits the 8 kHz step (0.125 ms) with
+  room to spare — but every step of firmness shrinks the ceiling with the sink: a 3 cm stop (a quarter of the
+  post, the first honest margin) needs `k = 0.65·(30/0.03)² = 650 kN/m` and a step below 1 ms; promising a
+  3.75 mm sink — the firmness an impulse gives for free — needs `k = 0.65·(30/0.00375)² ≈ 42 MN/m` and a step
+  below 0.125 ms, the entire physics budget spent on stability with none left for accuracy, and anything firmer
+  needs a faster clock.
 
-An **impulse** has no stiffness to integrate: it changes the velocity directly, by as much as the restitution
-asks, in one step. What limits it is geometry — at 8 kHz a 30 m/s quad moves 3.75 mm per step, a fifth of a prop
-sphere, so nothing tunnels. That is why the world's objects get impulses and the ground keeps its spring.
+An **impulse** carries none of this: it has no stiffness and no damper to integrate, and it bounds the velocity
+change directly — the normal velocity is reversed (scaled by the restitution) in one step, whatever the transit
+time. What limits it is plain geometry: at 8 kHz a 30 m/s quad moves 3.75 mm per step, a fifth of a prop sphere,
+so nothing tunnels between steps. That is why the world's objects get impulses and the ground keeps its spring.
 
 ## The contact model
 
