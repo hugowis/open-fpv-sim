@@ -662,7 +662,9 @@ mod erpm_block {
 
     #[test]
     fn the_erpm_block_rides_the_datagram_like_a_serial_block() {
-        let fdm = FdmPacket { timestamp_s: 1.0, ..Default::default() };
+        let fdm = FdmPacket { timestamp_s: 1.0, gyro_rpy_radps: [0.0; 3], accel_xyz_mps2: [0.0; 3],
+                              quat_wxyz: [1.0, 0.0, 0.0, 0.0], velocity_xyz_mps: [0.0; 3],
+                              position_xyz: [0.0; 3], pressure_pa: 0.0 };
         let rc = RcPacket { timestamp_s: 1.0, channels: [0; 16] };
         let datagram = state_datagram_with_serial(&fdm, &rc, &[(EXT_ERPM_BLOCK_ID, erpm_block_payload(&[0.0; 4]).to_vec())]);
         assert_eq!(datagram.len(), STATE_DATAGRAM_SIZE + 3 + 8);
