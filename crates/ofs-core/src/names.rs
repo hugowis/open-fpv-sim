@@ -77,8 +77,14 @@ pub const RADIO_TX_ENABLED: &str = "radio.tx_enabled";
 pub const RADIO_LINK_UP: &str = "radio.link_up";
 /// Uplink link quality: percent of the last 100 packets received.
 pub const RADIO_LQ: &str = "radio.lq_pct";
-/// Uplink RSSI as the receiver reports it.
+/// Uplink RSSI as the receiver reports it, at the antenna in use.
 pub const RADIO_RSSI: &str = "radio.rssi_dbm";
+/// Uplink SNR in dB at the antenna in use (LoRa decodes below the noise, so it may be negative).
+pub const RADIO_SNR: &str = "radio.snr_db";
+/// Index (into the quad file's radio antennas) of the antenna in use.
+pub const RADIO_ANTENNA: &str = "radio.antenna";
+/// Downlink link quality: percent of the last 100 packets the handset received.
+pub const RADIO_DOWNLINK_LQ: &str = "radio.downlink_lq";
 /// Fault: 1 = every uplink packet is lost.
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 /// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).

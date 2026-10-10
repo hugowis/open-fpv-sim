@@ -810,7 +810,9 @@ dependencies = [
 name = "ofs-radio"
 version = "0.1.0"
 dependencies = [
+ "glam 0.29.3",
  "ofs-core",
+ "ofs-rf",
  "proptest",
  "rand 0.8.8",
  "rand_chacha 0.3.1",

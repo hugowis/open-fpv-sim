@@ -18,8 +18,9 @@ use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
+use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
-use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody};
+use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
@@ -353,6 +354,34 @@ pub fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
     DVec3::from_array(ofs_proto::aim_ned(heading_deg, elevation_deg))
 }
 
+/// The world's objects as collidable shapes, exactly as the file gives them (not rooted).
+pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
+    world.objects.iter().map(|o| WorldObject { name: o.name.clone(), shape: object_shape(o) }).collect()
+}
+
+/// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.
+pub fn world_obstacles(world: &WorldConfig) -> Vec<Obstacle> {
+    world
+        .objects
+        .iter()
+        .filter(|o| o.rf_loss_db > 0.0)
+        .map(|o| Obstacle { shape: object_shape(o).rooted(), rf_loss_db: o.rf_loss_db })
+        .collect()
+}
+
+fn object_shape(o: &world_cfg::ObjectSection) -> Shape {
+    let center = v3(o.center_ned_m);
+    match o.shape {
+        world_cfg::Shape::Box => {
+            let s = o.size_m.unwrap_or_default();
+            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
+        }
+        world_cfg::Shape::Cylinder => {
+            Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
+        }
+    }
+}
+
 /// An emitter's frequency: its `freq_mhz`, or its band and channel in the factory table.
 pub(crate) fn emitter_freq_mhz(e: &world_cfg::EmitterSection) -> Result<f64, SimError> {
     if let Some(f) = e.freq_mhz {
@@ -382,24 +411,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
             },
         })
         .collect();
-    let obstacles = world
-        .objects
-        .iter()
-        .filter(|o| o.rf_loss_db > 0.0)
-        .map(|o| {
-            let center = v3(o.center_ned_m);
-            let shape = match o.shape {
-                world_cfg::Shape::Box => {
-                    let s = o.size_m.unwrap_or_default();
-                    Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
-                }
-                world_cfg::Shape::Cylinder => {
-                    Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
-                }
-            };
-            Obstacle { shape: shape.rooted(), rf_loss_db: o.rf_loss_db }
-        })
-        .collect();
+    let obstacles = world_obstacles(world);
     let emitters = world
         .emitters
         .iter()
@@ -468,6 +480,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Battery::new(battery, n, base_hz / cfg.battery.rate_hz, &mut bus)));
 
     let f = &cfg.frame;
+    let (restitution, friction_coeff) = cfg.collision_contact();
     let airframe = AirframeParams {
         mass_kg: f.mass_kg,
         inertia_kgm2: v3(f.inertia_kgm2),
@@ -486,8 +499,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             damping_nspm: cfg.ground.damping_nspm,
             friction_coeff: cfg.ground.friction_coeff,
         },
-        objects: Vec::new(), // the world's objects are wired in with the collision milestone
-        collision: Default::default(),
+        objects: world_objects(&opts.world),
+        collision: CollisionParams {
+            restitution,
+            friction_coeff,
+            spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
+        },
     };
     let initial = BodyState {
         pos_ned_m: v3(cfg.initial.position_ned_m),
@@ -507,18 +524,37 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
 
     let r = &cfg.radio;
+    let facing = opts.world.pilot.facing_deg;
+    let handset = &opts.world.handset;
     let link = LinkParams {
         packet_rate_hz: r.packet_rate_hz,
         latency_packets: r.latency_packets,
-        loss_good: r.loss_good,
-        loss_bad: r.loss_bad,
-        p_good_to_bad: r.p_good_to_bad,
-        p_bad_to_good: r.p_bad_to_good,
-        rssi_dbm: r.rssi_dbm,
-        snr_db: r.snr_db,
+        tx_power_mw: f64::from(r.tx_power_mw),
         link_stats_interval_packets: r.link_stats_interval_packets,
-        rf_mode: r.rf_mode,
-        tx_power: r.tx_power,
+        handset_position: v3(handset.position(&opts.world.pilot)),
+        handset_antennas: handset
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, a.beamwidth_deg),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
+            })
+            .collect(),
+        quad_antennas: r
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, None),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: v3(a.mount_frd).normalize(),
+            })
+            .collect(),
+        obstacles: world_obstacles(&opts.world),
+        fading: true,
+        ground_bounce: true,
     };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.

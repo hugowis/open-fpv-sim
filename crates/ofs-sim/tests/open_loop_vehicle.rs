@@ -18,12 +18,14 @@ fn throttle(t: f64) -> Sticks {
 #[test]
 fn resting_quad_stays_put() {
     let mut v = vehicle(1);
+    v.run_for(0.5).unwrap(); // settle onto the collision spheres (the default body sphere is 4 cm)
     let start = v.state().pos_ned_m;
+    assert!((start.z + 0.04).abs() < 2e-3, "rests on the body sphere at {}", start);
     v.run_for(3.0).unwrap();
     let s = v.state();
     assert!((s.pos_ned_m - start).length() < 2e-3, "moved to {}", s.pos_ned_m);
     assert!(s.vel_ned_mps.length() < 1e-3);
-    assert!((s.time_s - 3.0).abs() < 1e-12);
+    assert!((s.time_s - 3.5).abs() < 1e-12);
 }
 
 #[test]
@@ -84,7 +86,9 @@ fn the_radio_link_is_up_while_the_transmitter_is_on() {
     let r = v.state().radio;
     assert!(r.tx_enabled && r.link_up, "{r:?}");
     assert_eq!(r.lq_pct, 100.0);
-    assert_eq!(r.rssi_dbm, -50.0, "the quad file's radio.rssi_dbm");
+    // RSSI comes from the geometry (M3c): 250 mW, 2 dBi dipoles, the pad about a metre and a half from the
+    // open field's handset, fading on. The old fixed radio.rssi_dbm field is gone from the quad schema.
+    assert!((-40.0..=-30.0).contains(&r.rssi_dbm), "rssi at the pad: {r:?}");
     v.set_transmitter(false);
     v.run_for(0.5).unwrap();
     let r = v.state().radio;
