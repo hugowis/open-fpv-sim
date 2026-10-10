@@ -700,7 +700,7 @@ pub fn erpm_block_payload(motor_omega_radps: &[f64]) -> [u8; 8] {
     let mut out = [0u8; 8];
     for (i, omega) in motor_omega_radps.iter().take(4).enumerate() {
         let erpm = omega * 60.0 / (2.0 * std::f64::consts::PI) * crate::sitl::esc_telemetry::POLE_PAIRS / 100.0;
-        let value = erpm.clamp(0.0, 65535.0) as u16;
+        let value = erpm.round().clamp(0.0, 65535.0) as u16;  // round: the f64 chain is 69.999... for 1000 rpm
         out[i * 2..i * 2 + 2].copy_from_slice(&value.to_le_bytes());
     }
     out
