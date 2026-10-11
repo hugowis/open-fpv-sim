@@ -1027,21 +1027,24 @@ impl QuadConfig {
                     );
                 }
                 let pole_pairs = self.motors.iter().map(|m| m.pole_pairs).collect::<Vec<_>>();
-                if pole_pairs.iter().any(|p| *p != pole_pairs[0]) {
-                    c.check(false, "motors", "SITL quads need uniform motor pole_pairs: Betaflight has one motor_poles setting, and the KISS battery frames carry one pack eRPM");
-                }
-                let poles = 2 * pole_pairs[0];
-                match diff_setting(&text, "motor_poles").map(str::trim).and_then(|v| v.parse::<u32>().ok().map(|p| (v, p))) {
-                    Some((raw, set)) => c.check(
-                        set == poles,
-                        "fc.betaflight_diff",
-                        format!("the diff sets motor_poles = {raw} but the motors have {poles} poles (2 x pole_pairs); the RPM filter would mis-scale"),
-                    ),
-                    None => c.check(
-                        poles == 14,
-                        "motors",
-                        format!("the diff does not set motor_poles, so Betaflight uses its default 14, but the motors have {poles} poles; set pole_pairs = 7 or add `set motor_poles = {poles}` to the diff"),
-                    ),
+                // no motors (the frame's motor-count problem already reports it): the SITL diff checks are meaningless without them
+                if let Some(&first) = pole_pairs.first() {
+                    if pole_pairs.iter().any(|p| *p != first) {
+                        c.check(false, "motors", "SITL quads need uniform motor pole_pairs: Betaflight has one motor_poles setting, and the KISS battery frames carry one pack eRPM");
+                    }
+                    let poles = 2 * first;
+                    match diff_setting(&text, "motor_poles").map(str::trim).and_then(|v| v.parse::<u32>().ok().map(|p| (v, p))) {
+                        Some((raw, set)) => c.check(
+                            set == poles,
+                            "fc.betaflight_diff",
+                            format!("the diff sets motor_poles = {raw} but the motors have {poles} poles (2 x pole_pairs); the RPM filter would mis-scale"),
+                        ),
+                        None => c.check(
+                            poles == 14,
+                            "motors",
+                            format!("the diff does not set motor_poles, so Betaflight uses its default 14, but the motors have {poles} poles; set pole_pairs = 7 or add `set motor_poles = {poles}` to the diff"),
+                        ),
+                    }
                 }
             }
         }

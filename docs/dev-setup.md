@@ -145,7 +145,8 @@ block, which the old `sitl.c` does not intercept — and flies without motor tel
 What is new: Betaflight's own CRSF telemetry rides the ELRS downlink (the model is in
 `docs/research/elrs-link.md`, "Downlink telemetry"), so the HUD's battery line shows Betaflight's own voltage,
 current and flight mode while the telemetry is fresh and dashes out when it is not; and the simulator's per-motor
-eRPMs reach Betaflight's RPM filter. No configuration is involved — schema-4 quad files are unchanged.
+eRPMs reach Betaflight's RPM filter. No configuration was involved — schema-4 quad files, unchanged then, are
+refused since M4a's schema 5, and pole pairs are now configuration, validated against the diff.
 
 Manual check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` set, and the game):
 1. Fly and punch the throttle: the HUD battery line (`12.40 V   3.2 A   ACRO` — Betaflight's values, the flight

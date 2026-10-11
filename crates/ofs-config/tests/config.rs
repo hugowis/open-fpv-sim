@@ -342,6 +342,19 @@ fn non_finite_part_vectors_are_rejected() {
     }
 }
 
+#[test]
+fn an_empty_motor_list_on_a_frame_part_is_a_collected_error_not_a_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let emptied = part_text("frames", "opendrone-5f")
+        .replace("motor_positions_frd_m = [[-0.08, 0.08, 0.0], [0.08, 0.08, 0.0], [-0.08, -0.08, 0.0], [0.08, -0.08, 0.0]]",
+                 "motor_positions_frd_m = []");
+    write_part(dir.path(), "frames", "opendrone-5f", &emptied);
+    let err = load(&path).unwrap_err();
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    assert!(err.to_string().contains("motor_positions_frd_m"), "{err}");
+}
+
 /// The shipped diff's video lines, without the SmartAudio port.
 const ESC_OSD_DIFF: &str = "feature ESC_SENSOR\nserial 2 1024 115200 57600 0 115200\nset force_battery_cell_count = 6\n\
                             feature OSD\nserial 3 131073 115200 57600 0 115200\nset osd_displayport_device = MSP\n";
