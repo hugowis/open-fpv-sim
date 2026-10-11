@@ -8,8 +8,8 @@ use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 use super::codec::{
-    parse_reply_serial, state_datagram_with_serial, RcPacket, ReplySerial, ServoPacket, PORT_PWM, PORT_STATE,
-    REPLY_MAX, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
+    erpm_block_payload, parse_reply_serial, state_datagram_with_serial, RcPacket, ReplySerial, ServoPacket,
+    EXT_ERPM_BLOCK_ID, PORT_PWM, PORT_STATE, REPLY_MAX, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
 };
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
@@ -29,6 +29,9 @@ pub struct BridgeConfig {
     pub motor_count: usize,
     /// Bytes for SITL's UARTs, carried in the state datagram (e.g. the receiver's CRSF into UART2).
     pub serial: Vec<SerialLink>,
+    /// The motor-omega signals for the per-motor eRPM block (rad/s; empty for an open-loop quad —
+    /// but the bridge only runs under SITL). One value per motor, at most 4.
+    pub erpm: Vec<Signal<f64>>,
     /// Betaflight's UART TX bytes, routed to the models that listen (OSD, VTX)
     pub taps: Vec<SerialTap>,
 }
@@ -69,6 +72,8 @@ struct Inputs {
 
 pub struct SitlBridge {
     cfg: BridgeConfig,
+    /// The motor-omega signals for the per-motor eRPM block, copied out of the config before it moved.
+    erpm: Vec<Signal<f64>>,
     /// What was launched (with `--ip` under WSL); launched again when Betaflight reboots.
     launch: LaunchConfig,
     rx: UdpSocket,
@@ -142,8 +147,10 @@ impl SitlBridge {
             launch.launch.extend(["--ip".to_string(), ip.to_string()]);
         }
         let proc = SitlProcess::start(&launch)?;
+        let erpm = cfg.erpm.clone();
         Ok(Self {
             cfg,
+            erpm,
             launch,
             rx,
             tx,
@@ -266,7 +273,9 @@ pub fn wire_drops(serial: &[SerialLink], taps: &[SerialTap]) -> u64 {
 /// links for the next datagram.
 pub fn take_serial_blocks(links: &[SerialLink]) -> Vec<(u8, Vec<u8>)> {
     let mut blocks = Vec::new();
-    let mut room = SERIAL_SECTION_MAX;
+    // The eRPM block (header + 8 bytes, EXT_ERPM_BLOCK_ID) is appended after these blocks; reserving
+    // its bytes here keeps the datagram's serial section inside SITL's EXT_SERIAL_MAX by construction.
+    let mut room = SERIAL_SECTION_MAX - (SERIAL_BLOCK_HEADER + 8);
     for link in links {
         if room <= SERIAL_BLOCK_HEADER {
             break;
@@ -397,7 +406,12 @@ impl Model for SitlBridge {
         let fdm = fdm_packet(&frame, &self.cfg.home);
         // A first datagram may be resent, and SITL may receive more than one copy: it carries no UART bytes, so none
         // can reach Betaflight twice. They wait in the links for the next exchange.
-        let serial = if self.answered { take_serial_blocks(&self.cfg.serial) } else { Vec::new() };
+        let mut serial = if self.answered { take_serial_blocks(&self.cfg.serial) } else { Vec::new() };
+        // The per-motor eRPM block, after the UART blocks (a first, resendable datagram carries none).
+        if self.answered {
+            let omega: Vec<f64> = self.erpm.iter().map(|s| bus.get(*s)).collect();
+            serial.push((EXT_ERPM_BLOCK_ID, erpm_block_payload(&omega).to_vec()));
+        }
         let datagram = state_datagram_with_serial(&fdm, &rc, &serial);
         self.count_link_drops(bus);
 

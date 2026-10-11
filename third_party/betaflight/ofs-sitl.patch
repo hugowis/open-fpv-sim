@@ -1,3 +1,27 @@
+diff --git a/src/main/build/atomic.h b/src/main/build/atomic.h
+index 236ebf9..fefc234 100644
+--- a/src/main/build/atomic.h
++++ b/src/main/build/atomic.h
+@@ -22,7 +22,7 @@
+ 
+ #include <stdint.h>
+ 
+-#if !defined(UNIT_TEST)
++#if !defined(UNIT_TEST) && !defined(SIMULATOR_BUILD)
+ // BASEPRI manipulation functions
+ // only set_BASEPRI is implemented in device library. It does always create memory barrier
+ // missing versions are implemented here
+@@ -41,8 +41,8 @@ __attribute__( ( always_inline ) ) static inline void __set_BASEPRI_MAX_nb(uint3
+ 
+ #endif
+ 
+-#if defined(UNIT_TEST)
+-// atomic related functions for unittest.
++#if defined(UNIT_TEST) || defined(SIMULATOR_BUILD)
++// atomic related functions for unittest and simulator builds (software BASEPRI).
+ 
+ extern uint8_t atomic_BASEPRI;
+ 
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
 index a922cc7..a5f7355 100644
 --- a/src/main/drivers/serial_tcp.c
@@ -188,10 +212,33 @@ index a391e10..4ae8055 100644
  
  bool tcpIsStart(void);
 diff --git a/src/main/osd/osd.c b/src/main/osd/osd.c
-index c4d877b..bcf3138 100644
+index c4d877b..ffc53de 100644
 --- a/src/main/osd/osd.c
 +++ b/src/main/osd/osd.c
-@@ -777,7 +777,9 @@ static void osdGetBlackboxStatusString(char * buff)
+@@ -625,6 +625,7 @@ static int32_t getAverageEscRpm(void)
+ {
+ #ifdef USE_ESC_SENSOR
+     if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
++        if (osdEscDataCombined == NULL) return 0;  // OFS: assigned only in osdProcessStats2
+         return lrintf(erpmToRpm(osdEscDataCombined->rpm));
+     }
+ #endif
+@@ -714,9 +715,11 @@ static void osdUpdateStats(void)
+ 
+ #if defined(USE_ESC_SENSOR)
+     if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
+-        value = osdEscDataCombined->temperature;
+-        if (stats.max_esc_temp < value) {
+-            stats.max_esc_temp = value;
++        if (osdEscDataCombined != NULL) {  // OFS: assigned only in osdProcessStats2
++            value = osdEscDataCombined->temperature;
++            if (stats.max_esc_temp < value) {
++                stats.max_esc_temp = value;
++            }
+         }
+     } else
+ #endif
+@@ -777,7 +780,9 @@ static void osdGetBlackboxStatusString(char * buff)
          break;
      }
  
@@ -202,6 +249,19 @@ index c4d877b..bcf3138 100644
          const uint16_t storageUsedPercent = (storageUsed * 100) / storageTotal;
          tfp_sprintf(buff, "%d%%", storageUsedPercent);
      } else {
+diff --git a/src/main/osd/osd_elements.c b/src/main/osd/osd_elements.c
+index 580d4d3..016b9fd 100644
+--- a/src/main/osd/osd_elements.c
++++ b/src/main/osd/osd_elements.c
+@@ -2839,7 +2839,7 @@ void osdUpdateAlarms(void)
+ #if defined(USE_ESC_SENSOR)
+     if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
+         // This works because the combined ESC data contains the maximum temperature seen amongst all ESCs
+-        blink = osdConfig()->esc_temp_alarm != ESC_TEMP_ALARM_OFF && osdEscDataCombined->temperature >= osdConfig()->esc_temp_alarm;
++        blink = osdEscDataCombined != NULL && osdConfig()->esc_temp_alarm != ESC_TEMP_ALARM_OFF && osdEscDataCombined->temperature >= osdConfig()->esc_temp_alarm;
+     } else
+ #endif
+ #if defined(USE_DSHOT_TELEMETRY)
 diff --git a/src/main/scheduler/scheduler.c b/src/main/scheduler/scheduler.c
 index eace67b..a3b8fa7 100644
 --- a/src/main/scheduler/scheduler.c
@@ -263,7 +323,7 @@ index eace67b..a3b8fa7 100644
      readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);
      UNUSED(taskExecutionTimeUs);
 diff --git a/src/main/target/common_post.h b/src/main/target/common_post.h
-index 1bdd7fd..2c83972 100644
+index 1bdd7fd..3cedc92 100644
 --- a/src/main/target/common_post.h
 +++ b/src/main/target/common_post.h
 @@ -299,7 +299,7 @@
@@ -275,6 +335,15 @@ index 1bdd7fd..2c83972 100644
  #undef USE_ESC_SENSOR
  #endif
  
+@@ -679,7 +679,7 @@
+ #undef USE_CMS_FAILSAFE_MENU
+ #endif
+ 
+-#ifndef USE_DSHOT
++#if !defined(USE_DSHOT) && !defined(SIMULATOR_BUILD)  // SITL: DShot telemetry is emulated without the driver
+ #undef USE_DSHOT_TELEMETRY
+ #undef USE_DSHOT_BITBANG
+ #endif
 diff --git a/src/platform/SIMULATOR/include/platform/platform.h b/src/platform/SIMULATOR/include/platform/platform.h
 index 3759c26..4a82321 100644
 --- a/src/platform/SIMULATOR/include/platform/platform.h
@@ -291,11 +360,32 @@ index 3759c26..4a82321 100644
  #define USE_MAIN_ARGS
  #define GYRO_COUNT 1 // 1 Gyro
  
+diff --git a/src/platform/SIMULATOR/mk/SITL.mk b/src/platform/SIMULATOR/mk/SITL.mk
+index d1288e2..db34ec0 100644
+--- a/src/platform/SIMULATOR/mk/SITL.mk
++++ b/src/platform/SIMULATOR/mk/SITL.mk
+@@ -29,7 +29,6 @@ ARM_SDK_PREFIX  =
+ MCU_EXCLUDES = \
+         drivers/rx/rx_xn297.c \
+         drivers/display_ug2864hsweg01.c \
+-        telemetry/crsf.c \
+         telemetry/ghst.c \
+         telemetry/srxl.c \
+         io/displayport_oled.c
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..71ddf04 100644
+index ee216ef..341fe23 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
-@@ -101,6 +101,136 @@ static bool fdm_received = false;
+@@ -44,6 +44,8 @@
+ #include "drivers/pwm_output.h"
+ #include "drivers/servo_impl.h"
+ #include "drivers/pwm_output_impl.h"
++#include "drivers/dshot.h"
++#include "sensors/esc_sensor.h"
+ #include "drivers/light_led.h"
+ 
+ #include "drivers/timer.h"
+@@ -101,6 +103,151 @@ static bool fdm_received = false;
  
  static struct timespec start_time;
  static double simRate = 1.0;
@@ -344,10 +434,15 @@ index ee216ef..71ddf04 100644
 +static int extFdmSerialLen = 0;
 +static uint8_t extSerialPending[EXT_SERIAL_MAX];
 +static int extSerialPendingLen = 0;
++// The simulator's per-motor eRPM block (index 250), staged with the packet like the serial
++// bytes. Main thread only (extInjectSerial runs there, as does the consumer in pwmCompleteMotorUpdate).
++static uint16_t extErpm[4];
++static bool extErpmValid = false;
 +
 +static void extInjectSerial(const uint8_t *p, int len)
 +{
 +    int i = 0;
++    extErpmValid = false;  // the eRPM block is per datagram; the bridge sends it every datagram
 +    while (i + 3 <= len) {
 +        const unsigned uart = p[i];
 +        const int n = p[i + 1] | (p[i + 2] << 8);
@@ -355,6 +450,16 @@ index ee216ef..71ddf04 100644
 +        if (n > len - i) {
 +            printf("[SITL] malformed serial block for UART%u: %d bytes announced, %d left; rest dropped\n", uart + 1, n, len - i);
 +            return;
++        }
++        if (uart == 250) {  // M3d: the simulator's per-motor eRPM block
++            if (n != 8) {
++                printf("[SITL] malformed eRPM block: %d bytes, expected 8; dropped\n", n);
++            } else {
++                memcpy(extErpm, &p[i], sizeof(extErpm));
++                extErpmValid = true;
++            }
++            i += n;
++            continue;
 +        }
 +        if (!tcpSerialInject(uart, &p[i], n)) {
 +            printf("[SITL] %d serial bytes for UART%u dropped: no such open UART\n", n, uart + 1);
@@ -432,7 +537,7 @@ index ee216ef..71ddf04 100644
  static pthread_t tcpWorker, udpWorker, udpWorkerRC;
  static bool workerRunning = true;
  static udpLink_t stateLink, pwmLink, pwmRawLink, rcLink;
-@@ -205,6 +335,11 @@ static void gpxTrackClose(void)
+@@ -205,6 +352,11 @@ static void gpxTrackClose(void)
  
  int targetParseArgs(int argc, char * argv[])
  {
@@ -444,7 +549,7 @@ index ee216ef..71ddf04 100644
      for (int i = 1; i < argc; i++) {
          if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
              printf("Betaflight SITL\n");
-@@ -282,6 +417,23 @@ static void updateState(const fdm_packet* pkt)
+@@ -282,6 +434,23 @@ static void updateState(const fdm_packet* pkt)
      clock_gettime(CLOCK_MONOTONIC, &now_ts);
  
      const uint64_t realtime_now = micros64_real();
@@ -468,7 +573,7 @@ index ee216ef..71ddf04 100644
      if (realtime_now > last_realtime + 500*1e3) { // 500ms timeout
          last_timestamp = pkt->timestamp;
          last_realtime = realtime_now;
-@@ -483,8 +635,13 @@ static void updateState(const fdm_packet* pkt)
+@@ -483,8 +652,13 @@ static void updateState(const fdm_packet* pkt)
  
      // Periodic status (about 1 Hz)
      static uint64_t lastDebugTimeUs = 0;
@@ -484,7 +589,7 @@ index ee216ef..71ddf04 100644
  
          const armingDisableFlags_e flags = getArmingDisableFlags();
          if (flags) {
-@@ -512,6 +669,31 @@ static void updateState(const fdm_packet* pkt)
+@@ -512,6 +686,31 @@ static void updateState(const fdm_packet* pkt)
      }
  
      pthread_mutex_unlock(&updateLock); // can send PWM output now
@@ -516,7 +621,7 @@ index ee216ef..71ddf04 100644
  
  #if ENABLE_SIMULATOR_GYROPID_SYNC
      pthread_mutex_unlock(&mainLoopLock); // can run main loop
-@@ -524,8 +706,31 @@ static void* udpThread(void* data)
+@@ -524,8 +723,31 @@ static void* udpThread(void* data)
      int n = 0;
  
      while (workerRunning) {
@@ -548,7 +653,7 @@ index ee216ef..71ddf04 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -584,6 +789,16 @@ void systemInit(void)
+@@ -584,6 +806,16 @@ void systemInit(void)
      int ret;
  
      clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -565,7 +670,7 @@ index ee216ef..71ddf04 100644
      printf("[system]Init...\n");
  
      // Close the GPX track file cleanly on exit
-@@ -691,7 +906,16 @@ uint64_t millis64_real(void)
+@@ -691,7 +923,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
@@ -582,7 +687,7 @@ index ee216ef..71ddf04 100644
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +929,11 @@ uint64_t micros64(void)
+@@ -705,6 +946,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
@@ -594,10 +699,12 @@ index ee216ef..71ddf04 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +949,29 @@ uint32_t micros(void)
+@@ -720,6 +966,85 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
++uint8_t atomic_BASEPRI;  // software BASEPRI for ATOMIC_BLOCK (atomic.h); atomic.c is UNIT_TEST-only
++
 +uint32_t microsISR(void)  // used by serial RX drivers (e.g. CRSF frame timing)
 +{
 +    return micros();
@@ -606,7 +713,6 @@ index ee216ef..71ddf04 100644
 +#if defined(USE_ESC_SENSOR) && !defined(USE_DSHOT)
 +// ESC telemetry without DShot: the simulator streams KISS telemetry frames to the ESC sensor UART.
 +// These stand in for the helpers in drivers/dshot.c (compiled only with USE_DSHOT); same math.
-+bool useDshotTelemetry = false;
 +static float sitlErpmToHz = 0.0f;
 +
 +void initDshotTelemetry(const timeUs_t looptimeUs)
@@ -619,12 +725,67 @@ index ee216ef..71ddf04 100644
 +{
 +    return erpm * sitlErpmToHz * SECONDS_PER_MINUTE;
 +}
++
++#ifdef USE_DSHOT_TELEMETRY
++// SITL DShot-telemetry emulation (dshot.c compiles only with USE_DSHOT): per-motor eRPM provided by
++// the simulator. Task 1 feeds synthetic values so the chain is provable standalone; Task 2's state-
++// datagram block replaces them with the simulator's motor models.
++bool useDshotTelemetry = true;
++dshotTelemetryState_t dshotTelemetryState;
++dshotTelemetryCycleCounters_t dshotDMAHandlerCycleCounters;
++static uint32_t sitlDshotErpm[MAX_SUPPORTED_MOTORS];
++static float sitlMotorFrequencyHz[MAX_SUPPORTED_MOTORS];
++
++static void sitlDshotTelemetryFeed(void)
++{
++    for (int i = 0; i < 4; i++) {  // the datagram block's eRPM/100 (zeros until one arrives)
++        sitlDshotErpm[i] = extErpmValid ? (uint32_t)extErpm[i] * 100U : 0U;
++        sitlMotorFrequencyHz[i] = erpmToRpm(sitlDshotErpm[i] / 100U) / 60.0f;
++    }
++    dshotTelemetryState.readCount++;
++}
++
++uint16_t getDshotErpm(uint8_t motorIndex) { return (uint16_t)(sitlDshotErpm[motorIndex] / 100U); }  // ERPM_PER_LSB
++float getDshotRpm(uint8_t motorIndex) { return erpmToRpm(sitlDshotErpm[motorIndex] / 100U); }
++float getDshotRpmAverage(void)
++{
++    float sum = 0.0f;
++    for (int i = 0; i < 4; i++) {
++        sum += getDshotRpm(i);
++    }
++    return sum / 4.0f;
++}
++float getMotorFrequencyHz(uint8_t motorIndex) { return sitlMotorFrequencyHz[motorIndex]; }
++float getMinMotorFrequencyHz(void)
++{
++    float m = sitlMotorFrequencyHz[0];
++    for (int i = 1; i < 4; i++) {
++        if (sitlMotorFrequencyHz[i] < m) m = sitlMotorFrequencyHz[i];
++    }
++    return m;
++}
++bool isDshotMotorTelemetryActive(uint8_t motorIndex) { UNUSED(motorIndex); return extErpmValid; }
++bool isDshotTelemetryActive(void) { return true; }
++void dshotCleanTelemetryData(void) { memset(sitlDshotErpm, 0, sizeof(sitlDshotErpm)); }
++int16_t getDshotTelemetryMotorInvalidPercent(uint8_t motorIndex) { UNUSED(motorIndex); return 0; }
++void updateDshotTelemetry(void) {}
++bool getDshotSensorData(escSensorData_t *dest, int motorIndex)
++{
++    memset(dest, 0, sizeof(*dest));
++    dest->dataAge = 0;
++    dest->temperature = 25;
++    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100U, 0, 32767);  // 0.01 erpm units (escSensorData_t contract)
++    return true;
++}
++#else
++bool useDshotTelemetry = false;
++#endif
 +#endif
 +
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +1012,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +1085,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -637,7 +798,7 @@ index ee216ef..71ddf04 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +1028,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +1101,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -650,12 +811,15 @@ index ee216ef..71ddf04 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1137,71 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1210,74 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
 +    // pwmPkt now holds the latest motor values; simulatorSchedulerIdle() sends one reply per tick.
++#if defined(USE_ESC_SENSOR) && defined(USE_DSHOT_TELEMETRY) && !defined(USE_DSHOT)
++    sitlDshotTelemetryFeed();  // M3d: per-motor eRPM (synthetic until Task 2's datagram block)
++#endif
 +    return;
 +#endif
      if (pthread_mutex_trylock(&updateLock) != 0) return;
@@ -723,10 +887,21 @@ index ee216ef..71ddf04 100644
  {
      servosPwm[index] = value;
 diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
-index 69d3250..573b8ee 100644
+index 69d3250..a0f2bea 100644
 --- a/src/platform/SIMULATOR/target/SITL/target.h
 +++ b/src/platform/SIMULATOR/target/SITL/target.h
-@@ -135,11 +135,8 @@
+@@ -125,6 +125,10 @@
+ 
+ #ifndef USE_PWM_OUTPUT
+ #define USE_PWM_OUTPUT
++// M3d: DShot telemetry emulated in sitl.c (no DShot driver), so the RPM filter builds.
++#define USE_DSHOT_TELEMETRY
++#define USE_DSHOT_TELEMETRY_STATS
++#define USE_RPM_FILTER
+ #endif
+ 
+ #define USE_BLACKBOX
+@@ -135,11 +139,8 @@
  #undef USE_TELEMETRY_LTM
  #undef USE_ADC
  #undef USE_VCP
@@ -738,12 +913,15 @@ index 69d3250..573b8ee 100644
  #undef USE_SERIALRX_GHST
  #undef USE_SERIALRX_IBUS
  #undef USE_SERIALRX_SBUS
-@@ -152,17 +149,12 @@
+@@ -152,17 +153,14 @@
  #undef USE_TELEMETRY_HOTT
  #undef USE_TELEMETRY_SMARTPORT
  #undef USE_RESOURCE_MGMT
 -#undef USE_CMS
- #undef USE_TELEMETRY_CRSF
+-#undef USE_TELEMETRY_CRSF
++// M3d: CRSF telemetry enabled; atomic.h emulates BASEPRI in software for SIMULATOR_BUILD.
++#define USE_TELEMETRY
++#define USE_TELEMETRY_CRSF
  #undef USE_TELEMETRY_GHST
  #undef USE_TELEMETRY_IBUS
  #undef USE_TELEMETRY_JETIEXBUS
@@ -756,14 +934,13 @@ index 69d3250..573b8ee 100644
  #undef USE_VTX_MSP
  #undef USE_CAMERA_CONTROL
  #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
-@@ -171,6 +163,25 @@
+@@ -171,6 +169,24 @@
  #undef USE_I2C
  #undef USE_SPI
  
 +// Open FPV Sim: peripherals simulated over TCP UARTs (CRSF receiver, ESC telemetry, MSP DisplayPort OSD, VTX control)
 +#define USE_SERIALRX
 +#define USE_SERIALRX_CRSF
-+// USE_TELEMETRY_CRSF stays undefined: telemetry/crsf.c needs an ATOMIC_BLOCK shim for SITL (future work)
 +#ifndef USE_ESC_SENSOR
 +#define USE_ESC_SENSOR
 +#endif
@@ -782,7 +959,7 @@ index 69d3250..573b8ee 100644
  #define TARGET_FLASH_SIZE 2048
  
  #define DEFIO_NO_PORTS   // suppress 'no pins defined' warning
-@@ -263,6 +274,15 @@ uint64_t millis64(void);
+@@ -263,6 +279,15 @@ uint64_t millis64(void);
  
  int lockMainPID(void);
  

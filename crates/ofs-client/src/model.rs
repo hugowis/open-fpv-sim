@@ -288,6 +288,55 @@ impl OsdFrame {
     }
 }
 
+/// Betaflight's own telemetry as the handset received it over the ELRS downlink (`telemetry_age_s`
+/// is INFINITY until the first frame arrives; always INFINITY without SITL).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FcTelemetry {
+    pub battery_v: f64,
+    pub battery_a: f64,
+    pub battery_mah: f64,
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
+    pub flight_mode: String,
+    pub frame_count: u64,
+    pub telemetry_age_s: f64,
+}
+
+impl Default for FcTelemetry {
+    fn default() -> Self {
+        // INFINITY, not 0.0: the contract is "no frame yet", so a fresh client reports a stale age
+        // (see the doc comment and the HUD's freshness guard) rather than a zero-second-old one.
+        FcTelemetry {
+            battery_v: 0.0,
+            battery_a: 0.0,
+            battery_mah: 0.0,
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg: 0.0,
+            flight_mode: String::new(),
+            frame_count: 0,
+            telemetry_age_s: f64::INFINITY,
+        }
+    }
+}
+
+impl FcTelemetry {
+    fn from_pb(f: &pb::FcTelemetry) -> FcTelemetry {
+        FcTelemetry {
+            battery_v: f.battery_v,
+            battery_a: f.battery_a,
+            battery_mah: f.battery_mah,
+            roll_deg: f.roll_deg,
+            pitch_deg: f.pitch_deg,
+            yaw_deg: f.yaw_deg,
+            flight_mode: f.flight_mode.clone(),
+            frame_count: f.frame_count,
+            telemetry_age_s: f.telemetry_age_s,
+        }
+    }
+}
+
 /// Everything the HUD shows, from one state message.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Telemetry {
@@ -312,6 +361,7 @@ pub struct Telemetry {
     pub radio_antenna: String,
     /// What the handset receives.
     pub downlink_lq_pct: f64,
+    pub fc_telemetry: FcTelemetry,
     /// The inward speed of the last collision (0 until one happens).
     pub collision_speed_mps: f64,
     /// The session is paced to the wall clock right now (false while paused).
@@ -345,6 +395,7 @@ impl Telemetry {
             radio_snr_db: radio.snr_db,
             radio_antenna: radio.active_antenna.clone(),
             downlink_lq_pct: radio.downlink_lq_pct,
+            fc_telemetry: s.fc_telemetry.as_ref().map(FcTelemetry::from_pb).unwrap_or_default(),
             collision_speed_mps: s.collision_speed_mps,
             running: s.running,
             overruns: s.overruns,

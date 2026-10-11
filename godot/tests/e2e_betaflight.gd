@@ -68,6 +68,10 @@ func _run() -> void:
 	app.sticks_override = _sticks(0.0, true)
 	var armed: bool = await _wait_for(func(): return app.client.get_telemetry().get("motors_spinning", false), 10.0)
 	_check(armed, "the arm switch arms Betaflight (motors idle): %s" % str(app.client.get_telemetry().get("motor_cmd")))
+	var fc_fresh: bool = await _wait_for(func():
+		var t: Dictionary = app.client.get_telemetry()
+		return t.get("fc_telemetry_age_s", INF) < 1.0 and t.get("fc_battery_v", 0.0) > 0.0, 10.0)
+	_check(fc_fresh, "Betaflight's telemetry arrives over the downlink: %s" % str(app.client.get_telemetry().get("fc_battery_v")))
 	var osd_up: bool = await _wait_for(func(): return app.osd.is_drawing(), 20.0)
 	_check(osd_up, "Betaflight's OSD reaches the screen")
 	var osd: Dictionary = app.client.get_osd()
@@ -93,6 +97,8 @@ func _run() -> void:
 	_check(told, "cutting the radio is reported")
 	var disarmed: bool = await _wait_for(func(): return not app.client.get_telemetry().get("motors_spinning", true), 6.0)
 	_check(disarmed, "Betaflight fails safe: the motors stop within 6 s of the cut")
+	var fc_stale: bool = await _wait_for(func(): return app.client.get_telemetry().get("fc_telemetry_age_s", 0.0) > 1.0, 6.0)
+	_check(fc_stale, "the FC telemetry goes stale with the link: the HUD dashes")
 	_press(app, KEY_K)  # the pilot's own failsafe test works through the key too
 	_press(app, KEY_K)
 

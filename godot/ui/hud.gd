@@ -43,6 +43,11 @@ var _fatal := ""
 var _shown := true
 
 
+## Betaflight's telemetry is shown while younger than this; past it the line dashes out (goggles
+## behaviour: when the link drops, the pilot loses the FC's numbers too).
+const FC_TELEMETRY_FRESH_S := 1.0
+
+
 func _ready() -> void:
 	var root := Control.new()
 	root.name = "HudRoot"
@@ -187,6 +192,11 @@ func link_text() -> String:
 	return _link.text
 
 
+## The battery line (for the tests).
+func battery_text() -> String:
+	return _battery.text
+
+
 ## view: {phase, detail, telemetry: Dictionary (empty before the first state), sticks: Dictionary from Controls.read,
 ## controls_status, configurator, quad, camera, radio_cut}
 func update_view(view: Dictionary) -> void:
@@ -210,7 +220,12 @@ func update_view(view: Dictionary) -> void:
 		var snr: String = str(roundi(t.get("radio_snr_db", 0.0))) if up else "–"
 		_link.text = "LINK %s   LQ %d %%   %d dBm   SNR %s" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"], snr]
 		_link.add_theme_color_override("font_color", GREEN if up and t["lq_pct"] >= 80.0 else (YELLOW if up else RED))
-		_battery.text = "%.2f V   %.1f A" % [t["battery_voltage_v"], t["battery_current_a"]]
+		# The age default (INF) evaluates first, so the fresh branch's direct t["fc_..."] reads are safe.
+		var fc_age: float = t.get("fc_telemetry_age_s", INF)
+		if fc_age < FC_TELEMETRY_FRESH_S:
+			_battery.text = "%.2f V   %.1f A   %s" % [t["fc_battery_v"], t["fc_battery_a"], t["fc_flight_mode"]]
+		else:
+			_battery.text = "-- V   -- A   --"
 		if t.get("vtx_present", false):
 			var channel: String = t.get("vtx_channel_name", "")
 			_vtx.text = "VTX %s  %d MHz  %d mW%s" % [channel if channel != "" else "user", t["vtx_freq_mhz"], t["vtx_power_mw"], "  PIT" if t["vtx_pit_mode"] else ""]

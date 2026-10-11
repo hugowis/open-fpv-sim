@@ -21,7 +21,7 @@ use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
-use ofs_radio::elrs::{ElrsLink, LinkParams};
+use ofs_radio::elrs::{ElrsLink, FcTelemetry, FcTelemetryHandle, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, FIELD_RATE_HZ};
@@ -69,6 +69,38 @@ pub struct RadioState {
     pub active_antenna: String,
     /// What the handset receives.
     pub downlink_lq_pct: f64,
+}
+
+/// Betaflight's telemetry as the handset received it over the ELRS downlink (`age_s` = INFINITY until
+/// the first frame arrives; always INFINITY without SITL).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FcTelemetrySnapshot {
+    pub battery_v: f64,
+    pub battery_a: f64,
+    pub battery_mah: f64,
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
+    pub flight_mode: String,
+    pub frame_count: u64,
+    pub age_s: f64,
+}
+
+impl FcTelemetrySnapshot {
+    fn new(t: FcTelemetry, now_s: f64) -> Self {
+        let age_s = if t.frame_count == 0 { f64::INFINITY } else { now_s - t.last_frame_s };
+        Self {
+            battery_v: t.battery_v,
+            battery_a: t.battery_a,
+            battery_mah: t.battery_mah,
+            roll_deg: t.roll_deg,
+            pitch_deg: t.pitch_deg,
+            yaw_deg: t.yaw_deg,
+            flight_mode: t.flight_mode,
+            frame_count: t.frame_count,
+            age_s,
+        }
+    }
 }
 
 /// What the VTX model publishes (all zero without a `[vtx]` section or without Betaflight).
@@ -144,6 +176,7 @@ pub struct VehicleState {
     pub motor_rpm: Vec<f64>,
     pub motor_cmd: Vec<f64>,
     pub radio: RadioState,
+    pub fc_telemetry: FcTelemetrySnapshot,
     /// Betaflight reboots so far (e.g. after a Configurator save); always 0 without SITL.
     pub fc_restarts: u32,
     pub vtx: VtxInfo,
@@ -285,6 +318,7 @@ pub struct Vehicle {
     h: Handles,
     sitl: bool,
     osd: Option<OsdHandle>,
+    fc_telemetry: FcTelemetryHandle,
     world: WorldConfig,
     /// The quad file's radio antenna names, by index (the state's `active_antenna`).
     radio_antenna_names: Vec<String>,
@@ -583,8 +617,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         ground_bounce: true,
     };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
+    let radio_tap = Wire::new(VIDEO_TAP_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    models.push(Box::new(ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), &mut bus)));
+    let elrs = ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), radio_tap.clone(), &mut bus);
+    let fc_telemetry = elrs.fc_telemetry_handle();
+    models.push(Box::new(elrs));
 
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
@@ -625,7 +662,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     home: Home { lat_deg: cfg.home.lat_deg, lon_deg: cfg.home.lon_deg, alt_m: cfg.home.alt_m },
                     motor_count: n,
                     serial,
-                    taps: video.taps,
+                    erpm: (0..n).map(|i| bus.signal(&names::motor_omega(i))).collect(),
+                    taps: {
+                        let mut taps = vec![SerialTap { uart_index: r.uart - 1, tx: radio_tap.clone() }];
+                        taps.extend(video.taps);
+                        taps
+                    },
                 },
                 &mut bus,
             )
@@ -649,7 +691,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     }
     let radio_antenna_names = cfg.radio.antennas.iter().map(|a| a.name.clone()).collect();
     let mut vehicle =
-        Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, world: opts.world.clone(), radio_antenna_names };
+        Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, fc_telemetry, world: opts.world.clone(), radio_antenna_names };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
@@ -750,6 +792,7 @@ impl Vehicle {
                     downlink_lq_pct: b.get(h.radio_downlink_lq),
                 }
             },
+            fc_telemetry: FcTelemetrySnapshot::new(self.fc_telemetry.latest(), self.scheduler.time_s()),
             fc_restarts: b.get(h.fc_restarts) as u32,
             vtx: VtxInfo {
                 present: b.get(h.vtx_present) > 0.5,
@@ -888,6 +931,16 @@ mod tests {
         let state = vehicle.state();
         assert!(!state.vtx.present);
         assert_eq!(state.video, VideoInfo::default());
+    }
+
+    #[test]
+    fn an_open_loop_quad_reports_no_fc_telemetry() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.run_for(0.1).unwrap();
+        let fc = vehicle.state().fc_telemetry;
+        assert_eq!(fc.frame_count, 0);
+        assert_eq!(fc.age_s, f64::INFINITY);
+        assert!(fc.flight_mode.is_empty());
     }
 
     #[test]

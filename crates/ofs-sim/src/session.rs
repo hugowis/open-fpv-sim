@@ -318,6 +318,17 @@ impl Session {
             serial_dropped_bytes: s.serial_dropped_bytes,
             video: Some(video_msg(&s.video)),
             collision_speed_mps: s.collision_speed_mps,
+            fc_telemetry: Some(pb::FcTelemetry {
+                battery_v: s.fc_telemetry.battery_v,
+                battery_a: s.fc_telemetry.battery_a,
+                battery_mah: s.fc_telemetry.battery_mah,
+                roll_deg: s.fc_telemetry.roll_deg,
+                pitch_deg: s.fc_telemetry.pitch_deg,
+                yaw_deg: s.fc_telemetry.yaw_deg,
+                flight_mode: s.fc_telemetry.flight_mode.clone(),
+                frame_count: s.fc_telemetry.frame_count,
+                telemetry_age_s: s.fc_telemetry.age_s,
+            }),
         }
     }
 
@@ -513,6 +524,17 @@ mod tests {
                 snr_db: 49.0,
                 active_antenna: "antenna".into(),
                 downlink_lq_pct: 100.0,
+            },
+            fc_telemetry: crate::vehicle::FcTelemetrySnapshot {
+                battery_v: 0.0,
+                battery_a: 0.0,
+                battery_mah: 0.0,
+                roll_deg: 0.0,
+                pitch_deg: 0.0,
+                yaw_deg: 0.0,
+                flight_mode: String::new(),
+                frame_count: 0,
+                age_s: f64::INFINITY,
             },
             fc_restarts: 0,
             vtx: crate::vehicle::VtxInfo { present: false, band: 0, channel: 0, freq_mhz: 0, power_mw: 0, pit_mode: false },

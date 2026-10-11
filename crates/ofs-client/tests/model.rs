@@ -1,5 +1,5 @@
 use glam::DVec3;
-use ofs_client::{ClientError, ErrorKind, Event, EventKind, OsdFrame, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
+use ofs_client::{ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -77,6 +77,12 @@ fn telemetry_is_derived_from_a_state_message() {
     assert_eq!((t.overruns, t.fc_restarts), (3, 1));
     let disarmed = Telemetry::from_pb(&pb::State { motor_cmd: vec![0.0; 4], ..Default::default() });
     assert!(!disarmed.motors_spinning);
+}
+
+#[test]
+fn default_telemetry_age_is_infinity() {
+    // No frame yet: the age must be INFINITY (the doc comment's contract), not 0.0 ("just arrived").
+    assert_eq!(FcTelemetry::default().telemetry_age_s, f64::INFINITY);
 }
 
 #[test]

@@ -7,8 +7,8 @@ These items were deliberately left out of M3a, or surfaced while building it. Th
 - **The analog link model and degradation shader (M3b).** Layer 3 of the FPV render path (between the OSD and the HUD) and the `vtx.*` bus signals the model will read are already in place.
 - **Font page 1 and the HD/digital OSD.** Only the first 256 glyphs (Betaflight's analog font) are converted and drawn from the atlas; HD/digital OSDs use more pages and a different element set.
 - **An OSD aspect-ratio setting.** The OSD draws in a fixed 4:3 box fitted to the window height today.
-- **The RPM filter and per-motor eRPM.** Needs DShot telemetry emulation in SITL (per-motor eRPM each loop); the ESC-sensor frames carry only an RPM the filter ignores (M0 §5, §7 risk 2).
-- **CRSF telemetry back to the radio.** The HUD keeps reading the battery from the simulator's own models; SITL's CRSF telemetry also needs the atomic-block shim from M0 (§5).
+- **The RPM filter and per-motor eRPM.** Needs DShot telemetry emulation in SITL (per-motor eRPM each loop); the ESC-sensor frames carry only an RPM the filter ignores (M0 §5, §7 risk 2) (closed in M3d).
+- **CRSF telemetry back to the radio.** The HUD keeps reading the battery from the simulator's own models; SITL's CRSF telemetry also needs the atomic-block shim from M0 (§5) (closed in M3d).
 - **A thermal model.** The ESC temperature in the KISS frames is a constant 25 degC.
 - **VTX faults (M4).** The faults module covers physics and the radio link, not the video chain yet.
 

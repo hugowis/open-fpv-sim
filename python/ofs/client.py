@@ -19,7 +19,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -35,6 +35,23 @@ class RadioLink:
     snr_db: float = 0.0  # may be negative: LoRa decodes below the noise
     active_antenna: str = ""
     downlink_lq_pct: float = 0.0  # what the handset receives
+
+
+@dataclass(frozen=True)
+class FcTelemetry:
+    """Betaflight's own telemetry as the handset received it over the ELRS downlink.
+
+    telemetry_age_s is INFINITY until the first frame arrives (and always INFINITY without SITL).
+    """
+    battery_v: float = 0.0
+    battery_a: float = 0.0
+    battery_mah: float = 0.0
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
+    yaw_deg: float = 0.0
+    flight_mode: str = ""
+    frame_count: int = 0
+    telemetry_age_s: float = float("inf")
 
 
 @dataclass(frozen=True)
@@ -187,6 +204,7 @@ class State:
     motor_rpm: tuple
     motor_cmd: tuple
     radio: RadioLink = field(default_factory=RadioLink)
+    fc_telemetry: FcTelemetry = field(default_factory=FcTelemetry)
     running: bool = False
     overruns: int = 0
     fc_restarts: int = 0
@@ -260,6 +278,10 @@ def _state(m) -> State:
         motor_cmd=tuple(m.motor_cmd),
         radio=RadioLink(m.radio.tx_enabled, m.radio.link_up, m.radio.lq_pct, m.radio.rssi_dbm,
                         m.radio.snr_db, m.radio.active_antenna, m.radio.downlink_lq_pct),
+        fc_telemetry=FcTelemetry(m.fc_telemetry.battery_v, m.fc_telemetry.battery_a, m.fc_telemetry.battery_mah,
+                                 m.fc_telemetry.roll_deg, m.fc_telemetry.pitch_deg, m.fc_telemetry.yaw_deg,
+                                 m.fc_telemetry.flight_mode, m.fc_telemetry.frame_count,
+                                 m.fc_telemetry.telemetry_age_s),
         running=m.running,
         overruns=m.overruns,
         fc_restarts=m.fc_restarts,

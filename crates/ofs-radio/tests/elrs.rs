@@ -10,17 +10,21 @@ use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization}
 
 const BASE_HZ: u32 = 8000;
 
-fn rig(params: LinkParams, seed: u64) -> (Scheduler, Wire) {
+fn rig(params: LinkParams, seed: u64) -> (Scheduler, Wire, Wire, ElrsHandle) {
     let mut bus = Bus::new();
     let uart = Wire::new(1 << 20);
+    let telemetry_in = Wire::new(1 << 16);
     let div = BASE_HZ / params.packet_rate_hz;
-    let link = ElrsLink::new(params, div, seed, uart.clone(), &mut bus);
+    let link = ElrsLink::new(params, div, seed, uart.clone(), telemetry_in.clone(), &mut bus);
+    let handle = link.fc_telemetry_handle();
     let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
     bus.set(tx, 1.0);
     let mut s = Scheduler::new(BASE_HZ, bus);
     s.add(Box::new(link));
-    (s, uart)
+    (s, uart, telemetry_in, handle)
 }
+
+type ElrsHandle = ofs_radio::elrs::FcTelemetryHandle;
 
 fn set(s: &mut Scheduler, name: &str, v: f64) {
     let sig = s.bus_mut().signal::<f64>(name);
@@ -87,7 +91,7 @@ fn the_rssi_reaches_the_sensitivity_at_the_published_range() {
     for (power_mw, range_m) in [(250.0, 43_600.0), (10.0, 8_700.0)] {
         let mut p = LinkParams::ideal(500);
         p.tx_power_mw = power_mw;
-        let (mut s, _uart) = rig(p, 1);
+        let (mut s, _uart, _telemetry_in, _fc) = rig(p, 1);
         set_pos(&mut s, DVec3::new(range_m, 0.0, -1.7));
         packets(&mut s, 2);
         let rssi = get(&s, names::RADIO_RSSI);
@@ -98,7 +102,7 @@ fn the_rssi_reaches_the_sensitivity_at_the_published_range() {
 
 #[test]
 fn ideal_link_sends_one_rc_frame_per_packet_and_periodic_statistics() {
-    let (mut s, uart) = rig(LinkParams::ideal(500), 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     set_pos(&mut s, DVec3::new(0.0, 0.0, -1.7)); // level with the handset, 2 m away: a horizontal path
     s.run_for(1.0).unwrap();
     let f = frames(&uart);
@@ -120,7 +124,7 @@ fn ideal_link_sends_one_rc_frame_per_packet_and_periodic_statistics() {
 fn a_second_antenna_is_picked_when_it_is_clearly_better() {
     let mut p = LinkParams::ideal(500);
     p.quad_antennas.push(Antenna { kind: AntennaKind::Patch { beamwidth_deg: 60.0 }, gain_dbi: 8.0, polarization: Polarization::Linear, axis: DVec3::NEG_X });
-    let (mut s, uart) = rig(p, 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(p, 1);
     set_pos(&mut s, DVec3::new(20.0, 0.0, -1.7)); // the handset is due west of the quad: the patch's boresight
     s.run_for(1.0).unwrap();
     let stats = statistics(&frames(&uart));
@@ -131,12 +135,12 @@ fn a_second_antenna_is_picked_when_it_is_clearly_better() {
 
 #[test]
 fn a_dipole_crossed_to_the_handset_loses_20_db() {
-    let (mut aligned, _) = rig(LinkParams::ideal(500), 1);
+    let (mut aligned, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     set_pos(&mut aligned, DVec3::new(0.0, 0.0, -1.7)); // level with the handset: a horizontal path
     packets(&mut aligned, 2);
     let mut crossed_params = LinkParams::ideal(500);
     crossed_params.quad_antennas[0].axis = DVec3::Y; // broadside to the path, its field crossed with the handset's
-    let (mut crossed, _) = rig(crossed_params, 1);
+    let (mut crossed, _, _telemetry_in, _fc) = rig(crossed_params, 1);
     set_pos(&mut crossed, DVec3::new(0.0, 0.0, -1.7));
     packets(&mut crossed, 2);
     let loss = get(&aligned, names::RADIO_RSSI) - get(&crossed, names::RADIO_RSSI);
@@ -148,8 +152,8 @@ fn behind_a_building_the_rssi_drops_by_its_capped_knife_edge_loss() {
     let mut blocked_params = LinkParams::ideal(500);
     let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(10.0, 10.0, 10.0) };
     blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss_db: 25.0 }];
-    let (mut open, _) = rig(LinkParams::ideal(500), 1);
-    let (mut blocked, _) = rig(blocked_params, 1);
+    let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
+    let (mut blocked, _, _telemetry_in, _fc) = rig(blocked_params, 1);
     set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));
     set_pos(&mut blocked, DVec3::new(100.0, 0.0, -1.7));
     packets(&mut open, 2);
@@ -163,7 +167,7 @@ fn a_hovering_quad_in_the_open_keeps_lq_at_100() {
     let mut p = LinkParams::ideal(500);
     p.fading = true;
     p.ground_bounce = true;
-    let (mut s, _uart) = rig(p, 7);
+    let (mut s, _uart, _telemetry_in, _fc) = rig(p, 7);
     set_pos(&mut s, DVec3::new(30.0, 0.0, -1.7));
     s.run_for(1.0).unwrap();
     assert_eq!(get(&s, names::RADIO_LQ), 100.0, "60 dB of margin survives any fade");
@@ -175,7 +179,7 @@ fn the_same_seed_gives_the_same_packet_stream() {
         let mut p = LinkParams::ideal(500);
         p.fading = true;
         p.ground_bounce = true;
-        let (mut s, uart) = rig(p, seed);
+        let (mut s, uart, _telemetry_in, _fc) = rig(p, seed);
         for north in [0.0, 500.0, 1000.0] {
             set_pos(&mut s, DVec3::new(north, 0.0, -1.7));
             s.run_for(0.2).unwrap();
@@ -194,7 +198,7 @@ fn the_loss_draws_do_not_depend_on_the_transmitter() {
     let pattern = |tx_from: u64| {
         let mut p = LinkParams::ideal(500);
         p.fading = true;
-        let (mut s, uart) = rig(p, 3);
+        let (mut s, uart, _telemetry_in, _fc) = rig(p, 3);
         set_pos(&mut s, DVec3::new(42_000.0, 0.0, -1.7));
         let mut seen = Vec::new();
         for t in 0..8000 {
@@ -211,7 +215,7 @@ fn the_loss_draws_do_not_depend_on_the_transmitter() {
 
 #[test]
 fn with_the_transmitter_off_the_receiver_goes_silent_and_lq_drains() {
-    let (mut s, uart) = rig(LinkParams::ideal(500), 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     s.run_for(0.2).unwrap(); // LQ 100
     frames(&uart); // discard the connected period's frames, still buffered on the wire
     set(&mut s, names::RADIO_TX_ENABLED, 0.0);
@@ -224,7 +228,7 @@ fn with_the_transmitter_off_the_receiver_goes_silent_and_lq_drains() {
 
 #[test]
 fn the_radio_link_loss_fault_silences_the_receiver() {
-    let (mut s, uart) = rig(LinkParams::ideal(500), 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     s.run_for(0.1).unwrap();
     let before = rc(&frames(&uart)).len();
     assert!(before > 0);
@@ -237,7 +241,7 @@ fn the_radio_link_loss_fault_silences_the_receiver() {
 
 #[test]
 fn the_sticks_reach_the_receiver_after_latency_packets() {
-    let (mut s, uart) = rig(LinkParams { latency_packets: 5, ..LinkParams::ideal(500) }, 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams { latency_packets: 5, ..LinkParams::ideal(500) }, 1);
     packets(&mut s, 2); // prime the pipeline with the neutral sticks
     set(&mut s, names::RC_ROLL, 0.5);
     s.run_for(0.012).unwrap(); // 6 packets at 500 Hz
@@ -252,11 +256,131 @@ fn the_sticks_reach_the_receiver_after_latency_packets() {
 
 #[test]
 fn sticks_become_crsf_channels_in_aetr_order() {
-    let (mut s, uart) = rig(LinkParams::ideal(500), 1);
+    let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     for (name, v) in [(names::RC_ROLL, 0.2), (names::RC_PITCH, -0.2), (names::RC_YAW, 0.5), (names::RC_THROTTLE, 0.25)] {
         set(&mut s, name, v);
     }
     s.run_for(0.004).unwrap();
     let frame = rc(&frames(&uart)).pop().unwrap();
     assert_eq!((frame[0], frame[1], frame[2], frame[3]), (stick_ticks(0.2), stick_ticks(-0.2), ofs_radio::crsf::throttle_ticks(0.25), stick_ticks(0.5)));
+}
+
+mod fc_telemetry {
+    use super::*;
+    use ofs_radio::crsf::{FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE};
+    use ofs_radio::elrs::FcTelemetry;
+
+    /// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
+    fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {
+        let mut f = vec![0xC8, (payload.len() + 2) as u8, frame_type];
+        f.extend_from_slice(payload);
+        f.push(ofs_radio::crsf::crc8_dvb_s2(&f[2..]));
+        f
+    }
+
+    fn battery_frame(voltage_v: f64, current_a: f64, _mah: u32, index: u8) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&((voltage_v * 10.0) as u16).to_be_bytes()); // 0.1 V units
+        p.extend_from_slice(&((current_a * 10.0) as u16).to_be_bytes()); // 0.1 A units
+        p.extend_from_slice(&[0, 0, index]); // u24 mAh: the index rides in the low byte
+        p.push(100);
+        frame(FRAMETYPE_BATTERY_SENSOR, &p)
+    }
+
+    fn attitude_frame(pitch_deg: f64, roll_deg: f64, yaw_deg: f64) -> Vec<u8> {
+        let rad = |d: f64| (d.to_radians() * 10_000.0).round() as i16;
+        let mut p = Vec::new();
+        for v in [rad(pitch_deg), rad(roll_deg), rad(yaw_deg)] {
+            p.extend_from_slice(&v.to_be_bytes());
+        }
+        frame(FRAMETYPE_ATTITUDE, &p)
+    }
+
+    #[test]
+    fn a_frame_flies_every_fourth_downlink_packet_and_updates_the_handle() {
+        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        telemetry_in.write(&battery_frame(24.6, 3.2, 0, 7));
+        packets(&mut s, 3);
+        assert_eq!(fc.latest().frame_count, 0, "no slot before the 4th packet");
+        packets(&mut s, 1);
+        let t = fc.latest();
+        assert_eq!(t.frame_count, 1);
+        assert!((t.battery_v - 24.6).abs() < 1e-9, "{:?}", t);
+        assert!((t.battery_a - 3.2).abs() < 1e-9, "{:?}", t);
+        assert_eq!(t.battery_mah, 7.0, "the u24's low byte rode through: {:?}", t);
+        packets(&mut s, 4);
+        assert_eq!(fc.latest().frame_count, 1, "the FIFO is empty: later slots fly idle");
+    }
+
+    #[test]
+    fn attitude_and_flight_mode_decode() {
+        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        telemetry_in.write(&attitude_frame(-4.5, 12.3, 90.0));
+        telemetry_in.write(&frame(FRAMETYPE_FLIGHT_MODE, b"ACRO\0"));
+        packets(&mut s, 8);
+        let t = fc.latest();
+        assert!((t.pitch_deg + 4.5).abs() < 0.01 && (t.roll_deg - 12.3).abs() < 0.01, "{:?}", t);
+        assert!((t.yaw_deg - 90.0).abs() < 0.01, "yaw wrapped to ±180 by Betaflight decodes back: {:?}", t);
+        assert_eq!(t.flight_mode, "ACRO");
+        assert_eq!(t.frame_count, 2);
+    }
+
+    #[test]
+    fn a_full_fifo_drops_the_oldest_frame() {
+        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        for i in 0..20u32 {
+            telemetry_in.write(&battery_frame(20.0 + f64::from(i), 0.0, 0, i as u8));
+        }
+        packets(&mut s, 4); // the first slot: 16 kept of 20 -> the 5th offered frame (index 4) flies
+        let t = fc.latest();
+        assert_eq!(t.frame_count, 1);
+        assert!((t.battery_v - 24.0).abs() < 1e-9, "oldest dropped: {:?}", t);
+    }
+
+    #[test]
+    fn no_downlink_packets_means_no_telemetry() {
+        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        s.run_for(0.1).unwrap();
+        let after_connected = fc.latest().frame_count;
+        telemetry_in.write(&battery_frame(24.6, 3.2, 0, 1));
+        set(&mut s, names::RADIO_TX_ENABLED, 0.0);
+        s.run_for(0.25).unwrap(); // 125 packets of silence drain the 100-packet LQ window
+        assert_eq!(fc.latest().frame_count, after_connected, "the receiver is silent: no slots");
+        assert_eq!(get(&s, names::RADIO_LQ), 0.0);
+    }
+
+    #[test]
+    fn corrupt_bytes_are_skipped_and_the_stream_stays_aligned() {
+        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        telemetry_in.write(&[0xDE, 0xAD, 0xC8, 0xFF]);
+        telemetry_in.write(&battery_frame(24.6, 3.2, 0, 1));
+        packets(&mut s, 4);
+        assert_eq!(fc.latest().frame_count, 1, "the garbage never reached the handle");
+    }
+
+    #[test]
+    fn the_telemetry_path_draws_no_numbers() {
+        // The downlink byte stream is identical whether or not frames were offered: the scheduler
+        // consumes no randomness.
+        let run = |offer: bool| {
+            let (mut s, uart, telemetry_in, _fc) = rig(
+                LinkParams { fading: true, ground_bounce: true, ..LinkParams::ideal(500) },
+                5,
+            );
+            if offer {
+                telemetry_in.write(&battery_frame(24.6, 3.2, 0, 1));
+            }
+            set_pos(&mut s, DVec3::new(30.0, 0.0, -1.7));
+            s.run_for(0.2).unwrap();
+            uart.take(usize::MAX)
+        };
+        assert_eq!(run(true), run(false), "the uplink bytes must not depend on the telemetry offered");
+    }
+
+    #[test]
+    fn an_open_link_reports_no_telemetry_until_frames_arrive() {
+        let (mut s, _uart, _telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
+        s.run_for(0.05).unwrap();
+        assert_eq!(fc.latest(), FcTelemetry::default(), "frame_count 0, everything zero, no mode");
+    }
 }

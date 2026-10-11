@@ -6,6 +6,7 @@
 //! failsafe takes over. Deterministic: every packet draws the same count of numbers from the model's own
 //! seeded stream, whatever the inputs.
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use glam::{DQuat, DVec3};
 use ofs_core::rng::model_rng;
@@ -15,7 +16,7 @@ use ofs_rf::propagation::{mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKi
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::crsf::{self, LinkStatistics, CHANNEL_COUNT};
+use crate::crsf::{self, Decoder, Frame, LinkStatistics, CHANNEL_COUNT};
 
 pub const MODEL_NAME: &str = "radio.elrs";
 /// ExpressLRS reports link quality as the share of the last 100 packets received.
@@ -30,6 +31,12 @@ pub const NOISE_FLOOR_DBM: f64 = -108.90176630349089;
 pub const DOWNLINK_TX_POWER_MW: f64 = 100.0;
 /// The logistic PER curve's width in dB (an estimate).
 pub const PER_SLOPE_DB: f64 = 1.0;
+/// Every this-many downlink packets carries one telemetry frame (an ExpressLRS telemetry-ratio
+/// estimate: 125 slots/s at the 500 Hz packet rate).
+pub const TELEMETRY_SLOT_DIVISOR: u32 = 4;
+/// How many offered telemetry frames wait for a slot at most; the oldest is dropped when full
+/// (stale data yields to fresh, like a radio that cannot retransmit).
+pub const TELEMETRY_FIFO_LEN: usize = 16;
 
 /// The RSSI at which half the packets decode, by packet rate: ExpressLRS's published sensitivities for its
 /// 2.4 GHz LoRa modes.
@@ -115,6 +122,43 @@ impl LinkParams {
     }
 }
 
+/// What Betaflight told the handset, decoded from the CRSF telemetry frames that flew a downlink
+/// slot. Units are Betaflight's own CRSF encodings (see docs/research/elrs-link.md): the battery
+/// voltage in 0.1 V and current in 0.1 A (`getLegacyBatteryVoltage()`/`getAmperage()/10`), attitude
+/// in radians x 10 000 with yaw wrapped to ±180°, the flight mode verbatim.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FcTelemetry {
+    pub battery_v: f64,
+    pub battery_a: f64,
+    pub battery_mah: f64,
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
+    pub flight_mode: String,
+    /// Simulated time of the last frame that flew a slot (0 until one arrives).
+    pub last_frame_s: f64,
+    /// Frames that flew a slot so far (a monotonic "anything arrived yet" marker).
+    pub frame_count: u64,
+}
+
+/// The latest [`FcTelemetry`], shared with the server's state snapshot (the `OsdHandle` pattern).
+#[derive(Debug, Clone, Default)]
+pub struct FcTelemetryHandle(Arc<Mutex<FcTelemetry>>);
+
+impl FcTelemetryHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn latest(&self) -> FcTelemetry {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn store(&self, t: FcTelemetry) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = t;
+    }
+}
+
 struct Inputs {
     roll: Signal<f64>,
     pitch: Signal<f64>,
@@ -155,11 +199,17 @@ pub struct ElrsLink {
     rssi: Vec<f64>,
     downlink: Vec<f64>,
     last_pos: Option<DVec3>,
+    telemetry_in: Wire,
+    decoder: Decoder,
+    telemetry_fifo: VecDeque<(u8, Vec<u8>)>,
+    downlink_packets: u32,
+    fc_telemetry: FcTelemetryHandle,
 }
 
 impl ElrsLink {
-    /// `uart` receives the receiver's CRSF output (the flight controller's UART RX).
-    pub fn new(params: LinkParams, rate_divisor: u32, seed: u64, uart: Wire, bus: &mut Bus) -> Self {
+    /// `uart` receives the receiver's CRSF output (the flight controller's UART RX); `telemetry_in`
+    /// carries the flight controller's own CRSF telemetry frames (its UART TX) into the downlink slots.
+    pub fn new(params: LinkParams, rate_divisor: u32, seed: u64, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> Self {
         assert!(!params.quad_antennas.is_empty() && !params.handset_antennas.is_empty(), "both ends need at least one antenna");
         assert!(sensitivity_dbm(params.packet_rate_hz).is_some(), "packet_rate_hz must be one of 50, 150, 250, 500");
         let inputs = Inputs {
@@ -206,7 +256,17 @@ impl ElrsLink {
             rssi: vec![NO_SIGNAL_RSSI_DBM; quad_antennas],
             downlink: vec![NO_SIGNAL_RSSI_DBM; handset_antennas],
             last_pos: None,
+            telemetry_in,
+            decoder: Decoder::default(),
+            telemetry_fifo: VecDeque::new(),
+            downlink_packets: 0,
+            fc_telemetry: FcTelemetryHandle::new(),
         }
+    }
+
+    /// The handset's view of Betaflight's telemetry, updated as frames fly downlink slots.
+    pub fn fc_telemetry_handle(&self) -> FcTelemetryHandle {
+        self.fc_telemetry.clone()
     }
 
     /// Handset: sticks to channels in Betaflight's default AETR order, then AUX1..4, the rest centred.
@@ -229,6 +289,32 @@ impl ElrsLink {
         }
         100.0 * history.iter().filter(|r| **r).count() as f64 / history.len() as f64
     }
+
+    /// Decodes one telemetry frame that flew a downlink slot into the shared handle. Frame types we
+    /// do not expose still consume their slot (the radio forwarded them; nothing more is modelled).
+    fn apply_telemetry_frame(&mut self, frame_type: u8, payload: &[u8], now_s: f64) {
+        let mut t = self.fc_telemetry.latest();
+        match frame_type {
+            crsf::FRAMETYPE_BATTERY_SENSOR if payload.len() >= 7 => {
+                t.battery_v = f64::from(u16::from_be_bytes([payload[0], payload[1]])) / 10.0;
+                t.battery_a = f64::from(u16::from_be_bytes([payload[2], payload[3]])) / 10.0;
+                t.battery_mah = f64::from(u32::from_be_bytes([0, payload[4], payload[5], payload[6]]));
+            }
+            crsf::FRAMETYPE_ATTITUDE if payload.len() >= 6 => {
+                let deg = |raw: [u8; 2]| f64::from(i16::from_be_bytes(raw)) * 180.0 / (10_000.0 * std::f64::consts::PI);
+                t.pitch_deg = deg([payload[0], payload[1]]);
+                t.roll_deg = deg([payload[2], payload[3]]);
+                t.yaw_deg = deg([payload[4], payload[5]]);
+            }
+            crsf::FRAMETYPE_FLIGHT_MODE => {
+                t.flight_mode = String::from_utf8_lossy(payload).split('\0').next().unwrap_or("").to_owned();
+            }
+            _ => {}
+        }
+        t.frame_count += 1;
+        t.last_frame_s = now_s;
+        self.fc_telemetry.store(t);
+    }
 }
 
 impl Model for ElrsLink {
@@ -240,7 +326,7 @@ impl Model for ElrsLink {
         self.div
     }
 
-    fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
+    fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         // Handset: the pipeline delays samples by `latency_packets` packets.
         let sample = self.sample(bus);
         if self.pipeline.is_empty() {
@@ -311,6 +397,26 @@ impl Model for ElrsLink {
         let downlink_active = self.handset_diversity.choose(downlink);
         let downlink_draw: f64 = self.rng.gen();
         let downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity);
+
+        // Telemetry ingress: whatever Betaflight wrote this tick joins the FIFO (oldest dropped when
+        // full). No new random draws: the queue is a pure function of the frames offered and the
+        // slots flown.
+        for frame in self.decoder.push(&self.telemetry_in.take(usize::MAX)) {
+            if let Frame::Other { frame_type, payload, .. } = frame {
+                if self.telemetry_fifo.len() >= TELEMETRY_FIFO_LEN {
+                    self.telemetry_fifo.pop_front();
+                }
+                self.telemetry_fifo.push_back((frame_type, payload));
+            }
+        }
+        if transmitting {
+            self.downlink_packets += 1;
+            if downlink_received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0 {
+                if let Some((frame_type, payload)) = self.telemetry_fifo.pop_front() {
+                    self.apply_telemetry_frame(frame_type, &payload, ctx.time_s);
+                }
+            }
+        }
 
         // Link quality over the last 100 packets, per direction; silence on loss; Betaflight fails safe.
         self.history.push_back(received);

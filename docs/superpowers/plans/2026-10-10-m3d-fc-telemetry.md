@@ -281,7 +281,7 @@ edit("src/platform/SIMULATOR/sitl.c", [
         "    memset(dest, 0, sizeof(*dest));\n"
         "    dest->dataAge = 0;\n"
         "    dest->temperature = 25;\n"
-        "    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100 * 100, 0, 32767);  // 0.01 erpm units\n"
+        "    dest->rpm = (int16_t)constrain(sitlDshotErpm[motorIndex] / 100U, 0, 32767);  // 0.01 erpm units (escSensorData_t contract)\n"
         "    return true;\n"
         "}\n"
         "#else\n"
@@ -662,7 +662,9 @@ mod erpm_block {
 
     #[test]
     fn the_erpm_block_rides_the_datagram_like_a_serial_block() {
-        let fdm = FdmPacket { timestamp_s: 1.0, ..Default::default() };
+        let fdm = FdmPacket { timestamp_s: 1.0, gyro_rpy_radps: [0.0; 3], accel_xyz_mps2: [0.0; 3],
+                              quat_wxyz: [1.0, 0.0, 0.0, 0.0], velocity_xyz_mps: [0.0; 3],
+                              position_xyz: [0.0; 3], pressure_pa: 0.0 };
         let rc = RcPacket { timestamp_s: 1.0, channels: [0; 16] };
         let datagram = state_datagram_with_serial(&fdm, &rc, &[(EXT_ERPM_BLOCK_ID, erpm_block_payload(&[0.0; 4]).to_vec())]);
         assert_eq!(datagram.len(), STATE_DATAGRAM_SIZE + 3 + 8);
@@ -698,7 +700,7 @@ pub fn erpm_block_payload(motor_omega_radps: &[f64]) -> [u8; 8] {
     let mut out = [0u8; 8];
     for (i, omega) in motor_omega_radps.iter().take(4).enumerate() {
         let erpm = omega * 60.0 / (2.0 * std::f64::consts::PI) * crate::sitl::esc_telemetry::POLE_PAIRS / 100.0;
-        let value = erpm.clamp(0.0, 65535.0) as u16;
+        let value = erpm.round().clamp(0.0, 65535.0) as u16;  // round: the f64 chain is 69.999... for 1000 rpm
         out[i * 2..i * 2 + 2].copy_from_slice(&value.to_le_bytes());
     }
     out
@@ -814,15 +816,6 @@ type ElrsHandle = ofs_radio::elrs::FcTelemetryHandle;
 ```
 
 Update every existing `rig(...)` call site (`let (mut s, uart) = rig(...)` → `let (mut s, uart, _telemetry_in, _fc) = rig(...)`; several tests destructure two names), and add the new tests:
-
-```rust
-mod fc_telemetry {
-    use super::*;
-    use ofs_radio::crsf::{FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE};
-    use ofs_radio::elrs::FcTelemetry;
-
-    /// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
-    fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {
 
 ```rust
 mod fc_telemetry {
@@ -1424,9 +1417,10 @@ def test_per_motor_erpm_reaches_betaflight(sim):
     assert len(rpm) == 4 and len(set(rpm)) > 1, f"expected distinct per-motor RPM, got {rpm}"
     sim_rpm = s.motor_rpm
     for bf, ours in zip(rpm, sim_rpm):
-        assert abs(bf - ours * POLE_PAIRS) <= max(500.0, 0.05 * ours * POLE_PAIRS), \
-            f"Betaflight reports {bf} eRPM/{POLE_PAIRS}, the sim models {ours} rpm: {rpm} vs {sim_rpm}"
-
+        # MSP_MOTOR_TELEMETRY's value is already mechanical rpm (the patch's getDshotRpm
+        # divides eRPM by the 7 pole pairs), so the comparison is like-for-like.
+        assert abs(bf - ours) <= max(500.0, 0.05 * ours), \
+            f"Betaflight reports {bf} rpm, the sim models {ours} rpm: {rpm} vs {sim_rpm}"
 
 def test_battery_and_mode_arrive_over_the_downlink(sim):
     sim.load(QUAD, seed=1)

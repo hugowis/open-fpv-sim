@@ -2,7 +2,8 @@ use std::f64::consts::PI;
 
 use glam::{DQuat, DVec3};
 use ofs_fc::sitl::codec::{
-    state_datagram, state_datagram_with_serial, FdmPacket, RcPacket, ServoPacket, SERIAL_SECTION_MAX, STATE_DATAGRAM_SIZE,
+    erpm_block_payload, state_datagram, state_datagram_with_serial, FdmPacket, RcPacket, ServoPacket, EXT_ERPM_BLOCK_ID,
+    SERIAL_SECTION_MAX, STATE_DATAGRAM_SIZE,
 };
 use ofs_fc::sitl::frames::{attitude_flu_nwu, fdm_packet, motor_commands, rc_channels, Home, SensorFrame, EARTH_RADIUS_M};
 
@@ -217,4 +218,32 @@ fn bytes_dropped_by_any_wire_to_or_from_sitl_are_counted() {
     into.rx.write(&[0; 6]); // 2 dropped
     out.tx.write(&[0; 5]); // 3 dropped
     assert_eq!(wire_drops(&[into], &[out]), 5);
+}
+
+#[test]
+fn omega_becomes_erpm_over_one_hundred_little_endian() {
+    // 1000 mechanical rpm = 104.719755 rad/s; x 7 pole pairs = 7000 eRPM; /100 = 70.
+    let bytes = erpm_block_payload(&[104.71975511965977, 0.0, -1.0, 1.0e9]);
+    assert_eq!(bytes, [70, 0, 0, 0, 0, 0, 255, 255], "motor 0 = 70; rest clamp and floor");
+}
+
+#[test]
+fn fewer_than_four_motors_pad_with_zeros() {
+    assert_eq!(erpm_block_payload(&[]), [0u8; 8]);
+    assert_eq!(erpm_block_payload(&[104.71975511965977]), [70, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn the_erpm_block_rides_the_datagram_like_a_serial_block() {
+    let fdm = FdmPacket { timestamp_s: 1.0, gyro_rpy_radps: [0.0; 3], accel_xyz_mps2: [0.0; 3],
+                          quat_wxyz: [1.0, 0.0, 0.0, 0.0], velocity_xyz_mps: [0.0; 3],
+                          position_xyz: [0.0; 3], pressure_pa: 0.0 };
+    let rc = RcPacket { timestamp_s: 1.0, channels: [0; 16] };
+    let datagram = state_datagram_with_serial(&fdm, &rc, &[(EXT_ERPM_BLOCK_ID, erpm_block_payload(&[0.0; 4]).to_vec())]);
+    assert_eq!(datagram.len(), STATE_DATAGRAM_SIZE + 3 + 8);
+    let block = &datagram[STATE_DATAGRAM_SIZE..];
+    assert_eq!((block[0], u16::from_le_bytes([block[1], block[2]])), (250, 8));
+    // The whole serial section, eRPM block included, stays within SITL's EXT_SERIAL_MAX.
+    let full = state_datagram_with_serial(&fdm, &rc, &[(1, vec![0xAA; 400]), (EXT_ERPM_BLOCK_ID, erpm_block_payload(&[0.0; 4]).to_vec())]);
+    assert!(full.len() - STATE_DATAGRAM_SIZE <= SERIAL_SECTION_MAX);
 }
