@@ -1417,9 +1417,10 @@ def test_per_motor_erpm_reaches_betaflight(sim):
     assert len(rpm) == 4 and len(set(rpm)) > 1, f"expected distinct per-motor RPM, got {rpm}"
     sim_rpm = s.motor_rpm
     for bf, ours in zip(rpm, sim_rpm):
-        assert abs(bf - ours * POLE_PAIRS) <= max(500.0, 0.05 * ours * POLE_PAIRS), \
-            f"Betaflight reports {bf} eRPM/{POLE_PAIRS}, the sim models {ours} rpm: {rpm} vs {sim_rpm}"
-
+        # MSP_MOTOR_TELEMETRY's value is already mechanical rpm (the patch's getDshotRpm
+        # divides eRPM by the 7 pole pairs), so the comparison is like-for-like.
+        assert abs(bf - ours) <= max(500.0, 0.05 * ours), \
+            f"Betaflight reports {bf} rpm, the sim models {ours} rpm: {rpm} vs {sim_rpm}"
 
 def test_battery_and_mode_arrive_over_the_downlink(sim):
     sim.load(QUAD, seed=1)
