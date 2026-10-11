@@ -81,4 +81,29 @@ Overrides:
 With `OFS_SITL_LAUNCH` set (see "With real Betaflight" above), the game starts Betaflight and arms it through the
 simulated radio link.
 
+## Component library
+
+The quad file is schema 5: it references parts and keeps only its own wiring, and the hardware lives in
+`library/` — one TOML per part, every parameter's provenance recorded.
+
+    library/
+      frames/    motors/   props/   escs/   batteries/   vtx/
+    quads/       <quad>.toml + <quad>.betaflight.diff   (as today)
+
+A part's id is its file stem, and the quad references it — `motors = ["opendrone-openmotor-2207"]` in
+`quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part. The library is resolved against
+`<quad dir>/../library`; set `OFS_LIBRARY` to fly another part set without touching `quads/`. Every parameter
+of a part must carry a `[provenance]` entry or the part is refused at load:
+
+    [provenance."motor.kv_rpm_per_v"]
+    source = "estimated"     # datasheet | measured | estimated
+    note = "M1 estimate; the OpenMotor datasheet value replaces this when transcribed"
+
+Every shipped value is an estimate recorded in the open — the ledger is
+`docs/research/component-library.md`, and `library/README.md` describes adding a part. Schema-4 quad files
+(which carried the `[frame]`, `[ground]`, `[motor]`, `[prop]`, `[esc]`, `[battery]` and `[vtx]` hardware
+inline) are refused at load with a message naming the move; the three shipped quads
+(`quads/opendrone-5f-freestyle.toml`, `quads/opendrone-5f-tramp.toml`, `quads/opendrone-5f-weak-link.toml`)
+are the worked example of the migration.
+
 License: GPL-3.0-or-later.

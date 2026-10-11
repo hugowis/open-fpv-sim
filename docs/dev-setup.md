@@ -53,12 +53,14 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
 
 ## OSD, VTX and battery telemetry (M3a)
 
-Schema-3 quad files have three video sections (all optional; see `quads/opendrone-5f-freestyle.toml`):
+Quad files are schema 5: the hardware lives in `library/` part files (see the "Component library" section of
+README.md) and the quad keeps its own wiring — including three video sections (all optional; see
+`quads/opendrone-5f-freestyle.toml`):
 - `[esc_telemetry]` — UART 3. The simulated battery is encoded as KISS ESC-telemetry frames (the diff sets `battery_meter = ESC` and `current_meter = ESC`), so Betaflight's battery meter, OSD elements and warnings run on the simulated battery.
 - `[osd]` — UART 4. Betaflight draws its OSD over MSP DisplayPort (`osd_displayport_device = MSP`); the simulator decodes the frames into a `cols` x `rows` character grid (30x16, the analog PAL grid).
-- `[vtx]` — UART 5. A SmartAudio v2.1 VTX (`kind = "smartaudio"`) answers Betaflight's requests; the state carries its band, channel, frequency and power, and changes arrive as `vtx_changed` events.
+- `[vtx]` — UART 5. The section references the VTX part (`part = "opendrone-smartaudio-1w"`, a SmartAudio v2.1 VTX) and carries this aircraft's wiring (the UART, default band, channel and power); the part answers Betaflight's requests, and the state carries its band, channel, frequency and power, with changes arriving as `vtx_changed` events.
 
-The quad's Betaflight diff must configure the matching serial ports (UART3 = serial 2, UART4 = serial 3, UART5 = serial 4), the OSD element positions, `vcd_video_system = PAL` (AUTO would leave a 13-row NTSC grid) and `force_battery_cell_count` matching `battery.cells` (Betaflight otherwise guesses from the first voltage it sees, and a part-charged 6S pack never raises the low-battery warning); the shipped quad's diff is the example. SITL has no `vtxtable`: Betaflight takes the VTX power list from the VTX itself, so the diff has no `vtxtable` lines. A diff that enables SmartAudio (`serial 4 2048 …`) needs a matching `[vtx]` section — without one the quad fails to load, because Betaflight SITL crashes when its OSD draws the VTX channel and no VTX answers. The diff is applied on first boot only: after changing it, delete the firmware directory's `eeprom.bin` (see "Firmware state" below).
+The quad's Betaflight diff must configure the matching serial ports (UART3 = serial 2, UART4 = serial 3, UART5 = serial 4), the OSD element positions, `vcd_video_system = PAL` (AUTO would leave a 13-row NTSC grid) and `force_battery_cell_count` matching `battery.cells` (Betaflight otherwise guesses from the first voltage it sees, and a part-charged 6S pack never raises the low-battery warning); the shipped quads' diffs are the examples. SITL has no `vtxtable`: Betaflight takes the VTX power list from the VTX itself, so the diff has no `vtxtable` lines. A diff that enables SmartAudio (`serial 4 2048 …`) needs a matching `[vtx]` section — without one the quad fails to load, because Betaflight SITL crashes when its OSD draws the VTX channel and no VTX answers. The diff is applied on first boot only: after changing it, delete the firmware directory's `eeprom.bin` (see "Firmware state" below).
 
 Wiring: SITL buffers the bytes it writes to its UARTs (UART1, the MSP/Configurator port, is excluded) in 4096-byte per-UART capture buffers and returns them in the reply datagram — a dropped count, then `[uart index][len][bytes]` blocks, at most 512 bytes per reply — so OSD and SmartAudio traffic is deterministic in lockstep. Bytes that don't fit are dropped and counted (`State.serial_dropped_bytes`); a rise raises `serial_overflow` events (see `docs/research/sitl-interface.md` §9).
 
@@ -89,8 +91,9 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
 - `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
   neighbouring channels. The shipped world has one, on R2, next to the quad's default R1.
 
-The quad file's `[vtx]` describes the VTX antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the
-pit-mode power (`pit_power_mw`). The VTX transmits from load on, also in open loop (it has no Betaflight to answer
+The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
+power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from
+load on, also in open loop (it has no Betaflight to answer
 then, so it stays on its power-up channel and power).
 
 The link model runs once per PAL field (50 Hz): path loss, antenna patterns, polarization, the quad's own frame,
@@ -114,10 +117,12 @@ Manual check (with the game, real Betaflight optional):
 
 ## World collision and the ExpressLRS link (M3c)
 
-Quad files are **schema 4**. A schema-3 file is refused at load with a message naming what changed: the fixed link
-figures (`radio.rssi_dbm`, `radio.snr_db` and the loss parameters `loss_good`, `loss_bad`, `p_good_to_bad`,
-`p_bad_to_good`) are gone — RSSI, SNR and packet loss come from the world's geometry now — and `radio.tx_power_mw`,
-the `[[radio.antennas]]` list and the optional `[collision]` section replace them. `quads/opendrone-5f-freestyle.toml`
+Quad files are **schema 5**: since M4a the hardware lives in `library/` part files that the quad references by id
+(see the "Component library" section of README.md), and a schema-4 file is refused at load with a message naming
+the move. Schema 4's own change survives: the fixed link figures (`radio.rssi_dbm`, `radio.snr_db` and the loss
+parameters `loss_good`, `loss_bad`, `p_good_to_bad`, `p_bad_to_good`) are gone — RSSI, SNR and packet loss come
+from the world's geometry now — and `radio.tx_power_mw`, the `[[radio.antennas]]` list and the collision data
+(the frame part's optional `[collision]` table since schema 5) replace them. `quads/opendrone-5f-freestyle.toml`
 is the example. The world file gains an optional `[handset]` (where the pilot's transmitter is and what it transmits
 with; the default sits 0.5 m below the goggles with one vertical 2 dBi dipole). The contact model and every constant
 are in `docs/research/collision.md` and `docs/research/elrs-link.md`.
