@@ -100,7 +100,8 @@ constant are in `docs/research/video-link.md`. The results are in `State.video` 
 `video_lost` / `video_restored` events mark sync losses. In the game, the HUD's `VID` line shows the SNR, the antenna
 in use and its signal, and the layer `godot/ui/video.gd` draws the breakup over the picture and Betaflight's OSD. The
 **Video effects** box on the F2 screen (also `OFS_VIDEO_EFFECTS`, `--video-effects=`) turns the drawing off; it is
-saved in `user://ofs_client.cfg`.
+saved in `user://ofs_client.cfg`. The **Picture** button beside it flips the FPV box between 4:3 (the default),
+16:9 and window-fill (`fpv_aspect`; `OFS_FPV_ASPECT`, `--fpv-aspect=`), saved the same way.
 
 Manual check (with the game, real Betaflight optional):
 1. Fly away from the pilot (the figure beside the launch pad) and watch grain, then sparkles, colour loss, tearing and
@@ -148,6 +149,48 @@ Manual check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` set, an
    the HUD stay.
 3. Open the Configurator's Motors tab (connect as in "Betaflight Configurator" below): four distinct per-motor
    RPMs track the throttle.
+
+## Video timing, the DVR and the Tramp VTX (M3e)
+
+The client's picture is a delayed composite: the world file's `[receiver]` section gains `latency_ms` (the
+goggles' glass-to-glass latency; default 40 ms = 2 PAL fields, quantized down to whole fields, at most 1000),
+and the client samples pose, video quality and OSD at one field-quantized instant, `sim_now − latency` — the
+picture lags the world and judders at the field rate, like real analog glass. In the marginal SNR band (between
+6 dB and 3 dB) the receiver fails to complete fields — a dropped field holds the previous picture (pose, OSD
+and quality all freeze) for one field. The model and its constants are in `docs/research/video-link.md`.
+
+The **DVR** (keybind **D**) records the FPV view — exactly what the pilot sees — as an MJPEG AVI into
+`user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
+`~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a
+dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again stops
+it, and it stops on its own (with a toast counting the saved frames) when the picture's internal size changes:
+an aspect switch or a chase-camera toggle — with a boxed aspect a plain window resize does not stop it. It
+records only the FPV view: press C first if the chase camera is up.
+
+The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of
+the SmartAudio one: `[vtx] kind = "tramp"` on UART6 (Betaflight serial 5, function mask 8192 = `VTX_TRAMP`).
+No SITL changes were needed (the patch stopped `#undef`-ing `USE_VTX_TRAMP` in M3a), and SITL has no
+`vtxtable`, so Betaflight uses the driver's built-in 25/100/200/400/600 mW power table. Tramp is
+frequency-only: band and channel settings convert to nothing (Betaflight's `vtxTrampSetBandAndChannel` is a
+no-op), and the frequency comes from the VTX's own power-up state (R1, 200 mW); what moves it is a frequency
+set, which the model answers like the SmartAudio one. Pit mode goes through Tramp's 'I' command (0 = pit on).
+Fly it from the game with real Betaflight:
+
+    godot --path godot -- --quad=quads/opendrone-5f-tramp.toml
+
+The live test behind it is `OFS_SITL_LAUNCH=<cmd> python -m pytest python/tests/test_sitl_tramp.py` (the CI
+sitl job runs it with the other live Python tests).
+
+M3e manual check (needs a controller and, for the Tramp check, real Betaflight with `OFS_SITL_LAUNCH` set):
+1. Fly with the default latency: the picture trails the sticks and judders at the field rate — visible but
+   flyable — and freezes for a field here and there near the edge of the range.
+2. Record a clip with D while flying the link through grain and static, press D again, and play the `.avi`
+   from `user://recordings/` in VLC: the breakup, the OSD and the freezes are all in the file.
+3. Flip the Picture setting through 4:3, 16:9 and window on the F2 screen: the box changes shape, and a
+   recording running across the switch stops with a toast.
+4. On the Tramp quad, open the OSD stick menu (as in the M3a check) and change the VTX power: the HUD VTX line
+   snaps to the built-in table. A band/channel change does nothing — Tramp is frequency-only; the live test
+   pins the frequency path.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
