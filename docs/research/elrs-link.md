@@ -26,7 +26,8 @@ Every constant below carries its provenance: **ExpressLRS published**, **physics
    `link_stats_interval_packets` received packets (default 50). When packets stop the receiver goes silent, as
    ExpressLRS does by default, and Betaflight's own failsafe takes over.
 5. The downlink is the same path reversed, the receiver transmitting at 100 mW with its own fader and its own
-   100-packet window; it feeds the LINK_STATISTICS downlink fields only.
+   100-packet window; it feeds the LINK_STATISTICS downlink fields, and every 4th downlink packet carries one
+   of the flight controller's telemetry frames (see Downlink telemetry below).
 
 ## What the 2.4 GHz link shares with the 5.8 GHz video link
 
@@ -99,6 +100,37 @@ The receiver's LINK_STATISTICS frame carries the mode and the power as CRSF indi
 
 (CRSF specification. A power between two rows takes the lower row's index: 15 mW reports as the 10 mW row.)
 
+## Downlink telemetry
+
+The downlink carries Betaflight's own CRSF telemetry back to the handset. Whatever the flight controller writes to
+the receiver's UART (CRSF is half-duplex: one UART, one wire) is tapped on its way out of the reply datagram and
+offered to the downlink; the receiver flies the frames to the handset in slots, and the decoded values reach clients
+as `State.fc_telemetry` and the game's HUD battery line.
+
+- **Slots.** Every 4th downlink packet carries one telemetry frame (`TELEMETRY_SLOT_DIVISOR` = 4 in
+  `crates/ofs-radio/src/elrs.rs`), so 125 slots/s at the 500 Hz packet rate (**estimated**: real ExpressLRS
+  negotiates its telemetry ratio; the fixed 1:4 stands in for it — nothing is measured). Frames offered while no
+  slot is due wait in a 16-frame FIFO (`TELEMETRY_FIFO_LEN`); when it is full the **oldest frame is dropped**, stale
+  data yielding to fresh like a radio that cannot retransmit. The scheduling draws no new random numbers — the
+  queue is a pure function of the frames offered and the slots flown, so lockstep runs stay bit-identical. With the
+  link down no slots fly and the values age out; an open-loop quad produces no frames at all.
+- **Payload encodings** (pinned against Betaflight's `telemetry/crsf.c`, whose units win over the CRSF
+  specification's):
+
+  | Frame | Payload |
+  |---|---|
+  | `BATTERY_SENSOR` (0x08) | voltage u16 BE in **0.1 V** (`getLegacyBatteryVoltage()`, not the CRSF spec's 0.01 V), current u16 BE in **0.1 A** (`getAmperage()/10`), mAh drawn u24 BE, remaining % u8 |
+  | `ATTITUDE` (0x1E) | pitch, roll, yaw as i16 BE, **radians × 10 000** (yaw wrapped to ±180°) |
+  | `FLIGHT_MODE` (0x21) | a NUL-terminated string (`ACRO`, `ANGLE`, `!FS!` …), passed through verbatim |
+
+  The sim decodes battery, attitude and flight mode into the handset's view; any other frame type still consumes
+  its slot.
+- **Where Betaflight's numbers come from.** The shipped diff takes the battery from the M3a ESC sensor
+  (`battery_meter = ESC`, `current_meter = ESC`), so the mAh drawn is Betaflight's ESC-sensor consumption summed
+  over the motor slots — the sim feeds each slot a quarter of the pack's current and consumption (four slots on a
+  4-motor quad), and the sum is the pack figure. The diff leaves `report_cell_voltage` off, so the voltage field
+  carries the whole pack in 0.1 V, not one cell.
+
 ## Diversity
 
 Receiver diversity (one or two antennas in the quad file's `[[radio.antennas]]` and the world file's
@@ -130,7 +162,9 @@ sensitivity) not a single packet survives.
   `radio.downlink_lq`.
 - CRSF on the flight controller's UART: one RC frame per received packet, LINK_STATISTICS every N received packets;
   silence when they stop.
-- The state stream: `State.radio` (protocol 5: `snr_db`, `active_antenna`, `downlink_lq_pct`), and the events
+- The state stream: `State.radio` (protocol 5: `snr_db`, `active_antenna`, `downlink_lq_pct`), `State.fc_telemetry`
+  (protocol 6: Betaflight's own battery, attitude and flight mode — see Downlink telemetry), and the events
   `LINK_UP` / `LINK_DOWN` on the up→down transition.
-- The game: the HUD's `LINK` line (`LINK UP   LQ 100 %   -62 dBm   SNR 9`); Betaflight's own OSD LQ element follows
+- The game: the HUD's `LINK` line (`LINK UP   LQ 100 %   -62 dBm   SNR 9`) and battery line (Betaflight's own
+  values, the flight mode appended; dashes when the telemetry is stale); Betaflight's own OSD LQ element follows
   the link, and the failsafe is Betaflight's.

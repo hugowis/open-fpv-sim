@@ -129,6 +129,26 @@ are in `docs/research/collision.md` and `docs/research/elrs-link.md`.
 4. Watch the link: with a quad file at `tx_power_mw = 10`, fly low behind BuildingB — the HUD's SNR falls,
    LQ decays, and Betaflight fails safe when the window drains.
 
+## Flight-controller telemetry (M3d)
+
+Updating the repository requires rebuilding SITL (`bash scripts/build-sitl.sh` again after a pull): the patch grows
+with the milestones, and a stale binary refuses what it was never taught. Since M3d a stale binary prints one
+`[SITL] 8 serial bytes for UART251 dropped: no such open UART` line per datagram — the simulator's per-motor eRPM
+block, which the old `sitl.c` does not intercept — and flies without motor telemetry.
+
+What is new: Betaflight's own CRSF telemetry rides the ELRS downlink (the model is in
+`docs/research/elrs-link.md`, "Downlink telemetry"), so the HUD's battery line shows Betaflight's own voltage,
+current and flight mode while the telemetry is fresh and dashes out when it is not; and the simulator's per-motor
+eRPMs reach Betaflight's RPM filter. No configuration is involved — schema-4 quad files are unchanged.
+
+Manual check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` set, and the game):
+1. Fly and punch the throttle: the HUD battery line (`12.40 V   3.2 A   ACRO` — Betaflight's values, the flight
+   mode appended) sags with the punch-outs.
+2. Cut the link (K, or switch the transmitter off): the battery line dashes out while the picture and the rest of
+   the HUD stay.
+3. Open the Configurator's Motors tab (connect as in "Betaflight Configurator" below): four distinct per-motor
+   RPMs track the throttle.
+
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
 - **Symptom:** SITL looks silent and runs fail with "no motor output within 5000 ms" or a first-exchange timeout.
