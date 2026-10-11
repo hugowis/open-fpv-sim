@@ -1,0 +1,169 @@
+use std::fs;
+use std::path::Path;
+
+use ofs_config::part::{load_frame, load_motor, load_prop, ProvenanceSource};
+
+const FRAME: &str = r#"
+schema_version = 1
+name = "Test 5F frame"
+
+[frame]
+mass_kg = 0.65
+inertia_kgm2 = [0.0025, 0.0025, 0.0045]
+cda_m2 = [0.010, 0.010, 0.020]
+angular_damping_nms = 0.0001
+motor_positions_frd_m = [[-0.08, 0.08, 0.0], [0.08, 0.08, 0.0], [-0.08, -0.08, 0.0], [0.08, -0.08, 0.0]]
+motor_spin = [1, -1, -1, 1]
+contact_points_frd_m = [[-0.08, 0.08, 0.03], [0.08, 0.08, 0.03], [-0.08, -0.08, 0.03], [0.08, -0.08, 0.03]]
+
+[ground]
+stiffness_npm = 3000.0
+damping_nspm = 40.0
+friction_coeff = 0.6
+
+[provenance."frame.mass_kg"]
+source = "estimated"
+[provenance."frame.inertia_kgm2"]
+source = "estimated"
+[provenance."frame.cda_m2"]
+source = "estimated"
+[provenance."frame.angular_damping_nms"]
+source = "estimated"
+[provenance."frame.motor_positions_frd_m"]
+source = "measured"
+[provenance."frame.motor_spin"]
+source = "estimated"
+[provenance."frame.contact_points_frd_m"]
+source = "estimated"
+[provenance."ground.stiffness_npm"]
+source = "estimated"
+[provenance."ground.damping_nspm"]
+source = "estimated"
+[provenance."ground.friction_coeff"]
+source = "estimated"
+"#;
+
+fn write(dir: &Path, name: &str, text: &str) -> std::path::PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, text).unwrap();
+    path
+}
+
+const PROP: &str = r#"
+schema_version = 1
+name = "Test prop"
+
+[prop]
+diameter_m = 0.127
+inertia_kgm2 = 6.0e-6
+ct_table = [[0.0, 0.11], [30000.0, 0.11]]
+cp_table = [[0.0, 0.045], [30000.0, 0.045]]
+imbalance_kgm = 0.0
+
+[provenance."prop.diameter_m"]
+source = "estimated"
+[provenance."prop.inertia_kgm2"]
+source = "estimated"
+[provenance."prop.ct_table"]
+source = "estimated"
+[provenance."prop.cp_table"]
+source = "estimated"
+[provenance."prop.imbalance_kgm"]
+source = "estimated"
+"#;
+
+#[test]
+fn a_frame_part_loads_with_its_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let part = load_frame(&write(dir.path(), "f.toml", FRAME)).unwrap();
+    assert_eq!(part.name, "Test 5F frame");
+    assert_eq!(part.frame.mass_kg, 0.65);
+    assert_eq!(part.ground.friction_coeff, 0.6);
+    assert!(part.collision.is_none());
+    assert_eq!(part.provenance["frame.motor_positions_frd_m"].source, ProvenanceSource::Measured);
+}
+
+#[test]
+fn missing_provenance_names_the_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = FRAME.replace("\n[provenance.\"ground.friction_coeff\"]\nsource = \"estimated\"\n", "\n");
+    let err = load_frame(&write(dir.path(), "f.toml", &missing)).unwrap_err();
+    assert!(err.to_string().contains("ground.friction_coeff"), "{err}");
+}
+
+#[test]
+fn unknown_provenance_path_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra = format!("{FRAME}\n[provenance.\"frame.does_not_exist\"]\nsource = \"estimated\"\n");
+    let err = load_frame(&write(dir.path(), "f.toml", &extra)).unwrap_err();
+    assert!(err.to_string().contains("frame.does_not_exist"), "{err}");
+}
+
+#[test]
+fn a_bad_source_is_a_parse_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = FRAME.replace("source = \"estimated\"", "source = \"guessed\"").replace("source = \"measured\"", "source = \"guessed\"");
+    let err = load_frame(&write(dir.path(), "f.toml", &bad)).unwrap_err();
+    assert!(err.to_string().contains("guessed"), "{err}");
+}
+
+#[test]
+fn an_unknown_part_schema_version_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_frame(&write(dir.path(), "f.toml", &FRAME.replace("schema_version = 1", "schema_version = 2"))).unwrap_err();
+    assert!(err.to_string().contains("schema_version 2"), "{err}");
+}
+
+#[test]
+fn an_unknown_data_field_is_a_parse_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_frame(&write(dir.path(), "f.toml", &FRAME.replace("mass_kg = 0.65", "mass_kg = 0.65\nmas_kg = 1.0"))).unwrap_err();
+    assert!(err.to_string().contains("mas_kg"), "{err}");
+}
+
+const MOTOR: &str = r#"
+schema_version = 1
+name = "Test motor"
+
+[motor]
+kv_rpm_per_v = 1950.0
+resistance_ohm = 0.07
+no_load_current_a = 1.2
+rotor_inertia_kgm2 = 6.0e-6
+pole_pairs = 7
+
+[provenance."motor.kv_rpm_per_v"]
+source = "estimated"
+[provenance."motor.resistance_ohm"]
+source = "estimated"
+[provenance."motor.no_load_current_a"]
+source = "estimated"
+[provenance."motor.rotor_inertia_kgm2"]
+source = "estimated"
+[provenance."motor.pole_pairs"]
+source = "estimated"
+"#;
+
+#[test]
+fn a_motor_part_carries_pole_pairs_and_the_sections_default_the_new_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let motor = load_motor(&write(dir.path(), "m.toml", MOTOR)).unwrap();
+    assert_eq!(motor.motor.pole_pairs, 7);
+    let prop = load_prop(&write(dir.path(), "p.toml", PROP)).unwrap();
+    assert_eq!(prop.prop.imbalance_kgm, 0.0);
+    // The schema-4 quads still load against the defaulted fields until the Task 3 cutover
+    // (this access moves to cfg.motors[0]/cfg.props[0] there — see Task 3's mapping table).
+    let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+    assert_eq!(cfg.motor.pole_pairs, 7);
+    assert_eq!(cfg.prop.imbalance_kgm, 0.0);
+}
+
+#[test]
+fn table_valued_parameters_are_one_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = PROP.replace("[provenance.\"prop.ct_table\"]\nsource = \"estimated\"\n", "\n");
+    let err = load_prop(&write(dir.path(), "p.toml", &missing)).unwrap_err();
+    let shown = err.to_string();
+    assert!(shown.contains("prop.ct_table"), "{shown}");
+    assert_eq!(shown.matches("prop.ct_table").count(), 1, "the table is one parameter, not one problem per row: {shown}");
+}

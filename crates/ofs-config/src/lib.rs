@@ -7,6 +7,8 @@ use serde::Deserialize;
 pub mod world;
 pub use world::{AntennaKind, Polarization, WorldConfig};
 
+pub mod part;
+
 /// 4: the `[radio]` section describes the real link (power, antennas) instead of fixed RSSI and loss figures, and
 /// the optional `[collision]` section arrives (M3c). 3: the optional `[esc_telemetry]`, `[osd]` and `[vtx]`
 /// sections (M3a). 2: the required `[radio]` section (M2).
@@ -78,6 +80,13 @@ pub struct MotorSection {
     pub resistance_ohm: f64,
     pub no_load_current_a: f64,
     pub rotor_inertia_kgm2: f64,
+    /// Electrical revolutions per mechanical revolution; Betaflight's `motor_poles` / 2 (M4a).
+    #[serde(default = "default_pole_pairs")]
+    pub pole_pairs: u32,
+}
+
+fn default_pole_pairs() -> u32 {
+    7
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -87,6 +96,9 @@ pub struct PropSection {
     pub inertia_kgm2: f64,
     pub ct_table: Vec<[f64; 2]>,
     pub cp_table: Vec<[f64; 2]>,
+    /// Static imbalance (mass × radius) the M4b vibration model turns into IMU disturbance. 0 = none.
+    #[serde(default)]
+    pub imbalance_kgm: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -383,7 +395,7 @@ fn default_vtx_mount_frd() -> [f64; 3] {
     [-0.5, 0.0, -1.0]
 }
 
-fn default_pit_power_mw() -> f64 {
+pub(crate) fn default_pit_power_mw() -> f64 {
     0.1
 }
 
@@ -427,7 +439,7 @@ fn default_vtx_channel() -> u8 {
     1
 }
 
-fn default_vtx_reply_latency_ms() -> f64 {
+pub(crate) fn default_vtx_reply_latency_ms() -> f64 {
     5.0
 }
 
