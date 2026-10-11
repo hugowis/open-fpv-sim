@@ -529,20 +529,23 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let base_hz = cfg.sim.base_hz;
     let mut models: Vec<Box<dyn Model>> = Vec::new();
 
-    let prop = PropParams { diameter_m: cfg.prop.diameter_m, ct_table: pairs(&cfg.prop.ct_table), cp_table: pairs(&cfg.prop.cp_table) };
     for i in 0..n {
-        models.push(Box::new(Propeller::new(i, prop.clone(), &mut bus)));
+        let prop = PropParams {
+            diameter_m: cfg.props[i].diameter_m,
+            ct_table: pairs(&cfg.props[i].ct_table),
+            cp_table: pairs(&cfg.props[i].cp_table),
+        };
+        models.push(Box::new(Propeller::new(i, prop, &mut bus)));
     }
-
-    let motor = MotorParams {
-        kv_rpm_per_v: cfg.motor.kv_rpm_per_v,
-        resistance_ohm: cfg.motor.resistance_ohm,
-        no_load_current_a: cfg.motor.no_load_current_a,
-        rotor_inertia_kgm2: cfg.motor.rotor_inertia_kgm2,
-    };
-    let esc = EscParams { response_tau_s: cfg.esc.response_tau_s, current_limit_a: cfg.esc.current_limit_a };
     for i in 0..n {
-        models.push(Box::new(EscMotor::new(i, esc.clone(), motor.clone(), cfg.prop.inertia_kgm2, &mut bus)));
+        let motor = MotorParams {
+            kv_rpm_per_v: cfg.motors[i].kv_rpm_per_v,
+            resistance_ohm: cfg.motors[i].resistance_ohm,
+            no_load_current_a: cfg.motors[i].no_load_current_a,
+            rotor_inertia_kgm2: cfg.motors[i].rotor_inertia_kgm2,
+        };
+        let esc = EscParams { response_tau_s: cfg.escs[i].response_tau_s, current_limit_a: cfg.escs[i].current_limit_a };
+        models.push(Box::new(EscMotor::new(i, esc, motor, cfg.props[i].inertia_kgm2, &mut bus)));
     }
 
     let battery = BatteryParams {
@@ -563,7 +566,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         inertia_kgm2: v3(f.inertia_kgm2),
         cda_m2: v3(f.cda_m2),
         angular_damping_nms: f.angular_damping_nms,
-        rotor_inertia_kgm2: cfg.motor.rotor_inertia_kgm2 + cfg.prop.inertia_kgm2,
+        rotor_inertia_kgm2: (0..n).map(|i| cfg.motors[i].rotor_inertia_kgm2 + cfg.props[i].inertia_kgm2).collect(),
         mounts: f
             .motor_positions_frd_m
             .iter()
@@ -956,6 +959,22 @@ mod tests {
         let state = vehicle.state();
         assert!(!state.vtx.present);
         assert_eq!(state.video, VideoInfo::default());
+    }
+
+    #[test]
+    fn a_mixed_motor_quad_builds_and_spins_its_motors_differently() {
+        let mut cfg = shipped_quad();
+        let mut other = cfg.motors[0].clone();
+        other.kv_rpm_per_v = 1000.0; // a slower motor on M3 and M4
+        cfg.motors[2] = other.clone();
+        cfg.motors[3] = other;
+        let mut vehicle = open_loop(&cfg, WorldConfig::open_field());
+        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() });
+        vehicle.run_for(0.05).unwrap();
+        let s = vehicle.state();
+        // From rest the ESC current sits on its 45 A limit, where the torque is ke*I: the 1000KV motors
+        // (double the ke) out-accelerate the 1950KV ones. The pin: each motor gets its own parameters.
+        assert!(s.motor_rpm[2] > s.motor_rpm[0], "the 1000KV motors out-accelerate the 1950KV ones: {:?}", s.motor_rpm);
     }
 
     #[test]

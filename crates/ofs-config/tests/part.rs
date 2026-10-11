@@ -153,11 +153,9 @@ fn a_motor_part_carries_pole_pairs_and_the_sections_default_the_new_fields() {
     assert_eq!(motor.motor.pole_pairs, 7);
     let prop = load_prop(&write(dir.path(), "p.toml", PROP)).unwrap();
     assert_eq!(prop.prop.imbalance_kgm, 0.0);
-    // The schema-4 quads still load against the defaulted fields until the Task 3 cutover
-    // (this access moves to cfg.motors[0]/cfg.props[0] there — see Task 3's mapping table).
     let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
-    assert_eq!(cfg.motor.pole_pairs, 7);
-    assert_eq!(cfg.prop.imbalance_kgm, 0.0);
+    assert_eq!(cfg.motors[0].pole_pairs, 7);
+    assert_eq!(cfg.props[0].imbalance_kgm, 0.0);
 }
 
 #[test]

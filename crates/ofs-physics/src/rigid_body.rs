@@ -35,8 +35,8 @@ pub struct AirframeParams {
     /// Drag area (Cd * A) per FRD axis.
     pub cda_m2: DVec3,
     pub angular_damping_nms: f64,
-    /// Motor rotor + propeller inertia, for the reaction torque of spinning up.
-    pub rotor_inertia_kgm2: f64,
+    /// Motor rotor + propeller inertia of each motor, for the reaction torque of spinning up.
+    pub rotor_inertia_kgm2: Vec<f64>,
     pub mounts: Vec<MotorMount>,
     pub contact_points_frd_m: Vec<DVec3>,
     pub ground: GroundParams,
@@ -201,7 +201,7 @@ impl Model for RigidBody {
             let f = DVec3::new(0.0, 0.0, -bus.get(self.thrust[k]));
             force_body += f;
             torque_body += m.position_frd_m.cross(f);
-            let rotor_torque = bus.get(self.torque[k]) + self.p.rotor_inertia_kgm2 * bus.get(self.omega_dot[k]);
+            let rotor_torque = bus.get(self.torque[k]) + self.p.rotor_inertia_kgm2[k] * bus.get(self.omega_dot[k]);
             torque_body.z -= m.spin * rotor_torque;
         }
         let v_body = to_body * s.vel_ned_mps;

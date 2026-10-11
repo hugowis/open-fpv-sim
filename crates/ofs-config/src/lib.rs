@@ -1,5 +1,6 @@
 //! Quad description files (TOML): parsing and validation that reports every problem at once.
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -9,25 +10,25 @@ pub use world::{AntennaKind, Polarization, WorldConfig};
 
 pub mod part;
 
-/// 4: the `[radio]` section describes the real link (power, antennas) instead of fixed RSSI and loss figures, and
-/// the optional `[collision]` section arrives (M3c). 3: the optional `[esc_telemetry]`, `[osd]` and `[vtx]`
-/// sections (M3a). 2: the required `[radio]` section (M2).
-pub const SCHEMA_VERSION: u32 = 4;
-/// Oldest schema this build still reads: only 4 (the radio section's meaning changed, so older files cannot be
-/// mapped onto it).
-pub const MIN_SCHEMA_VERSION: u32 = 4;
+/// 5: quads assemble from library parts (M4a) — frame/motor/prop/esc/battery/vtx hardware moves to
+/// `library/`, every part parameter carries provenance. 4: the real radio link and [collision] (M3c).
+/// 3: [esc_telemetry]/[osd]/[vtx] (M3a). 2: the required [radio] section (M2).
+pub const SCHEMA_VERSION: u32 = 5;
+/// Oldest schema this build still reads: only 5 (the hardware sections live in library/ part files, so older
+/// files cannot be mapped onto it).
+pub const MIN_SCHEMA_VERSION: u32 = 5;
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The resolved quad: the aircraft's own sections merged with the library parts it referenced.
+#[derive(Debug, Clone)]
 pub struct QuadConfig {
     pub schema_version: u32,
     pub name: String,
     pub sim: SimSection,
     pub frame: FrameSection,
     pub ground: GroundSection,
-    pub motor: MotorSection,
-    pub prop: PropSection,
-    pub esc: EscSection,
+    pub motors: Vec<MotorSection>,
+    pub props: Vec<PropSection>,
+    pub escs: Vec<EscSection>,
     pub battery: BatterySection,
     pub imu: ImuSection,
     pub baro: BaroSection,
@@ -35,16 +36,89 @@ pub struct QuadConfig {
     pub initial: InitialSection,
     pub fc: FcSection,
     pub radio: RadioSection,
-    #[serde(default)]
     pub collision: Option<CollisionSection>,
-    #[serde(default)]
     pub esc_telemetry: Option<EscTelemetrySection>,
-    #[serde(default)]
     pub osd: Option<OsdSection>,
-    #[serde(default)]
     pub vtx: Option<VtxSection>,
-    #[serde(skip)]
+    /// The part ids the quad referenced, kept for error messages and introspection.
+    pub parts: PartRefs,
     pub source_path: PathBuf,
+}
+
+/// The quad file as written: part references plus the aircraft's own wiring.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuadFile {
+    schema_version: u32,
+    name: String,
+    sim: SimSection,
+    frame: String,
+    motors: Vec<String>,
+    props: Vec<String>,
+    escs: Vec<String>,
+    battery: BatteryWiring,
+    imu: ImuSection,
+    baro: BaroSection,
+    home: HomeSection,
+    initial: InitialSection,
+    fc: FcSection,
+    radio: RadioSection,
+    #[serde(default)]
+    esc_telemetry: Option<EscTelemetrySection>,
+    #[serde(default)]
+    osd: Option<OsdSection>,
+    #[serde(default)]
+    vtx: Option<VtxWiring>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BatteryWiring {
+    part: String,
+    #[serde(default = "default_initial_soc")]
+    initial_soc: f64,
+    #[serde(default = "default_battery_rate_hz")]
+    rate_hz: u32,
+}
+
+fn default_initial_soc() -> f64 {
+    1.0
+}
+
+fn default_battery_rate_hz() -> u32 {
+    1000
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VtxWiring {
+    part: String,
+    uart: u8,
+    #[serde(default = "default_vtx_band")]
+    default_band: String,
+    #[serde(default = "default_vtx_channel")]
+    default_channel: u8,
+    #[serde(default)]
+    default_power_index: usize,
+}
+
+/// The part ids a quad referenced, kept for error messages and introspection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartRefs {
+    pub frame: String,
+    pub motors: Vec<String>,
+    pub props: Vec<String>,
+    pub escs: Vec<String>,
+    pub battery: String,
+    pub vtx: Option<String>,
+}
+
+/// The library root: the `OFS_LIBRARY` override when given, else `library/` beside the quads.
+pub fn library_root(env: Option<&str>, quad_dir: &Path) -> PathBuf {
+    match env.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(root) => PathBuf::from(root),
+        None => quad_dir.parent().unwrap_or_else(|| Path::new(".")).join("library"),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -473,6 +547,13 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
     let raw: toml::Value = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
+        Some(4) => {
+            let message = "unsupported schema_version 4 (this build reads schema 5); schema 5 moves the [frame], \
+                           [ground], [motor], [prop], [esc], [battery] and [vtx] hardware sections into library/ part \
+                           files with per-parameter provenance and the quad references them by id — see the \
+                           \"Component library\" section of README.md".to_string();
+            return Err(parse_err(message));
+        }
         Some(v @ ..=3) => {
             let message = format!(
                 "unsupported schema_version {v} (this build reads schema {SCHEMA_VERSION}); schema 4 removes radio.rssi_dbm, radio.snr_db, \
@@ -484,13 +565,152 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
         Some(v) => return Err(parse_err(format!("unsupported schema_version {v} (this build reads {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION})"))),
         None => return Err(parse_err("missing integer schema_version".into())),
     }
-    let mut cfg: QuadConfig = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
-    cfg.source_path = path.to_path_buf();
+    let file: QuadFile = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
+    let root = library_root(std::env::var("OFS_LIBRARY").ok().as_deref(), path.parent().unwrap_or(Path::new(".")));
+    let mut problems = Vec::new();
+    let resolve = |kind: &str, id: &str, field: &str, problems: &mut Vec<Problem>| -> Option<PathBuf> {
+        let dir = root.join(kind);
+        let path = dir.join(format!("{id}.toml"));
+        if path.is_file() {
+            return Some(path);
+        }
+        let message = if dir.is_dir() {
+            let mut have: Vec<String> = fs::read_dir(&dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+                        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            have.sort();
+            format!("part '{id}' not found in {} (have: {})", dir.display(), have.join(", "))
+        } else {
+            format!("library kind directory not found: {} (library root {}; set OFS_LIBRARY to override)", dir.display(), root.display())
+        };
+        problems.push(Problem { field: field.to_string(), message });
+        None
+    };
+
+    let Some(frame_path) = resolve("frames", &file.frame, "frame", &mut problems) else {
+        return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
+    };
+    let frame_part = part::load_frame(&frame_path)?;
+    let n = frame_part.frame.motor_positions_frd_m.len();
+    for (field, list) in [("motors", &file.motors), ("props", &file.props), ("escs", &file.escs)] {
+        if list.len() != 1 && list.len() != n {
+            problems.push(Problem { field: field.to_string(), message: format!("needs 1 or {n} entries (got {})", list.len()) });
+        }
+    }
+    let mut motor_paths = Vec::with_capacity(file.motors.len());
+    for (i, id) in file.motors.iter().enumerate() {
+        if let Some(p) = resolve("motors", id, &format!("motors[{i}]"), &mut problems) {
+            motor_paths.push(p);
+        }
+    }
+    let mut prop_paths = Vec::with_capacity(file.props.len());
+    for (i, id) in file.props.iter().enumerate() {
+        if let Some(p) = resolve("props", id, &format!("props[{i}]"), &mut problems) {
+            prop_paths.push(p);
+        }
+    }
+    let mut esc_paths = Vec::with_capacity(file.escs.len());
+    for (i, id) in file.escs.iter().enumerate() {
+        if let Some(p) = resolve("escs", id, &format!("escs[{i}]"), &mut problems) {
+            esc_paths.push(p);
+        }
+    }
+    let battery_path = resolve("batteries", &file.battery.part, "battery.part", &mut problems);
+    let mut vtx_path = None;
+    if let Some(wiring) = &file.vtx {
+        vtx_path = resolve("vtx", &wiring.part, "vtx.part", &mut problems);
+    }
+    if !problems.is_empty() {
+        return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
+    }
+
+    // Every id resolved above (any failure returned with the problems), so the optional paths are present.
+    let battery_part = part::load_battery(&battery_path.expect("the battery id resolved"))?;
+    let motors: Vec<MotorSection> =
+        broadcast(&motor_paths, n, part::load_motor)?.into_iter().map(|p| p.motor).collect();
+    let props: Vec<PropSection> =
+        broadcast(&prop_paths, n, part::load_prop)?.into_iter().map(|p| p.prop).collect();
+    let escs: Vec<EscSection> =
+        broadcast(&esc_paths, n, part::load_esc)?.into_iter().map(|p| p.esc).collect();
+    let battery = BatterySection {
+        cells: battery_part.battery.cells,
+        capacity_mah: battery_part.battery.capacity_mah,
+        r0_ohm: battery_part.battery.r0_ohm,
+        r1_ohm: battery_part.battery.r1_ohm,
+        c1_f: battery_part.battery.c1_f,
+        ocv_table: battery_part.battery.ocv_table,
+        initial_soc: file.battery.initial_soc,
+        rate_hz: file.battery.rate_hz,
+    };
+    let vtx = match (vtx_path, &file.vtx) {
+        (Some(vtx_path), Some(wiring)) => {
+            let hardware = part::load_vtx(&vtx_path)?.vtx;
+            Some(VtxSection {
+                kind: hardware.kind,
+                uart: wiring.uart,
+                default_band: wiring.default_band.clone(),
+                default_channel: wiring.default_channel,
+                power_levels_mw: hardware.power_levels_mw,
+                power_levels_dbm: hardware.power_levels_dbm,
+                default_power_index: wiring.default_power_index,
+                reply_latency_ms: hardware.reply_latency_ms,
+                antenna: hardware.antenna,
+                pit_power_mw: hardware.pit_power_mw,
+            })
+        }
+        _ => None,
+    };
+    let cfg = QuadConfig {
+        schema_version: file.schema_version,
+        name: file.name,
+        sim: file.sim,
+        frame: frame_part.frame,
+        ground: frame_part.ground,
+        collision: frame_part.collision,
+        motors,
+        props,
+        escs,
+        battery,
+        imu: file.imu,
+        baro: file.baro,
+        home: file.home,
+        initial: file.initial,
+        fc: file.fc,
+        radio: file.radio,
+        esc_telemetry: file.esc_telemetry,
+        osd: file.osd,
+        vtx,
+        parts: PartRefs {
+            frame: file.frame,
+            motors: file.motors,
+            props: file.props,
+            escs: file.escs,
+            battery: file.battery.part,
+            vtx: file.vtx.as_ref().map(|v| v.part.clone()),
+        },
+        source_path: path.to_path_buf(),
+    };
     let problems = cfg.validate();
     if !problems.is_empty() {
         return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
     }
     Ok(cfg)
+}
+
+/// Loads every path's part; a single part broadcasts to `n` entries (one part id covering every motor,
+/// prop or ESC of the aircraft).
+fn broadcast<P: Clone>(paths: &[PathBuf], n: usize, load: impl Fn(&Path) -> Result<P, ConfigError>) -> Result<Vec<P>, ConfigError> {
+    let parts = paths.iter().map(|p| load(p)).collect::<Result<Vec<_>, ConfigError>>()?;
+    if parts.len() == 1 {
+        return Ok(vec![parts[0].clone(); n]);
+    }
+    Ok(parts)
 }
 
 struct Checker(Vec<Problem>);
@@ -542,9 +762,9 @@ impl QuadConfig {
         if let Some(spheres) = self.collision.as_ref().and_then(|c| c.spheres_frd_m.clone()) {
             return spheres;
         }
-        let tip = self.prop.diameter_m / 2.0;
         let mut spheres = Vec::with_capacity(self.frame.motor_positions_frd_m.len() * SPHERES_PER_PROP + 1);
-        for m in &self.frame.motor_positions_frd_m {
+        for (m, p) in self.frame.motor_positions_frd_m.iter().zip(&self.props) {
+            let tip = p.diameter_m / 2.0;
             for k in 0..SPHERES_PER_PROP {
                 let a = 2.0 * std::f64::consts::PI * (k as f64) / SPHERES_PER_PROP as f64;
                 spheres.push([m[0] + tip * a.cos(), m[1] + tip * a.sin(), m[2], PROP_SPHERE_RADIUS_M]);
@@ -591,18 +811,28 @@ impl QuadConfig {
         c.non_negative(self.ground.damping_nspm, "ground.damping_nspm");
         c.non_negative(self.ground.friction_coeff, "ground.friction_coeff");
 
-        c.positive(self.motor.kv_rpm_per_v, "motor.kv_rpm_per_v");
-        c.positive(self.motor.resistance_ohm, "motor.resistance_ohm");
-        c.non_negative(self.motor.no_load_current_a, "motor.no_load_current_a");
-        c.positive(self.motor.rotor_inertia_kgm2, "motor.rotor_inertia_kgm2");
-
-        c.positive(self.prop.diameter_m, "prop.diameter_m");
-        c.non_negative(self.prop.inertia_kgm2, "prop.inertia_kgm2");
-        c.table(&self.prop.ct_table, "prop.ct_table");
-        c.table(&self.prop.cp_table, "prop.cp_table");
-
-        c.positive(self.esc.response_tau_s, "esc.response_tau_s");
-        c.positive(self.esc.current_limit_a, "esc.current_limit_a");
+        for (i, m) in self.motors.iter().enumerate() {
+            c.positive(m.kv_rpm_per_v, &format!("motors[{i}].kv_rpm_per_v"));
+            c.positive(m.resistance_ohm, &format!("motors[{i}].resistance_ohm"));
+            c.non_negative(m.no_load_current_a, &format!("motors[{i}].no_load_current_a"));
+            c.positive(m.rotor_inertia_kgm2, &format!("motors[{i}].rotor_inertia_kgm2"));
+            c.check(
+                (1..=32).contains(&m.pole_pairs),
+                &format!("motors[{i}].pole_pairs"),
+                format!("must be 1..=32 (got {})", m.pole_pairs),
+            );
+        }
+        for (i, p) in self.props.iter().enumerate() {
+            c.positive(p.diameter_m, &format!("props[{i}].diameter_m"));
+            c.non_negative(p.inertia_kgm2, &format!("props[{i}].inertia_kgm2"));
+            c.table(&p.ct_table, &format!("props[{i}].ct_table"));
+            c.table(&p.cp_table, &format!("props[{i}].cp_table"));
+            c.non_negative(p.imbalance_kgm, &format!("props[{i}].imbalance_kgm"));
+        }
+        for (i, e) in self.escs.iter().enumerate() {
+            c.positive(e.response_tau_s, &format!("escs[{i}].response_tau_s"));
+            c.positive(e.current_limit_a, &format!("escs[{i}].current_limit_a"));
+        }
 
         let b = &self.battery;
         c.check((1..=14).contains(&b.cells), "battery.cells", format!("must be 1..=14 (got {})", b.cells));

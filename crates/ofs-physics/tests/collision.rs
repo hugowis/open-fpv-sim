@@ -26,7 +26,7 @@ fn params(objects: Vec<WorldObject>, spheres: Vec<(DVec3, f64)>, restitution: f6
         inertia_kgm2: DVec3::new(0.0025, 0.0025, 0.0045),
         cda_m2: DVec3::ZERO,
         angular_damping_nms: 0.0,
-        rotor_inertia_kgm2: 0.0,
+        rotor_inertia_kgm2: Vec::new(),
         mounts: vec![],
         contact_points_frd_m: vec![],
         ground: GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: 0.6 },

@@ -33,14 +33,6 @@ pub struct Provenance {
     pub note: String,
 }
 
-impl Provenance {
-    /// Task 3's tests use this; `#[allow(dead_code)]` until then.
-    #[allow(dead_code)]
-    fn estimated() -> Self {
-        Self { source: ProvenanceSource::Estimated, ..Default::default() }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FramePart {

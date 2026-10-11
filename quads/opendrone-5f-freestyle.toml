@@ -1,53 +1,19 @@
-# OpenDrone 5" freestyle — M1 estimates. Units are in the key suffixes (SI).
-# Provenance tracking per parameter arrives with the component library (M4); all values here are estimates.
-schema_version = 4
-name = "OpenDrone 5F freestyle (M1 estimates)"
+# OpenDrone 5" freestyle — assembled from library parts (M1 estimates live in the part files now).
+schema_version = 5
+name = "OpenDrone 5F freestyle"
+
+frame = "opendrone-5f"
+motors = ["opendrone-openmotor-2207"]
+props = ["opendrone-5in-prop"]
+escs = ["opendrone-4in1-esc"]
+
+[battery]
+part = "opendrone-6s-1300"
+initial_soc = 1.0
+rate_hz = 1000
 
 [sim]
 base_hz = 8000
-
-[frame]
-mass_kg = 0.65
-inertia_kgm2 = [0.0025, 0.0025, 0.0045]
-cda_m2 = [0.010, 0.010, 0.020]
-angular_damping_nms = 0.0001
-# Betaflight Quad-X order: M1 rear-right, M2 front-right, M3 rear-left, M4 front-left (FRD: x fwd, y right, z down)
-motor_positions_frd_m = [[-0.08, 0.08, 0.0], [0.08, 0.08, 0.0], [-0.08, -0.08, 0.0], [0.08, -0.08, 0.0]]
-# +1 = clockwise seen from above. Betaflight default: M1 CW, M2 CCW, M3 CCW, M4 CW.
-motor_spin = [1, -1, -1, 1]
-contact_points_frd_m = [[-0.08, 0.08, 0.03], [0.08, 0.08, 0.03], [-0.08, -0.08, 0.03], [0.08, -0.08, 0.03]]
-
-[ground]
-stiffness_npm = 3000.0
-damping_nspm = 40.0
-friction_coeff = 0.6
-
-[motor]
-kv_rpm_per_v = 1950.0
-resistance_ohm = 0.07
-no_load_current_a = 1.2
-rotor_inertia_kgm2 = 6.0e-6
-
-[prop]
-diameter_m = 0.127
-inertia_kgm2 = 6.0e-6
-ct_table = [[0.0, 0.11], [30000.0, 0.11]]
-cp_table = [[0.0, 0.045], [30000.0, 0.045]]
-
-[esc]
-response_tau_s = 0.002
-current_limit_a = 45.0
-
-[battery]
-cells = 6
-capacity_mah = 1300.0
-r0_ohm = 0.024
-r1_ohm = 0.010
-c1_f = 2000.0
-initial_soc = 1.0
-rate_hz = 1000
-ocv_table = [[0.0, 3.27], [0.05, 3.61], [0.1, 3.69], [0.2, 3.73], [0.3, 3.77], [0.4, 3.79],
-             [0.5, 3.82], [0.6, 3.87], [0.7, 3.92], [0.8, 3.97], [0.9, 4.06], [1.0, 4.20]]
 
 [imu]
 gyro_noise_std_radps = 0.002
@@ -103,22 +69,10 @@ uart = 4
 cols = 30
 rows = 16
 
-# A SmartAudio v2.1 VTX. Betaflight builds its power list from the dBm values this VTX reports (SITL has no vtxtable).
+# The VTX part is the hardware (power table, antenna); the wiring below is this aircraft's.
 [vtx]
-kind = "smartaudio"
+part = "opendrone-smartaudio-1w"
 uart = 5
 default_band = "R"
 default_channel = 1
-power_levels_mw = [25, 200, 600, 1000]
-power_levels_dbm = [14, 23, 28, 30]
 default_power_index = 1
-reply_latency_ms = 5.0
-# Pit mode (0 dBm in SmartAudio) leaves a trickle: a picture only next to the pilot.
-pit_power_mw = 0.1
-
-# The video link model's view of the VTX antenna: a 2 dBi RHCP omni on the back of the frame, leaning back.
-[vtx.antenna]
-kind = "omni"
-gain_dbi = 2.0
-polarization = "rhcp"
-mount_frd = [-0.5, 0.0, -1.0]

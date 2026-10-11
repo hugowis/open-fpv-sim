@@ -8,6 +8,10 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 QUAD = str(REPO / "quads" / "opendrone-5f-freestyle.toml")
 WORLD = str(REPO / "worlds" / "flat.toml")
 
+# Schema-5 quads reference library/ parts. Tests that copy a quad into a bare temp dir would not resolve
+# them; default to the repo's library (an explicit OFS_LIBRARY wins).
+os.environ.setdefault("OFS_LIBRARY", str(REPO / "library"))
+
 
 @pytest.fixture(scope="session")
 def sim_bin():

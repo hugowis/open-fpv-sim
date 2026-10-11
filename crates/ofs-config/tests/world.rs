@@ -136,11 +136,38 @@ fn quad_text() -> String {
     fs::read_to_string(QUAD).unwrap().replace("\r\n", "\n")
 }
 
+const LIBRARY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library");
+
+fn part_text(kind: &str, id: &str) -> String {
+    fs::read_to_string(Path::new(LIBRARY).join(kind).join(format!("{id}.toml"))).unwrap().replace("\r\n", "\n")
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &to.join(entry.file_name()));
+        } else {
+            fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+        }
+    }
+}
+
+/// The quad at {dir}/quads/quad.toml, its diff beside it, the shipped library at {dir}/library/.
+/// Mutate parts with `write_part` only AFTER this, never before.
 fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
-    let path = dir.join("quad.toml");
+    fs::create_dir_all(dir.join("quads")).unwrap();
+    let path = dir.join("quads/quad.toml");
     fs::write(&path, text).unwrap();
-    fs::write(dir.join("opendrone-5f-freestyle.betaflight.diff"), "feature -GPS\n").unwrap();
+    fs::write(dir.join("quads/opendrone-5f-freestyle.betaflight.diff"), "feature -GPS\n").unwrap();
+    copy_dir(Path::new(LIBRARY), &dir.join("library"));
     path
+}
+
+/// Replaces one part file's text (after `write_quad`).
+fn write_part(dir: &Path, kind: &str, id: &str, text: &str) {
+    fs::write(dir.join("library").join(kind).join(format!("{id}.toml")), text).unwrap();
 }
 
 #[test]
@@ -155,9 +182,17 @@ fn the_shipped_quad_describes_its_vtx_antenna() {
 #[test]
 fn the_vtx_antenna_and_pit_power_have_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text();
-    let bare = text.split("# Pit mode").next().unwrap().to_string();
-    let cfg = load(&write_quad(dir.path(), &bare)).unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    // A vtx part without [vtx.antenna] and pit_power_mw (and their provenance, the section's last entries).
+    let part = part_text("vtx", "opendrone-smartaudio-1w")
+        .replace(
+            "pit_power_mw = 0.1\n\n[vtx.antenna]\nkind = \"omni\"\ngain_dbi = 2.0\npolarization = \"rhcp\"\n\
+             # Up and back, on the back of the frame.\nmount_frd = [-0.5, 0.0, -1.0]\n",
+            "",
+        )
+        .split("[provenance.\"vtx.pit_power_mw\"]").next().unwrap().to_string();
+    write_part(dir.path(), "vtx", "opendrone-smartaudio-1w", &part);
+    let cfg = load(&path).unwrap();
     let vtx = cfg.vtx.unwrap();
     assert_eq!(vtx.pit_power_mw, 0.1);
     assert_eq!(vtx.antenna, ofs_config::VtxAntennaSection::default());
@@ -167,12 +202,13 @@ fn the_vtx_antenna_and_pit_power_have_defaults() {
 #[test]
 fn video_link_problems_in_the_quad_file_are_reported() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text()
-        .replace("base_hz = 8000", "base_hz = 8010")
+    let path = write_quad(dir.path(), &quad_text().replace("base_hz = 8000", "base_hz = 8010"));
+    let part = part_text("vtx", "opendrone-smartaudio-1w")
         .replace("pit_power_mw = 0.1", "pit_power_mw = 0.0")
         .replace("kind = \"omni\"\ngain_dbi = 2.0", "kind = \"patch\"\ngain_dbi = 2.0")
         .replace("mount_frd = [-0.5, 0.0, -1.0]", "mount_frd = [0.0, 0.0, 0.0]");
-    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    write_part(dir.path(), "vtx", "opendrone-smartaudio-1w", &part);
+    let err = load(&path).unwrap_err();
     let ConfigError::Invalid { problems, .. } = &err else { panic!("{err}") };
     let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
     for field in ["sim.base_hz", "vtx.pit_power_mw", "vtx.antenna.beamwidth_deg", "vtx.antenna.mount_frd"] {

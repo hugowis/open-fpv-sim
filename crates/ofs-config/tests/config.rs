@@ -1,54 +1,157 @@
 use std::fs;
 use std::path::Path;
 
-use ofs_config::{load, ConfigError, FcKind, RadioKind};
+use ofs_config::{load, ConfigError, FcKind, RadioKind, VtxKind};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
+const LIBRARY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library");
 
 fn quad_text() -> String {
     fs::read_to_string(QUAD).unwrap().replace("\r\n", "\n")
 }
 
+fn part_text(kind: &str, id: &str) -> String {
+    fs::read_to_string(Path::new(LIBRARY).join(kind).join(format!("{id}.toml"))).unwrap().replace("\r\n", "\n")
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &to.join(entry.file_name()));
+        } else {
+            fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+        }
+    }
+}
+
+/// The quad at {dir}/quads/quad.toml, its diff beside it, the shipped library at {dir}/library/.
+/// Re-copies the library every call — mutate parts with `write_part` only AFTER this, never before.
 fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
-    let path = dir.join("quad.toml");
+    fs::create_dir_all(dir.join("quads")).unwrap();
+    let path = dir.join("quads/quad.toml");
     fs::write(&path, text).unwrap();
-    fs::write(dir.join("opendrone-5f-freestyle.betaflight.diff"), "feature -GPS\n").unwrap();
+    fs::write(dir.join("quads/opendrone-5f-freestyle.betaflight.diff"), "feature -GPS\n").unwrap();
+    copy_dir(Path::new(LIBRARY), &dir.join("library"));
     path
+}
+
+/// Replaces one part file's text (after `write_quad`).
+fn write_part(dir: &Path, kind: &str, id: &str, text: &str) {
+    fs::write(dir.join("library").join(kind).join(format!("{id}.toml")), text).unwrap();
 }
 
 #[test]
 fn reference_quad_loads_and_validates() {
     let cfg = load(Path::new(QUAD)).unwrap();
-    assert_eq!(cfg.schema_version, 4);
+    assert_eq!(cfg.schema_version, 5);
     assert_eq!(cfg.radio.kind, RadioKind::Elrs);
     assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
     assert_eq!(cfg.frame.motor_positions_frd_m.len(), 4);
+    assert_eq!(cfg.motors.len(), 4, "the single motor part broadcasts to every motor");
+    assert_eq!(cfg.motors[0].pole_pairs, 7);
+    assert_eq!(cfg.parts.battery, "opendrone-6s-1300");
     assert_eq!(cfg.fc.kind, FcKind::Sitl);
+    assert_eq!(cfg.vtx.as_ref().unwrap().kind, VtxKind::Smartaudio);
     assert!(cfg.validate().is_empty());
+}
+
+#[test]
+fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = quad_text()
+        .replace("schema_version = 5", "schema_version = 4")
+        .replace("frame = \"opendrone-5f\"", "[frame]\nmass_kg = 0.65");
+    let err = load(&write_quad(dir.path(), &old)).unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("schema_version 4"), "{message}");
+    assert!(message.contains("library"), "{message}");
+}
+
+#[test]
+fn an_unknown_part_id_lists_what_the_directory_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("motors = [\"opendrone-openmotor-2207\"]", "motors = [\"no-such-motor\"]");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    assert!(err.to_string().contains("no-such-motor"), "{err}");
+    assert!(err.to_string().contains("opendrone-openmotor-2207"), "lists the ids it holds: {err}");
+}
+
+#[test]
+fn a_missing_kind_directory_names_the_library_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    fs::remove_dir_all(dir.path().join("library/frames")).unwrap();
+    let err = load(&path).unwrap_err();
+    assert!(err.to_string().contains("frames"), "{err}");
+    assert!(err.to_string().contains("OFS_LIBRARY"), "{err}");
+}
+
+#[test]
+fn a_wrong_length_part_list_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("motors = [\"opendrone-openmotor-2207\"]",
+                                   "motors = [\"opendrone-openmotor-2207\", \"opendrone-openmotor-2207\"]");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    assert!(err.to_string().contains("motors"), "{err}");
+    assert!(err.to_string().contains("1 or 4"), "{err}");
+}
+
+#[test]
+fn the_library_root_honours_the_override() {
+    let quad_dir = Path::new("C:/anywhere/quads");
+    assert_eq!(ofs_config::library_root(None, quad_dir), Path::new("C:/anywhere/library"));
+    assert_eq!(ofs_config::library_root(Some("C:/my-library"), quad_dir), Path::new("C:/my-library"));
+}
+
+#[test]
+fn a_missing_vtx_part_is_reported_on_the_vtx_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("part = \"opendrone-smartaudio-1w\"", "part = \"no-such-vtx\"");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    assert!(err.to_string().contains("vtx.part"), "{err}");
+}
+
+#[test]
+fn frame_part_problems_are_reported_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("frames", "opendrone-5f")
+        .replace("mass_kg = 0.65", "mass_kg = -1.0")
+        .replace("motor_spin = [1, -1, -1, 1]", "motor_spin = [1, -1, -1, 2]");
+    write_part(dir.path(), "frames", "opendrone-5f", &part);
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    assert!(fields.contains(&"frame.mass_kg"), "{fields:?}");
+    assert!(fields.contains(&"frame.motor_spin"), "{fields:?}");
+    let shown = err.to_string();
+    assert!(shown.contains("frame.mass_kg") && shown.contains("frame.motor_spin"));
 }
 
 #[test]
 fn every_problem_is_reported_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let text = quad_text()
-        .replace("mass_kg = 0.65", "mass_kg = -1.0")
         .replace("initial_soc = 1.0", "initial_soc = 2.0")
-        .replace("motor_spin = [1, -1, -1, 1]", "motor_spin = [1, -1, -1, 2]");
+        .replace("packet_rate_hz = 500", "packet_rate_hz = 333");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
     let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
-    assert!(fields.contains(&"frame.mass_kg"), "{fields:?}");
     assert!(fields.contains(&"battery.initial_soc"), "{fields:?}");
-    assert!(fields.contains(&"frame.motor_spin"), "{fields:?}");
+    assert!(fields.contains(&"radio.packet_rate_hz"), "{fields:?}");
     let shown = err.to_string();
-    assert!(shown.contains("frame.mass_kg") && shown.contains("battery.initial_soc"));
+    assert!(shown.contains("battery.initial_soc") && shown.contains("radio.packet_rate_hz"));
 }
 
 #[test]
 fn unknown_field_is_a_parse_error_naming_it() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("mass_kg = 0.65", "mass_kg = 0.65\nmas_kg = 1.0");
-    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("frames", "opendrone-5f").replace("mass_kg = 0.65", "mass_kg = 0.65\nmas_kg = 1.0");
+    write_part(dir.path(), "frames", "opendrone-5f", &part);
+    let err = load(&path).unwrap_err();
     assert!(matches!(err, ConfigError::Parse { .. }));
     assert!(err.to_string().contains("mas_kg"), "{err}");
 }
@@ -56,7 +159,11 @@ fn unknown_field_is_a_parse_error_naming_it() {
 #[test]
 fn unsupported_schema_version_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 4", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 5", "schema_version = 4");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err();
+    assert!(err.to_string().contains("schema_version 4"), "{err}");
+    assert!(err.to_string().contains("library"), "{err}");
+    let text = quad_text().replace("schema_version = 5", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("schema_version 1"), "{err}");
     assert!(err.to_string().contains("radio.rssi_dbm") && err.to_string().contains("[collision]"), "{err}");
@@ -67,14 +174,14 @@ fn diff_path_resolves_relative_to_quad_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_quad(dir.path(), &quad_text());
     let cfg = load(&path).unwrap();
-    assert_eq!(cfg.resolve(&cfg.fc.betaflight_diff), dir.path().join("opendrone-5f-freestyle.betaflight.diff"));
+    assert_eq!(cfg.resolve(&cfg.fc.betaflight_diff), dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff"));
 }
 
 #[test]
 fn missing_diff_file_is_reported_for_sitl_quads() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_quad(dir.path(), &quad_text());
-    fs::remove_file(dir.path().join("opendrone-5f-freestyle.betaflight.diff")).unwrap();
+    fs::remove_file(dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff")).unwrap();
     let err = load(&path).unwrap_err();
     assert!(err.to_string().contains("fc.betaflight_diff"), "{err}");
 }
@@ -123,7 +230,7 @@ fn a_quad_without_a_radio_is_a_parse_error_naming_it() {
 fn the_reference_quad_has_the_video_sections() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = load(&write_quad(dir.path(), &quad_text())).unwrap();
-    assert_eq!(cfg.schema_version, 4);
+    assert_eq!(cfg.schema_version, 5);
     let esc = cfg.esc_telemetry.as_ref().expect("[esc_telemetry]");
     assert_eq!((esc.uart, esc.rate_hz), (3, 100));
     let osd = cfg.osd.as_ref().expect("[osd]");
@@ -140,13 +247,23 @@ fn video_problems_are_reported_together() {
     let dir = tempfile::tempdir().unwrap();
     let text = quad_text()
         .replace("[osd]\nuart = 4", "[osd]\nuart = 3")           // collides with [esc_telemetry]
-        .replace("default_band = \"R\"", "default_band = \"Z\"")
-        .replace("power_levels_dbm = [14, 23, 28, 30]", "power_levels_dbm = [14, 23, 28]");
+        .replace("default_band = \"R\"", "default_band = \"Z\"");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     let ConfigError::Invalid { problems, .. } = &err else { panic!("{err}") };
     let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
     assert!(fields.contains(&"osd.uart"), "{fields:?}");
     assert!(fields.contains(&"vtx.default_band"), "{fields:?}");
+}
+
+#[test]
+fn vtx_part_problems_are_reported_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("vtx", "opendrone-smartaudio-1w").replace("power_levels_dbm = [14, 23, 28, 30]", "power_levels_dbm = [14, 23, 28]");
+    write_part(dir.path(), "vtx", "opendrone-smartaudio-1w", &part);
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("{err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
     assert!(fields.contains(&"vtx.power_levels_dbm"), "{fields:?}");
 }
 
@@ -158,7 +275,7 @@ fn a_diff_that_enables_smartaudio_needs_a_vtx_section() {
     let dir = tempfile::tempdir().unwrap();
     let without_vtx = quad_text().split("\n[vtx]").next().unwrap().to_string() + "\n";
     let path = write_quad(dir.path(), &without_vtx);
-    fs::write(dir.path().join("opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
+    fs::write(dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
     let err = load(&path).unwrap_err();
     assert!(err.to_string().contains("SmartAudio") && err.to_string().contains("[vtx]"), "{err}");
     let ConfigError::Invalid { problems, .. } = &err else { panic!("{err}") };
@@ -169,11 +286,11 @@ fn a_diff_that_enables_smartaudio_needs_a_vtx_section() {
 fn a_smartaudio_diff_with_a_matching_vtx_section_loads() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_quad(dir.path(), &quad_text());
-    fs::write(dir.path().join("opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
+    fs::write(dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
     assert!(load(&path).is_ok(), "the shipped quad has [vtx] uart = 5");
-    let elsewhere = quad_text().replace("[vtx]\nkind = \"smartaudio\"\nuart = 5", "[vtx]\nkind = \"smartaudio\"\nuart = 6");
+    let elsewhere = quad_text().replace("[vtx]\npart = \"opendrone-smartaudio-1w\"\nuart = 5", "[vtx]\npart = \"opendrone-smartaudio-1w\"\nuart = 6");
     let path = write_quad(dir.path(), &elsewhere);
-    fs::write(dir.path().join("opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
+    fs::write(dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff"), SMARTAUDIO_DIFF).unwrap();
     let err = load(&path).unwrap_err();
     assert!(err.to_string().contains("UART5"), "a VTX on another UART than the diff's SmartAudio port: {err}");
 }
@@ -181,7 +298,7 @@ fn a_smartaudio_diff_with_a_matching_vtx_section_loads() {
 #[test]
 fn a_video_uart_outside_the_sitl_range_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("[vtx]\nkind = \"smartaudio\"\nuart = 5", "[vtx]\nkind = \"smartaudio\"\nuart = 1");
+    let text = quad_text().replace("[vtx]\npart = \"opendrone-smartaudio-1w\"\nuart = 5", "[vtx]\npart = \"opendrone-smartaudio-1w\"\nuart = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("vtx.uart"), "{err}");
 }
@@ -197,23 +314,30 @@ fn invalid_fields(text: &str) -> Vec<String> {
 #[test]
 fn non_finite_vectors_are_rejected() {
     let text = quad_text()
-        .replace("motor_positions_frd_m = [[-0.08, 0.08, 0.0]", "motor_positions_frd_m = [[nan, 0.08, 0.0]")
-        .replace("contact_points_frd_m = [[-0.08, 0.08, 0.03]", "contact_points_frd_m = [[-0.08, inf, 0.03]")
         .replace("gyro_bias_radps = [0.0, 0.0, 0.0]", "gyro_bias_radps = [0.0, nan, 0.0]")
         .replace("accel_bias_mps2 = [0.0, 0.0, 0.0]", "accel_bias_mps2 = [-inf, 0.0, 0.0]")
         .replace("position_ned_m = [0.0, 0.0, -0.03]", "position_ned_m = [0.0, nan, -0.03]")
         .replace("yaw_deg = 0.0", "yaw_deg = inf")
         .replace("alt_m = 30.0", "alt_m = nan");
     let fields = invalid_fields(&text);
-    for field in [
-        "frame.motor_positions_frd_m",
-        "frame.contact_points_frd_m",
-        "imu.gyro_bias_radps",
-        "imu.accel_bias_mps2",
-        "initial.position_ned_m",
-        "initial.yaw_deg",
-        "home.alt_m",
-    ] {
+    for field in ["imu.gyro_bias_radps", "imu.accel_bias_mps2", "initial.position_ned_m", "initial.yaw_deg", "home.alt_m"] {
+        assert!(fields.iter().any(|f| f == field), "{field} missing from {fields:?}");
+    }
+}
+
+#[test]
+fn non_finite_part_vectors_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("frames", "opendrone-5f")
+        .replace("motor_positions_frd_m = [[-0.08, 0.08, 0.0]", "motor_positions_frd_m = [[nan, 0.08, 0.0]")
+        .replace("contact_points_frd_m = [[-0.08, 0.08, 0.03]", "contact_points_frd_m = [[-0.08, inf, 0.03]");
+    write_part(dir.path(), "frames", "opendrone-5f", &part);
+    let fields: Vec<String> = match load(&path) {
+        Err(ConfigError::Invalid { problems, .. }) => problems.into_iter().map(|p| p.field).collect(),
+        other => panic!("expected Invalid, got {other:?}"),
+    };
+    for field in ["frame.motor_positions_frd_m", "frame.contact_points_frd_m"] {
         assert!(fields.iter().any(|f| f == field), "{field} missing from {fields:?}");
     }
 }
@@ -225,7 +349,7 @@ const ESC_OSD_DIFF: &str = "feature ESC_SENSOR\nserial 2 1024 115200 57600 0 115
 fn with_diff(text: &str, diff: &str) -> Result<ofs_config::QuadConfig, ConfigError> {
     let dir = tempfile::tempdir().unwrap();
     let path = write_quad(dir.path(), text);
-    fs::write(dir.path().join("opendrone-5f-freestyle.betaflight.diff"), diff).unwrap();
+    fs::write(dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff"), diff).unwrap();
     load(&path)
 }
 
@@ -258,7 +382,7 @@ fn an_esc_sensor_battery_needs_the_forced_cell_count() {
 #[test]
 fn the_schema_1_hint_reads_as_one_sentence() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 4", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 5", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err().to_string();
     assert!(!err.contains("  "), "run-on spaces in: {err}");
 }
@@ -275,7 +399,7 @@ fn shipped_with(edit: impl FnOnce(&mut String)) -> Result<ofs_config::QuadConfig
 
 #[test]
 fn a_schema_3_quad_file_is_refused_with_the_field_changes() {
-    let err = shipped_with(|t| *t = t.replace("schema_version = 4", "schema_version = 3")).unwrap_err();
+    let err = shipped_with(|t| *t = t.replace("schema_version = 5", "schema_version = 3")).unwrap_err();
     let message = err.to_string();
     assert!(message.contains("schema_version 3"), "{message}");
     assert!(message.contains("radio.rssi_dbm"), "{message}");
@@ -287,7 +411,7 @@ fn a_schema_3_quad_file_is_refused_with_the_field_changes() {
 }
 
 #[test]
-fn the_old_radio_fields_are_unknown_in_schema_4() {
+fn the_old_radio_fields_are_unknown_in_schema_5() {
     let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 250\nrssi_dbm = -50.0")).unwrap_err();
     assert!(err.to_string().contains("unknown field `rssi_dbm`"), "{}", err);
 }
@@ -336,7 +460,7 @@ fn the_shipped_quad_gets_25_collision_spheres_with_no_gap_for_a_post() {
     assert_eq!(spheres.len(), 25, "6 spheres per prop tip circle + one body sphere");
     let (restitution, friction) = cfg.collision_contact();
     assert_eq!((restitution, friction), (0.3, 0.5), "the spec's defaults");
-    let tip = cfg.prop.diameter_m / 2.0;
+    let tip = cfg.props[0].diameter_m / 2.0;
     for m in &cfg.frame.motor_positions_frd_m {
         let mut ring: Vec<[f64; 4]> = spheres
             .iter()
@@ -359,28 +483,34 @@ fn the_shipped_quad_gets_25_collision_spheres_with_no_gap_for_a_post() {
     }
 }
 
+/// The frame part's `[collision]` lines plus the provenance its parameters need.
+fn frame_part_with_collision(collision: &str) -> String {
+    part_text("frames", "opendrone-5f").replace(
+        "[provenance.\"frame.mass_kg\"]",
+        &format!("[collision]\n{collision}\n\n[provenance.\"collision.restitution\"]\nsource = \"estimated\"\n\
+                  [provenance.\"collision.friction_coeff\"]\nsource = \"estimated\"\n\
+                  [provenance.\"collision.spheres_frd_m\"]\nsource = \"estimated\"\n\
+                  \n[provenance.\"frame.mass_kg\"]"),
+    )
+}
+
 #[test]
 fn a_collision_section_is_honoured() {
-    let cfg = shipped_with(|t| {
-        *t = t.replace(
-            "tx_power_mw = 250",
-            "tx_power_mw = 250\n\n[collision]\nrestitution = 0.7\nfriction_coeff = 0.2\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.05]]",
-        )
-    })
-    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    write_part(dir.path(), "frames", "opendrone-5f", &frame_part_with_collision("restitution = 0.7\nfriction_coeff = 0.2\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.05]]"));
+    let cfg = load(&path).unwrap();
     assert_eq!(cfg.collision_spheres(), vec![[0.0, 0.0, 0.0, 0.05]]);
     assert_eq!(cfg.collision_contact(), (0.7, 0.2));
 }
 
 #[test]
 fn collision_validation_problems_are_collected() {
-    let err = shipped_with(|t| {
-        *t = t.replace(
-            "tx_power_mw = 250",
-            "tx_power_mw = 250\n\n[collision]\nrestitution = 1.5\nfriction_coeff = -1.0\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.0], [nan, 0.0, 0.0, 0.02]]",
-        )
-    })
-    .unwrap_err();
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let collision = "restitution = 1.5\nfriction_coeff = -1.0\nspheres_frd_m = [[0.0, 0.0, 0.0, 0.0], [nan, 0.0, 0.0, 0.02]]";
+    write_part(dir.path(), "frames", "opendrone-5f", &frame_part_with_collision(collision));
+    let err = load(&path).unwrap_err();
     let message = err.to_string();
     assert!(message.contains("collision.restitution"), "{message}");
     assert!(message.contains("collision.friction_coeff"), "{message}");

@@ -29,7 +29,7 @@ fn params(mounts: Vec<MotorMount>, contacts: Vec<DVec3>) -> AirframeParams {
         inertia_kgm2: DVec3::new(0.0025, 0.0025, 0.0045),
         cda_m2: DVec3::ZERO,
         angular_damping_nms: 0.0,
-        rotor_inertia_kgm2: 0.0,
+        rotor_inertia_kgm2: vec![0.0; mounts.len()],
         mounts,
         contact_points_frd_m: contacts,
         ground: GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: 0.6 },
