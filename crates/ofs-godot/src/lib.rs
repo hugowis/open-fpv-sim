@@ -182,6 +182,8 @@ impl OfsClient {
     /// The newest telemetry, or an empty Dictionary before the first state: `time_s`, `altitude_m`, `speed_mps`,
     /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` (PackedFloat32Array), `motors_spinning`,
     /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `radio_snr_db`, `radio_antenna`, `downlink_lq_pct`,
+    /// `fc_battery_v`, `fc_battery_a`, `fc_battery_mah`, `fc_roll_deg`, `fc_pitch_deg`, `fc_yaw_deg`,
+    /// `fc_flight_mode`, `fc_frame_count`, `fc_telemetry_age_s`,
     /// `collision_speed_mps`, `running`, `overruns`, `fc_restarts`, `age_s`, and the VTX's
     /// `vtx_present`, `vtx_band`, `vtx_channel`, `vtx_channel_name` (a String, empty without a VTX), `vtx_freq_mhz`,
     /// `vtx_power_mw` and `vtx_pit_mode`, and the video link's `video_present`, `video_snr_db`,
@@ -208,6 +210,16 @@ impl OfsClient {
         d.set("radio_snr_db", t.radio_snr_db);
         d.set("radio_antenna", &GString::from(t.radio_antenna.as_str()));
         d.set("downlink_lq_pct", t.downlink_lq_pct);
+        let fc = &t.fc_telemetry;
+        d.set("fc_battery_v", fc.battery_v);
+        d.set("fc_battery_a", fc.battery_a);
+        d.set("fc_battery_mah", fc.battery_mah);
+        d.set("fc_roll_deg", fc.roll_deg);
+        d.set("fc_pitch_deg", fc.pitch_deg);
+        d.set("fc_yaw_deg", fc.yaw_deg);
+        d.set("fc_flight_mode", &GString::from(fc.flight_mode.as_str()));
+        d.set("fc_frame_count", fc.frame_count as i64);
+        d.set("fc_telemetry_age_s", fc.telemetry_age_s);
         d.set("collision_speed_mps", t.collision_speed_mps);
         d.set("running", t.running);
         d.set("overruns", t.overruns as i64);

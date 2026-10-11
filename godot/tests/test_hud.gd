@@ -14,7 +14,10 @@ func _telemetry(overrides := {}) -> Dictionary:
 		"time_s": 12.3, "altitude_m": 4.5, "speed_mps": 6.7, "climb_mps": -0.4, "battery_voltage_v": 24.1,
 		"battery_current_a": 12.0, "motor_cmd": PackedFloat32Array([0.3, 0.3, 0.3, 0.3]), "motors_spinning": true,
 		"tx_enabled": true, "link_up": true, "lq_pct": 100.0, "rssi_dbm": -50.0, "radio_snr_db": 49.0,
-		"radio_antenna": "antenna", "downlink_lq_pct": 100.0, "collision_speed_mps": 0.0, "running": true,
+		"radio_antenna": "antenna", "downlink_lq_pct": 100.0, "fc_battery_v": 24.6, "fc_battery_a": 3.2,
+		"fc_battery_mah": 120.0, "fc_roll_deg": 1.0, "fc_pitch_deg": -2.0, "fc_yaw_deg": 90.0,
+		"fc_flight_mode": "ACRO", "fc_frame_count": 120, "fc_telemetry_age_s": 0.05,
+		"collision_speed_mps": 0.0, "running": true,
 		"overruns": 0, "fc_restarts": 0, "age_s": 0.01,
 	}
 	t.merge(overrides, true)
@@ -136,4 +139,15 @@ func test_the_link_line_carries_the_snr() -> void:
 	eq(hud.link_text(), "LINK UP   LQ 100 %   -50 dBm   SNR 49", "the link line")
 	hud.update_view(_view({"telemetry": _telemetry({"link_up": false})}))
 	ok(hud.link_text().begins_with("LINK DOWN"), "down: '%s'" % hud.link_text())
+	hud.queue_free()
+
+
+func test_the_battery_line_shows_betaflight_while_fresh_and_dashes_when_stale() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	eq(hud.battery_text(), "24.60 V   3.2 A   ACRO", "fresh: Betaflight's values and its mode")
+	hud.update_view(_view({"telemetry": _telemetry({"fc_telemetry_age_s": 1.5})}))
+	eq(hud.battery_text(), "-- V   -- A   --", "stale: dashes")
+	hud.update_view(_view({"telemetry": _telemetry({"fc_telemetry_age_s": INF})}))
+	eq(hud.battery_text(), "-- V   -- A   --", "never arrived (open loop): dashes")
 	hud.queue_free()
