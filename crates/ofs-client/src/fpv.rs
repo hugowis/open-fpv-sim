@@ -64,7 +64,7 @@ impl FpvBuffer {
     /// Adds a state sample's field. The state stream is faster than the video, so samples inside one field
     /// replace that field's entry; a sample from before the newest one clears the buffer (the session restarted).
     pub fn push_field(&mut self, time_s: f64, uniforms: FieldUniforms, valid: bool) {
-        if !(time_s.is_finite() && uniforms.noise.is_finite() && uniforms.chroma.is_finite()) {
+        if !(time_s.is_finite() && uniforms.noise.is_finite() && uniforms.sparkles.is_finite() && uniforms.chroma.is_finite()) {
             return;
         }
         let boundary = field_floor(time_s);

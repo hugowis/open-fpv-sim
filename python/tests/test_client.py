@@ -174,7 +174,7 @@ def test_video_messages_convert():
                      rssi=[pb.AntennaRssi(name="omni", rssi_dbm=-90.0), pb.AntennaRssi(name="patch", rssi_dbm=-85.0)])
     v = _video(m)
     assert (v.sync, v.active_antenna, v.rssi) == ("lost", "patch", {"omni": -90.0, "patch": -85.0})
-    assert v.field_valid in (True, False) and v.latency_ms == 0
+    assert not v.field_valid and v.latency_ms == 0, "the mapped bool and latency equal the pb values"
     mapped = _video(pb.VideoLink(field_valid=True, latency_ms=40))
     assert mapped.field_valid and mapped.latency_ms == 40
     assert _video(pb.VideoLink()).sync == "" and not _video(pb.VideoLink()).present

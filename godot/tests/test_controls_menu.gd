@@ -140,6 +140,17 @@ func test_the_aspect_button_cycles_from_the_set_value() -> void:
 	menu.queue_free()
 
 
+func test_a_junk_setting_resolves_to_the_4x3_label() -> void:
+	# The game clamps the pass-through setting before showing it (app.gd), so the label and the layout agree.
+	var clamped: String = App.clamp_aspect("vhs")
+	eq(clamped, "4:3", "an unknown setting falls back to the 4:3 default")
+	eq(App.clamp_aspect("window"), "window", "a known setting passes through")
+	var menu = (await _menu())[0]
+	menu.set_aspect(clamped)
+	eq(menu._aspect.text, "Picture: 4:3", "the label agrees with the clamped setting")
+	menu.queue_free()
+
+
 func test_the_fpv_box_fits_the_aspect_and_centers() -> void:
 	var wide := App.fpv_box_for(Vector2(1600, 800), "4:3", false)
 	ok((wide["box"] as Rect2).is_equal_approx(Rect2(266.666, 0, 1066.666, 800)), "a wide window: height-fitted 4:3, centred")

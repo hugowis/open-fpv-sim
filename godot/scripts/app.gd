@@ -4,6 +4,7 @@ extends Node3D
 
 const Controls = preload("res://scripts/controls.gd")
 const AppSettings = preload("res://scripts/settings.gd")
+const ControlsMenu = preload("res://ui/controls_menu.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -47,6 +48,7 @@ var _world_version := -1
 
 func _ready() -> void:
 	settings = AppSettings.load_settings()
+	settings["fpv_aspect"] = clamp_aspect(settings["fpv_aspect"])
 	_load_controls()
 	controls_menu.setup(controls, CONTROLS_PATH)
 	video.effects = settings["video_effects"]
@@ -74,6 +76,15 @@ func _ready() -> void:
 		hud.show_fatal("Could not start the simulator client: %s
 Check the [client] section of user://ofs_client.cfg and the OFS_* variables, then restart." % error)
 		set_process(false)
+
+
+## The Picture setting arrives as a pass-through string (the config file, the environment, the command line):
+## anything outside the controls menu's cycle falls back to the 4:3 default, so the label and the layout agree.
+static func clamp_aspect(value: String) -> String:
+	if value in ControlsMenu.ASPECTS:
+		return value
+	push_warning("%s is not a Picture setting; using 4:3" % value)
+	return "4:3"
 
 
 ## The FPV box and the viewport's internal resolution for `window_size`. The chase view and the "window"

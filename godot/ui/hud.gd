@@ -20,6 +20,7 @@ const HELP_LINES := [
 	"P  pause / resume the simulation",
 	"R  reload the quad (back to the start; retry after an error)",
 	"C  switch between FPV and chase camera",
+	"D  record the FPV view (DVR)",
 	"K  cut / restore the radio link (failsafe test)",
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen",

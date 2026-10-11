@@ -117,7 +117,18 @@ fn write_header(file: &mut File, h: &Header) -> std::io::Result<[usize; 4]> {
     Ok([riff_size_at, movi_size_at, avih_frames_at, strh_length_at])
 }
 
-fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> DvrSummary {
+/// Seeks to each `(offset, value)` pair and patches it in, then flushes: the four size/length fields that make
+/// the file a valid AVI. A failure anywhere leaves the file unfinalized, so the caller reports it instead of
+/// claiming the frames were saved.
+fn patch_sizes(file: &mut File, patches: [(u64, u32); 4]) -> std::io::Result<()> {
+    for (at, value) in patches {
+        file.seek(SeekFrom::Start(at))?;
+        file.write_all(&value.to_le_bytes())?;
+    }
+    file.flush()
+}
+
+fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> Result<DvrSummary, String> {
     let [riff_size_at, movi_size_at, avih_frames_at, strh_length_at] =
         write_header(&mut file, &header).expect("the DVR header write failed");
     let mut frames = 0u64;
@@ -131,7 +142,8 @@ fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> DvrSummary {
         index.push(size);
         frames += 1;
     }
-    // The sender is gone: the queue is drained, finalize.
+    // The sender is gone: the queue is drained, finalize. The index write and the position read panic into the
+    // join's Err on failure; the patching returns its first failure to `stop()` instead of a summary.
     let mut idx = Vec::with_capacity(8 + index.len() * 16);
     put(&mut idx, b"idx1");
     put32(&mut idx, (index.len() * 16) as u32);
@@ -146,23 +158,21 @@ fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> DvrSummary {
     file.write_all(&idx).expect("the DVR index write failed");
     let end = file.stream_position().expect("the DVR position failed");
     let movi_end = end - idx.len() as u64;
-    let _ = file.seek(SeekFrom::Start(avih_frames_at as u64));
-    let _ = file.write_all(&(frames as u32).to_le_bytes());
-    let _ = file.seek(SeekFrom::Start(strh_length_at as u64));
-    let _ = file.write_all(&(frames as u32).to_le_bytes());
-    let _ = file.seek(SeekFrom::Start(movi_size_at as u64));
-    // The movi LIST's size counts the 'movi' fourcc plus every chunk (movi_data_at = movi_size_at + 8).
-    let _ = file.write_all(&((movi_end - (movi_size_at + 4) as u64) as u32).to_le_bytes());
-    let _ = file.seek(SeekFrom::Start(riff_size_at as u64));
-    let _ = file.write_all(&((end - 8) as u32).to_le_bytes());
-    let _ = file.flush();
-    DvrSummary { frames, dropped_frames: 0, bytes: end }
+    // The movi LIST's size counts the 'movi' fourcc plus every chunk (movi_data_at = movi_size_at + 4).
+    let patches = [
+        (avih_frames_at as u64, frames as u32),
+        (strh_length_at as u64, frames as u32),
+        (movi_size_at as u64, (movi_end - (movi_size_at + 4) as u64) as u32),
+        (riff_size_at as u64, (end - 8) as u32),
+    ];
+    patch_sizes(&mut file, patches).map_err(|e| format!("the DVR finalize failed: {e}"))?;
+    Ok(DvrSummary { frames, dropped_frames: 0, bytes: end })
 }
 
 /// A recording in progress. `stop` finalizes; dropping without `stop` also finalizes (the writer thread joins).
 pub struct DvrWriter {
     tx: Option<SyncSender<Vec<u8>>>,
-    handle: Option<JoinHandle<DvrSummary>>,
+    handle: Option<JoinHandle<Result<DvrSummary, String>>>,
     dropped: std::sync::Arc<AtomicU64>,
     path: PathBuf,
 }
@@ -182,9 +192,10 @@ impl DvrWriter {
         let handle = std::thread::Builder::new()
             .name("ofs-dvr".into())
             .spawn(move || {
-                let mut summary = writer(file, header, rx);
-                summary.dropped_frames += dropped_in_thread.load(Ordering::Relaxed);
-                summary
+                writer(file, header, rx).map(|mut summary| {
+                    summary.dropped_frames += dropped_in_thread.load(Ordering::Relaxed);
+                    summary
+                })
             })
             .map_err(|e| e.to_string())?;
         Ok(DvrWriter { tx: Some(tx), handle: Some(handle), dropped, path })
@@ -204,11 +215,15 @@ impl DvrWriter {
         }
     }
 
-    /// Stops: drops the sender (the worker drains the queue and patches the headers) and joins.
+    /// Stops: drops the sender (the worker drains the queue and patches the headers) and joins. A summary means
+    /// the file was finalized; an Err means it was not (the pilot's toast must be the failure, not "frames saved").
     pub fn stop(mut self) -> Result<DvrSummary, String> {
         self.tx.take();
         let handle = self.handle.take().ok_or_else(|| "the recorder already stopped".to_string())?;
-        handle.join().map_err(|_| "the DVR writer panicked".to_string())
+        match handle.join() {
+            Ok(summary) => summary,
+            Err(_) => Err("the DVR writer panicked".to_string()),
+        }
     }
 }
 

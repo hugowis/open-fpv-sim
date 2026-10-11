@@ -148,7 +148,7 @@ impl VtxModel {
         self.kind
     }
 
-    /// Frames ignored so far: bad CRC, unknown command or wrong length.
+    /// Frames ignored so far: a bad CRC or an unknown command (the SmartAudio codec also counts a wrong payload length).
     pub fn bad_frames(&self) -> u32 {
         match &self.codec {
             Codec::Smartaudio(parser) => parser.bad_frames(),

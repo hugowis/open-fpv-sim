@@ -163,8 +163,10 @@ The **DVR** (keybind **D**) records the FPV view — exactly what the pilot sees
 `user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
 `~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a
 dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again stops
-it, and it stops on its own (with a toast counting the saved frames) when the picture's internal size changes:
-an aspect switch or a chase-camera toggle — with a boxed aspect a plain window resize does not stop it. It
+it, and it stops on its own (with a toast counting the saved frames) when the picture's INTERNAL size changes:
+an aspect switch or a chase-camera toggle, and — because the window aspect renders at the window's own size —
+a plain window resize with the window aspect. With a boxed aspect the internal resolution is fixed (960×720 or
+1280×720), so a plain window resize does not stop it. It
 records only the FPV view: press C first if the chase camera is up.
 
 The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of

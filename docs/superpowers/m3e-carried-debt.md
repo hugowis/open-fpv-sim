@@ -3,19 +3,18 @@
 These items were deliberately left out of M3e, or surfaced while building it. They are listed so M4 planning and the maintainer can pick them up.
 
 ## Deferred features
-- **Font pages 2 and 3.** Betaflight's warnings arrive at page 2 (severity WARNING → `fontSelection[2]`, the
-  identity default) and the client falls back to page 0 for them; only page 1 (INFO) draws bold. A page-2
-  mapping (or shipping more pages in the atlas) would make warnings bold like a real HD goggle.
+- **Font pages 1-3.** The atlas ships page 0 only: the plan's page-1 `bold.mcm` download is deferred pending the
+  maintainer's approval (the M3a font discipline), and `osd.gd` masks the font-page bits off, so pages ≥ 1 all
+  draw from page 0 — nothing draws bold today, Betaflight's INFO elements (page 1) and warnings (page 2)
+  included. Shipping the second page (or a page-2 mapping) would make them bold like a real HD goggle.
 - **The DVR has no size mid-recording.** A viewport resize or aspect switch stops the recording instead of
-  re-negotiating the header. (With the boxed aspects a plain window resize does not stop it — only a change of
-  the picture's internal size does: an aspect switch or a chase toggle.)
+  re-negotiating the header. (The recording stops when the picture's internal size changes: an aspect switch, a
+  chase toggle from a boxed aspect, or a window resize with the window aspect — with the boxed aspects a plain
+  window resize does not stop it.)
 - **The DVR has no clean-feed mode.** It records exactly what the pilot sees (the spec's decision 2).
 - **A thermal model.** Tramp's 's' status answers a constant 25 °C, like the KISS ESC frames.
 - **`FIELD_PERIOD_S` is duplicated** in `ofs-client::fpv` (ofs-video is not a client dependency); the pairing
   with `ofs-video::link::FIELD_RATE_HZ` is by comment only.
-- **Junk `fpv_aspect` values silently render boxed 16:9.** The setting is a string pass-through with no
-  validation: anything that is not `4:3` or `window` draws the 16:9 box instead of falling back to the 4:3
-  default.
 - **The DVR's boundary dedup is fp-path-dependent.** Captures dedup on the field boundary
   `render_time_s + held_fields × FIELD_PERIOD_S` compared exactly; after long flights a mid-boundary recovery
   can compute a boundary one ulp off and stretch the AVI by one 20 ms frame.
@@ -25,3 +24,19 @@ These items were deliberately left out of M3e, or surfaced while building it. Th
 - **The spec's own out-of-scope list:** digital video systems; a clean-feed DVR; audio; image-sequence and
   ffmpeg export options; the VTX-interference fault (M4); a full HD/digital OSD element set; configurable
   receiver thresholds; reflections off objects.
+
+## Surfaced by the final review
+- **The spec's controls-menu DVR toggle shipped as keybind-only** (spec §5: "a keybind plus a controls-menu
+  toggle"). Recorded deviation: the D keybind plus its HUD help line is the shipped UX; a toggle on the F2
+  screen would close it.
+- **The spec's two listed tests were not delivered.** The Godot e2e's DVR check (a parseable `.avi` whose frame
+  count matches the recording duration at ~50 fps and whose frames decode as JPEG) and the simulator lockstep
+  run of two bit-identical sessions with latency + drops configured (the model level is covered: the Python
+  same-seed lockstep test). A headless JPEG-path pin — `Image.create` + `save_jpg_to_buffer` through
+  `dvr_write_frame` — would close the DVR's JPEG-quality guard beyond the comment in `godot/ui/dvr.gd`.
+- **A same-name DVR start still truncates silently.** The filename's timestamp now carries a millisecond
+  uniqueness suffix, so start/stop/start within one second no longer collides — but a genuine same-name start
+  (a clock without millisecond resolution, a scripted caller) opens with `File::create` and truncates the
+  previous recording instead of the start failing.
+- **`VideoHandles::read` reports latency 0 without a VTX** (`crates/ofs-sim/src/vehicle.rs`): `VideoInfo::default()`
+  zeroes it when `present` is false, though the goggles' glass-to-glass latency is arguably not VTX-conditional.

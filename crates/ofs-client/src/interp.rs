@@ -9,7 +9,12 @@ use std::collections::VecDeque;
 
 use glam::{DQuat, DVec3};
 
-const MAX_SAMPLES: usize = 64;
+/// How far back poses are kept: the 1000 ms `latency_ms` validation cap (`ofs-config`) + display delay + margin.
+/// The composite samples the pose and the picture at one instant, and `FpvBuffer` keeps 1.28 s of picture, so the
+/// pose history must reach at least the latency cap back or the two would disagree about "when".
+const POSE_SPAN_S: f64 = 1.2;
+/// A backstop on top of the time-based span (about 2.1 s of samples at the default 240 Hz state rate).
+const MAX_SAMPLES: usize = 512;
 /// How many recent arrival offsets the clock estimate looks at (a second at 240 Hz).
 const OFFSET_WINDOW: usize = 240;
 
@@ -80,6 +85,12 @@ impl StateBuffer {
             self.offsets.clear();
         }
         self.samples.push_back(s);
+        // Time-based retention: the composite asks for the pose up to the latency cap in the past (a second or
+        // more of samples at the state rate), so the span, not a count, must bound what is kept.
+        let cutoff = s.sim_time_s - POSE_SPAN_S;
+        while self.samples.front().is_some_and(|first| first.sim_time_s < cutoff) {
+            self.samples.pop_front();
+        }
         if self.samples.len() > MAX_SAMPLES {
             self.samples.pop_front();
         }
