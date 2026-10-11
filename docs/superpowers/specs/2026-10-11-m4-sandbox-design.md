@@ -24,7 +24,7 @@ Order rationale: the library lands first because the fault parameters that want 
 
 | # | Decision | Alternative rejected |
 |---|---|---|
-| 1 | **Parts by reference only, hard cutover, `schema_version = 5`** [ruling-pending: config cutover]. The three shipped quads (including M3e's Tramp one) are rewritten into `library/` parts; no inline `[frame]`/`[motor]`/… sections survive; no per-parameter overrides in the quad file. | Dual format (inline stays valid; every loader path doubles forever) and optional-parts-with-deprecation (two config dialects through all of v1). Pre-v1 there are no external users to break. |
+| 1 | **Parts by reference only, hard cutover, `schema_version = 5`** [ruling-pending: config cutover]. The two shipped quads (including M3e's Tramp one) are rewritten into `library/` parts; no inline `[frame]`/`[motor]`/… sections survive; no per-parameter overrides in the quad file. | Dual format (inline stays valid; every loader path doubles forever) and optional-parts-with-deprecation (two config dialects through all of v1). Pre-v1 there are no external users to break. |
 | 2 | **Provenance is mandatory per parameter.** A part file with a parameter missing from `[provenance]` is a config error naming the field. | Advisory provenance (the milestone's point is that the number's origin is part of the data). |
 | 3 | **Faults are runtime bus signals, not config** — the M2 `RadioLinkLoss` pattern generalized: every fault publishes `fault.*` signals; models read them each step; the fault never mutates a model's parameters behind the bus. Injecting and clearing raise events. | Rebuild-the-vehicle faults (slow, un-injectable mid-flight) or per-model flag APIs (N bespoke seams). |
 | 4 | **MCAP is written in Rust (`ofs-log`, the `mcap` crate); Rerun is Python-side** [ruling-pending: Rerun]. The live view subscribes the existing state/event streams and publishes through `rerun-sdk` as the optional extra `ofs[rerun]`. | Rerun's Rust SDK inside `ofs-sim` (a very large dependency to carry in the server for a viewer's sake; the 240 Hz state stream is plenty for a live view). MCAP files open in Foxglove unchanged. |
@@ -87,7 +87,7 @@ vtx     = "opendrone-vtx-sa-1w"         # optional, as today
 [sim] [home] [initial] [fc] [radio] [esc_telemetry] [osd]   # unchanged, quad-level
 ```
 
-Part ids resolve against **`library/` beside the quads directory** (`<quad dir>/../library`), overridable with `OFS_LIBRARY` (one path, v1). Unknown id → config error listing the searched directory. Parts do not reference parts (no composition graph in v1); the diff file, EEPROM directories and `force_battery_cell_count` validation are unchanged and quad-level. The three shipped quads are migrated with values unchanged, all provenance `estimated` — the point is the shape and the honesty, not new numbers; datasheet values are community follow-up.
+Part ids resolve against **`library/` beside the quads directory** (`<quad dir>/../library`), overridable with `OFS_LIBRARY` (one path, v1). Unknown id → config error listing the searched directory. Parts do not reference parts (no composition graph in v1); the diff file, EEPROM directories and `force_battery_cell_count` validation are unchanged and quad-level. The two shipped quads are migrated with values unchanged, all provenance `estimated` — the point is the shape and the honesty, not new numbers; datasheet values are community follow-up.
 
 ## 3. Fault catalog (M4b)
 
