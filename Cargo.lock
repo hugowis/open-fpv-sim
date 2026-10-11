@@ -869,9 +869,12 @@ name = "ofs-video"
 version = "0.1.0"
 dependencies = [
  "glam 0.29.3",
+ "ofs-config",
  "ofs-core",
  "ofs-fc",
  "ofs-rf",
+ "proptest",
+ "rand 0.8.8",
  "rand_chacha 0.3.1",
  "tempfile",
 ]

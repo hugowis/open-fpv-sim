@@ -2,6 +2,7 @@ extends "res://tests/testing.gd"
 
 const Controls = preload("res://scripts/controls.gd")
 const Menu = preload("res://ui/controls_menu.gd")
+const App = preload("res://scripts/app.gd")
 
 const SAVE_PATH := "user://test_controls.json"
 
@@ -121,3 +122,43 @@ func test_the_video_effects_box_reports_changes_but_not_its_setup() -> void:
 	menu._video_effects.button_pressed = true
 	eq(seen, [true], "a click is reported")
 	menu.queue_free()
+
+
+func test_the_aspect_button_cycles_from_the_set_value() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	var seen := []
+	menu.aspect_changed.connect(func(value: String) -> void: seen.append(value))
+	menu.set_aspect("16:9")
+	eq(menu._aspect.text, "Picture: 16:9", "set from the settings")
+	eq(seen, [], "without a signal")
+	menu._aspect.pressed.emit()
+	eq(seen, ["window"], "pressing continues the cycle from the set value")
+	eq(menu._aspect.text, "Picture: window", "and the label follows")
+	menu.set_aspect("vhs")
+	eq(menu._aspect.text, "Picture: 4:3", "an unknown value falls back to index 0")
+	menu.queue_free()
+
+
+func test_a_junk_setting_resolves_to_the_4x3_label() -> void:
+	# The game clamps the pass-through setting before showing it (app.gd), so the label and the layout agree.
+	var clamped: String = App.clamp_aspect("vhs")
+	eq(clamped, "4:3", "an unknown setting falls back to the 4:3 default")
+	eq(App.clamp_aspect("window"), "window", "a known setting passes through")
+	var menu = (await _menu())[0]
+	menu.set_aspect(clamped)
+	eq(menu._aspect.text, "Picture: 4:3", "the label agrees with the clamped setting")
+	menu.queue_free()
+
+
+func test_the_fpv_box_fits_the_aspect_and_centers() -> void:
+	var wide := App.fpv_box_for(Vector2(1600, 800), "4:3", false)
+	ok((wide["box"] as Rect2).is_equal_approx(Rect2(266.666, 0, 1066.666, 800)), "a wide window: height-fitted 4:3, centred")
+	eq(wide["internal"], Vector2i(960, 720), "the boxed aspect renders at its fixed resolution")
+	var tall := App.fpv_box_for(Vector2(600, 900), "16:9", false)
+	eq((tall["box"] as Rect2).size, Vector2(600, 337.5), "a tall window: width-fitted 16:9")
+	var window_mode := App.fpv_box_for(Vector2(1600, 800), "window", false)
+	eq(window_mode["box"], Rect2(0, 0, 1600, 800), "the window aspect fills the window")
+	eq(window_mode["internal"], Vector2i(1600, 800), "at the window's own resolution")
+	var chase := App.fpv_box_for(Vector2(1600, 800), "4:3", true)
+	eq(chase["box"], Rect2(0, 0, 1600, 800), "the chase view always fills the window")

@@ -4,6 +4,7 @@ extends Node3D
 
 const Controls = preload("res://scripts/controls.gd")
 const AppSettings = preload("res://scripts/settings.gd")
+const ControlsMenu = preload("res://ui/controls_menu.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -17,15 +18,19 @@ const TIPS := {
 	"not_loaded": "The session ended on the server.",
 }
 
-@onready var drone: Node3D = $Drone
-@onready var fpv_camera: Camera3D = $Drone/FpvCamera
-@onready var chase_camera: Camera3D = $ChaseCamera
-@onready var lens: CanvasLayer = $Lens
-@onready var osd: CanvasLayer = $Osd
-@onready var video: CanvasLayer = $Video
-@onready var world: Node3D = $World
+@onready var fpv_viewport: SubViewport = $FpvViewport
+@onready var drone: Node3D = $FpvViewport/Drone
+@onready var fpv_camera: Camera3D = $FpvViewport/Drone/FpvCamera
+@onready var chase_camera: Camera3D = $FpvViewport/ChaseCamera
+@onready var lens: CanvasLayer = $FpvViewport/Lens
+@onready var osd: CanvasLayer = $FpvViewport/Osd
+@onready var video: CanvasLayer = $FpvViewport/Video
+@onready var world: Node3D = $FpvViewport/World
+@onready var fpv_box: Control = $FpvBox
+@onready var fpv_texture: TextureRect = $FpvBox/FpvTexture
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
+@onready var dvr: Node = $Dvr
 
 var client: Object = null  # OfsClient, from the extension
 var controls = Controls.new()
@@ -37,17 +42,23 @@ var chase_view := false
 var last_sticks := {}
 var phase_kind := ""
 var _link_was_lost := false
-var _osd_version := -1
+var _fpv_render_time := -1.0
 var _world_version := -1
 
 
 func _ready() -> void:
 	settings = AppSettings.load_settings()
+	settings["fpv_aspect"] = clamp_aspect(settings["fpv_aspect"])
 	_load_controls()
 	controls_menu.setup(controls, CONTROLS_PATH)
 	video.effects = settings["video_effects"]
 	controls_menu.set_video_effects(settings["video_effects"])
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
+	controls_menu.set_aspect(settings["fpv_aspect"])
+	controls_menu.aspect_changed.connect(_on_aspect_changed)
+	fpv_texture.texture = fpv_viewport.get_texture()
+	get_viewport().size_changed.connect(_layout_fpv)
+	_layout_fpv()
 	if not ClassDB.class_exists("OfsClient"):
 		hud.show_fatal("The OfsClient extension is not loaded.\nBuild it with `cargo build -p ofs-godot` (docs/dev-setup.md) and restart.")
 		set_process(false)
@@ -67,6 +78,42 @@ Check the [client] section of user://ofs_client.cfg and the OFS_* variables, the
 		set_process(false)
 
 
+## The Picture setting arrives as a pass-through string (the config file, the environment, the command line):
+## anything outside the controls menu's cycle falls back to the 4:3 default, so the label and the layout agree.
+static func clamp_aspect(value: String) -> String:
+	if value in ControlsMenu.ASPECTS:
+		return value
+	push_warning("%s is not a Picture setting; using 4:3" % value)
+	return "4:3"
+
+
+## The FPV box and the viewport's internal resolution for `window_size`. The chase view and the "window"
+## aspect fill the window (the viewport at the window's size, today's quality); the boxed aspects center a
+## fixed-resolution picture like goggles do.
+static func fpv_box_for(window_size: Vector2, aspect: String, chase: bool) -> Dictionary:
+	var box := Rect2(Vector2.ZERO, window_size)
+	var internal := Vector2i(window_size)
+	if not chase and aspect != "window":
+		var ratio := 4.0 / 3.0 if aspect == "4:3" else 16.0 / 9.0
+		var w: float = minf(window_size.x, window_size.y * ratio)
+		box = Rect2((window_size - Vector2(w, w / ratio)) * 0.5, Vector2(w, w / ratio))
+		internal = Vector2i(960, 720) if aspect == "4:3" else Vector2i(1280, 720)
+	return {"box": box, "internal": internal}
+
+
+## Sizes the FPV box and the viewport's internal resolution. A size change while the DVR records stops it
+## (Review Focus 5): stop before the resize so the comparison sees the old size.
+func _layout_fpv() -> void:
+	var layout: Dictionary = fpv_box_for(fpv_box.size, settings["fpv_aspect"], chase_view)
+	var internal: Vector2i = layout["internal"]
+	if dvr != null and dvr.recording and fpv_viewport.size != internal:
+		var summary: Dictionary = dvr.stop()
+		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
+	fpv_texture.position = (layout["box"] as Rect2).position
+	fpv_texture.size = (layout["box"] as Rect2).size
+	fpv_viewport.size = internal
+
+
 func _load_controls() -> void:
 	if FileAccess.file_exists(CONTROLS_PATH):
 		var text := FileAccess.get_file_as_string(CONTROLS_PATH)
@@ -78,12 +125,22 @@ func _process(delta: float) -> void:
 	var focused := get_window().has_focus()
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
-	if client.has_pose():
+	if not chase_view:
+		var fpv: Dictionary = client.get_fpv_view()
+		if fpv.has("pose"):
+			drone.transform = fpv["pose"]
+			video.update_view({
+				"video_present": fpv["video_present"], "video_noise": fpv["video_noise"],
+				"video_sparkles": fpv["video_sparkles"], "video_chroma": fpv["video_chroma"],
+				"video_sync": fpv["video_sync"],
+			}, delta)
+		var render_time: float = fpv.get("render_time_s", -1.0)
+		if render_time != _fpv_render_time:
+			_fpv_render_time = render_time
+			osd.set_frame(fpv.get("osd", {}))
+		dvr.capture(fpv)
+	elif client.has_pose():
 		drone.transform = client.get_pose()
-	var osd_version: int = client.get_osd_version()
-	if osd_version != _osd_version:
-		_osd_version = osd_version
-		osd.set_frame(client.get_osd())
 	var world_version: int = client.get_world_version()
 	if world_version != _world_version:
 		_world_version = world_version
@@ -91,7 +148,6 @@ func _process(delta: float) -> void:
 	var telemetry: Dictionary = client.get_telemetry()
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
-	video.update_view(telemetry, delta)
 	var detail: String = client.get_phase_detail()
 	if client.get_phase() == "failed" and TIPS.has(phase_kind):
 		detail += "\n" + TIPS[phase_kind]
@@ -115,6 +171,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				client.reload()
 		KEY_C:
 			set_chase_view(not chase_view)
+		KEY_D:
+			_toggle_dvr()
 		KEY_K:
 			set_radio_cut(not radio_cut)
 		KEY_H:
@@ -138,6 +196,29 @@ func set_chase_view(chase: bool) -> void:
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
 	video.set_enabled(not chase)
+	_layout_fpv()  # the chase view always fills the window
+
+
+func _toggle_dvr() -> void:
+	if chase_view:
+		hud.add_toast("DVR records the FPV view - switch with C first", "warn")
+		return
+	if dvr.recording:
+		var summary: Dictionary = dvr.stop()
+		if summary.is_empty():
+			hud.add_toast("DVR failed: the writer stopped abnormally", "error")
+		else:
+			hud.add_toast("DVR: %d frames saved%s" % [summary.get("frames", 0), _dvr_drop_note(summary)])
+	else:
+		var error: String = dvr.start(client, fpv_viewport)
+		hud.add_toast("DVR: recording to user://recordings" if error == "" else "DVR failed: %s" % error, "info" if error == "" else "error")
+		if error != "":
+			return
+
+
+func _dvr_drop_note(summary: Dictionary) -> String:
+	var dropped: int = summary.get("dropped_frames", 0)
+	return "" if dropped == 0 else " (%d dropped)" % dropped
 
 
 func _on_video_effects_toggled(on: bool) -> void:
@@ -145,6 +226,13 @@ func _on_video_effects_toggled(on: bool) -> void:
 	settings["video_effects"] = on
 	if not AppSettings.save_value("video_effects", on):
 		hud.add_toast("Could not save the Video effects setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
+func _on_aspect_changed(value: String) -> void:
+	settings["fpv_aspect"] = value
+	_layout_fpv()
+	if not AppSettings.save_value("fpv_aspect", value):
+		hud.add_toast("Could not save the Picture setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
 func set_radio_cut(cut: bool) -> void:
@@ -159,7 +247,7 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 		radio_cut = false  # a reloaded quad has no faults
 		_link_was_lost = false
 		osd.set_frame({})
-		_osd_version = -1
+		_fpv_render_time = -1.0
 	if phase == "failed":
 		hud.add_toast("Failed: %s" % detail.get_slice("\n", 0), "error")
 

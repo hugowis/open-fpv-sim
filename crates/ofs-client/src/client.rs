@@ -1,11 +1,14 @@
 //! The client handle: a supervisor running on its own threads, polled without blocking from a game loop.
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 
+use crate::dvr::{self, DvrSummary, DvrWriter};
 use crate::error::{ClientError, ErrorKind};
+use crate::fpv::{self, FpvBuffer, FpvView};
 use crate::interp::{Pose, StateBuffer};
 use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
 use crate::worker::{lock, run, Shared};
@@ -29,6 +32,7 @@ pub struct Client {
     finished: Mutex<std_mpsc::Receiver<()>>,
     runtime: Option<tokio::runtime::Runtime>,
     seen: Mutex<Seen>,
+    dvr: Mutex<Option<DvrWriter>>,
 }
 
 /// Upper bound of the stick rate: a mistyped setting must not make the worker spin or flood the server.
@@ -59,6 +63,7 @@ impl Client {
             sticks: sticks_tx,
             buffer: Mutex::new(StateBuffer::new(delay_s)),
             telemetry: Mutex::new(None),
+            fpv: Mutex::new(FpvBuffer::default()),
             osd: Mutex::new(None),
             osd_version: AtomicU64::new(0),
             world: Mutex::new(None),
@@ -84,6 +89,7 @@ impl Client {
                 configurator_address: String::new(),
                 quad_name: String::new(),
             }),
+            dvr: Mutex::new(None),
         })
     }
 
@@ -155,6 +161,22 @@ impl Client {
         self.shared.osd_version.load(Ordering::Acquire)
     }
 
+    /// The FPV picture for this frame (the goggles' pipeline): the newest field boundary at or before
+    /// `sim_now − latency` with the pose, video uniforms and OSD all sampled there; a dropped field holds the
+    /// previous one. None before the first state, while paused, or when every buffered field was dropped —
+    /// the caller keeps the last picture.
+    pub fn fpv_view(&self) -> Option<FpvView> {
+        let now_s = self.shared.epoch.elapsed().as_secs_f64();
+        let buffer = lock(&self.shared.buffer);
+        let sim_now = buffer.sim_now(now_s)?;
+        let latency_ms = lock(&self.shared.telemetry).clone().map_or(0, |(t, _)| t.video.latency_ms);
+        let target = fpv::field_floor(sim_now - f64::from(latency_ms) / 1000.0);
+        let (render_time_s, uniforms, field_valid) = lock(&self.shared.fpv).field_at(target)?;
+        let pose = buffer.pose_at_sim(render_time_s)?;
+        let osd = lock(&self.shared.fpv).osd_at(render_time_s);
+        Some(FpvView { pose, uniforms, field_valid, osd, render_time_s, held_fields: fpv::held_fields(target, render_time_s), latency_ms })
+    }
+
     /// The world of the loaded session, in Godot's frame; `None` before the first load and while one is under way.
     pub fn world(&self) -> Option<World> {
         lock(&self.shared.world).clone()
@@ -163,6 +185,29 @@ impl Client {
     /// Counts world updates (and clears): a changed value means [`world`](Self::world) has something new to build.
     pub fn world_version(&self) -> u64 {
         self.shared.world_version.load(Ordering::Acquire)
+    }
+
+    /// Starts a DVR recording to `path` at the field rate with `width` × `height` pixels.
+    pub fn dvr_start(&self, path: String, width: u32, height: u32) -> Result<(), String> {
+        let mut dvr = lock(&self.dvr);
+        if dvr.is_some() {
+            return Err("already recording".into());
+        }
+        *dvr = Some(DvrWriter::start(PathBuf::from(path), dvr::DVR_FPS, width, height)?);
+        Ok(())
+    }
+
+    pub fn dvr_write_frame(&self, jpeg: Vec<u8>) {
+        let dvr = lock(&self.dvr);
+        if let Some(w) = dvr.as_ref() {
+            w.write_frame(jpeg);
+        }
+    }
+
+    /// Stops the recording; the summary reports frames, drops and bytes.
+    pub fn dvr_stop(&self) -> Result<DvrSummary, String> {
+        let writer = lock(&self.dvr).take().ok_or_else(|| "not recording".to_string())?;
+        writer.stop()
     }
 
     /// Ends the session (unloading it first when this client launched the server) and stops the supervisor.

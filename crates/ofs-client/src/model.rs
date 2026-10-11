@@ -126,6 +126,10 @@ pub struct VideoInfo {
     /// Colour, 1 (full) to 0 (black and white).
     pub chroma: f64,
     pub sync: VideoSync,
+    /// Whether the receiver completed the last field.
+    pub field_valid: bool,
+    /// The goggles' glass-to-glass latency, quantized down to whole fields.
+    pub latency_ms: u32,
 }
 
 impl Default for VideoInfo {
@@ -140,6 +144,8 @@ impl Default for VideoInfo {
             sparkles: 0.0,
             chroma: 1.0,
             sync: VideoSync::None,
+            field_valid: false,
+            latency_ms: 0,
         }
     }
 }
@@ -162,6 +168,8 @@ impl VideoInfo {
             sparkles: v.sparkles,
             chroma: v.chroma,
             sync,
+            field_valid: v.field_valid,
+            latency_ms: v.latency_ms,
         }
     }
 }

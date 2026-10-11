@@ -91,6 +91,8 @@ pub(crate) fn video_msg(v: &VideoInfo) -> pb::VideoLink {
         sparkles: v.sparkles,
         chroma: v.chroma,
         sync: sync as i32,
+        field_valid: v.field_valid,
+        latency_ms: v.latency_ms,
     }
 }
 
@@ -468,6 +470,8 @@ mod tests {
             sparkles: 0.0,
             chroma: 1.0,
             sync: VideoSync::Locked,
+            field_valid: false,
+            latency_ms: 0,
         };
         let video_events = |events: Vec<pb::Event>| {
             events
@@ -563,6 +567,8 @@ mod tests {
     fn the_video_message_says_absent_without_a_vtx() {
         let msg = video_msg(&VideoInfo::default());
         assert!(!msg.present);
+        assert!(!msg.field_valid);
+        assert_eq!(msg.latency_ms, 0);
         assert_eq!(msg.sync(), pb::VideoSync::Unspecified);
         let lost = video_msg(&VideoInfo { present: true, sync: VideoSync::Lost, ..VideoInfo::default() });
         assert_eq!(lost.sync(), pb::VideoSync::Lost);

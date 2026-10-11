@@ -57,6 +57,16 @@ fn the_oldest_pose_is_held_before_the_buffer_reaches_back_that_far() {
 }
 
 #[test]
+fn a_second_of_pose_history_survives_beyond_the_sample_count_backstop() {
+    // The composite samples the pose at `sim_now − latency` with the picture (at most 1 s back, the world file's
+    // cap), so at 240 Hz hundreds of samples must be kept even though a 64-sample count cap only spans ~262 ms:
+    // the pose at a second back has to be interpolated, not clamped to the oldest kept sample.
+    let b = filled(0.006, 300);
+    let pose = b.pose_at_sim(299.0 / RATE_HZ - 1.0).unwrap();
+    assert!(pose.pos.x > 2.0 && pose.pos.x < 3.0, "interpolated near x = 2.46 (sample 59), got {}", pose.pos.x);
+}
+
+#[test]
 fn there_is_no_pose_before_the_first_sample() {
     assert!(StateBuffer::new(0.006).pose_at(1.0).is_none());
 }

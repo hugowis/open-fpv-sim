@@ -81,10 +81,38 @@ fading off, falls to 8 dB SNR at 580 m; 600 mW reaches about 3 km (a unit test p
 sparkles. The SNRs are for R1 with the parked quad of `worlds/flat.toml` raising the patch's noise floor to about
 -92.3 dBm.)
 
+## Timing
+
+The link computes each field at the instant of reception, but the pilot sees the world as it was when the
+picture was captured: the glass-to-glass latency of a real camera + VTX + air + goggles pipeline. Two M3e
+additions, both estimates:
+
+- **Latency.** `latency_ms` on the world file's `[receiver]` section (the goggles live there), default 40 and
+  validated at most 1000, is quantized **down** to whole fields (20 ms at 50 Hz) — a pipeline that buffers
+  fields delivers whole fields, and the simulator can only delay whole fields. The default 40 ms = 2 fields is
+  an estimate for a typical analog setup: the camera's own pipeline, the VTX and the air, and the goggles'
+  buffering, together two fields. `State.video.latency_ms` carries the quantized value.
+- **Field drops.** At a marginal SNR the receiver fails to complete fields: the drop probability
+  (`field_drop_probability`) is 0 at or above 6 dB (`UNSTABLE_SNR_DB`), ramps linearly to
+  `FIELD_DROP_P_MAX` = 0.5 at 3 dB (`LOST_SNR_DB`) and is 0 outside that band — a locked link never drops, and
+  a lost link outputs static, where a drop would mean nothing. The probability is an estimate; the draw is one
+  seeded RNG draw per field, after the fading draws, so lockstep runs drop the same fields seed for seed. The
+  draw is not made while the sync is already lost, and a dropped field never updates the sync tracker (the
+  receiver is busy failing, not relocking). The result is the `video.field_valid` signal and
+  `State.video.field_valid`; a dropped field leaves sync and the picture at their last values.
+
+The client composites the whole picture from **one field-quantized instant**: the newest field boundary at or
+before `sim_now − latency`. Pose, video quality and the OSD all sample that instant, so the picture ages as a
+unit at the field rate — the judder of real analog glass. A dropped field at the render instant holds the
+previous composite (pose, OSD and quality all freeze for one field, what a real receiver does with an
+incomplete field); the client's FPV view carries `held_fields`, the count of field boundaries the shown
+picture is behind.
+
 ## Where it shows
 
 - Bus signals: `video.snr_db`, `video.rssi_dbm.<antenna>`, `video.antenna`, `video.interference_dbm`,
-  `video.noise`, `video.sparkles`, `video.chroma`, `video.sync`.
-- The state stream: `State.video` (protocol 4), and the events `video_lost` and `video_restored`.
+  `video.noise`, `video.sparkles`, `video.chroma`, `video.sync`, `video.field_valid`.
+- The state stream: `State.video` (protocol 7; also `field_valid` and `latency_ms`), and the events
+  `video_lost` and `video_restored`.
 - The game: the HUD's `VID` line, and the shader of `godot/ui/video.gd` between Betaflight's OSD and the HUD, so the
   OSD breaks up with the picture.

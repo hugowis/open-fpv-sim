@@ -19,7 +19,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 6
+PROTOCOL_VERSION = 7
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -109,6 +109,8 @@ class VideoLink:
     sparkles: float = 0.0
     chroma: float = 1.0  # colour, 1 (full) to 0 (black and white)
     sync: str = ""  # "locked", "unstable" (tearing), "lost" (rolling, static); "" without a VTX
+    field_valid: bool = False  # false: the receiver dropped this field (marginal signal)
+    latency_ms: int = 0  # the goggles' glass-to-glass latency, quantized down to whole fields
 
 
 @dataclass(frozen=True)
@@ -244,7 +246,8 @@ _SYNC_NAMES = {pb.VIDEO_SYNC_LOCKED: "locked", pb.VIDEO_SYNC_UNSTABLE: "unstable
 def _video(m) -> VideoLink:
     return VideoLink(present=m.present, snr_db=m.snr_db, interference_dbm=m.interference_dbm,
                      rssi=AntennaRssi((r.name, r.rssi_dbm) for r in m.rssi), active_antenna=m.active_antenna, noise=m.noise,
-                     sparkles=m.sparkles, chroma=m.chroma, sync=_SYNC_NAMES.get(m.sync, ""))
+                     sparkles=m.sparkles, chroma=m.chroma, sync=_SYNC_NAMES.get(m.sync, ""),
+                     field_valid=m.field_valid, latency_ms=m.latency_ms)
 
 
 def _world(m) -> World:

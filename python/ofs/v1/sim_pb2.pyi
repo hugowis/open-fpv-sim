@@ -250,7 +250,7 @@ class AntennaRssi(_message.Message):
     def __init__(self, name: _Optional[str] = ..., rssi_dbm: _Optional[float] = ...) -> None: ...
 
 class VideoLink(_message.Message):
-    __slots__ = ("present", "snr_db", "interference_dbm", "rssi", "active_antenna", "noise", "sparkles", "chroma", "sync")
+    __slots__ = ("present", "snr_db", "interference_dbm", "rssi", "active_antenna", "noise", "sparkles", "chroma", "sync", "field_valid", "latency_ms")
     PRESENT_FIELD_NUMBER: _ClassVar[int]
     SNR_DB_FIELD_NUMBER: _ClassVar[int]
     INTERFERENCE_DBM_FIELD_NUMBER: _ClassVar[int]
@@ -260,6 +260,8 @@ class VideoLink(_message.Message):
     SPARKLES_FIELD_NUMBER: _ClassVar[int]
     CHROMA_FIELD_NUMBER: _ClassVar[int]
     SYNC_FIELD_NUMBER: _ClassVar[int]
+    FIELD_VALID_FIELD_NUMBER: _ClassVar[int]
+    LATENCY_MS_FIELD_NUMBER: _ClassVar[int]
     present: bool
     snr_db: float
     interference_dbm: float
@@ -269,7 +271,9 @@ class VideoLink(_message.Message):
     sparkles: float
     chroma: float
     sync: VideoSync
-    def __init__(self, present: _Optional[bool] = ..., snr_db: _Optional[float] = ..., interference_dbm: _Optional[float] = ..., rssi: _Optional[_Iterable[_Union[AntennaRssi, _Mapping]]] = ..., active_antenna: _Optional[str] = ..., noise: _Optional[float] = ..., sparkles: _Optional[float] = ..., chroma: _Optional[float] = ..., sync: _Optional[_Union[VideoSync, str]] = ...) -> None: ...
+    field_valid: bool
+    latency_ms: int
+    def __init__(self, present: _Optional[bool] = ..., snr_db: _Optional[float] = ..., interference_dbm: _Optional[float] = ..., rssi: _Optional[_Iterable[_Union[AntennaRssi, _Mapping]]] = ..., active_antenna: _Optional[str] = ..., noise: _Optional[float] = ..., sparkles: _Optional[float] = ..., chroma: _Optional[float] = ..., sync: _Optional[_Union[VideoSync, str]] = ..., field_valid: _Optional[bool] = ..., latency_ms: _Optional[int] = ...) -> None: ...
 
 class State(_message.Message):
     __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video", "collision_speed_mps", "fc_telemetry")

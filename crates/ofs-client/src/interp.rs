@@ -9,7 +9,12 @@ use std::collections::VecDeque;
 
 use glam::{DQuat, DVec3};
 
-const MAX_SAMPLES: usize = 64;
+/// How far back poses are kept: the 1000 ms `latency_ms` validation cap (`ofs-config`) + display delay + margin.
+/// The composite samples the pose and the picture at one instant, and `FpvBuffer` keeps 1.28 s of picture, so the
+/// pose history must reach at least the latency cap back or the two would disagree about "when".
+const POSE_SPAN_S: f64 = 1.2;
+/// A backstop on top of the time-based span (about 2.1 s of samples at the default 240 Hz state rate).
+const MAX_SAMPLES: usize = 512;
 /// How many recent arrival offsets the clock estimate looks at (a second at 240 Hz).
 const OFFSET_WINDOW: usize = 240;
 
@@ -80,6 +85,12 @@ impl StateBuffer {
             self.offsets.clear();
         }
         self.samples.push_back(s);
+        // Time-based retention: the composite asks for the pose up to the latency cap in the past (a second or
+        // more of samples at the state rate), so the span, not a count, must bound what is kept.
+        let cutoff = s.sim_time_s - POSE_SPAN_S;
+        while self.samples.front().is_some_and(|first| first.sim_time_s < cutoff) {
+            self.samples.pop_front();
+        }
         if self.samples.len() > MAX_SAMPLES {
             self.samples.pop_front();
         }
@@ -103,6 +114,34 @@ impl StateBuffer {
         let after = self.samples.partition_point(|s| s.sim_time_s <= target);
         let (a, b) = (self.samples[after - 1], self.samples[after]);
         let t = (target - a.sim_time_s) / (b.sim_time_s - a.sim_time_s);
+        Some(Pose { pos: a.pos.lerp(b.pos, t), att: a.att.slerp(b.att, t) })
+    }
+
+    /// The simulator's idea of "now" for `client_now_s`: the least-delayed recent arrival's clock offset
+    /// (delays only add, so the minimum is the best estimate). None before the first sample and while paused
+    /// (the offsets are forgotten then) — the caller keeps the last picture.
+    pub fn sim_now(&self, client_now_s: f64) -> Option<f64> {
+        let latest = *self.samples.back()?;
+        let offset = self.offsets.iter().copied().reduce(f64::min)?;
+        Some((client_now_s - offset).max(latest.sim_time_s))
+    }
+
+    /// The pose at an exact simulated time (no clock offset, no display delay): interpolated between the two
+    /// samples that bracket it; the oldest or newest pose held outside them.
+    pub fn pose_at_sim(&self, sim_time_s: f64) -> Option<Pose> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        if sim_time_s <= self.samples.front()?.sim_time_s {
+            return Some((*self.samples.front()?).into());
+        }
+        let latest = *self.samples.back()?;
+        if sim_time_s >= latest.sim_time_s {
+            return Some(latest.into());
+        }
+        let after = self.samples.partition_point(|s| s.sim_time_s <= sim_time_s);
+        let (a, b) = (self.samples[after - 1], self.samples[after]);
+        let t = (sim_time_s - a.sim_time_s) / (b.sim_time_s - a.sim_time_s);
         Some(Pose { pos: a.pos.lerp(b.pos, t), att: a.att.slerp(b.att, t) })
     }
 }

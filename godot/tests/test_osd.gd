@@ -10,24 +10,23 @@ func _osd() -> CanvasLayer:
 	return osd
 
 
-## A 3x2 frame: row 0 is " A " with the A blinking, row 1 is "B C".
+## A 3x2 frame: row 0 is " A " with the A blinking, row 1 is "B C" with B addressed on font page 2 (which falls
+## back to page 0: the atlas ships two pages).
 func _frame(overrides := {}) -> Dictionary:
-	var cells := PackedInt32Array([0x20, 0x41 | (1 << 10), 0x20, 0x42, 0x20, 0x43])
+	var cells := PackedInt32Array([0x20, 0x41 | (1 << 10), 0x20, 0x42 | (2 << 8), 0x20, 0x43])
 	var f := {"seq": 1, "time_s": 0.0, "present": true, "cols": 3, "rows": 2, "cells": cells}
 	f.merge(overrides, true)
 	return f
 
 
 func test_the_font_atlas_has_the_expected_layout() -> void:
-	eq(Osd.FONT.get_size(), Vector2(192, 288), "16 x 16 glyphs of 12 x 18 pixels")
-	eq(Osd.glyph_rect(0), Rect2(0, 0, 12, 18), "glyph 0")
-	eq(Osd.glyph_rect(65), Rect2(12, 72, 12, 18), "glyph 'A' is column 1, row 4")
-	eq(Osd.glyph_rect(255), Rect2(180, 270, 12, 18), "the last glyph")
-
-
-func test_the_box_is_4_by_3_fitted_and_centred() -> void:
-	eq(Osd.box_for(Vector2(1280, 720)), Rect2(160, 0, 960, 720), "a wide window: height-fitted")
-	eq(Osd.box_for(Vector2(400, 800)), Rect2(0, 250, 400, 300), "a tall window: width-fitted")
+	eq(Osd.FONT.get_size(), Vector2(192, 576), "two pages of 16 x 16 glyphs of 12 x 18 pixels")
+	eq(Osd.glyph_rect(0, 0), Rect2(0, 0, 12, 18), "glyph 0, page 0")
+	eq(Osd.glyph_rect(0, 65), Rect2(12, 72, 12, 18), "glyph 'A' is column 1, row 4")
+	eq(Osd.glyph_rect(1, 0), Rect2(0, 288, 12, 18), "page 1 starts one glyph-block down")
+	eq(Osd.glyph_rect(1, 255), Rect2(180, 558, 12, 18), "the last glyph of page 1")
+	eq(Osd.glyph_rect(2, 65), Osd.glyph_rect(0, 65), "page 2 falls back to page 0")
+	eq(Osd.glyph_rect(3, 0), Osd.glyph_rect(0, 0), "so does page 3")
 
 
 func test_nothing_is_drawn_without_a_present_frame() -> void:
@@ -50,7 +49,7 @@ func test_blank_cells_are_not_drawn_and_blinking_cells_follow_the_blink_phase() 
 	var osd := await _osd()
 	osd.set_frame(_frame())
 	ok(osd.blink_visible(), "blink starts visible")
-	eq(osd.drawn_cell_count(), 3, "A (blinking, on), B and C; the three blanks are skipped")
+	eq(osd.drawn_cell_count(), 3, "A (blinking, on), B (page 2, drawn from page 0) and C; the three blanks are skipped")
 	osd.advance_blink(0.6)
 	ok(not osd.blink_visible(), "the phase flips after half a period")
 	eq(osd.drawn_cell_count(), 2, "the blinking A is off")

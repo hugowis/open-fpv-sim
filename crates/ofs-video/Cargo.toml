@@ -7,10 +7,13 @@ rust-version.workspace = true
 
 [dependencies]
 glam.workspace = true
+ofs-config.workspace = true
 ofs-core.workspace = true
 ofs-fc.workspace = true
 ofs-rf.workspace = true
+rand.workspace = true
 rand_chacha.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
