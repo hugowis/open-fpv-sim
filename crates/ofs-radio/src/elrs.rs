@@ -292,8 +292,10 @@ impl ElrsLink {
 
     /// Decodes one telemetry frame that flew a downlink slot into the shared handle. Frame types we
     /// do not expose still consume their slot (the radio forwarded them; nothing more is modelled).
-    fn apply_telemetry_frame(&mut self, frame_type: u8, payload: &[u8], now_s: f64) {
-        let mut t = self.fc_telemetry.latest();
+    /// A field-targeted function, not a `&mut self` method: the step's `rssi`/`downlink` borrows are
+    /// still live at the call site (the M3c hot loop holds them across the telemetry slot).
+    fn apply_telemetry_frame(fc: &FcTelemetryHandle, frame_type: u8, payload: &[u8], now_s: f64) {
+        let mut t = fc.latest();
         match frame_type {
             crsf::FRAMETYPE_BATTERY_SENSOR if payload.len() >= 7 => {
                 t.battery_v = f64::from(u16::from_be_bytes([payload[0], payload[1]])) / 10.0;
@@ -313,7 +315,7 @@ impl ElrsLink {
         }
         t.frame_count += 1;
         t.last_frame_s = now_s;
-        self.fc_telemetry.store(t);
+        fc.store(t);
     }
 }
 
@@ -413,7 +415,7 @@ impl Model for ElrsLink {
             self.downlink_packets += 1;
             if downlink_received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0 {
                 if let Some((frame_type, payload)) = self.telemetry_fifo.pop_front() {
-                    self.apply_telemetry_frame(frame_type, &payload, ctx.time_s);
+                    Self::apply_telemetry_frame(&self.fc_telemetry, frame_type, &payload, ctx.time_s);
                 }
             }
         }
