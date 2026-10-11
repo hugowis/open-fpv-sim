@@ -219,6 +219,7 @@ func update_view(view: Dictionary) -> void:
 		var up: bool = t["link_up"] and t["tx_enabled"]
 		_link.text = "LINK %s   LQ %d %%   %d dBm   SNR %d" % ["UP" if up else "DOWN", t["lq_pct"], t["rssi_dbm"], roundi(t.get("radio_snr_db", 0.0))]
 		_link.add_theme_color_override("font_color", GREEN if up and t["lq_pct"] >= 80.0 else (YELLOW if up else RED))
+		# The age default (INF) evaluates first, so the fresh branch's direct t["fc_..."] reads are safe.
 		var fc_age: float = t.get("fc_telemetry_age_s", INF)
 		if fc_age < FC_TELEMETRY_FRESH_S:
 			_battery.text = "%.2f V   %.1f A   %s" % [t["fc_battery_v"], t["fc_battery_a"], t["fc_flight_mode"]]

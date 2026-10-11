@@ -10,6 +10,7 @@ These items were deliberately left out of M3d, or surfaced while building it. Th
 ## Modelling simplifications (estimates, see docs/research/elrs-link.md)
 - The telemetry slots are an estimated 1:4 ratio of the downlink; real ExpressLRS negotiates the ratio dynamically.
 - The RC/telemetry UART is shared with no contention model: Betaflight's own scheduler interleaves its telemetry with the receiver's traffic, and the sim captures whatever it wrote.
+- The simulator's pole pairs are the named constant 7 (`ofs-fc::sitl::esc_telemetry::POLE_PAIRS`, the shipped quad's 14-pole motors) while Betaflight's come from its `motor_poles` setting; a diff with motor_poles != 14 silently scales the RPM filter's input by 14/poles.
 
 ## Rulings made while planning
 - **The motor protocol stays PWM** (M3d spec decision 2): the spike proved the RPM filter needs no DShot driver, so the M3c milestone table's "motor-protocol change" note is retired.

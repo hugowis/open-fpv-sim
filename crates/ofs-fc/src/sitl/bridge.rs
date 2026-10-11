@@ -273,7 +273,9 @@ pub fn wire_drops(serial: &[SerialLink], taps: &[SerialTap]) -> u64 {
 /// links for the next datagram.
 pub fn take_serial_blocks(links: &[SerialLink]) -> Vec<(u8, Vec<u8>)> {
     let mut blocks = Vec::new();
-    let mut room = SERIAL_SECTION_MAX;
+    // The eRPM block (header + 8 bytes, EXT_ERPM_BLOCK_ID) is appended after these blocks; reserving
+    // its bytes here keeps the datagram's serial section inside SITL's EXT_SERIAL_MAX by construction.
+    let mut room = SERIAL_SECTION_MAX - (SERIAL_BLOCK_HEADER + 8);
     for link in links {
         if room <= SERIAL_BLOCK_HEADER {
             break;
