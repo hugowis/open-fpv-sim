@@ -23,10 +23,14 @@ pub struct Imu {
     accel_ned: Signal<DVec3>,
     gyro_out: Signal<DVec3>,
     accel_out: Signal<DVec3>,
+    fault_bias: Signal<DVec3>,
+    fault_noise_scale: Signal<f64>,
 }
 
 impl Imu {
     pub fn new(p: ImuParams, seed: u64, bus: &mut Bus) -> Self {
+        let fault_noise_scale = bus.signal(names::FAULT_IMU_NOISE_SCALE);
+        bus.set(fault_noise_scale, 1.0); // the multiplicative fault seam starts at its identity (M4b)
         Self {
             rng: model_rng(seed, "imu"),
             gyro_noise: Normal::new(0.0, p.gyro_noise_std_radps).expect("gyro noise std must be finite and >= 0"),
@@ -36,6 +40,8 @@ impl Imu {
             accel_ned: bus.signal(names::BODY_ACCEL_NED),
             gyro_out: bus.signal(names::IMU_GYRO),
             accel_out: bus.signal(names::IMU_ACCEL),
+            fault_bias: bus.signal(names::FAULT_IMU_GYRO_BIAS),
+            fault_noise_scale,
             p,
         }
     }
@@ -57,7 +63,8 @@ impl Model for Imu {
     fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         let gravity = DVec3::new(0.0, 0.0, GRAVITY_MPS2);
         let specific_force = bus.get(self.att).inverse() * (bus.get(self.accel_ned) - gravity);
-        let gyro = bus.get(self.rate) + self.p.gyro_bias_radps + self.noise3(self.gyro_noise);
+        let gyro = bus.get(self.rate) + self.p.gyro_bias_radps + bus.get(self.fault_bias)
+            + self.noise3(self.gyro_noise) * bus.get(self.fault_noise_scale);
         let accel = specific_force + self.p.accel_bias_mps2 + self.noise3(self.accel_noise);
         bus.set(self.gyro_out, gyro);
         bus.set(self.accel_out, accel);

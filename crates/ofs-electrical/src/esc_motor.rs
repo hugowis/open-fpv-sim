@@ -1,5 +1,5 @@
 //! Averaged ESC + brushless DC motor (winding inductance neglected).
-//! duty lags the command; I = (duty·Vbus − Ke·ω)/R clamped to the ESC limit;
+//! duty lags the command; I = (duty·Vbus − Ke·ω)/R clamped to the ESC limit, × fault scale;
 //! J·dω/dt = Ke·I − Ke·I0 − Q_prop; bus current = duty·I.
 use std::f64::consts::PI;
 
@@ -27,6 +27,7 @@ pub struct EscMotor {
     ke: f64,
     duty: f64,
     omega: f64,
+    theta: f64,
     cmd: Signal<f64>,
     vbus: Signal<f64>,
     load: Signal<f64>,
@@ -35,10 +36,14 @@ pub struct EscMotor {
     current_sig: Signal<f64>,
     bus_current_sig: Signal<f64>,
     duty_sig: Signal<f64>,
+    fault_scale: Signal<f64>,
+    theta_sig: Signal<f64>,
 }
 
 impl EscMotor {
     pub fn new(index: usize, esc: EscParams, motor: MotorParams, prop_inertia_kgm2: f64, bus: &mut Bus) -> Self {
+        let fault_scale = bus.signal(&names::fault_motor_scale(index));
+        bus.set(fault_scale, 1.0); // the multiplicative fault seam starts at its identity (M4b)
         Self {
             name: format!("esc_motor.{index}"),
             ke: 60.0 / (2.0 * PI * motor.kv_rpm_per_v),
@@ -47,6 +52,7 @@ impl EscMotor {
             motor,
             duty: 0.0,
             omega: 0.0,
+            theta: 0.0,
             cmd: bus.signal(&names::motor_cmd(index)),
             vbus: bus.signal(names::BATTERY_VOLTAGE),
             load: bus.signal(&names::prop_torque(index)),
@@ -55,6 +61,8 @@ impl EscMotor {
             current_sig: bus.signal(&names::motor_current(index)),
             bus_current_sig: bus.signal(&names::esc_bus_current(index)),
             duty_sig: bus.signal(&names::esc_duty(index)),
+            fault_scale,
+            theta_sig: bus.signal(&names::motor_theta(index)),
         }
     }
 }
@@ -75,14 +83,17 @@ impl Model for EscMotor {
 
         let applied_v = self.duty * bus.get(self.vbus);
         let limit = self.esc.current_limit_a;
-        let current = ((applied_v - self.ke * self.omega) / self.motor.resistance_ohm).clamp(-limit, limit);
+        let scale = bus.get(self.fault_scale);
+        let current = (((applied_v - self.ke * self.omega) / self.motor.resistance_ohm).clamp(-limit, limit)) * scale;
         let friction = if self.omega > 0.0 { self.ke * self.motor.no_load_current_a } else { 0.0 };
         let net_torque = self.ke * current - friction - bus.get(self.load);
         let omega_dot = net_torque / self.inertia_kgm2;
         self.omega = (self.omega + omega_dot * dt).max(0.0); // no reversing in v1 (3D mode unsupported)
+        self.theta = (self.theta + self.omega * dt) % (2.0 * PI);
 
         bus.set(self.omega_sig, self.omega);
         bus.set(self.omega_dot_sig, omega_dot);
+        bus.set(self.theta_sig, self.theta);
         bus.set(self.current_sig, current);
         bus.set(self.bus_current_sig, self.duty * current);
         bus.set(self.duty_sig, self.duty);

@@ -26,6 +26,11 @@ pub struct Battery {
     current: Signal<f64>,
     soc_sig: Signal<f64>,
     consumed: Signal<f64>,
+    r_offset: Signal<f64>,
+    v_offset: Signal<f64>,
+    /// Read from M4b Task 5; Task 1 only registers the seam.
+    #[allow(dead_code)]
+    weak_cell: Signal<f64>,
 }
 
 impl Battery {
@@ -39,6 +44,9 @@ impl Battery {
             current: bus.signal(names::BATTERY_CURRENT),
             soc_sig: bus.signal(names::BATTERY_SOC),
             consumed: bus.signal(names::BATTERY_CONSUMED),
+            r_offset: bus.signal(names::FAULT_BATTERY_R_OFFSET_OHM),
+            v_offset: bus.signal(names::FAULT_BATTERY_V_OFFSET_V),
+            weak_cell: bus.signal(names::FAULT_BATTERY_WEAK_CELL),
             div: rate_divisor,
             soc: p.initial_soc,
             v1: 0.0,
@@ -51,7 +59,8 @@ impl Battery {
 
     fn publish(&self, bus: &mut Bus, current: f64) {
         let ocv = f64::from(self.p.cells) * interp::linear(&self.p.ocv_table, self.soc);
-        bus.set(self.voltage, ocv - current * self.p.r0_ohm - self.v1);
+        let droop = current * (self.p.r0_ohm + bus.get(self.r_offset)) + bus.get(self.v_offset);
+        bus.set(self.voltage, ocv - droop - self.v1);
         bus.set(self.current, current);
         bus.set(self.soc_sig, self.soc);
         bus.set(self.consumed, self.consumed_mah);

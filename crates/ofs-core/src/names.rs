@@ -87,6 +87,36 @@ pub const RADIO_ANTENNA: &str = "radio.antenna";
 pub const RADIO_DOWNLINK_LQ: &str = "radio.downlink_lq";
 /// Fault: 1 = every packet is lost, uplink and downlink alike (the receiver and the handset both go silent).
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
+/// Fault seams (M4b): the vehicle writes them once per set_fault; models read them each step.
+pub const FAULT_RADIO_LOSS_FRACTION: &str = "fault.radio.loss_fraction";
+pub const FAULT_RADIO_BURST_ON_S: &str = "fault.radio.burst_on_s";
+pub const FAULT_RADIO_BURST_OFF_S: &str = "fault.radio.burst_off_s";
+
+pub fn fault_motor_scale(i: usize) -> String {
+    format!("fault.motor.{i}.scale")
+}
+
+pub fn fault_prop_thrust_scale(i: usize) -> String {
+    format!("fault.prop.{i}.thrust_scale")
+}
+
+/// Per-motor static imbalance (part data, overwritten by PropDamage while active).
+pub fn prop_imbalance(i: usize) -> String {
+    format!("prop.{i}.imbalance_kgm")
+}
+
+/// Integrated rotor phase, wrapped to [0, 2π) — the vibration model's phase input.
+pub fn motor_theta(i: usize) -> String {
+    format!("motor.{i}.theta_rad")
+}
+
+pub const FAULT_BATTERY_R_OFFSET_OHM: &str = "fault.battery.r_offset_ohm";
+pub const FAULT_BATTERY_V_OFFSET_V: &str = "fault.battery.v_offset_v";
+/// Cell index + 1; 0 = no weak cell.
+pub const FAULT_BATTERY_WEAK_CELL: &str = "fault.battery.weak_cell";
+
+pub const FAULT_IMU_GYRO_BIAS: &str = "fault.imu.gyro_bias_radps";
+pub const FAULT_IMU_NOISE_SCALE: &str = "fault.imu.noise_scale";
 /// Number of firmware restarts so far (e.g. Betaflight rebooting after a Configurator save).
 pub const FC_RESTARTS: &str = "fc.restarts";
 /// Cumulative serial bytes lost on the way to or from Betaflight: those SITL reported dropping from its UART TX

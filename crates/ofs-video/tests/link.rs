@@ -153,7 +153,7 @@ struct Rig {
 impl Rig {
     fn new(params: LinkParams, seed: u64) -> Rig {
         let mut bus = Bus::new();
-        let link = VideoLink::new(params, 160, seed, &mut bus);
+        let link = VideoLink::new(params, 160, seed, VtxInterferenceHandle::default(), &mut bus);
         let mut rig = Rig { bus, link, tick: 0 };
         rig.set_vtx(true, 5800.0, 25.0, false);
         rig.set_pose(DVec3::new(50.0, 0.0, -10.0));
@@ -312,7 +312,7 @@ fn run_fields(seed: u64) -> Vec<bool> {
     bus.set(pos, DVec3::new(866.0, 0.0, -1.7));
     let att = bus.signal::<DQuat>(names::BODY_ATT);
     bus.set(att, DQuat::IDENTITY);
-    let mut link = VideoLink::new(params, 1, seed, &mut bus);
+    let mut link = VideoLink::new(params, 1, seed, VtxInterferenceHandle::default(), &mut bus);
     let vtx_present = bus.signal::<f64>(names::VTX_PRESENT);
     let vtx_freq = bus.signal::<f64>(names::VTX_FREQ_MHZ);
     let vtx_power = bus.signal::<f64>(names::VTX_POWER_MW);

@@ -182,11 +182,15 @@ pub struct ElrsLink {
     params: LinkParams,
     div: u32,
     rng: ChaCha8Rng,
+    fault_rng: ChaCha8Rng,
     uart: Wire,
     inputs: Inputs,
     outputs: Outputs,
     pos: Signal<DVec3>,
     att: Signal<DQuat>,
+    fault_loss_fraction: Signal<f64>,
+    fault_burst_on: Signal<f64>,
+    fault_burst_off: Signal<f64>,
     history: VecDeque<bool>,
     downlink_history: VecDeque<bool>,
     pipeline: VecDeque<[u16; CHANNEL_COUNT]>,
@@ -230,6 +234,7 @@ impl ElrsLink {
             downlink_lq: bus.signal(names::RADIO_DOWNLINK_LQ),
         };
         let mut rng = model_rng(seed, MODEL_NAME);
+        let fault_rng = model_rng(seed, "elrs-faults");
         let mut quad_faders = vec![Fader::default(); params.quad_antennas.len()];
         let mut handset_faders = vec![Fader::default(); params.handset_antennas.len()];
         for f in quad_faders.iter_mut().chain(handset_faders.iter_mut()) {
@@ -240,11 +245,15 @@ impl ElrsLink {
             params,
             div: rate_divisor,
             rng,
+            fault_rng,
             uart,
             inputs,
             outputs,
             pos: bus.signal(names::BODY_POS_NED),
             att: bus.signal(names::BODY_ATT),
+            fault_loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
+            fault_burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
+            fault_burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
             history: VecDeque::with_capacity(LQ_WINDOW + 1),
             downlink_history: VecDeque::with_capacity(LQ_WINDOW + 1),
             pipeline: VecDeque::new(),
@@ -372,7 +381,13 @@ impl Model for ElrsLink {
         }
         let active = self.quad_diversity.choose(rssi);
         let draw: f64 = self.rng.gen();
-        let received = transmitting && draw >= packet_error_rate(rssi[active], sensitivity);
+        let fault_draw: f64 = self.fault_rng.gen();
+        let fraction = bus.get(self.fault_loss_fraction);
+        let burst_on = bus.get(self.fault_burst_on);
+        let burst_off = bus.get(self.fault_burst_off);
+        let in_burst = burst_on > 0.0 && ctx.time_s % (burst_on + burst_off) < burst_on;
+        let received = transmitting && draw >= packet_error_rate(rssi[active], sensitivity)
+            && fault_draw >= fraction && !in_burst;
 
         // Downlink: the reversed path of the active antenna, the receiver transmitting at DOWNLINK_TX_POWER_MW,
         // received on the handset's best antenna.

@@ -34,6 +34,7 @@ pub struct Propeller {
     omega: Signal<f64>,
     thrust: Signal<f64>,
     torque: Signal<f64>,
+    thrust_scale: Signal<f64>,
 }
 
 impl Propeller {
@@ -43,12 +44,15 @@ impl Propeller {
                 panic!("{e}");
             }
         }
+        let thrust_scale = bus.signal(&names::fault_prop_thrust_scale(index));
+        bus.set(thrust_scale, 1.0); // the multiplicative fault seam starts at its identity (M4b)
         Self {
             name: format!("prop.{index}"),
             p,
             omega: bus.signal(&names::motor_omega(index)),
             thrust: bus.signal(&names::prop_thrust(index)),
             torque: bus.signal(&names::prop_torque(index)),
+            thrust_scale,
         }
     }
 }
@@ -64,8 +68,9 @@ impl Model for Propeller {
 
     fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         let (t, q) = thrust_torque(&self.p, bus.get(self.omega));
-        bus.set(self.thrust, t);
-        bus.set(self.torque, q);
+        let scale = bus.get(self.thrust_scale);
+        bus.set(self.thrust, t * scale);
+        bus.set(self.torque, q * scale);
         Ok(())
     }
 }

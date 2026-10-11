@@ -160,6 +160,20 @@ pub struct Emitter {
     pub antenna: Antenna,
 }
 
+/// A runtime emitter injected by the VtxInterference fault (the OsdHandle pattern: shared state the
+/// vehicle writes and the model reads). Default = no injected emitter.
+#[derive(Clone, Default)]
+pub struct VtxInterferenceHandle(std::sync::Arc<std::sync::Mutex<Option<Emitter>>>);
+
+impl VtxInterferenceHandle {
+    pub fn set(&self, emitter: Option<Emitter>) {
+        *self.0.lock().expect("vtx interference handle poisoned") = emitter;
+    }
+    fn emitter(&self) -> Option<Emitter> {
+        *self.0.lock().expect("vtx interference handle poisoned")
+    }
+}
+
 /// Everything the link needs to know about the world.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkWorld {
@@ -236,6 +250,7 @@ struct Outputs {
 
 pub struct VideoLink {
     params: LinkParams,
+    handle: VtxInterferenceHandle,
     divisor: u32,
     rng: ChaCha8Rng,
     faders: Vec<Fader>,
@@ -255,7 +270,7 @@ pub struct VideoLink {
 
 impl VideoLink {
     /// `divisor` is `base_hz / FIELD_RATE_HZ`.
-    pub fn new(params: LinkParams, divisor: u32, seed: u64, bus: &mut Bus) -> Self {
+    pub fn new(params: LinkParams, divisor: u32, seed: u64, handle: VtxInterferenceHandle, bus: &mut Bus) -> Self {
         assert!(!params.world.antennas.is_empty(), "the receiver needs at least one antenna");
         let out = Outputs {
             present: bus.signal(names::VIDEO_PRESENT),
@@ -296,6 +311,7 @@ impl VideoLink {
             vtx_pit: bus.signal(names::VTX_PIT),
             out,
             params,
+            handle,
         }
     }
 
@@ -303,7 +319,11 @@ impl VideoLink {
         match &self.interference {
             Some((f, values)) if *f == freq_mhz => values.clone(),
             _ => {
-                let values = interference_dbm(&self.params.world, freq_mhz, self.params.ground_bounce);
+                let mut emitters = self.params.world.emitters.clone();
+                if let Some(e) = self.handle.emitter() {
+                    emitters.push(e);
+                }
+                let values = interference_dbm(&LinkWorld { emitters, ..self.params.world.clone() }, freq_mhz, self.params.ground_bounce);
                 self.interference = Some((freq_mhz, values.clone()));
                 values
             }

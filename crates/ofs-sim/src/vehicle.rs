@@ -24,7 +24,7 @@ use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMoun
 use ofs_radio::elrs::{ElrsLink, FcTelemetry, FcTelemetryHandle, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams};
-use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, FIELD_RATE_HZ};
+use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
 use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
@@ -273,6 +273,32 @@ struct Handles {
     lq: Signal<f64>,
     rssi: Signal<f64>,
     fault_radio_loss: Signal<f64>,
+    /// Uplink loss fraction 0..1 — written from M4b Task 3; the ELRS model reads it per packet.
+    #[allow(dead_code)]
+    fault_radio_loss_fraction: Signal<f64>,
+    /// Burst window edges, s — written from M4b Task 3 (Task 4 consumes).
+    #[allow(dead_code)]
+    fault_burst_on: Signal<f64>,
+    #[allow(dead_code)]
+    fault_burst_off: Signal<f64>,
+    /// Battery Thevenin offsets — written from M4b Task 3 (Task 5 consumes).
+    #[allow(dead_code)]
+    fault_battery_r_offset: Signal<f64>,
+    #[allow(dead_code)]
+    fault_battery_v_offset: Signal<f64>,
+    /// 1-based weak-cell index, 0 = none — written from M4b Task 3 (Task 5 consumes).
+    #[allow(dead_code)]
+    fault_battery_weak_cell: Signal<f64>,
+    /// Gyro bias offset, FRD rad/s — written from M4b Task 3 (Task 2 consumes).
+    #[allow(dead_code)]
+    fault_imu_gyro_bias: Signal<DVec3>,
+    fault_imu_noise_scale: Signal<f64>,
+    fault_motor_scale: Vec<Signal<f64>>,
+    fault_prop_thrust_scale: Vec<Signal<f64>>,
+    prop_imbalance: Vec<Signal<f64>>,
+    /// Integrated rotor phase — the M4b vibration model's phase input (Task 2).
+    #[allow(dead_code)]
+    motor_theta: Vec<Signal<f64>>,
     fc_restarts: Signal<f64>,
     vtx_present: Signal<f64>,
     vtx_band: Signal<f64>,
@@ -311,6 +337,18 @@ impl Handles {
             lq: bus.signal(names::RADIO_LQ),
             rssi: bus.signal(names::RADIO_RSSI),
             fault_radio_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
+            fault_radio_loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
+            fault_burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
+            fault_burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
+            fault_battery_r_offset: bus.signal(names::FAULT_BATTERY_R_OFFSET_OHM),
+            fault_battery_v_offset: bus.signal(names::FAULT_BATTERY_V_OFFSET_V),
+            fault_battery_weak_cell: bus.signal(names::FAULT_BATTERY_WEAK_CELL),
+            fault_imu_gyro_bias: bus.signal(names::FAULT_IMU_GYRO_BIAS),
+            fault_imu_noise_scale: bus.signal(names::FAULT_IMU_NOISE_SCALE),
+            fault_motor_scale: (0..motors).map(|i| bus.signal(&names::fault_motor_scale(i))).collect(),
+            fault_prop_thrust_scale: (0..motors).map(|i| bus.signal(&names::fault_prop_thrust_scale(i))).collect(),
+            prop_imbalance: (0..motors).map(|i| bus.signal(&names::prop_imbalance(i))).collect(),
+            motor_theta: (0..motors).map(|i| bus.signal(&names::motor_theta(i))).collect(),
             fc_restarts: bus.signal(names::FC_RESTARTS),
             vtx_present: bus.signal(names::VTX_PRESENT),
             vtx_band: bus.signal(names::VTX_BAND),
@@ -339,6 +377,18 @@ pub struct Vehicle {
     world: WorldConfig,
     /// The quad file's radio antenna names, by index (the state's `active_antenna`).
     radio_antenna_names: Vec<String>,
+    /// The video link's runtime-emitter handle, written from M4b Task 3's set_fault.
+    #[allow(dead_code)]
+    vtx_interference: VtxInterferenceHandle,
+    /// Per-motor part imbalance at build time; `clear_faults` restores it (M4b Task 3).
+    #[allow(dead_code)]
+    prop_imbalance_baseline: Vec<f64>,
+    /// Pack cell count, for the weak-cell fault (M4b Task 3).
+    #[allow(dead_code)]
+    battery_cells: u32,
+    /// Whether the quad has a VTX, for the VtxInterference fault (M4b Task 3).
+    #[allow(dead_code)]
+    has_vtx: bool,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -700,10 +750,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             osd = video.osd;
         }
     }
+    let vtx_interference = VtxInterferenceHandle::default();
     if let Some(x) = &cfg.vtx {
         // Last in the tick: it reads the pose the physics wrote and the channel the VTX published.
         let params = link_params(x, &opts.world)?;
-        models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, &mut bus)));
+        models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, vtx_interference.clone(), &mut bus)));
     }
 
     let h = Handles::register(&mut bus, n, &opts.world);
@@ -712,11 +763,23 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         scheduler.add(m);
     }
     let radio_antenna_names = cfg.radio.antennas.iter().map(|a| a.name.clone()).collect();
-    let mut vehicle =
-        Vehicle { scheduler, h, sitl: fc_kind == FcKind::Sitl, osd, fc_telemetry, world: opts.world.clone(), radio_antenna_names };
+    let mut vehicle = Vehicle {
+        scheduler,
+        h,
+        sitl: fc_kind == FcKind::Sitl,
+        osd,
+        fc_telemetry,
+        world: opts.world.clone(),
+        radio_antenna_names,
+        vtx_interference,
+        prop_imbalance_baseline: cfg.props.iter().map(|p| p.imbalance_kgm).collect(),
+        battery_cells: cfg.battery.cells,
+        has_vtx: cfg.vtx.is_some(),
+    };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
+    vehicle.init_fault_identities(&cfg.props.iter().map(|p| p.imbalance_kgm).collect::<Vec<_>>());
     Ok(vehicle)
 }
 
@@ -731,6 +794,19 @@ impl Vehicle {
         for (sig, v) in h.aux.iter().zip(s.aux) {
             bus.set(*sig, v);
         }
+    }
+
+    /// Fault seams start at their identities: multiplicative faults at 1.0, the prop imbalance at its
+    /// part data, additive faults at the bus's zero.
+    fn init_fault_identities(&mut self, imbalance: &[f64]) {
+        let h = &self.h;
+        let bus = self.scheduler.bus_mut();
+        for (i, imbalance) in imbalance.iter().enumerate() {
+            bus.set(h.fault_motor_scale[i], 1.0);
+            bus.set(h.fault_prop_thrust_scale[i], 1.0);
+            bus.set(h.prop_imbalance[i], *imbalance);
+        }
+        bus.set(h.fault_imu_noise_scale, 1.0);
     }
 
     /// Transmitter on (pilot or script connected) or off (the receiver hears nothing).
@@ -987,6 +1063,34 @@ mod tests {
         assert_eq!(fc.frame_count, 0);
         assert_eq!(fc.age_s, f64::INFINITY);
         assert!(fc.flight_mode.is_empty());
+    }
+
+    #[test]
+    fn fault_signals_start_at_their_identities() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.run_for(0.05).unwrap();
+        let b = vehicle.scheduler.bus();
+        for i in 0..4 {
+            assert_eq!(b.get(vehicle.h.fault_motor_scale[i]), 1.0, "motor {i} scale");
+            assert_eq!(b.get(vehicle.h.fault_prop_thrust_scale[i]), 1.0, "prop {i} thrust scale");
+            assert_eq!(b.get(vehicle.h.prop_imbalance[i]), 0.0, "prop {i} imbalance (the shipped parts carry none)");
+        }
+        assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_battery_weak_cell), 0.0);
+    }
+
+    #[test]
+    fn motors_integrate_theta() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() });
+        vehicle.run_for(0.10).unwrap();
+        let b = vehicle.scheduler.bus();
+        let theta = b.get(vehicle.h.motor_theta[0]);
+        assert!(theta > 0.0 && theta < 2.0 * std::f64::consts::PI, "wrapped into [0, 2π): {theta}");
+        let omega = b.get(vehicle.h.omega[0]);
+        // 0.10 s at a rising rpm: theta is in the same ballpark as omega·dt, never wildly off.
+        assert!(theta < omega * 0.11 + 2.0 * std::f64::consts::PI, "theta consistent with omega: {theta} vs {omega}");
     }
 
     #[test]
