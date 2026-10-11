@@ -11,6 +11,7 @@ fn quiet_imu() -> ImuParams {
         gyro_bias_radps: DVec3::ZERO,
         accel_noise_std_mps2: 0.0,
         accel_bias_mps2: DVec3::ZERO,
+        vibration: None,
     }
 }
 

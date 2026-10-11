@@ -23,7 +23,7 @@ use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
 use ofs_radio::elrs::{ElrsLink, FcTelemetry, FcTelemetryHandle, LinkParams};
 use ofs_sensors::baro::{Baro, BaroParams};
-use ofs_sensors::imu::{Imu, ImuParams};
+use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
@@ -650,6 +650,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         gyro_bias_radps: v3(cfg.imu.gyro_bias_radps),
         accel_noise_std_mps2: cfg.imu.accel_noise_std_mps2,
         accel_bias_mps2: v3(cfg.imu.accel_bias_mps2),
+        // The frame's motors shake the IMU (Ruling 8); the empty-motor edge carries no vibration params.
+        vibration: (n > 0).then(|| VibrationParams {
+            positions_frd: f.motor_positions_frd_m.iter().map(|p| v3(*p)).collect(),
+            mass_kg: f.mass_kg,
+            inertia_kgm2: v3(f.inertia_kgm2),
+        }),
     };
     models.push(Box::new(Imu::new(imu, opts.seed, &mut bus)));
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
