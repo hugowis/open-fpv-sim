@@ -65,6 +65,7 @@ fn still_quad(
             motor_count: 4,
             serial,
             erpm: Vec::new(),
+            pole_pairs: Vec::new(),
             taps,
         },
         &mut bus,
@@ -206,7 +207,7 @@ fn esc_telemetry_frames_become_battery_state() {
             current: bus.signal(names::BATTERY_CURRENT),
             consumed: bus.signal(names::BATTERY_CONSUMED),
         };
-        let esc = EscTelemetry::new(uart.clone(), 4, 80, bus);
+        let esc = EscTelemetry::new(uart.clone(), 4, 80, 7.0, bus);
         Some(Box::new(Both(vec![Box::new(battery), Box::new(esc)])))
     });
     s.run_for(4.0).unwrap();

@@ -54,6 +54,7 @@ pub fn still_quad(
             motor_count: 4,
             serial,
             erpm: Vec::new(),
+            pole_pairs: Vec::new(),
             taps,
         },
         &mut bus,

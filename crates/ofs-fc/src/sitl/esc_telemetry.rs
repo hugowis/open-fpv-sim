@@ -2,8 +2,6 @@
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 pub const FRAME_SIZE: usize = 10;
-/// Motor pole pairs of the reference quad's motors (14 poles): eRPM = mechanical RPM x pole pairs.
-pub const POLE_PAIRS: f64 = 7.0;
 /// Constant until there is a thermal model.
 pub const TEMPERATURE_C: u8 = 25;
 
@@ -38,10 +36,13 @@ pub fn kiss_frame(temperature_c: u8, voltage_v: f64, current_a: f64, consumed_ma
 /// Writes `motors` identical frames every period to the UART wired to Betaflight's ESC-sensor port. Betaflight sums
 /// current and consumption over its motor slots and averages voltage and RPM, so each frame carries a share of
 /// the pack current and charge and the pack voltage.
+///
+/// eRPM = mechanical rpm × pole pairs (uniform on SITL quads; enforced by ofs-config).
 pub struct EscTelemetry {
     uart: Wire,
     motors: usize,
     divisor: u32,
+    pole_pairs: f64,
     voltage: Signal<f64>,
     current: Signal<f64>,
     consumed: Signal<f64>,
@@ -49,12 +50,13 @@ pub struct EscTelemetry {
 }
 
 impl EscTelemetry {
-    pub fn new(uart: Wire, motors: usize, divisor: u32, bus: &mut Bus) -> Self {
+    pub fn new(uart: Wire, motors: usize, divisor: u32, pole_pairs: f64, bus: &mut Bus) -> Self {
         assert!(motors > 0, "an ESC telemetry model needs at least one motor");
         Self {
             uart,
             motors,
             divisor,
+            pole_pairs,
             voltage: bus.signal(names::BATTERY_VOLTAGE),
             current: bus.signal(names::BATTERY_CURRENT),
             consumed: bus.signal(names::BATTERY_CONSUMED),
@@ -80,7 +82,7 @@ impl Model for EscTelemetry {
             bus.get(self.voltage),
             bus.get(self.current) / share,
             bus.get(self.consumed) / share,
-            mean_rpm * POLE_PAIRS,
+            mean_rpm * self.pole_pairs,
         );
         for _ in 0..self.motors {
             self.uart.write(&frame);

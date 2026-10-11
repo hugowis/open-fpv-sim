@@ -516,3 +516,51 @@ fn collision_validation_problems_are_collected() {
     assert!(message.contains("collision.friction_coeff"), "{message}");
     assert!(message.contains("collision.spheres_frd_m"), "{message}");
 }
+
+#[test]
+fn a_diffs_motor_poles_must_match_the_motors() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let diff = dir.path().join("quads/opendrone-5f-freestyle.betaflight.diff");
+    let mismatched = "feature -GPS\nset motor_poles = 12\n";
+    fs::write(&diff, mismatched).unwrap();
+    let err = load(&path).unwrap_err();
+    assert!(err.to_string().contains("motor_poles"), "{err}");
+    assert!(err.to_string().contains("14"), "names the motors' pole count: {err}");
+    fs::write(&diff, "feature -GPS\nset motor_poles = 14\n").unwrap();
+    assert!(load(&path).is_ok());
+}
+
+#[test]
+fn pole_pairs_without_a_diff_line_must_match_the_default_14() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text()); // the library lands first; mutate parts after it
+    let six = part_text("motors", "opendrone-openmotor-2207").replace("pole_pairs = 7", "pole_pairs = 6");
+    write_part(dir.path(), "motors", "opendrone-openmotor-2207", &six);
+    let err = load(&path).unwrap_err();
+    assert!(err.to_string().contains("motor_poles"), "{err}");
+    assert!(err.to_string().contains("12 poles"), "{err}");
+}
+
+#[test]
+fn mixed_pole_pairs_on_a_sitl_quad_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("motors = [\"opendrone-openmotor-2207\"]",
+        "motors = [\"opendrone-openmotor-2207\", \"opendrone-openmotor-2207\", \"opendrone-openmotor-2207\", \"opendrone-openmotor-6pp\"]");
+    let path = write_quad(dir.path(), &text);
+    let six = part_text("motors", "opendrone-openmotor-2207").replace("pole_pairs = 7", "pole_pairs = 6");
+    write_part(dir.path(), "motors", "opendrone-openmotor-6pp", &six);
+    let err = load(&path).unwrap_err();
+    assert!(err.to_string().contains("uniform"), "{err}");
+}
+
+#[test]
+fn a_motor_part_without_pole_pairs_is_a_parse_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let missing = part_text("motors", "opendrone-openmotor-2207").replace("pole_pairs = 7\n", "\n");
+    write_part(dir.path(), "motors", "opendrone-openmotor-2207", &missing);
+    let err = load(&path).unwrap_err();
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    assert!(err.to_string().contains("pole_pairs"), "{err}");
+}

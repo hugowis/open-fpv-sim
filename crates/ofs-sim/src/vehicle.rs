@@ -377,7 +377,8 @@ fn video_devices(cfg: &QuadConfig, motors: usize, fc_divisor: u32, bus: &mut Bus
     let mut v = VideoDevices { before_fc: Vec::new(), after_fc: Vec::new(), serial: Vec::new(), taps: Vec::new(), osd: None };
     if let Some(e) = &cfg.esc_telemetry {
         let uart = Wire::new(ESC_UART_CAPACITY);
-        v.before_fc.push(Box::new(EscTelemetry::new(uart.clone(), motors, cfg.sim.base_hz / e.rate_hz, bus)));
+        let pp = cfg.motors[0].pole_pairs as f64;
+        v.before_fc.push(Box::new(EscTelemetry::new(uart.clone(), motors, cfg.sim.base_hz / e.rate_hz, pp, bus)));
         v.serial.push(SerialLink { uart_index: e.uart - 1, rx: uart });
     }
     if let Some(o) = &cfg.osd {
@@ -683,6 +684,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                     motor_count: n,
                     serial,
                     erpm: (0..n).map(|i| bus.signal(&names::motor_omega(i))).collect(),
+                    pole_pairs: cfg.motors.iter().map(|m| f64::from(m.pole_pairs)).collect(),
                     taps: {
                         let mut taps = vec![SerialTap { uart_index: r.uart - 1, tx: radio_tap.clone() }];
                         taps.extend(video.taps);

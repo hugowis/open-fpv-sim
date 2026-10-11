@@ -32,6 +32,7 @@ fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
         motor_count: 4,
         serial: vec![],
         erpm: Vec::new(),
+        pole_pairs: Vec::new(),
         taps: vec![],
     }
 }

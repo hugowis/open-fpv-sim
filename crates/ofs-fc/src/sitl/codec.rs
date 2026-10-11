@@ -92,12 +92,12 @@ pub fn state_datagram_with_serial(fdm: &FdmPacket, rc: &RcPacket, blocks: &[(u8,
 pub const EXT_ERPM_BLOCK_ID: u8 = 250;
 
 /// The eRPM block's payload: motor 0..3's eRPM/100 as u16 little-endian, saturating (u16 covers
-/// 6.55 M eRPM). eRPM = mechanical rpm x pole pairs (the ESC-sensor shim's constant: the same
-/// convention as Betaflight's `motor_poles` default of 14 on the shipped quad).
-pub fn erpm_block_payload(motor_omega_radps: &[f64]) -> [u8; 8] {
+/// 6.55 M eRPM). eRPM = mechanical rpm x pole pairs; the pole pairs come from the quad's motor parts
+/// (the M3d shim constant's replacement), indexed per motor like Betaflight's `motor_poles` data.
+pub fn erpm_block_payload(motor_omega_radps: &[f64], pole_pairs: &[f64]) -> [u8; 8] {
     let mut out = [0u8; 8];
     for (i, omega) in motor_omega_radps.iter().take(4).enumerate() {
-        let erpm = omega * 60.0 / (2.0 * std::f64::consts::PI) * crate::sitl::esc_telemetry::POLE_PAIRS / 100.0;
+        let erpm = omega * 60.0 / (2.0 * std::f64::consts::PI) * pole_pairs.get(i).copied().unwrap_or(pole_pairs[0]) / 100.0;
         let value = erpm.round().clamp(0.0, 65535.0) as u16;
         out[i * 2..i * 2 + 2].copy_from_slice(&value.to_le_bytes());
     }

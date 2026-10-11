@@ -154,13 +154,9 @@ pub struct MotorSection {
     pub resistance_ohm: f64,
     pub no_load_current_a: f64,
     pub rotor_inertia_kgm2: f64,
-    /// Electrical revolutions per mechanical revolution; Betaflight's `motor_poles` / 2 (M4a).
-    #[serde(default = "default_pole_pairs")]
+    /// Electrical revolutions per mechanical revolution; Betaflight's `motor_poles` / 2 (M4a). Required —
+    /// Betaflight takes it as data, so the simulator must not guess it.
     pub pole_pairs: u32,
-}
-
-fn default_pole_pairs() -> u32 {
-    7
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1029,6 +1025,23 @@ impl QuadConfig {
                             forced.unwrap_or("no such line")
                         ),
                     );
+                }
+                let pole_pairs = self.motors.iter().map(|m| m.pole_pairs).collect::<Vec<_>>();
+                if pole_pairs.iter().any(|p| *p != pole_pairs[0]) {
+                    c.check(false, "motors", "SITL quads need uniform motor pole_pairs: Betaflight has one motor_poles setting, and the KISS battery frames carry one pack eRPM");
+                }
+                let poles = 2 * pole_pairs[0];
+                match diff_setting(&text, "motor_poles").map(str::trim).and_then(|v| v.parse::<u32>().ok().map(|p| (v, p))) {
+                    Some((raw, set)) => c.check(
+                        set == poles,
+                        "fc.betaflight_diff",
+                        format!("the diff sets motor_poles = {raw} but the motors have {poles} poles (2 x pole_pairs); the RPM filter would mis-scale"),
+                    ),
+                    None => c.check(
+                        poles == 14,
+                        "motors",
+                        format!("the diff does not set motor_poles, so Betaflight uses its default 14, but the motors have {poles} poles; set pole_pairs = 7 or add `set motor_poles = {poles}` to the diff"),
+                    ),
                 }
             }
         }

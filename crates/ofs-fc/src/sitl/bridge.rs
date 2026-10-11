@@ -32,6 +32,9 @@ pub struct BridgeConfig {
     /// The motor-omega signals for the per-motor eRPM block (rad/s; empty for an open-loop quad —
     /// but the bridge only runs under SITL). One value per motor, at most 4.
     pub erpm: Vec<Signal<f64>>,
+    /// Per-motor pole pairs for the eRPM block (the quad's motor parts; uniform on SITL quads —
+    /// enforced by ofs-config). One value per motor.
+    pub pole_pairs: Vec<f64>,
     /// Betaflight's UART TX bytes, routed to the models that listen (OSD, VTX)
     pub taps: Vec<SerialTap>,
 }
@@ -74,6 +77,8 @@ pub struct SitlBridge {
     cfg: BridgeConfig,
     /// The motor-omega signals for the per-motor eRPM block, copied out of the config before it moved.
     erpm: Vec<Signal<f64>>,
+    /// The per-motor pole pairs of the eRPM block, copied out of the config before it moved.
+    pole_pairs: Vec<f64>,
     /// What was launched (with `--ip` under WSL); launched again when Betaflight reboots.
     launch: LaunchConfig,
     rx: UdpSocket,
@@ -148,9 +153,11 @@ impl SitlBridge {
         }
         let proc = SitlProcess::start(&launch)?;
         let erpm = cfg.erpm.clone();
+        let pole_pairs = cfg.pole_pairs.clone();
         Ok(Self {
             cfg,
             erpm,
+            pole_pairs,
             launch,
             rx,
             tx,
@@ -410,7 +417,7 @@ impl Model for SitlBridge {
         // The per-motor eRPM block, after the UART blocks (a first, resendable datagram carries none).
         if self.answered {
             let omega: Vec<f64> = self.erpm.iter().map(|s| bus.get(*s)).collect();
-            serial.push((EXT_ERPM_BLOCK_ID, erpm_block_payload(&omega).to_vec()));
+            serial.push((EXT_ERPM_BLOCK_ID, erpm_block_payload(&omega, &self.pole_pairs).to_vec()));
         }
         let datagram = state_datagram_with_serial(&fdm, &rc, &serial);
         self.count_link_drops(bus);

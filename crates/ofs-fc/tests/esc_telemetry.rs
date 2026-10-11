@@ -29,7 +29,7 @@ fn the_model_sends_one_quarter_of_the_pack_current_in_each_of_four_frames() {
     bus.set(i, 8.0);
     bus.set(c, 120.0);
     let uart = Wire::new(256);
-    let mut model = EscTelemetry::new(uart.clone(), 4, 80, &mut bus);
+    let mut model = EscTelemetry::new(uart.clone(), 4, 80, 7.0, &mut bus);
     assert_eq!(model.rate_divisor(), 80);
     model.step(&StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 8000.0 }, &mut bus).unwrap();
     let bytes = uart.take(256);
@@ -39,5 +39,21 @@ fn the_model_sends_one_quarter_of_the_pack_current_in_each_of_four_frames() {
         assert_eq!(&frame[3..5], &[0x00, 0xC8], "2.00 A = 8.00 A / 4");
         assert_eq!(&frame[5..7], &[0x00, 0x1E], "30 mAh = 120 mAh / 4");
         assert_eq!(frame[9], crc8(&frame[..9]));
+    }
+}
+
+#[test]
+fn the_kiss_frames_carry_erpm_from_the_motors_pole_pairs() {
+    let mut bus = Bus::new();
+    for i in 0..4 {
+        let omega = bus.signal::<f64>(&names::motor_omega(i));
+        bus.set(omega, 104.71975511965977); // 1000 mechanical rpm
+    }
+    for (pairs, expected) in [(7.0, [0x00, 0x46]), (3.0, [0x00, 0x1E])] {
+        let uart = Wire::new(256);
+        let mut model = EscTelemetry::new(uart.clone(), 4, 80, pairs, &mut bus);
+        model.step(&StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 8000.0 }, &mut bus).unwrap();
+        let frame = &uart.take(256)[..FRAME_SIZE];
+        assert_eq!(&frame[7..9], &expected, "{pairs} pole pairs: eRPM = 1000 rpm x pairs, / 100");
     }
 }
