@@ -130,6 +130,14 @@ func _run() -> void:
 	_check(app.hud.video_text().begins_with("VID "), "the HUD shows the video line: '%s'" % app.hud.video_text())
 	_check(not app.video.is_active(), "a clean link draws nothing over the picture")
 
+	# The delayed composite: pose, video and OSD sampled at one field-quantized instant in the past.
+	var fpv: Dictionary = app.client.get_fpv_view()
+	_check(fpv.has("pose"), "the fpv view carries a pose")
+	_check(fpv.has("render_time_s") and float(fpv["render_time_s"]) > 0.0, "the render instant is set")
+	_check(bool(fpv.get("field_valid", false)), "a clean link completes every field")
+	_check(int(fpv.get("latency_ms", -1)) == 40, "the default latency reaches the client")
+	_check(float(fpv["render_time_s"]) <= float(app.client.get_telemetry()["time_s"]), "the picture trails the sim clock")
+
 	# A hard touchdown raises the collision toast (the quad falls back onto the launch pad or the ground).
 	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.9, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
 	var up: bool = await _wait_for(func(): return app.drone.position.y > 2.0, 20.0)

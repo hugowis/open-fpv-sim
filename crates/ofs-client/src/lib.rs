@@ -6,6 +6,7 @@
 //! them blocks.
 mod client;
 pub mod error;
+pub mod fpv;
 pub mod frames;
 pub mod interp;
 pub mod launch;

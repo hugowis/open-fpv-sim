@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use godot::classes::{INode, Node};
 use godot::prelude::*;
-use ofs_client::{Client, Command, LaunchSpec, OverrunPolicy, Settings, Sticks, Update};
+use ofs_client::{Client, Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
 
 struct OfsExtension;
 
@@ -251,20 +251,39 @@ impl OfsClient {
         d
     }
 
+    /// The FPV picture for this frame — the goggles' pipeline: the pose, video uniforms and OSD of one delayed,
+    /// field-quantized instant; a dropped field holds the previous one. Empty before the first field: `pose`
+    /// (Transform3D), `render_time_s`, `video_present`, `video_noise`, `video_sparkles`, `video_chroma`,
+    /// `video_sync` ("locked"/"unstable"/"lost"), `field_valid`, `latency_ms`, and `osd` (the Dictionary
+    /// `get_osd` returns, or empty).
+    #[func]
+    fn get_fpv_view(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(v) = self.client.as_ref().and_then(|c| c.fpv_view()) else { return d };
+        let rotation = Quaternion::new(v.pose.att.x as f32, v.pose.att.y as f32, v.pose.att.z as f32, v.pose.att.w as f32);
+        let origin = Vector3::new(v.pose.pos.x as f32, v.pose.pos.y as f32, v.pose.pos.z as f32);
+        d.set("pose", Transform3D::new(Basis::from_quaternion(rotation), origin));
+        d.set("render_time_s", v.render_time_s);
+        d.set("video_present", v.uniforms.present);
+        d.set("video_noise", v.uniforms.noise);
+        d.set("video_sparkles", v.uniforms.sparkles);
+        d.set("video_chroma", v.uniforms.chroma);
+        d.set("video_sync", &GString::from(v.uniforms.sync.as_str()));
+        d.set("field_valid", v.field_valid);
+        d.set("latency_ms", v.latency_ms);
+        match &v.osd {
+            Some(frame) => d.set("osd", &osd_dict(frame)),
+            None => d.set("osd", &VarDictionary::new()),
+        }
+        d
+    }
+
     /// The newest OSD frame: `seq`, `time_s`, `present`, `cols`, `rows` and `cells` (a PackedInt32Array, row-major,
     /// each `char | font_page << 8 | blink << 10`); an empty Dictionary before the first frame.
     #[func]
     fn get_osd(&self) -> VarDictionary {
-        let mut d = VarDictionary::new();
-        let Some(frame) = self.client.as_ref().and_then(|c| c.osd()) else { return d };
-        let cells: Vec<i32> = frame.cells.iter().map(|c| *c as i32).collect();
-        d.set("seq", frame.seq as i64);
-        d.set("time_s", frame.time_s);
-        d.set("present", frame.present);
-        d.set("cols", i64::from(frame.cols));
-        d.set("rows", i64::from(frame.rows));
-        d.set("cells", &PackedInt32Array::from(cells.as_slice()));
-        d
+        let Some(frame) = self.client.as_ref().and_then(|c| c.osd()) else { return VarDictionary::new() };
+        osd_dict(&frame)
     }
 
     /// Counts OSD updates; when it changes, `get_osd()` has something new to draw.
@@ -342,6 +361,18 @@ impl OfsClient {
             client.send(command);
         }
     }
+}
+
+fn osd_dict(frame: &OsdFrame) -> VarDictionary {
+    let cells: Vec<i32> = frame.cells.iter().map(|c| *c as i32).collect();
+    let mut d = VarDictionary::new();
+    d.set("seq", frame.seq as i64);
+    d.set("time_s", frame.time_s);
+    d.set("present", frame.present);
+    d.set("cols", i64::from(frame.cols));
+    d.set("rows", i64::from(frame.rows));
+    d.set("cells", &PackedInt32Array::from(cells.as_slice()));
+    d
 }
 
 fn vector3(x: f64, y: f64, z: f64) -> Vector3 {

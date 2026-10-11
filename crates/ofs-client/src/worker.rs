@@ -15,6 +15,7 @@ use tonic::transport::{Channel, Endpoint};
 
 use crate::error::{ClientError, ErrorKind};
 use crate::frames::{quat_to_godot, vec_to_godot};
+use crate::fpv::{FieldUniforms, FpvBuffer};
 use crate::interp::{Sample, StateBuffer};
 use crate::launch::ServerProcess;
 use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update, World};
@@ -34,6 +35,7 @@ pub(crate) struct Shared {
     pub sticks: watch::Sender<Sticks>,
     pub buffer: Mutex<StateBuffer>,
     pub telemetry: Mutex<Option<(Telemetry, Instant)>>,
+    pub fpv: Mutex<FpvBuffer>,
     pub osd: Mutex<Option<OsdFrame>>,
     pub osd_version: AtomicU64,
     pub world: Mutex<Option<World>>,
@@ -70,12 +72,19 @@ impl Shared {
     }
 
     fn store_osd(&self, frame: Option<OsdFrame>) {
-        *lock(&self.osd) = frame;
+        *lock(&self.osd) = frame.clone();
+        let mut fpv = lock(&self.fpv);
+        match frame {
+            Some(f) => fpv.push_osd(f),
+            None => fpv.clear(),
+        }
+        drop(fpv);
         self.osd_version.fetch_add(1, Ordering::AcqRel);
     }
 
     fn ingest(&self, state: pb::State) {
         let arrival_s = self.epoch.elapsed().as_secs_f64();
+        let telemetry = Telemetry::from_pb(&state);
         if let (Some(p), Some(q)) = (state.position_ned_m, state.attitude) {
             let sample = Sample {
                 sim_time_s: state.time_s,
@@ -84,7 +93,16 @@ impl Shared {
             };
             lock(&self.buffer).push(sample, arrival_s, state.running);
         }
-        *lock(&self.telemetry) = Some((Telemetry::from_pb(&state), Instant::now()));
+        let v = &telemetry.video;
+        // A dropped field holds the previous one, but only a real drop of a transmitting signal: the server
+        // publishes field_valid = 0 both for drops and while nothing transmits, and a VTX powering off must
+        // walk the goggles to the newest (static) field and blank, never freeze an old picture.
+        lock(&self.fpv).push_field(
+            state.time_s,
+            FieldUniforms { present: v.present, noise: v.noise, sparkles: v.sparkles, chroma: v.chroma, sync: v.sync },
+            v.field_valid || !v.present,
+        );
+        *lock(&self.telemetry) = Some((telemetry, Instant::now()));
     }
 }
 

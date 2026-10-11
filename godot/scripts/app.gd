@@ -40,7 +40,7 @@ var chase_view := false
 var last_sticks := {}
 var phase_kind := ""
 var _link_was_lost := false
-var _osd_version := -1
+var _fpv_render_time := -1.0
 var _world_version := -1
 
 
@@ -93,12 +93,21 @@ func _process(delta: float) -> void:
 	var focused := get_window().has_focus()
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
-	if client.has_pose():
+	if not chase_view:
+		var fpv: Dictionary = client.get_fpv_view()
+		if fpv.has("pose"):
+			drone.transform = fpv["pose"]
+			video.update_view({
+				"video_present": fpv["video_present"], "video_noise": fpv["video_noise"],
+				"video_sparkles": fpv["video_sparkles"], "video_chroma": fpv["video_chroma"],
+				"video_sync": fpv["video_sync"],
+			}, delta)
+		var render_time: float = fpv.get("render_time_s", -1.0)
+		if render_time != _fpv_render_time:
+			_fpv_render_time = render_time
+			osd.set_frame(fpv.get("osd", {}))
+	elif client.has_pose():
 		drone.transform = client.get_pose()
-	var osd_version: int = client.get_osd_version()
-	if osd_version != _osd_version:
-		_osd_version = osd_version
-		osd.set_frame(client.get_osd())
 	var world_version: int = client.get_world_version()
 	if world_version != _world_version:
 		_world_version = world_version
@@ -106,7 +115,6 @@ func _process(delta: float) -> void:
 	var telemetry: Dictionary = client.get_telemetry()
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
-	video.update_view(telemetry, delta)
 	var detail: String = client.get_phase_detail()
 	if client.get_phase() == "failed" and TIPS.has(phase_kind):
 		detail += "\n" + TIPS[phase_kind]
@@ -174,7 +182,7 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 		radio_cut = false  # a reloaded quad has no faults
 		_link_was_lost = false
 		osd.set_frame({})
-		_osd_version = -1
+		_fpv_render_time = -1.0
 	if phase == "failed":
 		hud.add_toast("Failed: %s" % detail.get_slice("\n", 0), "error")
 

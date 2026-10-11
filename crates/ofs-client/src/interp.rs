@@ -105,4 +105,32 @@ impl StateBuffer {
         let t = (target - a.sim_time_s) / (b.sim_time_s - a.sim_time_s);
         Some(Pose { pos: a.pos.lerp(b.pos, t), att: a.att.slerp(b.att, t) })
     }
+
+    /// The simulator's idea of "now" for `client_now_s`: the least-delayed recent arrival's clock offset
+    /// (delays only add, so the minimum is the best estimate). None before the first sample and while paused
+    /// (the offsets are forgotten then) — the caller keeps the last picture.
+    pub fn sim_now(&self, client_now_s: f64) -> Option<f64> {
+        let latest = *self.samples.back()?;
+        let offset = self.offsets.iter().copied().reduce(f64::min)?;
+        Some((client_now_s - offset).max(latest.sim_time_s))
+    }
+
+    /// The pose at an exact simulated time (no clock offset, no display delay): interpolated between the two
+    /// samples that bracket it; the oldest or newest pose held outside them.
+    pub fn pose_at_sim(&self, sim_time_s: f64) -> Option<Pose> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        if sim_time_s <= self.samples.front()?.sim_time_s {
+            return Some((*self.samples.front()?).into());
+        }
+        let latest = *self.samples.back()?;
+        if sim_time_s >= latest.sim_time_s {
+            return Some(latest.into());
+        }
+        let after = self.samples.partition_point(|s| s.sim_time_s <= sim_time_s);
+        let (a, b) = (self.samples[after - 1], self.samples[after]);
+        let t = (sim_time_s - a.sim_time_s) / (b.sim_time_s - a.sim_time_s);
+        Some(Pose { pos: a.pos.lerp(b.pos, t), att: a.att.slerp(b.att, t) })
+    }
 }

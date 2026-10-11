@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
 use crate::error::{ClientError, ErrorKind};
+use crate::fpv::{self, FpvBuffer, FpvView};
 use crate::interp::{Pose, StateBuffer};
 use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
 use crate::worker::{lock, run, Shared};
@@ -59,6 +60,7 @@ impl Client {
             sticks: sticks_tx,
             buffer: Mutex::new(StateBuffer::new(delay_s)),
             telemetry: Mutex::new(None),
+            fpv: Mutex::new(FpvBuffer::default()),
             osd: Mutex::new(None),
             osd_version: AtomicU64::new(0),
             world: Mutex::new(None),
@@ -153,6 +155,22 @@ impl Client {
     /// Counts OSD updates (and clears): a changed value means [`osd`](Self::osd) has something new to draw.
     pub fn osd_version(&self) -> u64 {
         self.shared.osd_version.load(Ordering::Acquire)
+    }
+
+    /// The FPV picture for this frame (the goggles' pipeline): the newest field boundary at or before
+    /// `sim_now − latency` with the pose, video uniforms and OSD all sampled there; a dropped field holds the
+    /// previous one. None before the first state, while paused, or when every buffered field was dropped —
+    /// the caller keeps the last picture.
+    pub fn fpv_view(&self) -> Option<FpvView> {
+        let now_s = self.shared.epoch.elapsed().as_secs_f64();
+        let buffer = lock(&self.shared.buffer);
+        let sim_now = buffer.sim_now(now_s)?;
+        let latency_ms = lock(&self.shared.telemetry).clone().map_or(0, |(t, _)| t.video.latency_ms);
+        let target = fpv::field_floor(sim_now - f64::from(latency_ms) / 1000.0);
+        let (render_time_s, uniforms, field_valid) = lock(&self.shared.fpv).field_at(target)?;
+        let pose = buffer.pose_at_sim(render_time_s)?;
+        let osd = lock(&self.shared.fpv).osd_at(render_time_s);
+        Some(FpvView { pose, uniforms, field_valid, osd, render_time_s, latency_ms })
     }
 
     /// The world of the loaded session, in Godot's frame; `None` before the first load and while one is under way.
