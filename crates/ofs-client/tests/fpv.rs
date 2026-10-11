@@ -1,4 +1,4 @@
-use ofs_client::fpv::{field_floor, FieldUniforms, FpvBuffer};
+use ofs_client::fpv::{field_floor, held_fields, FieldUniforms, FpvBuffer};
 use ofs_client::model::{OsdFrame, VideoSync};
 
 fn uniforms(present: bool, valid: bool) -> (FieldUniforms, bool) {
@@ -41,6 +41,7 @@ fn a_dropped_field_holds_the_previous_one() {
     push_fields(&mut b, &[0.0, 0.02, 0.04], &[true, true, false]);
     let (t, _, _) = b.field_at(0.06).unwrap();
     assert_eq!(t, 0.02, "field 0.04 dropped: the newest valid one before it shows");
+    assert_eq!(held_fields(0.06, t), 2, "the shown field 0.02 lags the 0.06 target by two boundaries");
 }
 
 #[test]
@@ -50,6 +51,7 @@ fn many_drops_walk_back_bounded() {
     push_fields(&mut b, &[0.02, 0.04, 0.06], &[false, false, false]);
     let (t, _, _) = b.field_at(0.08).unwrap();
     assert_eq!(t, 0.0, "the walk stops at the oldest buffered valid field");
+    assert_eq!(held_fields(0.08, t), 4, "the 0.08 target is four boundaries past the shown field 0.0");
     assert!(b.field_at(field_floor(-0.01)).is_none(), "nothing before the first field");
 }
 
@@ -58,8 +60,10 @@ fn zero_latency_picks_the_current_field() {
     let mut b = FpvBuffer::default();
     push_fields(&mut b, &[0.0, 0.02, 0.04], &[true, true, true]);
     // latency 0: the target is field_floor(sim_now) — the newest received field, nothing held back.
-    let (t, _, _) = b.field_at(field_floor(0.059)).unwrap();
+    let target = field_floor(0.059);
+    let (t, _, _) = b.field_at(target).unwrap();
     assert_eq!(t, 0.04);
+    assert_eq!(held_fields(target, t), 0, "the shown field is current, nothing held");
 }
 
 #[test]

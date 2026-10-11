@@ -1,8 +1,24 @@
 extends "res://tests/testing.gd"
-## The DVR's file side: the client's dvr_* API writes a parseable MJPEG AVI (headless has no renderer, so the
-## capture path itself is checked by eye and by shots.gd; test_dvr.gd drives the bytes).
+## The DVR's file side and capture timing: the client's dvr_* API writes a parseable MJPEG AVI, and the
+## boundary dedup and held-frame freeze are checked against a stand-in client (headless has no renderer, so
+## the encode path itself is checked by eye and by shots.gd; test_dvr.gd drives the bytes and the timing).
 
+const Dvr = preload("res://ui/dvr.gd")
 const QUAD := "res://../quads/opendrone-5f-freestyle.toml"
+
+
+## A stand-in for OfsClient: records what the DVR feeds it.
+class MockClient:
+	var frames: Array = []
+
+	func dvr_start(_path: String, _width: int, _height: int) -> String:
+		return ""
+
+	func dvr_write_frame(jpeg: PackedByteArray) -> void:
+		frames.append(jpeg)
+
+	func dvr_stop() -> Dictionary:
+		return {"frames": frames.size(), "dropped_frames": 0, "bytes": 0}
 
 
 func _client() -> Object:
@@ -52,3 +68,30 @@ func test_stop_without_start_and_double_start_are_honest() -> void:
 	ok(client.dvr_start(path, 4, 2) != "", "a second start fails")
 	client.dvr_stop()
 	client.free()
+
+
+func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var viewport := SubViewport.new()
+	await add_to_tree(viewport)
+	var mock := MockClient.new()
+	eq(dvr.start(mock, viewport), "", "starts against the stand-in")
+	dvr._last_jpeg = PackedByteArray([1, 2, 3])  # the held frame, as a previous encode left it
+	# A drop stretch: render_time_s holds at 0.04 while the boundaries advance through the held_fields count.
+	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "field_valid": false})
+	eq(mock.frames.size(), 1, "the held frame repeats on the next boundary")
+	eq(mock.frames[0], PackedByteArray([1, 2, 3]), "the repeated bytes are the held frame, not a re-encode")
+	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "field_valid": false})
+	eq(mock.frames.size(), 1, "the same boundary does not repeat it twice")
+	dvr.capture({"render_time_s": 0.04, "held_fields": 2, "field_valid": false})
+	eq(mock.frames.size(), 2, "and the boundary after repeats it again")
+	# The stretch ends: the recovered field renders for the boundary the last repeat already covered.
+	dvr.capture({"render_time_s": 0.08, "held_fields": 0, "field_valid": true})
+	eq(mock.frames.size(), 2, "the recovery boundary is deduped: one frame per boundary")
+	# The next current field would encode from the viewport; headless has no picture, so nothing is written.
+	dvr.capture({"render_time_s": 0.1, "held_fields": 0, "field_valid": true})
+	eq(mock.frames.size(), 2, "headless: no picture to encode, no frame written")
+	near(dvr._last_target, 0.1, "the dedup key tracks the rendered boundary", 1e-9)
+	eq(dvr.stop()["frames"], 2, "the stand-in reports what was fed")
+	dvr.queue_free()

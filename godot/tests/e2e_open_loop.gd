@@ -135,6 +135,7 @@ func _run() -> void:
 	_check(fpv.has("pose"), "the fpv view carries a pose")
 	_check(fpv.has("render_time_s") and float(fpv["render_time_s"]) > 0.0, "the render instant is set")
 	_check(bool(fpv.get("field_valid", false)), "a clean link completes every field")
+	_check(int(fpv.get("held_fields", -1)) == 0, "a clean link holds nothing: held_fields is 0")
 	_check(int(fpv.get("latency_ms", -1)) == 40, "the default latency reaches the client")
 	_check(float(fpv["render_time_s"]) <= float(app.client.get_telemetry()["time_s"]), "the picture trails the sim clock")
 

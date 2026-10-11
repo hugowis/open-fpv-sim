@@ -174,7 +174,7 @@ impl Client {
         let (render_time_s, uniforms, field_valid) = lock(&self.shared.fpv).field_at(target)?;
         let pose = buffer.pose_at_sim(render_time_s)?;
         let osd = lock(&self.shared.fpv).osd_at(render_time_s);
-        Some(FpvView { pose, uniforms, field_valid, osd, render_time_s, latency_ms })
+        Some(FpvView { pose, uniforms, field_valid, osd, render_time_s, held_fields: fpv::held_fields(target, render_time_s), latency_ms })
     }
 
     /// The world of the loaded session, in Godot's frame; `None` before the first load and while one is under way.

@@ -34,6 +34,9 @@ pub struct FpvView {
     pub osd: Option<OsdFrame>,
     /// Simulated time of the field the picture shows (a field boundary).
     pub render_time_s: f64,
+    /// How many field boundaries the shown field lags the render target by: 0 when the shown field is
+    /// current, ≥ 1 when dropped fields held it back (the caller repeats the held picture).
+    pub held_fields: u32,
     /// The goggles' glass-to-glass latency the instant was computed with.
     pub latency_ms: u32,
 }
@@ -41,6 +44,13 @@ pub struct FpvView {
 /// The newest field boundary at or before `sim_time_s`.
 pub fn field_floor(sim_time_s: f64) -> f64 {
     (sim_time_s / FIELD_PERIOD_S).floor() * FIELD_PERIOD_S
+}
+
+/// How many field boundaries `render_time_s` (the field the picture shows) lags the render target `target_s`
+/// by: 0 when the shown field is current, ≥ 1 when dropped fields held it back. Both are field boundaries, so
+/// the target is exactly recoverable as `render_time_s + held_fields × FIELD_PERIOD_S`.
+pub fn held_fields(target_s: f64, render_time_s: f64) -> u32 {
+    ((target_s - render_time_s) / FIELD_PERIOD_S).round() as u32
 }
 
 #[derive(Debug, Default)]

@@ -254,8 +254,9 @@ impl OfsClient {
     /// The FPV picture for this frame — the goggles' pipeline: the pose, video uniforms and OSD of one delayed,
     /// field-quantized instant; a dropped field holds the previous one. Empty before the first field: `pose`
     /// (Transform3D), `render_time_s`, `video_present`, `video_noise`, `video_sparkles`, `video_chroma`,
-    /// `video_sync` ("locked"/"unstable"/"lost"), `field_valid`, `latency_ms`, and `osd` (the Dictionary
-    /// `get_osd` returns, or empty).
+    /// `video_sync` ("locked"/"unstable"/"lost"), `field_valid`, `held_fields` (how many field boundaries the
+    /// shown field lags the render target by; 0 is current, ≥ 1 means held fields), `latency_ms`, and `osd`
+    /// (the Dictionary `get_osd` returns, or empty).
     #[func]
     fn get_fpv_view(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -270,6 +271,7 @@ impl OfsClient {
         d.set("video_chroma", v.uniforms.chroma);
         d.set("video_sync", &GString::from(v.uniforms.sync.as_str()));
         d.set("field_valid", v.field_valid);
+        d.set("held_fields", i64::from(v.held_fields));
         d.set("latency_ms", v.latency_ms);
         match &v.osd {
             Some(frame) => d.set("osd", &osd_dict(frame)),
