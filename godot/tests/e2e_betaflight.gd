@@ -99,8 +99,21 @@ func _run() -> void:
 	_check(disarmed, "Betaflight fails safe: the motors stop within 6 s of the cut")
 	var fc_stale: bool = await _wait_for(func(): return app.client.get_telemetry().get("fc_telemetry_age_s", 0.0) > 1.0, 6.0)
 	_check(fc_stale, "the FC telemetry goes stale with the link: the HUD dashes")
-	_press(app, KEY_K)  # the pilot's own failsafe test works through the key too
+	app.set_radio_cut(false)
+	await _wait_for(func(): return app.client.get_telemetry()["link_up"], 4.0)
+	# The pilot's own failsafe test works through the key too: cut through the real engine pipeline (what a
+	# physical keypress drives), restore through the handler call.
+	var key_event := InputEventKey.new()
+	key_event.physical_keycode = KEY_K
+	key_event.pressed = true
+	Input.parse_input_event(key_event)
+	var key_cut: bool = await _wait_for(func(): return not app.client.get_telemetry()["link_up"], 4.0)
+	_check(key_cut, "the K key cuts the radio through the engine's input pipeline")
+	var key_stale: bool = await _wait_for(func(): return app.client.get_telemetry().get("fc_telemetry_age_s", 0.0) > 1.0, 6.0)
+	_check(key_stale, "and the HUD dashes on the key cut too")
 	_press(app, KEY_K)
+	var key_back: bool = await _wait_for(func(): return app.client.get_telemetry()["link_up"], 4.0)
+	_check(key_back, "and K restores the link")
 
 	app.set_chase_view(true)
 	_check(not app.osd.is_drawing(), "the OSD is hidden in the chase view")
