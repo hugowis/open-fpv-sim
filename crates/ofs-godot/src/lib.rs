@@ -278,6 +278,35 @@ impl OfsClient {
         d
     }
 
+    /// Starts a DVR recording to `path` (an absolute .avi path) at the viewport's pixel size; "" or why not.
+    #[func]
+    fn dvr_start(&self, path: GString, width: i64, height: i64) -> GString {
+        let Some(client) = self.client.as_ref() else { return GString::from("no session") };
+        match client.dvr_start(path.to_string(), width.max(1) as u32, height.max(1) as u32) {
+            Ok(()) => GString::new(),
+            Err(e) => GString::from(e.as_str()),
+        }
+    }
+
+    #[func]
+    fn dvr_write_frame(&self, jpeg: PackedByteArray) {
+        if let Some(client) = self.client.as_ref() {
+            client.dvr_write_frame(jpeg.to_vec());
+        }
+    }
+
+    /// Stops the recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
+    #[func]
+    fn dvr_stop(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(client) = self.client.as_ref() else { return d };
+        let Ok(summary) = client.dvr_stop() else { return d };
+        d.set("frames", summary.frames as i64);
+        d.set("dropped_frames", summary.dropped_frames as i64);
+        d.set("bytes", summary.bytes as i64);
+        d
+    }
+
     /// The newest OSD frame: `seq`, `time_s`, `present`, `cols`, `rows` and `cells` (a PackedInt32Array, row-major,
     /// each `char | font_page << 8 | blink << 10`); an empty Dictionary before the first frame.
     #[func]

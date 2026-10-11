@@ -29,6 +29,7 @@ const TIPS := {
 @onready var fpv_texture: TextureRect = $FpvBox/FpvTexture
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
+@onready var dvr: Node = $Dvr
 
 var client: Object = null  # OfsClient, from the extension
 var controls = Controls.new()
@@ -79,6 +80,9 @@ func _layout_fpv() -> void:
 	var window_size := fpv_box.size
 	fpv_texture.position = Vector2.ZERO
 	fpv_texture.size = window_size
+	if dvr != null and dvr.recording and fpv_viewport.size != Vector2i(window_size):
+		var summary: Dictionary = dvr.stop()
+		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
 	fpv_viewport.size = Vector2i(window_size)
 
 
@@ -106,6 +110,7 @@ func _process(delta: float) -> void:
 		if render_time != _fpv_render_time:
 			_fpv_render_time = render_time
 			osd.set_frame(fpv.get("osd", {}))
+		dvr.capture(fpv)
 	elif client.has_pose():
 		drone.transform = client.get_pose()
 	var world_version: int = client.get_world_version()
@@ -138,6 +143,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				client.reload()
 		KEY_C:
 			set_chase_view(not chase_view)
+		KEY_D:
+			_toggle_dvr()
 		KEY_K:
 			set_radio_cut(not radio_cut)
 		KEY_H:
@@ -161,6 +168,28 @@ func set_chase_view(chase: bool) -> void:
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
 	video.set_enabled(not chase)
+
+
+func _toggle_dvr() -> void:
+	if chase_view:
+		hud.add_toast("DVR records the FPV view - switch with C first", "warn")
+		return
+	if dvr.recording:
+		var summary: Dictionary = dvr.stop()
+		if summary.is_empty():
+			hud.add_toast("DVR failed: the writer stopped abnormally", "error")
+		else:
+			hud.add_toast("DVR: %d frames saved%s" % [summary.get("frames", 0), _dvr_drop_note(summary)])
+	else:
+		var error: String = dvr.start(client, fpv_viewport)
+		hud.add_toast("DVR: recording to user://recordings" if error == "" else "DVR failed: %s" % error, "info" if error == "" else "error")
+		if error != "":
+			return
+
+
+func _dvr_drop_note(summary: Dictionary) -> String:
+	var dropped: int = summary.get("dropped_frames", 0)
+	return "" if dropped == 0 else " (%d dropped)" % dropped
 
 
 func _on_video_effects_toggled(on: bool) -> void:

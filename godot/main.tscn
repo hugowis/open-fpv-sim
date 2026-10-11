@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://ui/controls_menu.gd" id="8"]
 [ext_resource type="Script" path="res://ui/osd.gd" id="9"]
 [ext_resource type="Script" path="res://ui/video.gd" id="10"]
+[ext_resource type="Script" path="res://ui/dvr.gd" id="11"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1")
@@ -66,3 +67,6 @@ script = ExtResource("7")
 [node name="ControlsMenu" type="CanvasLayer" parent="."]
 layer = 5
 script = ExtResource("8")
+
+[node name="Dvr" type="Node" parent="."]
+script = ExtResource("11")
