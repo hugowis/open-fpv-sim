@@ -15,6 +15,7 @@ const ENV_NAMES := {
 	"OFS_SITL_LAUNCH": "sitl_launch",
 	"OFS_WORLD": "world_path",
 	"OFS_VIDEO_EFFECTS": "video_effects",
+	"OFS_FPV_ASPECT": "fpv_aspect",
 }
 ## Command-line flag -> setting (`--name=value`; `--open-loop` alone means true).
 const FLAG_NAMES := {
@@ -26,6 +27,7 @@ const FLAG_NAMES := {
 	"--sitl-launch": "sitl_launch",
 	"--world": "world_path",
 	"--video-effects": "video_effects",
+	"--fpv-aspect": "fpv_aspect",
 }
 
 
@@ -50,6 +52,7 @@ static func defaults() -> Dictionary:
 		"quad_path": root.path_join("quads").path_join("opendrone-5f-freestyle.toml"),
 		"world_path": root.path_join("worlds").path_join("flat.toml"),
 		"video_effects": true,
+		"fpv_aspect": "4:3",
 		"sitl_launch": "",
 		"open_loop": false,
 		"seed": 1,

@@ -52,6 +52,8 @@ func _ready() -> void:
 	video.effects = settings["video_effects"]
 	controls_menu.set_video_effects(settings["video_effects"])
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
+	controls_menu.set_aspect(settings["fpv_aspect"])
+	controls_menu.aspect_changed.connect(_on_aspect_changed)
 	fpv_texture.texture = fpv_viewport.get_texture()
 	get_viewport().size_changed.connect(_layout_fpv)
 	_layout_fpv()
@@ -74,16 +76,31 @@ Check the [client] section of user://ofs_client.cfg and the OFS_* variables, the
 		set_process(false)
 
 
-## Sizes the FPV box and the viewport's internal resolution. The chase view and the "window" aspect fill the
-## window; the boxed aspects (Task 9) center a fixed-resolution picture like goggles do.
+## The FPV box and the viewport's internal resolution for `window_size`. The chase view and the "window"
+## aspect fill the window (the viewport at the window's size, today's quality); the boxed aspects center a
+## fixed-resolution picture like goggles do.
+static func fpv_box_for(window_size: Vector2, aspect: String, chase: bool) -> Dictionary:
+	var box := Rect2(Vector2.ZERO, window_size)
+	var internal := Vector2i(window_size)
+	if not chase and aspect != "window":
+		var ratio := 4.0 / 3.0 if aspect == "4:3" else 16.0 / 9.0
+		var w: float = minf(window_size.x, window_size.y * ratio)
+		box = Rect2((window_size - Vector2(w, w / ratio)) * 0.5, Vector2(w, w / ratio))
+		internal = Vector2i(960, 720) if aspect == "4:3" else Vector2i(1280, 720)
+	return {"box": box, "internal": internal}
+
+
+## Sizes the FPV box and the viewport's internal resolution. A size change while the DVR records stops it
+## (Review Focus 5): stop before the resize so the comparison sees the old size.
 func _layout_fpv() -> void:
-	var window_size := fpv_box.size
-	fpv_texture.position = Vector2.ZERO
-	fpv_texture.size = window_size
-	if dvr != null and dvr.recording and fpv_viewport.size != Vector2i(window_size):
+	var layout: Dictionary = fpv_box_for(fpv_box.size, settings["fpv_aspect"], chase_view)
+	var internal: Vector2i = layout["internal"]
+	if dvr != null and dvr.recording and fpv_viewport.size != internal:
 		var summary: Dictionary = dvr.stop()
 		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
-	fpv_viewport.size = Vector2i(window_size)
+	fpv_texture.position = (layout["box"] as Rect2).position
+	fpv_texture.size = (layout["box"] as Rect2).size
+	fpv_viewport.size = internal
 
 
 func _load_controls() -> void:
@@ -168,6 +185,7 @@ func set_chase_view(chase: bool) -> void:
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
 	video.set_enabled(not chase)
+	_layout_fpv()  # the chase view always fills the window
 
 
 func _toggle_dvr() -> void:
@@ -197,6 +215,13 @@ func _on_video_effects_toggled(on: bool) -> void:
 	settings["video_effects"] = on
 	if not AppSettings.save_value("video_effects", on):
 		hud.add_toast("Could not save the Video effects setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
+func _on_aspect_changed(value: String) -> void:
+	settings["fpv_aspect"] = value
+	_layout_fpv()
+	if not AppSettings.save_value("fpv_aspect", value):
+		hud.add_toast("Could not save the Picture setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
 func set_radio_cut(cut: bool) -> void:

@@ -9,9 +9,13 @@ const LABELS := {
 	"aux1": "Aux 1 (arm)", "aux2": "Aux 2 (angle mode)", "aux3": "Aux 3", "aux4": "Aux 4",
 }
 const BIND_THRESHOLD := 0.6
+const ASPECTS := ["4:3", "16:9", "window"]
 
 ## The "Video effects" box changed (the game applies and saves it).
 signal video_effects_toggled(on: bool)
+
+## The "Picture" button changed the aspect setting (the game applies and saves it).
+signal aspect_changed(value: String)
 
 var controls = null  # Controls
 var save_path := ""
@@ -22,6 +26,8 @@ var _deadzone := HSlider.new()
 var _deadzone_label := Label.new()
 var _hint := Label.new()
 var _video_effects := CheckBox.new()
+var _aspect: Button = Button.new()
+var _aspect_index := 0
 var _rows := {}  # channel -> {description, bind, invert, live}
 var _listening := ""
 
@@ -103,6 +109,10 @@ func _ready() -> void:
 	_video_effects.toggled.connect(func(on: bool) -> void: video_effects_toggled.emit(on))
 	box.add_child(_video_effects)
 
+	_aspect.text = "Picture: 4:3"
+	_aspect.pressed.connect(func(): _aspect_index = (_aspect_index + 1) % ASPECTS.size(); _aspect.text = "Picture: %s" % ASPECTS[_aspect_index]; aspect_changed.emit(ASPECTS[_aspect_index]))
+	box.add_child(_aspect)
+
 	_hint.text = "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
 	box.add_child(_hint)
 
@@ -133,6 +143,14 @@ func set_video_effects(on: bool) -> void:
 
 func video_effects_checked() -> bool:
 	return _video_effects.button_pressed
+
+
+## Shows the aspect setting without emitting `aspect_changed`.
+func set_aspect(value: String) -> void:
+	_aspect_index = ASPECTS.find(value)
+	if _aspect_index < 0:
+		_aspect_index = 0
+	_aspect.text = "Picture: %s" % ASPECTS[_aspect_index]
 
 
 ## The channel being bound ("" when none).

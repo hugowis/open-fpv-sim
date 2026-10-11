@@ -64,6 +64,12 @@ func test_the_world_and_the_video_effects_come_from_every_source() -> void:
 	eq(AppSettings.to_client_dict(t)["world_path"], "w.toml", "the client gets the world")
 
 
+func test_the_aspect_setting_defaults_and_comes_from_the_env_and_the_command_line() -> void:
+	eq(AppSettings.defaults()["fpv_aspect"], "4:3", "4:3 by default")
+	eq(AppSettings.resolve({}, {"OFS_FPV_ASPECT": "16:9"}, PackedStringArray())["fpv_aspect"], "16:9", "OFS_FPV_ASPECT=16:9")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--fpv-aspect=window"]))["fpv_aspect"], "window", "--fpv-aspect=window")
+
+
 func test_a_setting_saved_in_the_game_keeps_the_rest_of_the_file() -> void:
 	var path := "user://test_ofs_client.cfg"
 	DirAccess.remove_absolute(path)
