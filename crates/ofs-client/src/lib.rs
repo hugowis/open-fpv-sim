@@ -5,6 +5,7 @@
 //! what happened, `pose` and `telemetry` for what to draw, and `set_sticks` with what the pilot did; none of
 //! them blocks.
 mod client;
+pub mod dvr;
 pub mod error;
 pub mod fpv;
 pub mod frames;
