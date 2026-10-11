@@ -408,7 +408,7 @@ fn vtx_model(x: &VtxSection, requests: Wire, replies: Wire, divisor: u32, bus: &
         default_power_index: x.default_power_index,
         reply_latency_s: x.reply_latency_ms / 1000.0,
     };
-    Ok(VtxModel::new(params, requests, replies, divisor, bus))
+    Ok(VtxModel::new(x.kind, params, requests, replies, divisor, bus))
 }
 
 fn polarization(p: world_cfg::Polarization) -> Polarization {

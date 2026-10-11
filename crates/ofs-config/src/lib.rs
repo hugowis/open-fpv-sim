@@ -301,6 +301,8 @@ fn default_osd_rows() -> u32 {
 pub enum VtxKind {
     /// SmartAudio v2.1 (fidelity level 1).
     Smartaudio,
+    /// Tramp (fidelity level 1).
+    Tramp,
 }
 
 /// The video transmitter, controlled by Betaflight over SmartAudio.

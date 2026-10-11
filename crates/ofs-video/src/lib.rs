@@ -3,4 +3,5 @@
 pub mod link;
 pub mod osd;
 pub mod smartaudio;
+pub mod tramp;
 pub mod vtx;

@@ -10,7 +10,7 @@ use ofs_core::{names, Scheduler, Wire};
 use ofs_fc::msp::MspClient;
 use ofs_fc::sitl::bridge::{SerialLink, SerialTap};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
-use ofs_video::vtx::{band_index, VtxModel, VtxParams};
+use ofs_video::vtx::{band_index, VtxKind, VtxModel, VtxParams};
 
 const VTX_DIFF: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/vtx.betaflight.diff");
 const MSP_VTX_CONFIG: u8 = 88;
@@ -37,7 +37,7 @@ fn betaflight_accepts_the_smartaudio_vtx_and_follows_msp_changes() {
             default_power_index: 1,
             reply_latency_s: 0.005,
         };
-        Some(Box::new(VtxModel::new(params, to_vtx, from_vtx, 1, bus)))
+        Some(Box::new(VtxModel::new(VtxKind::Smartaudio, params, to_vtx, from_vtx, 1, bus)))
     });
     s.run_for(5.0).unwrap();
 

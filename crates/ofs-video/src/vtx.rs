@@ -1,13 +1,18 @@
-//! The video transmitter, controlled by Betaflight over SmartAudio v2.1.
+//! The video transmitter, controlled by Betaflight over SmartAudio v2.1 or Tramp.
 use std::collections::VecDeque;
 
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
+/// The configured protocol kind, shared with the quad files' `[vtx] kind`.
+pub use ofs_config::VtxKind;
+
 use crate::smartaudio::{
-    response_frame, settings_payload, Request, RequestParser, CMD_SET_CHANNEL, CMD_SET_FREQUENCY, CMD_SET_MODE,
-    CMD_SET_POWER, FREQ_GET_PIT, FREQ_MASK, FREQ_SET_PIT, MODE_FREQUENCY, MODE_PIT, MODE_UNLOCKED, POWER_IS_DBM,
-    RESP_SETTINGS_V21, SET_MODE_CLEAR_PIT, SET_MODE_PIT_IN_RANGE, SET_MODE_PIT_OUT_OF_RANGE, SET_MODE_UNLOCK,
+    response_frame, settings_payload as smartaudio_settings_payload, Request, RequestParser, CMD_SET_CHANNEL,
+    CMD_SET_FREQUENCY, CMD_SET_MODE, CMD_SET_POWER, FREQ_GET_PIT, FREQ_MASK, FREQ_SET_PIT, MODE_FREQUENCY, MODE_PIT,
+    MODE_UNLOCKED, POWER_IS_DBM, RESP_SETTINGS_V21, SET_MODE_CLEAR_PIT, SET_MODE_PIT_IN_RANGE,
+    SET_MODE_PIT_OUT_OF_RANGE, SET_MODE_UNLOCK,
 };
+use crate::tramp;
 
 pub const BAND_LETTERS: [char; 6] = ['A', 'B', 'E', 'F', 'R', 'L'];
 
@@ -72,12 +77,20 @@ impl VtxState {
     }
 }
 
-/// A SmartAudio v2.1 VTX. Reads Betaflight's requests from `requests` (the tap on its UART TX), answers on `replies`
-/// (the wire into its UART RX) after the configured latency, and publishes its state on the bus for the link model.
+/// The wire codec a [`VtxModel`] speaks, chosen by the configured [`VtxKind`].
+enum Codec {
+    Smartaudio(RequestParser),
+    Tramp(tramp::Parser),
+}
+
+/// A video transmitter speaking SmartAudio v2.1 or Tramp. Reads Betaflight's requests from `requests` (the tap on
+/// its UART TX), answers on `replies` (the wire into its UART RX) after the configured latency, and publishes its
+/// state on the bus for the link model.
 pub struct VtxModel {
+    kind: VtxKind,
     params: VtxParams,
     state: VtxState,
-    parser: RequestParser,
+    codec: Codec,
     requests: Wire,
     replies: Wire,
     pending: VecDeque<(f64, Vec<u8>)>,
@@ -92,7 +105,7 @@ pub struct VtxModel {
 }
 
 impl VtxModel {
-    pub fn new(params: VtxParams, requests: Wire, replies: Wire, divisor: u32, bus: &mut Bus) -> Self {
+    pub fn new(kind: VtxKind, params: VtxParams, requests: Wire, replies: Wire, divisor: u32, bus: &mut Bus) -> Self {
         assert_eq!(params.power_levels_mw.len(), params.power_levels_dbm.len(), "one dBm value per power level");
         assert!(params.default_power_index < params.power_levels_mw.len(), "default power level out of range");
         assert!(params.default_band < BAND_LETTERS.len() && (1..=8).contains(&params.default_channel), "default band/channel");
@@ -103,10 +116,15 @@ impl VtxModel {
             pit: false,
             unlocked: true,
         };
+        let codec = match kind {
+            VtxKind::Smartaudio => Codec::Smartaudio(RequestParser::default()),
+            VtxKind::Tramp => Codec::Tramp(tramp::Parser::default()),
+        };
         Self {
+            kind,
             params,
             state,
-            parser: RequestParser::default(),
+            codec,
             requests,
             replies,
             pending: VecDeque::new(),
@@ -125,9 +143,17 @@ impl VtxModel {
         self.state
     }
 
+    /// The protocol kind this VTX was built for.
+    pub fn kind(&self) -> VtxKind {
+        self.kind
+    }
+
     /// Frames ignored so far: bad CRC, unknown command or wrong length.
     pub fn bad_frames(&self) -> u32 {
-        self.parser.bad_frames()
+        match &self.codec {
+            Codec::Smartaudio(parser) => parser.bad_frames(),
+            Codec::Tramp(parser) => parser.bad_frames(),
+        }
     }
 
     fn current_dbm(&self) -> u8 {
@@ -151,7 +177,7 @@ impl VtxModel {
     fn handle(&mut self, request: Request) -> Vec<u8> {
         match request {
             Request::GetSettings => {
-                let payload = settings_payload(
+                let payload = smartaudio_settings_payload(
                     self.state.index,
                     self.mode_byte(),
                     self.state.freq_mhz(),
@@ -205,6 +231,47 @@ impl VtxModel {
         }
     }
 
+    /// Tramp requests. `None` means the FC expects no reply: it confirms 'F', 'P' and 'I' with its next 'v' at
+    /// least 200 ms later (the plan's ruling 2), so the model applies them silently.
+    fn handle_tramp(&mut self, request: tramp::Request) -> Option<Vec<u8>> {
+        match request {
+            // Limits: the model accepts the SmartAudio frequency window (5000..5999) and its own power table.
+            tramp::Request::Reset => {
+                let payload = limits_payload(&self.params.power_levels_mw);
+                Some(tramp::response_frame(tramp::CMD_RESET, &payload))
+            }
+            tramp::Request::GetSettings => {
+                let freq = self.state.freq_mhz();
+                let power_mw = self.params.power_levels_mw[self.state.power_level];
+                let payload = settings_payload(freq, power_mw, self.state.pit);
+                Some(tramp::response_frame(tramp::CMD_GET_SETTINGS, &payload))
+            }
+            tramp::Request::GetStatus => {
+                // 's': the FC reads the temperature as an i16 at frame byte 6 (the plan's ruling 2) and discards a
+                // zero one. 25 °C is the constant the KISS ESC frames carry (M3a's thermal debt applies).
+                let mut payload = vec![0, 0, 0, 0];
+                payload.extend_from_slice(&25u16.to_le_bytes());
+                Some(tramp::response_frame(tramp::RESP_STATUS, &payload))
+            }
+            tramp::Request::SetFrequency(freq) => {
+                if (5000..=5999).contains(&freq) {
+                    self.state.user_freq_mhz = Some(freq);
+                }
+                None // confirmed by the FC's next 'v' (ruling 2)
+            }
+            tramp::Request::SetPowerMw(mw) => {
+                if let Some(level) = self.params.power_levels_mw.iter().position(|p| *p == u32::from(mw)) {
+                    self.state.power_level = level;
+                }
+                None
+            }
+            tramp::Request::SetActive(active) => {
+                self.state.pit = !active;
+                None
+            }
+        }
+    }
+
     fn publish(&self, bus: &mut Bus) {
         bus.set(self.present, 1.0);
         bus.set(self.band, f64::from(self.state.band()));
@@ -227,9 +294,20 @@ impl Model for VtxModel {
     fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         let bytes = self.requests.take(usize::MAX);
         if !bytes.is_empty() {
-            for request in self.parser.push(&bytes) {
-                let reply = self.handle(request);
-                self.pending.push_back((ctx.time_s + self.params.reply_latency_s, reply));
+            match &mut self.codec {
+                Codec::Smartaudio(parser) => {
+                    for request in parser.push(&bytes) {
+                        let reply = self.handle(request);
+                        self.pending.push_back((ctx.time_s + self.params.reply_latency_s, reply));
+                    }
+                }
+                Codec::Tramp(parser) => {
+                    for request in parser.push(&bytes) {
+                        if let Some(reply) = self.handle_tramp(request) {
+                            self.pending.push_back((ctx.time_s + self.params.reply_latency_s, reply));
+                        }
+                    }
+                }
             }
         }
         while self.pending.front().is_some_and(|(due, _)| *due <= ctx.time_s) {
@@ -240,4 +318,26 @@ impl Model for VtxModel {
         self.publish(bus);
         Ok(())
     }
+}
+
+/// 'r': min frequency 5000, max 5999 (the model's accepted window), max power from the model's table —
+/// little endian; the FC ignores the reply unless min_freq is not zero.
+fn limits_payload(power_levels_mw: &[u32]) -> Vec<u8> {
+    let mut p = Vec::new();
+    p.extend_from_slice(&5000u16.to_le_bytes());
+    p.extend_from_slice(&5999u16.to_le_bytes());
+    p.extend_from_slice(&((*power_levels_mw.iter().max().unwrap_or(&0)).min(u32::from(u16::MAX)) as u16).to_le_bytes());
+    p
+}
+
+/// 'v': frequency, configured power, control mode 0, pit flag, actual power — little endian; the FC ignores
+/// the reply unless the frequency is not zero, which it never is while the VTX exists.
+fn settings_payload(freq_mhz: u16, power_mw: u32, pit: bool) -> Vec<u8> {
+    let mut p = Vec::new();
+    p.extend_from_slice(&freq_mhz.to_le_bytes());
+    p.extend_from_slice(&(power_mw.min(u32::from(u16::MAX)) as u16).to_le_bytes());
+    p.push(0); // control mode: no race lock
+    p.push(u8::from(pit));
+    p.extend_from_slice(&(power_mw.min(u32::from(u16::MAX)) as u16).to_le_bytes());
+    p
 }
