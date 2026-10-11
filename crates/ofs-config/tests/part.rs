@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use ofs_config::part::{load_frame, load_motor, load_prop, ProvenanceSource};
+use ofs_config::part::{
+    load_battery, load_esc, load_frame, load_motor, load_prop, load_vtx, ProvenanceSource,
+};
 
 const FRAME: &str = r#"
 schema_version = 1
@@ -166,4 +168,24 @@ fn table_valued_parameters_are_one_path() {
     let shown = err.to_string();
     assert!(shown.contains("prop.ct_table"), "{shown}");
     assert_eq!(shown.matches("prop.ct_table").count(), 1, "the table is one parameter, not one problem per row: {shown}");
+}
+
+#[test]
+fn every_shipped_part_loads_and_names_its_id() {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library"));
+    let frame = load_frame(&root.join("frames/opendrone-5f.toml")).unwrap();
+    assert_eq!(frame.frame.mass_kg, 0.65);
+    assert_eq!(frame.frame.motor_positions_frd_m.len(), 4);
+    assert!(frame.collision.is_none());
+    let motor = load_motor(&root.join("motors/opendrone-openmotor-2207.toml")).unwrap();
+    assert_eq!(motor.motor.pole_pairs, 7);
+    let prop = load_prop(&root.join("props/opendrone-5in-prop.toml")).unwrap();
+    assert_eq!(prop.prop.imbalance_kgm, 0.0);
+    load_esc(&root.join("escs/opendrone-4in1-esc.toml")).unwrap();
+    load_battery(&root.join("batteries/opendrone-6s-1300.toml")).unwrap();
+    let sa = load_vtx(&root.join("vtx/opendrone-smartaudio-1w.toml")).unwrap();
+    assert_eq!(sa.vtx.power_levels_mw, vec![25, 200, 600, 1000]);
+    let tramp = load_vtx(&root.join("vtx/opendrone-tramp-600.toml")).unwrap();
+    assert_eq!(tramp.vtx.power_levels_mw, vec![25, 100, 200, 400, 600]);
+    assert_eq!(tramp.vtx.kind, ofs_config::VtxKind::Tramp);
 }

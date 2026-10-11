@@ -1,0 +1,14 @@
+# OpenDrone 4-in-1 ESC (AM32) — M1 behavioural estimates; firmware-in-the-loop is fidelity level 2.
+schema_version = 1
+name = "OpenDrone 4-in-1 ESC"
+
+[esc]
+response_tau_s = 0.002
+current_limit_a = 45.0
+
+[provenance."esc.response_tau_s"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."esc.current_limit_a"]
+source = "estimated"
+note = "M1 estimate"

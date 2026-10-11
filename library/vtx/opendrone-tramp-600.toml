@@ -1,0 +1,46 @@
+# A Tramp VTX. Power levels are the FC's built-in Tramp table; the dBm column is a label - Tramp talks mW
+# and the codec never sends it (M3e rulings 3-4).
+schema_version = 1
+name = "OpenDrone Tramp VTX (600 mW)"
+
+[vtx]
+kind = "tramp"
+power_levels_mw = [25, 100, 200, 400, 600]
+power_levels_dbm = [14, 20, 23, 26, 28]
+reply_latency_ms = 5.0
+pit_power_mw = 0.1
+
+[vtx.antenna]
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+mount_frd = [-0.5, 0.0, -1.0]
+
+[provenance."vtx.kind"]
+source = "estimated"
+note = "Tramp behavioural model (M3e)"
+[provenance."vtx.power_levels_mw"]
+source = "datasheet"
+link = "https://github.com/betaflight/betaflight/blob/master/src/main/io/vtx_tramp.c"
+note = "the FC driver's built-in trampPowerTable"
+[provenance."vtx.power_levels_dbm"]
+source = "estimated"
+note = "labels only; the codec never sends dBm"
+[provenance."vtx.reply_latency_ms"]
+source = "estimated"
+note = "M3e estimate"
+[provenance."vtx.pit_power_mw"]
+source = "estimated"
+note = "default 0.1 (M3a)"
+[provenance."vtx.antenna.kind"]
+source = "estimated"
+note = "same antenna as the SmartAudio quad"
+[provenance."vtx.antenna.gain_dbi"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.polarization"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.mount_frd"]
+source = "estimated"
+note = "M3b estimate"

@@ -1,0 +1,45 @@
+# A SmartAudio v2.1 VTX. Betaflight builds its power list from the dBm values reported (SITL has no vtxtable).
+schema_version = 1
+name = "OpenDrone SmartAudio VTX (1 W)"
+
+[vtx]
+kind = "smartaudio"
+power_levels_mw = [25, 200, 600, 1000]
+power_levels_dbm = [14, 23, 28, 30]
+reply_latency_ms = 5.0
+pit_power_mw = 0.1
+
+[vtx.antenna]
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+# Up and back, on the back of the frame.
+mount_frd = [-0.5, 0.0, -1.0]
+
+[provenance."vtx.kind"]
+source = "estimated"
+note = "SmartAudio v2.1 behavioural model (M3a)"
+[provenance."vtx.power_levels_mw"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."vtx.power_levels_dbm"]
+source = "estimated"
+note = "dBm equivalents of the mW table, our own conversion"
+[provenance."vtx.reply_latency_ms"]
+source = "estimated"
+note = "M3a estimate"
+[provenance."vtx.pit_power_mw"]
+source = "estimated"
+note = "M3a estimate: a trickle next to the pilot"
+[provenance."vtx.antenna.kind"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.gain_dbi"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.polarization"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.mount_frd"]
+source = "estimated"
+note = "M3b estimate"
