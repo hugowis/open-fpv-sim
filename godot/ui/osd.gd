@@ -57,10 +57,17 @@ func advance_blink(delta: float) -> void:
 		_canvas.queue_redraw()
 
 
-## Where glyph `code` is in the atlas (page 0 of the font; other font pages are drawn from it too).
+## How many font pages the atlas holds (the PNG stacks them vertically, 16 glyph rows of 18 px each).
+static func font_pages() -> int:
+	return int(FONT.get_size().y / (16.0 * GLYPH_H))
+
+
+## Where glyph `code` of font `page` is in the atlas (pages beyond the atlas fall back to page 0: Betaflight
+## addresses up to four pages, the analog font ships two).
 @warning_ignore("integer_division")
-static func glyph_rect(code: int) -> Rect2:
-	return Rect2((code % ATLAS_COLS) * GLYPH_W, (code / ATLAS_COLS) * GLYPH_H, GLYPH_W, GLYPH_H)
+static func glyph_rect(page: int, code: int) -> Rect2:
+	var p := page if page < font_pages() else 0
+	return Rect2((code % ATLAS_COLS) * GLYPH_W, (code / ATLAS_COLS) * GLYPH_H + p * ATLAS_COLS * GLYPH_H, GLYPH_W, GLYPH_H)
 
 
 ## How many cells would be drawn now: non-blank ones, minus the blinking ones in the off phase.
@@ -94,4 +101,4 @@ func _draw_grid() -> void:
 		for col in cols:
 			var packed := cells[row * cols + col]
 			if _is_drawn(packed):
-				_canvas.draw_texture_rect_region(FONT, Rect2(box.position + Vector2(col, row) * cell_size, cell_size), glyph_rect(packed & 0xFF))
+				_canvas.draw_texture_rect_region(FONT, Rect2(box.position + Vector2(col, row) * cell_size, cell_size), glyph_rect((packed >> 8) & 0x3, packed & 0xFF))

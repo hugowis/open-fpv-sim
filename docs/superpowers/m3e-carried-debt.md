@@ -3,10 +3,10 @@
 These items were deliberately left out of M3e, or surfaced while building it. They are listed so M4 planning and the maintainer can pick them up.
 
 ## Deferred features
-- **Font pages 1-3.** The atlas ships page 0 only: the plan's page-1 `bold.mcm` download is deferred pending the
-  maintainer's approval (the M3a font discipline), and `osd.gd` masks the font-page bits off, so pages ≥ 1 all
-  draw from page 0 — nothing draws bold today, Betaflight's INFO elements (page 1) and warnings (page 2)
-  included. Shipping the second page (or a page-2 mapping) would make them bold like a real HD goggle.
+- **Font pages 2-3.** The atlas now ships two pages — 0 (default) and 1 (bold, downloaded after the maintainer
+  approved the M3a font discipline) — and `osd.gd` draws the font-page bits the simulator packs, so Betaflight's
+  INFO elements draw bold like a real HD goggle. Warnings (page 2) and criticals (page 3) still fall back to
+  page 0; shipping those pages (or a mapping) is the remainder.
 - **The DVR has no size mid-recording.** A viewport resize or aspect switch stops the recording instead of
   re-negotiating the header. (The recording stops when the picture's internal size changes: an aspect switch, a
   chase toggle from a boxed aspect, or a window resize with the window aspect — with the boxed aspects a plain

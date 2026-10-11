@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Converts a Betaflight OSD font (.mcm, MAX7456 format) into a glyph atlas PNG for the Godot client.
+"""Converts Betaflight OSD font(s) (.mcm, MAX7456 format) into a glyph atlas PNG for the Godot client.
 
 An .mcm file is the text line `MAX7456` followed by 256 glyphs x 64 lines of 8 binary digits. Each glyph is 12 x 18
 pixels, 2 bits per pixel, 4 pixels per byte starting at the most significant bits, row by row (54 of the 64 bytes
-are used): 00 black, 01 transparent, 10 white, 11 transparent. The atlas is 16 x 16 glyphs (192 x 288 px, RGBA);
-glyph `code` sits at column `code % 16`, row `code // 16`.
+are used): 00 black, 01 transparent, 10 white, 11 transparent. The atlas is 16 glyphs per row (192 px wide,
+288 px per page); glyph `code` of page `p` sits at column `code % 16`, row `code // 16 + p * 16`. With a second
+.mcm argument the pages stack vertically (two pages: 576 px tall).
 
-Usage: python tools/make_osd_font.py <default.mcm> godot/ui/osd_font.png
+Usage: python tools/make_osd_font.py <default.mcm> <out.png> [page1.mcm]
 """
 import struct
 import sys
@@ -51,17 +52,21 @@ def write_png(path, width, height, rows):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         raise SystemExit(__doc__)
     glyphs = [glyph_pixels(g) for g in read_mcm(sys.argv[1])]
-    width, height = COLS * GLYPH_W, (GLYPHS // COLS) * GLYPH_H
+    pages = [glyphs]
+    if len(sys.argv) == 4:
+        pages.append([glyph_pixels(g) for g in read_mcm(sys.argv[3])])
+    width, height = COLS * GLYPH_W, (GLYPHS // COLS) * GLYPH_H * len(pages)
     rows = []
-    for y in range(height):
-        row = []
-        for x in range(width):
-            glyph = glyphs[(y // GLYPH_H) * COLS + x // GLYPH_W]
-            row.append(glyph[(y % GLYPH_H) * GLYPH_W + x % GLYPH_W])
-        rows.append(row)
+    for page in pages:
+        for y in range((GLYPHS // COLS) * GLYPH_H):
+            row = []
+            for x in range(width):
+                glyph = page[(y // GLYPH_H) * COLS + x // GLYPH_W]
+                row.append(glyph[(y % GLYPH_H) * GLYPH_W + x % GLYPH_W])
+            rows.append(row)
     write_png(sys.argv[2], width, height, rows)
     print(f"wrote {sys.argv[2]} ({width}x{height})")
 
