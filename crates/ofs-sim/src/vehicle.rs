@@ -116,6 +116,11 @@ pub struct VtxInfo {
     pub pit_mode: bool,
 }
 
+/// The glass-to-glass latency the pipeline can actually deliver: whole fields (20 ms at 50 Hz), rounded down.
+pub fn quantize_latency_ms(ms: u32) -> u32 {
+    ms / 20 * 20
+}
+
 /// The analog video link as the goggles see it (`present = false` and a clean picture without a VTX).
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoInfo {
@@ -130,6 +135,10 @@ pub struct VideoInfo {
     pub sparkles: f64,
     pub chroma: f64,
     pub sync: VideoSync,
+    /// Whether the receiver completed the last field.
+    pub field_valid: bool,
+    /// The world file's glass-to-glass latency, quantized down to whole fields.
+    pub latency_ms: u32,
 }
 
 impl Default for VideoInfo {
@@ -144,6 +153,8 @@ impl Default for VideoInfo {
             sparkles: 0.0,
             chroma: 1.0,
             sync: VideoSync::Locked,
+            field_valid: false,
+            latency_ms: 0,
         }
     }
 }
@@ -201,6 +212,8 @@ struct VideoHandles {
     sparkles: Signal<f64>,
     chroma: Signal<f64>,
     sync: Signal<f64>,
+    field_valid: Signal<f64>,
+    latency_ms: u32,
 }
 
 impl VideoHandles {
@@ -215,6 +228,8 @@ impl VideoHandles {
             sparkles: bus.signal(names::VIDEO_SPARKLES),
             chroma: bus.signal(names::VIDEO_CHROMA),
             sync: bus.signal(names::VIDEO_SYNC),
+            field_valid: bus.signal(names::VIDEO_FIELD_VALID),
+            latency_ms: quantize_latency_ms(world.receiver.latency_ms),
         }
     }
 
@@ -233,6 +248,8 @@ impl VideoHandles {
             sparkles: b.get(self.sparkles),
             chroma: b.get(self.chroma),
             sync: VideoSync::from_signal(b.get(self.sync)),
+            field_valid: b.get(self.field_valid) > 0.5,
+            latency_ms: self.latency_ms,
         }
     }
 }
@@ -864,6 +881,14 @@ mod tests {
         assert_eq!(argv, ["wsl.exe", "-d", "Ubuntu", "-e", "/home/me/my builds/betaflight_SITL.elf", "--x", "a b"]);
         assert_eq!(split_argv("  plain   words "), ["plain", "words"]);
         assert_eq!(split_argv(r#"C:\tools\sitl.exe "#), [r"C:\tools\sitl.exe"], "backslashes are kept (Windows paths)");
+    }
+
+    #[test]
+    fn the_latency_quantizes_down_to_whole_fields() {
+        assert_eq!(quantize_latency_ms(40), 40, "the default is already two fields");
+        assert_eq!(quantize_latency_ms(37), 20, "37 ms delivers one field");
+        assert_eq!(quantize_latency_ms(0), 0);
+        assert_eq!(quantize_latency_ms(1015), 1000);
     }
 
     fn shipped_quad() -> QuadConfig {

@@ -188,8 +188,8 @@ impl OfsClient {
     /// `vtx_present`, `vtx_band`, `vtx_channel`, `vtx_channel_name` (a String, empty without a VTX), `vtx_freq_mhz`,
     /// `vtx_power_mw` and `vtx_pit_mode`, and the video link's `video_present`, `video_snr_db`,
     /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
-    /// `video_sparkles`, `video_chroma`, `video_antenna` (the antenna in use) and `video_rssi` (a Dictionary of dBm by
-    /// antenna name).
+    /// `video_sparkles`, `video_chroma`, `video_field_valid`, `video_latency_ms`, `video_antenna`
+    /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -239,6 +239,8 @@ impl OfsClient {
         d.set("video_noise", v.noise);
         d.set("video_sparkles", v.sparkles);
         d.set("video_chroma", v.chroma);
+        d.set("video_field_valid", v.field_valid);
+        d.set("video_latency_ms", v.latency_ms);
         d.set("video_antenna", &GString::from(v.active_antenna.as_str()));
         let mut rssi = VarDictionary::new();
         for (name, dbm) in &v.rssi_dbm {

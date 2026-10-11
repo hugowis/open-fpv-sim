@@ -127,15 +127,21 @@ fn video_messages_convert() {
         sparkles: 0.1,
         chroma: 0.8,
         sync: pb::VideoSync::Unstable as i32,
+        field_valid: true,
+        latency_ms: 40,
     };
     let v = VideoInfo::from_pb(&m);
     assert_eq!(v.sync, VideoSync::Unstable);
     assert_eq!(v.sync.as_str(), "unstable");
     assert_eq!(v.rssi_dbm, vec![("omni".to_string(), -90.0), ("patch".to_string(), -85.5)]);
     assert_eq!((v.active_antenna.as_str(), v.snr_db, v.noise, v.chroma), ("patch", 7.5, 0.6, 0.8));
+    assert!(v.field_valid);
+    assert_eq!(v.latency_ms, 40);
     let absent = VideoInfo::from_pb(&pb::VideoLink::default());
     assert_eq!(absent.sync, VideoSync::None);
     assert_eq!(absent.sync.as_str(), "");
+    assert!(!absent.field_valid);
+    assert_eq!(absent.latency_ms, 0);
     let t = Telemetry::from_pb(&pb::State::default());
     assert_eq!(t.video, VideoInfo::default(), "a state without video: no link, a clean picture");
     assert_eq!(t.video.chroma, 1.0);

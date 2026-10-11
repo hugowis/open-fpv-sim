@@ -2,10 +2,9 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 6: protocol 5 plus the flight controller's telemetry over the ELRS downlink,
-// the collision speed, and the world's handset (M3c). Still: lockstep and real-time sessions, state and event
-// streams, the pilot link, fault injection, OSD and VTX state, and the world with its analog video link. One session
-// (loaded quad) per server.
+// Simulator control, protocol version 7: protocol 6 plus the video link's field validity and glass-to-glass latency (M3e).
+// Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
+// state, and the world with its analog video link. One session (loaded quad) per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
@@ -170,6 +169,8 @@ message VideoLink {
   double sparkles = 7;  // 0 to 1
   double chroma = 8;    // colour, 1 (full) to 0 (black and white)
   VideoSync sync = 9;
+  bool field_valid = 10;         // false: the receiver dropped this field (marginal signal)
+  uint32 latency_ms = 11;        // the goggles' glass-to-glass latency, quantized down to whole fields
 }
 
 message State {

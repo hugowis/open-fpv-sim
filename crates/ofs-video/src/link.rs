@@ -37,6 +37,20 @@ pub const LOST_AFTER_FIELDS: u32 = 3;
 /// Fields in a row at or above `UNSTABLE_SNR_DB` that a lost sync needs to relock.
 pub const RELOCK_AFTER_FIELDS: u32 = 5;
 
+/// The chance the receiver fails to complete a field at the lost edge of the marginal band; the probability
+/// ramps linearly from 0 at `UNSTABLE_SNR_DB` to this at `LOST_SNR_DB`, and is 0 outside the band (a locked
+/// link never drops, a lost link outputs static — drops there would mean nothing). An estimate; see
+/// docs/research/video-link.md.
+pub const FIELD_DROP_P_MAX: f64 = 0.5;
+
+/// The per-field drop probability at `snr_db` (M3e spec §2).
+pub fn field_drop_probability(snr_db: f64) -> f64 {
+    if snr_db >= UNSTABLE_SNR_DB || snr_db < LOST_SNR_DB {
+        return 0.0;
+    }
+    FIELD_DROP_P_MAX * ramp(snr_db, UNSTABLE_SNR_DB, LOST_SNR_DB)
+}
+
 /// The receiver's hold on the picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoSync {
@@ -117,6 +131,11 @@ impl SyncTracker {
         }
         self.state = Some(next);
         next
+    }
+
+    /// The current sync state without updating it (the drop decision reads it).
+    pub fn state(&self) -> Option<VideoSync> {
+        self.state
     }
 }
 
@@ -212,6 +231,7 @@ struct Outputs {
     sparkles: Signal<f64>,
     chroma: Signal<f64>,
     sync: Signal<f64>,
+    field_valid: Signal<f64>,
 }
 
 pub struct VideoLink {
@@ -247,6 +267,7 @@ impl VideoLink {
             sparkles: bus.signal(names::VIDEO_SPARKLES),
             chroma: bus.signal(names::VIDEO_CHROMA),
             sync: bus.signal(names::VIDEO_SYNC),
+            field_valid: bus.signal(names::VIDEO_FIELD_VALID),
         };
         let mut rng = model_rng(seed, MODEL_NAME);
         let faders = params
@@ -327,20 +348,36 @@ impl Model for VideoLink {
             .map(|(s, i)| snr_db(*s, self.params.world.noise_floor_dbm, *i))
             .collect();
         let active = if self.params.world.diversity { self.diversity.choose(&snr) } else { 0 };
-        let sync = self.tracker.update(snr[active]);
-        let picture = picture(snr[active]);
-        let o = &self.out;
-        bus.set(o.present, 1.0);
-        bus.set(o.snr, snr[active]);
-        for (signal, value) in o.rssi.iter().zip(&rssi) {
-            bus.set(*signal, *value);
+        // At a marginal SNR the receiver may fail to complete the field: one seeded draw per field, after the
+        // fading draws. A lost sync outputs static rather than held fields, so no drops are drawn there.
+        let mut field_valid = transmitting;
+        if transmitting
+            && self.tracker.state() != Some(VideoSync::Lost)
+            && rand::Rng::gen::<f64>(&mut self.rng) < field_drop_probability(snr[active])
+        {
+            field_valid = false;
         }
-        bus.set(o.antenna, active as f64);
-        bus.set(o.interference, interference[active]);
-        bus.set(o.noise, picture.noise);
-        bus.set(o.sparkles, picture.sparkles);
-        bus.set(o.chroma, picture.chroma);
-        bus.set(o.sync, sync as i32 as f64);
+        let o = &self.out;
+        // Without a transmitter the receiver still outputs static (published as before); only a dropped field
+        // repeats the previous one, so sync and the picture keep their last values and field_valid marks the miss.
+        if field_valid || !transmitting {
+            let sync = self.tracker.update(snr[active]);
+            let picture = picture(snr[active]);
+            bus.set(o.present, 1.0);
+            bus.set(o.snr, snr[active]);
+            for (signal, value) in o.rssi.iter().zip(&rssi) {
+                bus.set(*signal, *value);
+            }
+            bus.set(o.antenna, active as f64);
+            bus.set(o.interference, interference[active]);
+            bus.set(o.noise, picture.noise);
+            bus.set(o.sparkles, picture.sparkles);
+            bus.set(o.chroma, picture.chroma);
+            bus.set(o.sync, sync as i32 as f64);
+        } else {
+            bus.set(o.present, 1.0);
+        }
+        bus.set(o.field_valid, if field_valid { 1.0 } else { 0.0 });
         Ok(())
     }
 }

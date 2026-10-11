@@ -122,6 +122,8 @@ pub const VIDEO_SPARKLES: &str = "video.sparkles";
 pub const VIDEO_CHROMA: &str = "video.chroma";
 /// 0 locked, 1 unstable (tearing), 2 lost (rolling, static).
 pub const VIDEO_SYNC: &str = "video.sync";
+/// 1.0 when the receiver completed the field, 0.0 when it dropped it (M3e); 0.0 while nothing transmits.
+pub const VIDEO_FIELD_VALID: &str = "video.field_valid";
 
 /// Received power in dBm at one receiver antenna, by its name in the world file.
 pub fn video_rssi(antenna: &str) -> String {

@@ -71,11 +71,19 @@ pub struct ReceiverSection {
     /// Use the antenna with the best signal (otherwise the first one).
     #[serde(default = "default_true")]
     pub diversity: bool,
+    /// Glass-to-glass video latency in ms (camera + VTX + air + goggles), quantized down to whole fields by the
+    /// simulator. Default: the 2-field estimate in docs/research/video-link.md.
+    #[serde(default = "default_latency_ms")]
+    pub latency_ms: u32,
     pub antennas: Vec<AntennaSection>,
 }
 
 fn default_noise_floor_dbm() -> f64 {
     -93.0
+}
+
+fn default_latency_ms() -> u32 {
+    40
 }
 
 fn default_true() -> bool {
@@ -211,6 +219,7 @@ impl WorldConfig {
             receiver: ReceiverSection {
                 noise_floor_dbm: default_noise_floor_dbm(),
                 diversity: true,
+                latency_ms: default_latency_ms(),
                 antennas: vec![AntennaSection {
                     name: "omni".into(),
                     kind: AntennaKind::Omni,
@@ -237,6 +246,7 @@ impl WorldConfig {
         c.check(p.facing_deg.is_finite(), "pilot.facing_deg", "must be finite");
         let r = &self.receiver;
         c.check(r.noise_floor_dbm.is_finite(), "receiver.noise_floor_dbm", "must be finite");
+        c.check(r.latency_ms <= 1000, "receiver.latency_ms", format!("must be at most 1000 ms (got {})", r.latency_ms));
         c.check(!r.antennas.is_empty(), "receiver.antennas", "needs at least one antenna");
         let mut names = HashSet::new();
         for (i, a) in r.antennas.iter().enumerate() {

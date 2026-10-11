@@ -10,6 +10,7 @@ glam.workspace = true
 ofs-core.workspace = true
 ofs-fc.workspace = true
 ofs-rf.workspace = true
+rand.workspace = true
 rand_chacha.workspace = true
 
 [dev-dependencies]

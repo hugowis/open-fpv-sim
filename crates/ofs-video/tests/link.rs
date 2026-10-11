@@ -284,6 +284,51 @@ fn rig_without_diversity() -> Rig {
 }
 
 #[test]
+fn the_field_drop_probability_peaks_between_unstable_and_lost() {
+    close(field_drop_probability(25.0), 0.0, 1e-12, "a locked link never drops");
+    close(field_drop_probability(6.0), 0.0, 1e-12, "at the unstable edge: none");
+    close(field_drop_probability(4.5), FIELD_DROP_P_MAX * 0.5, 1e-12, "half way down the band");
+    close(field_drop_probability(3.0), FIELD_DROP_P_MAX, 1e-12, "at the lost edge: the peak");
+    close(field_drop_probability(2.0), 0.0, 1e-12, "a lost link is static, not held: no drops");
+}
+
+#[test]
+fn the_same_seed_drops_the_same_fields() {
+    for seed in [1u64, 7, 42] {
+        let drops = run_fields(seed);
+        assert_eq!(drops, run_fields(seed), "seed {seed}: the same seed, the same drops");
+        assert!(drops.iter().any(|v| !*v), "seed {seed}: the band actually drops some fields");
+        assert!(drops.iter().any(|v| *v), "seed {seed}: the band does not drop everything");
+    }
+}
+
+/// Steps a link in place for 200 fields with the quad parked 866 m out (25 mW: about 4.5 dB — the middle of
+/// the drop band, since the bare link budget gives 8 dB at 580 m and 20 dB a decade) and reports each field's
+/// `video.field_valid`.
+fn run_fields(seed: u64) -> Vec<bool> {
+    let params = bare(open_field());
+    let mut bus = Bus::new();
+    let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+    bus.set(pos, DVec3::new(866.0, 0.0, -1.7));
+    let att = bus.signal::<DQuat>(names::BODY_ATT);
+    bus.set(att, DQuat::IDENTITY);
+    let mut link = VideoLink::new(params, 1, seed, &mut bus);
+    let vtx_present = bus.signal::<f64>(names::VTX_PRESENT);
+    let vtx_freq = bus.signal::<f64>(names::VTX_FREQ_MHZ);
+    let vtx_power = bus.signal::<f64>(names::VTX_POWER_MW);
+    bus.set(vtx_present, 1.0);
+    bus.set(vtx_freq, 5800.0);
+    bus.set(vtx_power, 25.0);
+    let field_valid = bus.signal::<f64>(names::VIDEO_FIELD_VALID);
+    (0..200)
+        .map(|i| {
+            link.step(&StepCtx { tick: i, time_s: i as f64 * 0.02, dt_s: 0.02 }, &mut bus).unwrap();
+            bus.get(field_valid) > 0.5
+        })
+        .collect()
+}
+
+#[test]
 fn odd_positions_give_finite_values() {
     // At the goggles (zero distance), inside a building, below the ground plane (a crash can dip there): the
     // simulator's per-step check stops on any non-finite signal, so the link must never produce one.
