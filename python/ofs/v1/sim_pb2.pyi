@@ -187,6 +187,28 @@ class RadioLink(_message.Message):
     downlink_lq_pct: float
     def __init__(self, tx_enabled: _Optional[bool] = ..., link_up: _Optional[bool] = ..., lq_pct: _Optional[float] = ..., rssi_dbm: _Optional[float] = ..., snr_db: _Optional[float] = ..., active_antenna: _Optional[str] = ..., downlink_lq_pct: _Optional[float] = ...) -> None: ...
 
+class FcTelemetry(_message.Message):
+    __slots__ = ("battery_v", "battery_a", "battery_mah", "roll_deg", "pitch_deg", "yaw_deg", "flight_mode", "frame_count", "telemetry_age_s")
+    BATTERY_V_FIELD_NUMBER: _ClassVar[int]
+    BATTERY_A_FIELD_NUMBER: _ClassVar[int]
+    BATTERY_MAH_FIELD_NUMBER: _ClassVar[int]
+    ROLL_DEG_FIELD_NUMBER: _ClassVar[int]
+    PITCH_DEG_FIELD_NUMBER: _ClassVar[int]
+    YAW_DEG_FIELD_NUMBER: _ClassVar[int]
+    FLIGHT_MODE_FIELD_NUMBER: _ClassVar[int]
+    FRAME_COUNT_FIELD_NUMBER: _ClassVar[int]
+    TELEMETRY_AGE_S_FIELD_NUMBER: _ClassVar[int]
+    battery_v: float
+    battery_a: float
+    battery_mah: float
+    roll_deg: float
+    pitch_deg: float
+    yaw_deg: float
+    flight_mode: str
+    frame_count: int
+    telemetry_age_s: float
+    def __init__(self, battery_v: _Optional[float] = ..., battery_a: _Optional[float] = ..., battery_mah: _Optional[float] = ..., roll_deg: _Optional[float] = ..., pitch_deg: _Optional[float] = ..., yaw_deg: _Optional[float] = ..., flight_mode: _Optional[str] = ..., frame_count: _Optional[int] = ..., telemetry_age_s: _Optional[float] = ...) -> None: ...
+
 class OsdFrame(_message.Message):
     __slots__ = ("seq", "time_s", "present", "cols", "rows", "cells")
     SEQ_FIELD_NUMBER: _ClassVar[int]
@@ -250,7 +272,7 @@ class VideoLink(_message.Message):
     def __init__(self, present: _Optional[bool] = ..., snr_db: _Optional[float] = ..., interference_dbm: _Optional[float] = ..., rssi: _Optional[_Iterable[_Union[AntennaRssi, _Mapping]]] = ..., active_antenna: _Optional[str] = ..., noise: _Optional[float] = ..., sparkles: _Optional[float] = ..., chroma: _Optional[float] = ..., sync: _Optional[_Union[VideoSync, str]] = ...) -> None: ...
 
 class State(_message.Message):
-    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video", "collision_speed_mps")
+    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video", "collision_speed_mps", "fc_telemetry")
     TIME_S_FIELD_NUMBER: _ClassVar[int]
     POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_NED_MPS_FIELD_NUMBER: _ClassVar[int]
@@ -268,6 +290,7 @@ class State(_message.Message):
     SERIAL_DROPPED_BYTES_FIELD_NUMBER: _ClassVar[int]
     VIDEO_FIELD_NUMBER: _ClassVar[int]
     COLLISION_SPEED_MPS_FIELD_NUMBER: _ClassVar[int]
+    FC_TELEMETRY_FIELD_NUMBER: _ClassVar[int]
     time_s: float
     position_ned_m: Vec3
     velocity_ned_mps: Vec3
@@ -285,7 +308,8 @@ class State(_message.Message):
     serial_dropped_bytes: int
     video: VideoLink
     collision_speed_mps: float
-    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ..., collision_speed_mps: _Optional[float] = ...) -> None: ...
+    fc_telemetry: FcTelemetry
+    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ..., collision_speed_mps: _Optional[float] = ..., fc_telemetry: _Optional[_Union[FcTelemetry, _Mapping]] = ...) -> None: ...
 
 class Event(_message.Message):
     __slots__ = ("time_s", "kind", "message")

@@ -318,6 +318,17 @@ impl Session {
             serial_dropped_bytes: s.serial_dropped_bytes,
             video: Some(video_msg(&s.video)),
             collision_speed_mps: s.collision_speed_mps,
+            fc_telemetry: Some(pb::FcTelemetry {
+                battery_v: s.fc_telemetry.battery_v,
+                battery_a: s.fc_telemetry.battery_a,
+                battery_mah: s.fc_telemetry.battery_mah,
+                roll_deg: s.fc_telemetry.roll_deg,
+                pitch_deg: s.fc_telemetry.pitch_deg,
+                yaw_deg: s.fc_telemetry.yaw_deg,
+                flight_mode: s.fc_telemetry.flight_mode.clone(),
+                frame_count: s.fc_telemetry.frame_count,
+                telemetry_age_s: s.fc_telemetry.age_s,
+            }),
         }
     }
 
