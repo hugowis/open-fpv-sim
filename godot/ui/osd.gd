@@ -57,16 +57,6 @@ func advance_blink(delta: float) -> void:
 		_canvas.queue_redraw()
 
 
-## The 4:3 box the grid is drawn in, fitted to `size` and centred (like the picture in goggles).
-static func box_for(size: Vector2) -> Rect2:
-	var h := size.y
-	var w := h * 4.0 / 3.0
-	if w > size.x:
-		w = size.x
-		h = w * 3.0 / 4.0
-	return Rect2((size - Vector2(w, h)) * 0.5, Vector2(w, h))
-
-
 ## Where glyph `code` is in the atlas (page 0 of the font; other font pages are drawn from it too).
 @warning_ignore("integer_division")
 static func glyph_rect(code: int) -> Rect2:
@@ -98,7 +88,7 @@ func _draw_grid() -> void:
 	var cells: PackedInt32Array = _frame.get("cells", PackedInt32Array())
 	if cells.size() != cols * rows:
 		return
-	var box := box_for(_canvas.size)
+	var box := Rect2(Vector2.ZERO, _canvas.size)
 	var cell_size := Vector2(box.size.x / cols, box.size.y / rows)
 	for row in rows:
 		for col in cols:

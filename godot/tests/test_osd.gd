@@ -25,11 +25,6 @@ func test_the_font_atlas_has_the_expected_layout() -> void:
 	eq(Osd.glyph_rect(255), Rect2(180, 270, 12, 18), "the last glyph")
 
 
-func test_the_box_is_4_by_3_fitted_and_centred() -> void:
-	eq(Osd.box_for(Vector2(1280, 720)), Rect2(160, 0, 960, 720), "a wide window: height-fitted")
-	eq(Osd.box_for(Vector2(400, 800)), Rect2(0, 250, 400, 300), "a tall window: width-fitted")
-
-
 func test_nothing_is_drawn_without_a_present_frame() -> void:
 	var osd := await _osd()
 	ok(not osd.is_drawing(), "no frame yet")

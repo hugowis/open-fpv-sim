@@ -17,13 +17,16 @@ const TIPS := {
 	"not_loaded": "The session ended on the server.",
 }
 
-@onready var drone: Node3D = $Drone
-@onready var fpv_camera: Camera3D = $Drone/FpvCamera
-@onready var chase_camera: Camera3D = $ChaseCamera
-@onready var lens: CanvasLayer = $Lens
-@onready var osd: CanvasLayer = $Osd
-@onready var video: CanvasLayer = $Video
-@onready var world: Node3D = $World
+@onready var fpv_viewport: SubViewport = $FpvViewport
+@onready var drone: Node3D = $FpvViewport/Drone
+@onready var fpv_camera: Camera3D = $FpvViewport/Drone/FpvCamera
+@onready var chase_camera: Camera3D = $FpvViewport/ChaseCamera
+@onready var lens: CanvasLayer = $FpvViewport/Lens
+@onready var osd: CanvasLayer = $FpvViewport/Osd
+@onready var video: CanvasLayer = $FpvViewport/Video
+@onready var world: Node3D = $FpvViewport/World
+@onready var fpv_box: Control = $FpvBox
+@onready var fpv_texture: TextureRect = $FpvBox/FpvTexture
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 
@@ -48,6 +51,9 @@ func _ready() -> void:
 	video.effects = settings["video_effects"]
 	controls_menu.set_video_effects(settings["video_effects"])
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
+	fpv_texture.texture = fpv_viewport.get_texture()
+	get_viewport().size_changed.connect(_layout_fpv)
+	_layout_fpv()
 	if not ClassDB.class_exists("OfsClient"):
 		hud.show_fatal("The OfsClient extension is not loaded.\nBuild it with `cargo build -p ofs-godot` (docs/dev-setup.md) and restart.")
 		set_process(false)
@@ -65,6 +71,15 @@ func _ready() -> void:
 		hud.show_fatal("Could not start the simulator client: %s
 Check the [client] section of user://ofs_client.cfg and the OFS_* variables, then restart." % error)
 		set_process(false)
+
+
+## Sizes the FPV box and the viewport's internal resolution. The chase view and the "window" aspect fill the
+## window; the boxed aspects (Task 9) center a fixed-resolution picture like goggles do.
+func _layout_fpv() -> void:
+	var window_size := fpv_box.size
+	fpv_texture.position = Vector2.ZERO
+	fpv_texture.size = window_size
+	fpv_viewport.size = Vector2i(window_size)
 
 
 func _load_controls() -> void:
