@@ -13,6 +13,7 @@ use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
+use crate::inputs::{tick_at, Inputs, Stick};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -443,6 +444,19 @@ pub struct Vehicle {
     active_faults: Vec<String>,
     /// The recorder model's handle: StartRecording/StopRecording go through it.
     recorder: RecorderHandle,
+    /// Faults scheduled with `at`, by due tick (ties in scheduling order).
+    pending_faults: Vec<(u64, Fault)>,
+    /// The inputs file playing now.
+    playback: Option<Playback>,
+    /// An inputs file that finished on its own, until the session raises its event.
+    finished_inputs: Option<String>,
+}
+
+/// An inputs file being played: its rows' due ticks and the next row to apply.
+struct Playback {
+    inputs: Inputs,
+    ticks: Vec<u64>,
+    next: usize,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -841,6 +855,9 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         has_vtx: cfg.vtx.is_some(),
         active_faults: Vec::new(),
         recorder,
+        pending_faults: Vec::new(),
+        playback: None,
+        finished_inputs: None,
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
@@ -881,17 +898,14 @@ impl Vehicle {
         self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
     }
 
-    /// Activates (`active = true`) or deactivates a fault. A fault that fails validation leaves nothing
-    /// behind: no signal moves and it is not recorded as active.
-    pub fn set_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
-        let b = self.scheduler.bus_mut();
-        match &fault {
-            Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
+    /// Validates a fault against this quad without applying it: what `set_fault` and `schedule_fault` refuse.
+    fn check_fault(&self, fault: &Fault) -> Result<(), SimError> {
+        match fault {
+            Fault::RadioLinkLoss => {}
             Fault::RadioLoss { fraction } => {
                 if !(0.0..=1.0).contains(fraction) {
                     return Err(SimError::InvalidArgument(format!("radio loss fraction must be in [0, 1], got {fraction}")));
                 }
-                b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 });
             }
             Fault::BurstLoss { on_s, off_s } => {
                 if !on_s.is_finite() || !off_s.is_finite() || *on_s <= 0.0 || *off_s <= 0.0 {
@@ -899,9 +913,6 @@ impl Vehicle {
                         "burst on_ms and off_ms must both be finite and > 0, got on {on_s} s / off {off_s} s"
                     )));
                 }
-                let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
-                b.set(self.h.fault_burst_on, on);
-                b.set(self.h.fault_burst_off, off);
             }
             Fault::MotorFailure { motor, scale } => {
                 if *motor >= self.h.fault_motor_scale.len() {
@@ -913,7 +924,6 @@ impl Vehicle {
                 if !(0.0..=1.0).contains(scale) {
                     return Err(SimError::InvalidArgument(format!("motor failure scale must be in [0, 1], got {scale}")));
                 }
-                b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 });
             }
             Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
                 if *prop >= self.h.fault_prop_thrust_scale.len() {
@@ -927,8 +937,6 @@ impl Vehicle {
                         "prop damage thrust_scale and imbalance_kgm must be finite and >= 0, got {thrust_scale} / {imbalance_kgm}"
                     )));
                 }
-                b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
-                b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
             }
             Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
                 if *cell as u32 >= self.battery_cells {
@@ -940,16 +948,11 @@ impl Vehicle {
                 if !r_offset_ohm.is_finite() || !v_offset_v.is_finite() || *r_offset_ohm < 0.0 || *v_offset_v < 0.0 {
                     return Err(SimError::InvalidArgument("weak-cell offsets must be finite and >= 0".into()));
                 }
-                b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
-                b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
-                b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
             }
             Fault::GyroFault { bias_radps, noise_scale } => {
                 if !noise_scale.is_finite() || *noise_scale < 0.0 || !bias_radps.is_finite() {
                     return Err(SimError::InvalidArgument("gyro fault noise_scale must be >= 0 and bias finite".into()));
                 }
-                b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
-                b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
             }
             Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
                 if !self.has_vtx {
@@ -960,6 +963,39 @@ impl Vehicle {
                         "vtx interference needs a positive frequency and power and a finite position, got {freq_mhz} MHz / {power_mw} mW / {position_ned_m:?}"
                     )));
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Activates (`active = true`) or deactivates a fault. A fault that fails validation leaves nothing
+    /// behind: no signal moves and it is not recorded as active.
+    pub fn set_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
+        self.check_fault(&fault)?;
+        let b = self.scheduler.bus_mut();
+        match &fault {
+            Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
+            Fault::RadioLoss { fraction } => b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 }),
+            Fault::BurstLoss { on_s, off_s } => {
+                let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
+                b.set(self.h.fault_burst_on, on);
+                b.set(self.h.fault_burst_off, off);
+            }
+            Fault::MotorFailure { motor, scale } => b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 }),
+            Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
+                b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
+                b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
+            }
+            Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
+                b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
+                b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
+                b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
+            }
+            Fault::GyroFault { bias_radps, noise_scale } => {
+                b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
+                b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
+            }
+            Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
                 self.vtx_interference.set(active.then_some(Emitter {
                     position: *position_ned_m,
                     freq_mhz: *freq_mhz,
@@ -975,6 +1011,85 @@ impl Vehicle {
         }
         self.record_fault_active(&fault, active); // maintains self.active_faults
         Ok(())
+    }
+
+    /// Activates `fault` at simulated time `at_s`, on the first tick at or after it (spec §6.2's `at=`), so a
+    /// lockstep run is the same however its `Run` calls are cut. Validated now; a time already passed is refused;
+    /// the current time applies at once. `clear_faults` also drops the scheduled faults.
+    pub fn schedule_fault(&mut self, fault: Fault, at_s: f64) -> Result<(), SimError> {
+        if !at_s.is_finite() || at_s < 0.0 {
+            return Err(SimError::InvalidArgument(format!("fault time must be finite and >= 0 s, got {at_s}")));
+        }
+        self.check_fault(&fault)?;
+        let at = tick_at(at_s, self.base_hz());
+        let now = self.scheduler.tick();
+        if at < now {
+            return Err(SimError::InvalidArgument(format!("fault time {at_s} s has passed (the session is at {} s)", self.time_s())));
+        }
+        if at == now {
+            return self.set_fault(fault, true);
+        }
+        // Stable: faults due on one tick apply in the order they were scheduled.
+        let index = self.pending_faults.partition_point(|(t, _)| *t <= at);
+        self.pending_faults.insert(index, (at, fault));
+        Ok(())
+    }
+
+    /// Starts playing `inputs` from now: row `t_s` applies on the first tick at or after now + `t_s`, columns the
+    /// file leaves out keep their current value, and the last row's values hold after playback ends. Refused while
+    /// another file plays.
+    pub fn play_inputs(&mut self, inputs: Inputs) -> Result<(), SimError> {
+        if let Some(playing) = &self.playback {
+            return Err(SimError::InvalidArgument(format!("{} is still playing; stop it first", playing.inputs.name)));
+        }
+        let now = self.scheduler.tick();
+        let base_hz = self.base_hz();
+        let ticks = inputs.rows.iter().map(|(t, _)| now + tick_at(*t, base_hz)).collect();
+        self.playback = Some(Playback { inputs, ticks, next: 0 });
+        self.apply_due(); // rows at t_s = 0 apply now
+        Ok(())
+    }
+
+    /// Stops the playing inputs file, if any (the sticks keep their last values). Returns its name.
+    pub fn stop_inputs(&mut self) -> Option<String> {
+        self.playback.take().map(|p| p.inputs.name)
+    }
+
+    /// The name of the inputs file playing now.
+    pub fn inputs_playing(&self) -> Option<&str> {
+        self.playback.as_ref().map(|p| p.inputs.name.as_str())
+    }
+
+    /// The inputs file that finished on its own since the last call (its last row applied), once.
+    pub fn take_finished_inputs(&mut self) -> Option<String> {
+        self.finished_inputs.take()
+    }
+
+    /// Applies what is due at the current tick: scheduled faults, then inputs rows.
+    fn apply_due(&mut self) {
+        let now = self.scheduler.tick();
+        while self.pending_faults.first().is_some_and(|(t, _)| *t <= now) {
+            let (_, fault) = self.pending_faults.remove(0);
+            self.set_fault(fault, true).expect("validated when scheduled");
+        }
+        let Some(p) = self.playback.as_mut() else { return };
+        let bus = self.scheduler.bus_mut();
+        while p.next < p.ticks.len() && p.ticks[p.next] <= now {
+            for (stick, v) in p.inputs.columns.iter().zip(&p.inputs.rows[p.next].1) {
+                let signal = match stick {
+                    Stick::Roll => self.h.roll,
+                    Stick::Pitch => self.h.pitch,
+                    Stick::Yaw => self.h.yaw,
+                    Stick::Throttle => self.h.throttle,
+                    Stick::Aux(i) => self.h.aux[*i],
+                };
+                bus.set(signal, *v);
+            }
+            p.next += 1;
+        }
+        if p.next == p.ticks.len() {
+            self.finished_inputs = self.playback.take().map(|p| p.inputs.name);
+        }
     }
 
     /// Remembers the fault as active (replacing an existing same-name entry, so a re-inject updates the
@@ -1014,16 +1129,22 @@ impl Vehicle {
         bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
         self.vtx_interference.set(None);
         self.active_faults.clear();
+        self.pending_faults.clear();
     }
 
     pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
-        self.scheduler.run_for(seconds)
+        let ticks = self.scheduler.ticks_for(seconds)?;
+        self.step_ticks(ticks)
     }
 
-    /// Steps `ticks` base ticks. On error the failing tick is not counted.
+    /// Steps `ticks` base ticks. Scheduled faults and inputs rows apply as soon as the simulated time reaches
+    /// theirs, so the state at that time already shows them. On error the failing tick is not counted.
     pub fn step_ticks(&mut self, ticks: u64) -> Result<(), SimError> {
         for _ in 0..ticks {
             self.scheduler.step()?;
+            if !self.pending_faults.is_empty() || self.playback.is_some() {
+                self.apply_due();
+            }
         }
         Ok(())
     }

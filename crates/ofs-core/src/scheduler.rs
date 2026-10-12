@@ -68,15 +68,20 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Steps `seconds` of simulated time, rounded to the nearest whole tick (at most [`MAX_RUN_FOR_S`]).
-    pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
+    /// The whole ticks in `seconds` of simulated time (rounded to the nearest; at most [`MAX_RUN_FOR_S`]).
+    pub fn ticks_for(&self, seconds: f64) -> Result<u64, SimError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SimError::InvalidArgument(format!("seconds must be finite and >= 0 (got {seconds})")));
         }
         if seconds > MAX_RUN_FOR_S {
             return Err(SimError::InvalidArgument(format!("seconds must be <= {MAX_RUN_FOR_S} (got {seconds})")));
         }
-        let ticks = (seconds * f64::from(self.base_hz)).round() as u64;
+        Ok((seconds * f64::from(self.base_hz)).round() as u64)
+    }
+
+    /// Steps `seconds` of simulated time, rounded to the nearest whole tick (at most [`MAX_RUN_FOR_S`]).
+    pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
+        let ticks = self.ticks_for(seconds)?;
         for _ in 0..ticks {
             self.step()?;
         }

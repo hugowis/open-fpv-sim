@@ -1,0 +1,224 @@
+//! Scripted stick inputs (spec §5): a CSV of `t_s` and stick columns, validated once, played back
+//! sample-and-hold at tick boundaries.
+use ofs_core::names::RC_AUX_COUNT;
+
+/// The columns an inputs file may have; `t_s` is required, the sticks are any non-empty subset.
+pub const COLUMNS: [&str; 9] = ["t_s", "roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4"];
+
+/// Problems listed in one error before the rest are counted.
+const MAX_PROBLEMS: usize = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stick {
+    Roll,
+    Pitch,
+    Yaw,
+    Throttle,
+    /// 0-based aux channel (`aux1` is `Aux(0)`).
+    Aux(usize),
+}
+
+impl Stick {
+    fn from_column(name: &str) -> Option<Stick> {
+        Some(match name {
+            "roll" => Stick::Roll,
+            "pitch" => Stick::Pitch,
+            "yaw" => Stick::Yaw,
+            "throttle" => Stick::Throttle,
+            _ => {
+                let n: usize = name.strip_prefix("aux")?.parse().ok()?;
+                if !(1..=RC_AUX_COUNT).contains(&n) {
+                    return None;
+                }
+                Stick::Aux(n - 1)
+            }
+        })
+    }
+
+    /// The documented range: throttle [0, 1], every other stick and switch [-1, 1].
+    fn range(self) -> (f64, f64) {
+        match self {
+            Stick::Throttle => (0.0, 1.0),
+            _ => (-1.0, 1.0),
+        }
+    }
+}
+
+/// A validated inputs file: the stick columns it sets and, per row, the time (s after playback starts) and one
+/// value per column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Inputs {
+    pub name: String,
+    pub columns: Vec<Stick>,
+    pub rows: Vec<(f64, Vec<f64>)>,
+}
+
+impl Inputs {
+    /// When the last row applies, s after playback starts.
+    pub fn duration_s(&self) -> f64 {
+        self.rows.last().map_or(0.0, |r| r.0)
+    }
+}
+
+/// Parses and validates an inputs file. Blank lines and lines starting with `#` are skipped; the first other
+/// line is the header. A spreadsheet's UTF-8 byte-order mark and CRLF line endings are accepted. Every problem is
+/// collected, each naming `name` and its line (1-based).
+pub fn parse(name: &str, text: &str) -> Result<Inputs, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut problems = Vec::new();
+    let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l.trim())).filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
+    let Some((header_line, header)) = lines.next() else {
+        return Err(format!("{name}: no header line (expected t_s and stick columns from {})", COLUMNS.join(", ")));
+    };
+    let fields: Vec<&str> = header.split(',').map(str::trim).collect();
+    let mut time_index = None;
+    let mut columns: Vec<(usize, Stick)> = Vec::new();
+    for (i, f) in fields.iter().enumerate() {
+        if *f == "t_s" {
+            if time_index.replace(i).is_some() {
+                problems.push(format!("{name} line {header_line}: column t_s appears twice"));
+            }
+        } else if let Some(stick) = Stick::from_column(f) {
+            if columns.iter().any(|(_, s)| *s == stick) {
+                problems.push(format!("{name} line {header_line}: column {f} appears twice"));
+            }
+            columns.push((i, stick));
+        } else {
+            problems.push(format!("{name} line {header_line}: unknown column '{f}' (expected {})", COLUMNS.join(", ")));
+        }
+    }
+    if time_index.is_none() {
+        problems.push(format!("{name} line {header_line}: the header needs a t_s column"));
+    }
+    if columns.is_empty() {
+        problems.push(format!("{name} line {header_line}: the header needs at least one stick column"));
+    }
+    let mut rows = Vec::new();
+    let mut last_t: Option<f64> = None;
+    for (line, l) in lines {
+        let values: Vec<&str> = l.split(',').map(str::trim).collect();
+        if values.len() != fields.len() {
+            problems.push(format!("{name} line {line}: {} values for {} columns", values.len(), fields.len()));
+            continue;
+        }
+        let parsed: Vec<Option<f64>> = values.iter().map(|v| v.parse::<f64>().ok().filter(|x| x.is_finite())).collect();
+        for (v, p) in values.iter().zip(&parsed) {
+            if p.is_none() {
+                problems.push(format!("{name} line {line}: '{v}' is not a finite number"));
+            }
+        }
+        let Some(ti) = time_index else { continue };
+        let Some(t) = parsed[ti] else { continue };
+        if t < 0.0 {
+            problems.push(format!("{name} line {line}: t_s {t} is negative"));
+        }
+        if let Some(prev) = last_t {
+            if t <= prev {
+                problems.push(format!("{name} line {line}: t_s {t} does not increase (previous row {prev})"));
+            }
+        }
+        last_t = Some(t);
+        let mut row = Vec::with_capacity(columns.len());
+        for (i, stick) in &columns {
+            let Some(v) = parsed[*i] else { continue };
+            let (lo, hi) = stick.range();
+            if !(lo..=hi).contains(&v) {
+                problems.push(format!("{name} line {line}: {} {v} is outside [{lo}, {hi}]", fields[*i]));
+            }
+            row.push(v);
+        }
+        rows.push((t, row));
+    }
+    if rows.is_empty() && problems.is_empty() {
+        problems.push(format!("{name}: no rows after the header"));
+    }
+    if !problems.is_empty() {
+        let extra = problems.len().saturating_sub(MAX_PROBLEMS);
+        problems.truncate(MAX_PROBLEMS);
+        if extra > 0 {
+            problems.push(format!("... and {extra} more"));
+        }
+        return Err(problems.join("\n"));
+    }
+    Ok(Inputs { name: name.to_string(), columns: columns.into_iter().map(|(_, s)| s).collect(), rows })
+}
+
+/// The first tick whose time is at or after `t_s` (a time that is a whole number of ticks up to rounding is that
+/// tick: 0.3 s at 8 kHz is tick 2400, not 2401).
+pub fn tick_at(t_s: f64, base_hz: u32) -> u64 {
+    let x = t_s * f64::from(base_hz);
+    let r = x.round();
+    if (x - r).abs() < 1e-6 {
+        r as u64
+    } else {
+        x.ceil() as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_subset_of_columns_parses_in_file_order() {
+        let text = "# flips\n\nt_s, throttle, aux1\n0.0, 0.0, -1\n1.0, 0.0, 1\n\n1.5, 0.6, 1\n";
+        let inputs = parse("flips.csv", text).unwrap();
+        assert_eq!(inputs.columns, [Stick::Throttle, Stick::Aux(0)]);
+        assert_eq!(inputs.rows, [(0.0, vec![0.0, -1.0]), (1.0, vec![0.0, 1.0]), (1.5, vec![0.6, 1.0])]);
+        assert_eq!(inputs.duration_s(), 1.5);
+    }
+
+    #[test]
+    fn every_problem_is_reported_with_its_line() {
+        let text = "t_s,throttle,roll,wobble\n0,0.5,0,1\n0.5,1.5,0\n0.5,x,0,0\n0.2,0.5,-2,0\n";
+        let err = parse("bad.csv", text).unwrap_err();
+        assert_eq!(
+            err.lines().collect::<Vec<_>>(),
+            [
+                "bad.csv line 1: unknown column 'wobble' (expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4)",
+                "bad.csv line 3: 3 values for 4 columns",
+                "bad.csv line 4: 'x' is not a finite number",
+                "bad.csv line 5: t_s 0.2 does not increase (previous row 0.5)",
+                "bad.csv line 5: roll -2 is outside [-1, 1]",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_header_needs_time_and_a_stick_and_the_file_needs_rows() {
+        assert!(parse("e.csv", "").unwrap_err().contains("e.csv: no header line"));
+        assert!(parse("e.csv", "throttle\n0.5\n").unwrap_err().contains("the header needs a t_s column"));
+        assert!(parse("e.csv", "t_s\n0\n").unwrap_err().contains("at least one stick column"));
+        assert_eq!(parse("e.csv", "t_s,yaw\n").unwrap_err(), "e.csv: no rows after the header");
+        assert!(parse("e.csv", "t_s,aux5\n0,0\n").unwrap_err().contains("unknown column 'aux5'"));
+        assert!(parse("e.csv", "t_s,yaw,yaw\n0,0,0\n").unwrap_err().contains("column yaw appears twice"));
+        assert!(parse("e.csv", "t_s,yaw\n-1,0\n").unwrap_err().contains("t_s -1 is negative"));
+        assert!(parse("e.csv", "t_s,yaw\n0,inf\n").unwrap_err().contains("'inf' is not a finite number"));
+    }
+
+    #[test]
+    fn a_spreadsheet_export_with_a_bom_and_crlf_lines_parses_like_a_plain_file() {
+        let plain = parse("f.csv", "t_s,throttle\n0,0.5\n1,0.2\n").unwrap();
+        let excel = parse("f.csv", "\u{feff}t_s,throttle\r\n0,0.5\r\n1,0.2\r\n").unwrap();
+        assert_eq!(excel, plain);
+    }
+
+    #[test]
+    fn long_error_lists_are_capped() {
+        let mut text = String::from("t_s,throttle\n");
+        for i in 0..30 {
+            text.push_str(&format!("{i},2\n"));
+        }
+        let err = parse("big.csv", &text).unwrap_err();
+        assert_eq!(err.lines().count(), 21);
+        assert_eq!(err.lines().last(), Some("... and 10 more"));
+    }
+
+    #[test]
+    fn times_land_on_the_first_tick_at_or_after_them() {
+        assert_eq!(tick_at(0.0, 8000), 0);
+        assert_eq!(tick_at(0.3, 8000), 2400, "0.3 * 8000 is 2400.0000000000005 in floating point");
+        assert_eq!(tick_at(0.00001, 8000), 1);
+        assert_eq!(tick_at(1.0 / 3.0, 8000), 2667);
+    }
+}
