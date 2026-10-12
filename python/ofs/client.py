@@ -5,6 +5,7 @@ import collections
 import collections.abc
 import math
 import os
+import pathlib
 import shutil
 import socket
 import subprocess
@@ -17,7 +18,9 @@ import grpc
 from ofs.v1 import sim_pb2 as pb
 from ofs.v1 import sim_pb2_grpc as pbg
 
-from .errors import ProtocolMismatch, from_rpc_error
+from .errors import InvalidState, ProtocolMismatch, from_rpc_error
+from .reader import Log
+from .recording import Recording
 
 PROTOCOL_VERSION = 9
 UNLOAD_TIMEOUT_S = 5.0
@@ -328,6 +331,7 @@ class Sim:
         self._stub = pbg.SimStub(self._channel)
         self._watch = None
         self._events = collections.deque(maxlen=10_000)
+        self.recording = Recording(self)
         try:
             reply = self._call(self._stub.Handshake, pb.HandshakeRequest(protocol_version=PROTOCOL_VERSION))
             if reply.protocol_version != PROTOCOL_VERSION:
@@ -335,6 +339,7 @@ class Sim:
         except Exception:
             self._channel.close()
             raise
+        self.logs_dir = reply.logs_dir  # where the server writes recordings and copies Blackbox logs
 
     @staticmethod
     def _call(method, request):
@@ -368,10 +373,14 @@ class Sim:
         threading.Thread(target=pump, name="ofs-watch", daemon=True).start()
 
     def load(self, quad_path: str, seed: int = 0, mode: str = "lockstep", open_loop_fc: bool = False,
-             overrun_policy: str = "warn", keep_alive: bool = False, world: str | None = None) -> str:
+             overrun_policy: str = "warn", keep_alive: bool = False, world: str | None = None,
+             record: bool | None = None) -> str:
         """Loads a quad. `mode` is "lockstep" (advance with `run`) or "realtime" (loads paused; `start` paces it
-        to the wall clock). `world` is a world file (e.g. "worlds/flat.toml"); without one the quad flies in the
-        open field. Returns the quad's name; `configurator_address` is set when it runs Betaflight."""
+        to the wall clock). `world` is a world file (e.g. "worlds/flat.toml") or a world name ("flat":
+        worlds/flat.toml beside the quad's directory); without one the quad flies in the open field. `record`
+        starts a recording of every signal at the default rates (`sim.log` reads it); it defaults to on for
+        lockstep sessions and off for real-time ones. Returns the quad's name; `configurator_address` is set when
+        it runs Betaflight."""
         if mode not in _MODES:
             raise ValueError(f"mode must be one of {sorted(_MODES)}")
         if overrun_policy not in _POLICIES:
@@ -381,6 +390,9 @@ class Sim:
             quad_path=str(quad_path), seed=seed, mode=_MODES[mode], open_loop_fc=open_loop_fc,
             overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or "")))
         self.configurator_address = reply.configurator_address
+        self.recording._session_ended()
+        if (mode == "lockstep") if record is None else record:
+            self.recording.start()
         return reply.quad_name
 
     def set_sticks(self, roll=0.0, pitch=0.0, yaw=0.0, throttle=0.0, aux=(-1.0, -1.0, -1.0, -1.0)) -> None:
@@ -444,7 +456,35 @@ class Sim:
         self._call(self._stub.InjectFault, fault._to_pb())
 
     def clear_faults(self) -> None:
+        """Clears every active fault, and the ones scheduled with `at` that have not activated yet."""
         self._call(self._stub.ClearFaults, pb.Empty())
+
+    def play_inputs(self, path) -> None:
+        """Plays a stick-inputs CSV from now (spec §5): a `t_s` column (seconds after this call, increasing) and any
+        of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`. Each row holds until the next; columns the file
+        leaves out keep their value; the last row holds after it ends. `set_sticks` is refused while it plays. A
+        malformed file raises `ConfigError` naming every problem with its line."""
+        p = pathlib.Path(path)
+        self._call(self._stub.PlayInputs, pb.InputsFile(name=p.name, csv=p.read_text(encoding="utf-8")))
+
+    def stop_inputs(self) -> None:
+        """Stops the playing inputs file, if any (the sticks keep their last values)."""
+        self._call(self._stub.StopInputs, pb.Empty())
+
+    @property
+    def log(self) -> Log:
+        """The session's recording, as a `reader.Log` (`sim.log.to_dataframe(["imu.*"])`). A running recording is
+        stopped first: an MCAP file is readable once it is finished."""
+        if self.recording.active:
+            return self.recording.stop()
+        if self.recording.last is None:
+            raise InvalidState("no recording: a lockstep load records by default, or call sim.recording.start()")
+        return self.recording.last
+
+    def blackbox_files(self) -> list:
+        """Betaflight's own Blackbox logs the server copied into its logs directory, sorted. A session's logs
+        arrive when it ends (`close()`, or the next `load`); disarm before then for a complete log."""
+        return sorted(str(p) for p in pathlib.Path(self.logs_dir).glob("*.BFL"))
 
     def events(self) -> list:
         """Events received since the last call (radio link up/down, firmware restarts, overruns, ...).

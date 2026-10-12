@@ -1,15 +1,28 @@
-"""Faults to inject with `Sim.inject` (spec §6.2): the v1 catalog, radio to video."""
-from dataclasses import dataclass
+"""Faults to inject with `Sim.inject` (spec §6.2): the v1 catalog, radio to video.
+
+Every fault takes a keyword-only `at`: the simulated time (s) it activates at, on the first tick at or after it.
+Without `at` it activates at once. A time the session has already passed is refused (`InvalidArgument`).
+"""
+from dataclasses import dataclass, field
 
 from ofs.v1 import sim_pb2 as pb
+
+
+def _fault(at, **kind):
+    f = pb.Fault(**kind)
+    if at is not None:
+        f.at_s = float(at)
+    return f
 
 
 @dataclass(frozen=True)
 class RadioLinkLoss:
     """Every radio uplink packet is lost while active: the receiver goes silent and Betaflight fails safe."""
 
+    at: float | None = field(default=None, kw_only=True)
+
     def _to_pb(self):
-        return pb.Fault(radio_link_loss=pb.RadioLinkLoss())
+        return _fault(self.at, radio_link_loss=pb.RadioLinkLoss())
 
 
 @dataclass(frozen=True)
@@ -17,9 +30,10 @@ class RadioLoss:
     """Extra per-packet uplink loss while active: `fraction` of packets are dropped on top of the link model's own."""
 
     fraction: float
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
-        return pb.Fault(radio_loss=pb.RadioLoss(fraction=self.fraction))
+        return _fault(self.at, radio_loss=pb.RadioLoss(fraction=self.fraction))
 
 
 @dataclass(frozen=True)
@@ -28,9 +42,10 @@ class BurstLoss:
 
     on_ms: int
     off_ms: int
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
-        return pb.Fault(burst_loss=pb.BurstLoss(on_ms=self.on_ms, off_ms=self.off_ms))
+        return _fault(self.at, burst_loss=pb.BurstLoss(on_ms=self.on_ms, off_ms=self.off_ms))
 
 
 @dataclass(frozen=True)
@@ -39,9 +54,10 @@ class MotorFailure:
 
     motor: int
     scale: float = 0.0
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
-        return pb.Fault(motor_failure=pb.MotorFailure(motor=self.motor, scale=self.scale))
+        return _fault(self.at, motor_failure=pb.MotorFailure(motor=self.motor, scale=self.scale))
 
 
 @dataclass(frozen=True)
@@ -51,10 +67,11 @@ class PropDamage:
     prop: int
     thrust_scale: float = 1.0
     imbalance_kgm: float = 0.0
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
-        return pb.Fault(prop_damage=pb.PropDamage(prop=self.prop, thrust_scale=self.thrust_scale,
-                                                  imbalance_kgm=self.imbalance_kgm))
+        return _fault(self.at, prop_damage=pb.PropDamage(prop=self.prop, thrust_scale=self.thrust_scale,
+                                                         imbalance_kgm=self.imbalance_kgm))
 
 
 @dataclass(frozen=True)
@@ -64,10 +81,11 @@ class WeakCell:
     cell: int
     r_offset_ohm: float = 0.01
     v_offset_v: float = 0.05
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
-        return pb.Fault(weak_cell=pb.WeakCell(cell=self.cell, r_offset_ohm=self.r_offset_ohm,
-                                              v_offset_v=self.v_offset_v))
+        return _fault(self.at, weak_cell=pb.WeakCell(cell=self.cell, r_offset_ohm=self.r_offset_ohm,
+                                                     v_offset_v=self.v_offset_v))
 
 
 @dataclass(frozen=True)
@@ -76,10 +94,11 @@ class GyroFault:
 
     bias_radps: tuple = (0.0, 0.0, 0.0)
     noise_scale: float = 1.0
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
         x, y, z = self.bias_radps
-        return pb.Fault(gyro_fault=pb.GyroFault(bias_radps=pb.Vec3(x=x, y=y, z=z), noise_scale=self.noise_scale))
+        return _fault(self.at, gyro_fault=pb.GyroFault(bias_radps=pb.Vec3(x=x, y=y, z=z), noise_scale=self.noise_scale))
 
 
 @dataclass(frozen=True)
@@ -89,8 +108,9 @@ class VtxInterference:
     freq_mhz: float
     power_mw: float
     position_ned_m: tuple
+    at: float | None = field(default=None, kw_only=True)
 
     def _to_pb(self):
         x, y, z = self.position_ned_m
-        return pb.Fault(vtx_interference=pb.VtxInterference(freq_mhz=self.freq_mhz, power_mw=self.power_mw,
-                                                            position_ned_m=pb.Vec3(x=x, y=y, z=z)))
+        return _fault(self.at, vtx_interference=pb.VtxInterference(freq_mhz=self.freq_mhz, power_mw=self.power_mw,
+                                                                   position_ned_m=pb.Vec3(x=x, y=y, z=z)))
