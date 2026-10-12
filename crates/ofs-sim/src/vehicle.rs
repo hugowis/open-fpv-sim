@@ -937,7 +937,7 @@ impl Vehicle {
                 b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
             }
             Fault::GyroFault { bias_radps, noise_scale } => {
-                if *noise_scale < 0.0 || !bias_radps.is_finite() {
+                if !noise_scale.is_finite() || *noise_scale < 0.0 || !bias_radps.is_finite() {
                     return Err(SimError::InvalidArgument("gyro fault noise_scale must be >= 0 and bias finite".into()));
                 }
                 b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
@@ -947,7 +947,7 @@ impl Vehicle {
                 if !self.has_vtx {
                     return Err(SimError::InvalidArgument("vtx interference needs a quad with a [vtx] section".into()));
                 }
-                if *freq_mhz <= 0.0 || *power_mw <= 0.0 || !position_ned_m.is_finite() {
+                if !freq_mhz.is_finite() || !power_mw.is_finite() || *freq_mhz <= 0.0 || *power_mw <= 0.0 || !position_ned_m.is_finite() {
                     return Err(SimError::InvalidArgument(format!(
                         "vtx interference needs a positive frequency and power and a finite position, got {freq_mhz} MHz / {power_mw} mW / {position_ned_m:?}"
                     )));
@@ -1368,6 +1368,21 @@ mod tests {
     }
 
     #[test]
+    fn a_non_finite_or_negative_gyro_noise_scale_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for (bias_radps, noise_scale) in [(DVec3::ZERO, f64::NAN), (DVec3::ZERO, f64::INFINITY), (DVec3::ZERO, -1.0)] {
+            let err = vehicle
+                .set_fault(Fault::GyroFault { bias_radps, noise_scale }, true)
+                .unwrap_err();
+            assert!(err.to_string().contains("finite"), "{bias_radps:?} / {noise_scale}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        }
+        let b = vehicle.scheduler.bus();
+        assert_eq!(b.get(vehicle.h.fault_imu_gyro_bias), DVec3::ZERO, "a rejected fault leaves nothing behind");
+        assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0, "a rejected fault leaves nothing behind");
+    }
+
+    #[test]
     fn vtx_interference_without_a_vtx_is_invalid_argument() {
         let mut cfg = shipped_quad();
         cfg.vtx = None;
@@ -1376,6 +1391,20 @@ mod tests {
             .set_fault(Fault::VtxInterference { freq_mhz: 5700.0, power_mw: 100.0, position_ned_m: DVec3::X }, true)
             .unwrap_err();
         assert!(err.to_string().contains("[vtx]"), "{err}");
+    }
+
+    #[test]
+    fn a_non_finite_or_non_positive_vtx_parameter_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for (freq_mhz, power_mw) in
+            [(f64::NAN, 100.0), (5700.0, f64::NAN), (f64::INFINITY, 100.0), (5700.0, f64::INFINITY), (0.0, 100.0)]
+        {
+            let err = vehicle
+                .set_fault(Fault::VtxInterference { freq_mhz, power_mw, position_ned_m: DVec3::X }, true)
+                .unwrap_err();
+            assert!(err.to_string().contains("positive"), "{freq_mhz} / {power_mw}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        }
     }
 
     #[test]

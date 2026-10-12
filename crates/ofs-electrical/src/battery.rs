@@ -28,9 +28,6 @@ pub struct Battery {
     consumed: Signal<f64>,
     r_offset: Signal<f64>,
     v_offset: Signal<f64>,
-    /// Read from M4b Task 5; Task 1 only registers the seam.
-    #[allow(dead_code)]
-    weak_cell: Signal<f64>,
 }
 
 impl Battery {
@@ -46,7 +43,6 @@ impl Battery {
             consumed: bus.signal(names::BATTERY_CONSUMED),
             r_offset: bus.signal(names::FAULT_BATTERY_R_OFFSET_OHM),
             v_offset: bus.signal(names::FAULT_BATTERY_V_OFFSET_V),
-            weak_cell: bus.signal(names::FAULT_BATTERY_WEAK_CELL),
             div: rate_divisor,
             soc: p.initial_soc,
             v1: 0.0,

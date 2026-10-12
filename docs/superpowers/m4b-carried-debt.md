@@ -24,8 +24,8 @@
 - **`import ofs` in `test_sitl_faults.py` is unused** — the faults come from `ofs.faults` directly; the import is
   brief-skeleton inheritance (surfaced in Task 7).
 - **The interference cache's exact-equality key deserves a one-line comment** — `interference_for` matches
-  `f == freq_mhz && e == injected` exactly; a NaN frequency or emitter would recompute every field
-  (deterministic, unreachable today) (surfaced in Task 6).
+  `f == freq_mhz && e == injected` exactly, so any differing field recomputes instead of matching; non-finite
+  payloads cannot reach the key (fault validation rejects them at inject) (surfaced in Task 6).
 
 ## Rulings worth remembering
 - Fault randomness comes from a dedicated `elrs-faults` RNG stream: fault-active runs differ
