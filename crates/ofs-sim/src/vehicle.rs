@@ -886,9 +886,9 @@ impl Vehicle {
                 b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 });
             }
             Fault::BurstLoss { on_s, off_s } => {
-                if *on_s <= 0.0 || *off_s <= 0.0 {
+                if !on_s.is_finite() || !off_s.is_finite() || *on_s <= 0.0 || *off_s <= 0.0 {
                     return Err(SimError::InvalidArgument(format!(
-                        "burst on_ms and off_ms must both be > 0, got on {on_s} s / off {off_s} s"
+                        "burst on_ms and off_ms must both be finite and > 0, got on {on_s} s / off {off_s} s"
                     )));
                 }
                 let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
@@ -1280,6 +1280,16 @@ mod tests {
         assert!(err.to_string().contains("motor 7"), "{err}");
         assert!(err.to_string().contains("does not exist"), "{err}");
         assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+    }
+
+    #[test]
+    fn a_non_finite_or_non_positive_burst_window_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for (on_s, off_s) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (1.0, 0.0)] {
+            let err = vehicle.set_fault(Fault::BurstLoss { on_s, off_s }, true).unwrap_err();
+            assert!(err.to_string().contains("burst on_ms"), "{on_s} / {off_s}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        }
     }
 
     #[test]

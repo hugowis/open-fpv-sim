@@ -240,6 +240,66 @@ fn the_radio_link_loss_fault_silences_the_receiver() {
 }
 
 #[test]
+fn zero_fraction_is_a_no_op() {
+    let (mut clean, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 11);
+    let (mut faulted, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 11);
+    set(&mut faulted, names::FAULT_RADIO_LOSS_FRACTION, 0.0);
+    packets(&mut clean, 500);
+    packets(&mut faulted, 500);
+    // The dedicated fault stream consumed draws; the model's own stream did not move, so the
+    // LQ histories agree exactly.
+    close(get(&clean, names::RADIO_LQ), get(&faulted, names::RADIO_LQ), 0.0, "LQ identical");
+}
+
+#[test]
+fn full_fraction_equals_radio_link_loss() {
+    let (mut cut, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 3);
+    set(&mut cut, names::FAULT_RADIO_LINK_LOSS, 1.0);
+    packets(&mut cut, 300);
+    let (mut full, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 3);
+    set(&mut full, names::FAULT_RADIO_LOSS_FRACTION, 1.0);
+    packets(&mut full, 300);
+    assert_eq!(get(&cut, names::RADIO_LQ), 0.0);
+    assert_eq!(get(&full, names::RADIO_LQ), 0.0, "every packet lost: the same silence");
+    assert_eq!(get(&full, names::RADIO_LINK_UP), 0.0);
+}
+
+#[test]
+fn half_fraction_drops_about_half() {
+    let (mut s, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 5);
+    set(&mut s, names::FAULT_RADIO_LOSS_FRACTION, 0.5);
+    packets(&mut s, 2000);
+    let lq = get(&s, names::RADIO_LQ);
+    assert!(lq > 35.0 && lq < 65.0, "binomial 3-sigma band around 50: {lq}");
+}
+
+#[test]
+fn burst_window_boundaries_are_deterministic() {
+    // 100 ms on / 300 ms off at 500 Hz: 50 lost packets per on-phase, 150 delivered per off-phase.
+    // LQ is the last 100 packets, so the off-phase's tail reads a full clean window.
+    let (mut s, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 9);
+    set(&mut s, names::FAULT_RADIO_BURST_ON_S, 0.1);
+    set(&mut s, names::FAULT_RADIO_BURST_OFF_S, 0.3);
+    packets(&mut s, 50);
+    assert_eq!(get(&s, names::RADIO_LQ), 0.0, "the on-window lost every packet so far");
+    packets(&mut s, 150);
+    assert!(get(&s, names::RADIO_LQ) > 90.0, "the 150-packet off-window flushed the history");
+    packets(&mut s, 50);
+    close(get(&s, names::RADIO_LQ), 50.0, 1.0, "the second on-window mixes 50 lost into the last 100");
+}
+
+#[test]
+fn a_long_burst_failsafes_and_recovers() {
+    let (mut s, _uart, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 13);
+    set(&mut s, names::FAULT_RADIO_BURST_ON_S, 2.0);
+    set(&mut s, names::FAULT_RADIO_BURST_OFF_S, 1.0);
+    packets(&mut s, 900); // 1.8 s: inside the 2 s on-window
+    assert_eq!(get(&s, names::RADIO_LINK_UP), 0.0, "LQ hit zero during the burst");
+    packets(&mut s, 500); // 1.0 s more: 2.8 s, inside the off-window
+    assert_eq!(get(&s, names::RADIO_LINK_UP), 1.0, "the off-window delivered again");
+}
+
+#[test]
 fn the_sticks_reach_the_receiver_after_latency_packets() {
     let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams { latency_packets: 5, ..LinkParams::ideal(500) }, 1);
     packets(&mut s, 2); // prime the pipeline with the neutral sticks
