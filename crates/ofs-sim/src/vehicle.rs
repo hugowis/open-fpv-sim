@@ -12,6 +12,7 @@ use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
+use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -440,6 +441,8 @@ pub struct Vehicle {
     has_vtx: bool,
     /// The active faults' names in injection order; `active_fault_names` sorts them for the events.
     active_faults: Vec<String>,
+    /// The recorder model's handle: StartRecording/StopRecording go through it.
+    recorder: RecorderHandle,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -814,6 +817,10 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, vtx_interference.clone(), &mut bus)));
     }
 
+    // Last of all: the recorder reads the tick's final values and writes nothing to the bus.
+    let recorder = RecorderHandle::default();
+    models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
+
     let h = Handles::register(&mut bus, n, &opts.world);
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
@@ -833,6 +840,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         battery_cells: cfg.battery.cells,
         has_vtx: cfg.vtx.is_some(),
         active_faults: Vec::new(),
+        recorder,
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
@@ -1103,6 +1111,26 @@ impl Vehicle {
 
     pub fn digest(&self) -> u64 {
         self.scheduler.bus().digest()
+    }
+
+    /// Starts recording the bus to a new MCAP file at `path` (the server names it). No requests: every signal at
+    /// the default table's rate. Returns the recorded signals' names.
+    pub fn start_recording(&mut self, requests: &[SignalRate], path: &Path) -> Result<Vec<String>, RecordError> {
+        self.recorder.start(self.scheduler.bus(), self.scheduler.base_hz(), requests, path)
+    }
+
+    /// Finishes the running recording's file.
+    pub fn stop_recording(&mut self) -> Result<RecordingSummary, RecordError> {
+        self.recorder.stop()
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_recording()
+    }
+
+    /// Why the last recording stopped on its own (a write failed), reported once.
+    pub fn take_recording_failure(&mut self) -> Option<String> {
+        self.recorder.take_failure()
     }
 }
 

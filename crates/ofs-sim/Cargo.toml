@@ -16,6 +16,7 @@ ofs-radio.workspace = true
 ofs-rf.workspace = true
 ofs-proto.workspace = true
 ofs-video.workspace = true
+ofs-log.workspace = true
 glam.workspace = true
 tonic.workspace = true
 tokio.workspace = true
@@ -25,5 +26,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+mcap.workspace = true
 ofs-client = { path = "../ofs-client" }
 tempfile.workspace = true

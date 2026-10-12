@@ -1036,11 +1036,13 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "glam 0.29.3",
+ "mcap",
  "ofs-client",
  "ofs-config",
  "ofs-core",
  "ofs-electrical",
  "ofs-fc",
+ "ofs-log",
  "ofs-physics",
  "ofs-proto",
  "ofs-radio",
