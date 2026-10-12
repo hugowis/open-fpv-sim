@@ -55,6 +55,46 @@ fn duty_follows_command_with_first_order_lag() {
 }
 
 #[test]
+fn a_half_scale_motor_makes_half_the_torque_while_current_limited() {
+    // During the 40 A clamp the torque is ke·I_scaled, so omega integrates at (about) half the rate
+    // and the published current is half the clamp. (Steady state with no prop load would hide the
+    // scale — the no-load current is scale-independent — so the transient is the pin. The shared
+    // no-load drag leaves the half-scale rotor at 19/39 of full, inside the 2% tolerance.)
+    let mut full = sim(16.0, 1.0, 1.0);
+    for _ in 0..400 {
+        full.step().unwrap(); // 50 ms, still on the clamp
+    }
+    let mut half = sim(16.0, 1.0, 1.0);
+    let scale = half.bus().lookup::<f64>(&names::fault_motor_scale(0)).unwrap();
+    half.bus_mut().set(scale, 0.5);
+    for _ in 0..400 {
+        half.step().unwrap();
+    }
+    assert_eq!(get(&half, &names::motor_current(0)), 20.0, "the 40 A clamp scales to 20 A");
+    let wf = get(&full, &names::motor_omega(0));
+    let wh = get(&half, &names::motor_omega(0));
+    assert!(((wh - wf * 0.5) / wf).abs() < 0.02, "torque halves from standstill: {wh} vs {wf}/2");
+}
+
+#[test]
+fn a_dead_motor_draws_no_current_and_coasts_down() {
+    let mut s = sim(10.0, 1.0, 1.0);
+    s.run_for(0.5).unwrap(); // spinning
+    let scale = s.bus().lookup::<f64>(&names::fault_motor_scale(0)).unwrap();
+    s.bus_mut().set(scale, 0.0);
+    s.run_for(0.05).unwrap();
+    assert_eq!(get(&s, &names::motor_current(0)), 0.0, "scale 0: no current");
+    let omega_now = get(&s, &names::motor_omega(0));
+    assert!(omega_now > 0.0, "the rotor coasts down through drag, it does not stop dead");
+    // The no-load drag alone decelerates at ke·I0/J ≈ 477 rad/s², so ~4.35 s to stop 2073 rad/s.
+    s.run_for(4.5).unwrap();
+    assert_eq!(get(&s, &names::motor_omega(0)), 0.0, "drag stops it");
+    let theta = get(&s, &names::motor_theta(0));
+    s.run_for(0.1).unwrap();
+    assert_eq!(get(&s, &names::motor_theta(0)), theta, "a stopped motor's phase is frozen");
+}
+
+#[test]
 fn zero_command_brakes_without_reversing() {
     let mut s = sim(10.0, 1.0, 0.5);
     s.run_for(1.0).unwrap();

@@ -914,9 +914,9 @@ impl Vehicle {
                         self.h.fault_prop_thrust_scale.len()
                     )));
                 }
-                if *thrust_scale < 0.0 || *imbalance_kgm < 0.0 {
+                if !thrust_scale.is_finite() || !imbalance_kgm.is_finite() || *thrust_scale < 0.0 || *imbalance_kgm < 0.0 {
                     return Err(SimError::InvalidArgument(format!(
-                        "prop damage thrust_scale and imbalance_kgm must be >= 0, got {thrust_scale} / {imbalance_kgm}"
+                        "prop damage thrust_scale and imbalance_kgm must be finite and >= 0, got {thrust_scale} / {imbalance_kgm}"
                     )));
                 }
                 b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
@@ -929,8 +929,8 @@ impl Vehicle {
                         self.battery_cells
                     )));
                 }
-                if *r_offset_ohm < 0.0 || *v_offset_v < 0.0 {
-                    return Err(SimError::InvalidArgument("weak-cell offsets must be >= 0".into()));
+                if !r_offset_ohm.is_finite() || !v_offset_v.is_finite() || *r_offset_ohm < 0.0 || *v_offset_v < 0.0 {
+                    return Err(SimError::InvalidArgument("weak-cell offsets must be finite and >= 0".into()));
                 }
                 b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
                 b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
@@ -1274,6 +1274,52 @@ mod tests {
     }
 
     #[test]
+    fn clearing_prop_damage_restores_the_part_imbalance() {
+        // A quad whose prop part carries imbalance (the shipped quad, mutated like a temp part file).
+        let mut cfg = shipped_quad();
+        cfg.props[0].imbalance_kgm = 2.0e-4;
+        let mut vehicle = open_loop(&cfg, WorldConfig::open_field());
+        vehicle.run_for(0.01).unwrap();
+        assert_eq!(vehicle.scheduler.bus().get(vehicle.h.prop_imbalance[0]), 2.0e-4, "the part data starts");
+        vehicle.set_fault(Fault::PropDamage { prop: 0, thrust_scale: 0.9, imbalance_kgm: 5.0e-4 }, true).unwrap();
+        assert_eq!(vehicle.scheduler.bus().get(vehicle.h.prop_imbalance[0]), 5.0e-4);
+        vehicle.clear_faults();
+        assert_eq!(vehicle.scheduler.bus().get(vehicle.h.prop_imbalance[0]), 2.0e-4, "the part baseline is restored");
+        assert_eq!(vehicle.scheduler.bus().get(vehicle.h.fault_prop_thrust_scale[0]), 1.0);
+    }
+
+    #[test]
+    fn clear_faults_returns_every_fault_signal_to_its_identity() {
+        // The honest re-join pin: a physically diverged trajectory cannot re-join a clean run's
+        // digest, so the pin is exhaustive over the fault signals instead — every one of them.
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.set_fault(Fault::MotorFailure { motor: 1, scale: 0.0 }, true).unwrap();
+        vehicle.set_fault(Fault::PropDamage { prop: 2, thrust_scale: 0.8, imbalance_kgm: 3.0e-4 }, true).unwrap();
+        vehicle.set_fault(Fault::RadioLoss { fraction: 0.7 }, true).unwrap();
+        vehicle.set_fault(Fault::BurstLoss { on_s: 1.0, off_s: 0.5 }, true).unwrap();
+        vehicle.set_fault(Fault::GyroFault { bias_radps: DVec3::new(0.1, 0.0, 0.0), noise_scale: 2.0 }, true).unwrap();
+        vehicle.set_fault(Fault::WeakCell { cell: 3, r_offset_ohm: 0.01, v_offset_v: 0.1 }, true).unwrap();
+        vehicle.run_for(0.01).unwrap(); // the models consume the faulted values before the clear
+        vehicle.clear_faults();
+        let b = vehicle.scheduler.bus();
+        for i in 0..4 {
+            assert_eq!(b.get(vehicle.h.fault_motor_scale[i]), 1.0, "motor {i} scale");
+            assert_eq!(b.get(vehicle.h.fault_prop_thrust_scale[i]), 1.0, "prop {i} thrust scale");
+            assert_eq!(b.get(vehicle.h.prop_imbalance[i]), 0.0, "prop {i} imbalance (the shipped parts carry none)");
+        }
+        assert_eq!(b.get(vehicle.h.fault_radio_loss), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_burst_on), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_burst_off), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_battery_r_offset), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_battery_v_offset), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_battery_weak_cell), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_imu_gyro_bias), DVec3::ZERO);
+        assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
+        assert!(vehicle.active_fault_names().is_empty());
+    }
+
+    #[test]
     fn an_unknown_motor_index_is_invalid_argument() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         let err = vehicle.set_fault(Fault::MotorFailure { motor: 7, scale: 0.0 }, true).unwrap_err();
@@ -1288,6 +1334,35 @@ mod tests {
         for (on_s, off_s) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (1.0, 0.0)] {
             let err = vehicle.set_fault(Fault::BurstLoss { on_s, off_s }, true).unwrap_err();
             assert!(err.to_string().contains("burst on_ms"), "{on_s} / {off_s}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        }
+    }
+
+    #[test]
+    fn a_non_finite_or_negative_prop_damage_parameter_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for (thrust_scale, imbalance_kgm) in
+            [(f64::NAN, 1.0e-4), (0.5, f64::NAN), (f64::INFINITY, 1.0e-4), (-0.5, 1.0e-4)]
+        {
+            let err = vehicle
+                .set_fault(Fault::PropDamage { prop: 0, thrust_scale, imbalance_kgm }, true)
+                .unwrap_err();
+            assert!(err.to_string().contains("finite"), "{thrust_scale} / {imbalance_kgm}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        }
+        let b = vehicle.scheduler.bus();
+        assert_eq!(b.get(vehicle.h.fault_prop_thrust_scale[0]), 1.0, "a rejected fault leaves nothing behind");
+        assert_eq!(b.get(vehicle.h.prop_imbalance[0]), 0.0, "a rejected fault leaves nothing behind");
+    }
+
+    #[test]
+    fn a_non_finite_weak_cell_offset_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for (r_offset_ohm, v_offset_v) in [(f64::NAN, 0.1), (0.01, f64::NAN)] {
+            let err = vehicle
+                .set_fault(Fault::WeakCell { cell: 2, r_offset_ohm, v_offset_v }, true)
+                .unwrap_err();
+            assert!(err.to_string().contains("finite"), "{r_offset_ohm} / {v_offset_v}: {err}");
             assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
         }
     }

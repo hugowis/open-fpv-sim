@@ -7,6 +7,10 @@ fn prop(ct: Vec<(f64, f64)>, cp: Vec<(f64, f64)>) -> PropParams {
     PropParams { diameter_m: 0.127, ct_table: ct, cp_table: cp }
 }
 
+fn close(got: f64, expected: f64) {
+    assert!((got - expected).abs() < 1e-9, "{got} vs {expected}");
+}
+
 #[test]
 fn thrust_and_torque_follow_coefficient_formula() {
     let p = prop(vec![(0.0, 0.11)], vec![(0.0, 0.045)]);
@@ -50,6 +54,25 @@ fn model_reads_rotor_speed_and_writes_thrust_and_torque() {
     let b = s.bus();
     assert_eq!(b.get(b.lookup::<f64>(&names::prop_thrust(2)).unwrap()), t);
     assert_eq!(b.get(b.lookup::<f64>(&names::prop_torque(2)).unwrap()), q);
+}
+
+#[test]
+fn the_thrust_scale_fault_multiplies_both_outputs() {
+    let p = prop(vec![(0.0, 0.11)], vec![(0.0, 0.045)]);
+    let omega = 24_000.0 * 2.0 * PI / 60.0;
+    let (t, q) = thrust_torque(&p, omega);
+    let mut bus = Bus::new();
+    let model = Propeller::new(0, p, &mut bus);
+    let scale = bus.signal::<f64>(&names::fault_prop_thrust_scale(0));
+    bus.set(scale, 0.5); // after construction: the model starts the seam at its identity
+    let omega_sig = bus.signal::<f64>(&names::motor_omega(0));
+    bus.set(omega_sig, omega);
+    let mut s = Scheduler::new(8000, bus);
+    s.add(Box::new(model));
+    s.step().unwrap();
+    let b = s.bus();
+    close(b.get(b.lookup::<f64>(&names::prop_thrust(0)).unwrap()), t * 0.5);
+    close(b.get(b.lookup::<f64>(&names::prop_torque(0)).unwrap()), q * 0.5);
 }
 
 #[test]
