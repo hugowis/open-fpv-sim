@@ -161,8 +161,11 @@ sim.load("quads/opendrone-5f-freestyle.toml", world="flat", seed=42, mode="locks
 sim.inject(ofs.faults.MotorFailure(motor=2, at=3.0))
 sim.play_inputs("flips.csv")
 sim.run(seconds=10)
-df = sim.log.to_dataframe(["gyro.*", "motor.*.rpm", "battery.voltage"])
+df = sim.log.to_dataframe(["imu.gyro_frd_radps", "motor.*.omega_radps", "battery.voltage_v"])
 ```
+(M4c: the signal names are the bus's own; this example predates them. It ships as `python/examples/sandbox.py` and
+runs as printed.)
+
 **v1 fault catalog:** motor failure/degradation; prop damage (thrust loss + imbalance vibration); weak battery cell; packet loss and burst loss (→ failsafe); gyro noise and bias; VTX interference.
 
 ### 6.3 (D) Logging and inspection

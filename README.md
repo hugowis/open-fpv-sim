@@ -3,7 +3,7 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-Status: **M3e — video extras.**
+Status: **M4 — the sandbox (v1).**
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
 - Betaflight Configurator should connect to the running simulator (the manual check with the desktop app is pending). A reboot sent to its port makes the simulator relaunch SITL from its EEPROM (verified live).
@@ -20,10 +20,23 @@ Status: **M3e — video extras.**
   (whole PAL fields; dropped fields in the marginal band hold the picture instead of smoothly degrading), the
   **D** key records exactly what the pilot sees as an MJPEG AVI, and a Tramp-configured quad answers
   Betaflight's VTX commands like the SmartAudio one (M3e, `docs/research/video-link.md`).
+- The sandbox: parts are data files with recorded provenance (M4a), scripts break the aircraft with the v1 fault
+  catalog (M4b), and sessions are recordable and replayable — the signal bus to MCAP (two identical lockstep runs
+  write byte-identical files, Betaflight included), pandas/CSV/Parquet export, a live Rerun view, scripted stick
+  inputs, faults at a simulated time, and Betaflight's own Blackbox logs (M4c, `docs/research/mcap-determinism.md`).
 
 - Design: `docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`
 - SITL interface findings: `docs/research/sitl-interface.md`
 - Developer setup: `docs/dev-setup.md`
+
+## Install the Python package
+
+    pip install open-fpv-sim[log,rerun]
+
+The package is the client (`import ofs`); it drives the `ofs-sim` server you build here (`cargo build -p ofs-sim`,
+then `OFS_SIM_BIN` or `PATH`). The `log` extra reads recordings (`mcap`, `pandas`; Parquet export also needs
+`pyarrow`), the `rerun` extra adds the live view. From a checkout, `python -m pip install -e "python[dev]"` installs
+it editable with every extra and the test tools.
 
 ## Quick start (open loop, no firmware)
 
@@ -124,20 +137,42 @@ mechanisms, constants and their estimate status are in `docs/research/faults.md`
 | `GyroFault(bias_radps, noise_scale)` | the gyro reads an extra bias and a multiple of its normal noise |
 | `VtxInterference(freq_mhz, power_mw, position_ned_m)` | a transmitter next door breaks up the picture |
 
-The §6.2 shape of the spec's scripting example, against the shipped API:
+Every fault takes a keyword-only `at=`: the simulated time it activates at (on that tick, however the script cuts its
+`run` calls); without it, now. `clear_faults()` also drops faults still waiting for their time. The same faults fly
+from the game: the **K** key injects and clears `RadioLinkLoss`.
+
+## Scripting, recording and the live view
+
+The spec's sandbox example (`python/examples/sandbox.py`): run it from the repository root with `OFS_SIM_BIN` and
+`OFS_SITL_LAUNCH` set and `python/examples/flips.csv` copied beside it (`cp python/examples/flips.csv .`):
 
     import ofs
+    sim = ofs.launch(headless=True)
+    sim.load("quads/opendrone-5f-freestyle.toml", world="flat", seed=42, mode="lockstep")
+    sim.inject(ofs.faults.MotorFailure(motor=2, at=3.0))
+    sim.play_inputs("flips.csv")
+    sim.run(seconds=10)
+    df = sim.log.to_dataframe(["imu.gyro_frd_radps", "motor.*.omega_radps", "battery.voltage_v"])
 
-    sim = ofs.launch(binary="target/debug/ofs-sim")
-    sim.load("quads/opendrone-5f-freestyle.toml", open_loop_fc=True)
-    sim.set_sticks(throttle=0.6)
-    sim.run(1.0)
-    sim.inject(ofs.faults.MotorFailure(motor=2, scale=0.0))   # motor 3 dies in flight
-    sim.run(2.0)
-    print(sim.state().motor_rpm)                              # the dead one falls behind
-    sim.clear_faults()
-    sim.close()
-
-The same faults fly from the game: the **K** key injects and clears `RadioLinkLoss`.
+- **Recording.** A lockstep `load` records the whole signal bus at the default rates (body 240 Hz, IMU 1 kHz,
+  motors/ESCs/props 240 Hz, battery 10 Hz, everything else 50 Hz) into `<data_dir>/logs/<quad>-<n>.mcap`;
+  `load(record=False)` does not, and real-time sessions record only when asked. `sim.recording.start(["imu.*",
+  ("motor.*.omega_radps", 1000)])` picks signals and rates, `sim.recording.stop()` finishes the file. Recordings
+  open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files.
+- **Reading.** `sim.log` stops the running recording and returns it; `.to_dataframe(patterns)` gives one row per
+  recorded time and one column per signal component (`imu.gyro_frd_radps.x`), indexed by `time_s`, NaN where a
+  slower signal has no record. `.to_csv(path)` and `.to_parquet(path)` export; `ofs.reader.to_dataframe(path)`
+  reads any recording. Patterns: `*` matches any run of characters, `?` one; a pattern matching nothing names
+  the signals it probably meant.
+- **Scripted sticks.** `sim.play_inputs("flips.csv")` plays a CSV with a `t_s` column (seconds from the call) and any
+  of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, sample-and-hold on the simulator's ticks; `set_sticks`
+  is refused while it plays, and a malformed file raises `ConfigError` naming each problem's line.
+- **Betaflight's Blackbox.** The shipped quads log to SITL's virtual Blackbox; when a session ends its logs are
+  copied into the logs directory (`sim.blackbox_files()`), ready for Blackbox Explorer. Disarm before the session
+  ends for a complete log. (Enabling it changed the shipped diffs: an EEPROM made before M4c is refused at load
+  until you delete it, see `docs/dev-setup.md`.)
+- **Live view.** `ofs.rerun.view(sim)` opens the Rerun viewer on a running session: the quad's pose in the world,
+  battery, motor, link and video curves, the events as text. It follows the state stream (up to 240 Hz); the 8 kHz
+  signals are in the recording.
 
 License: GPL-3.0-or-later.

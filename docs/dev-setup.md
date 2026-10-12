@@ -11,7 +11,9 @@
 | Live SITL tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1` |
 | Live video tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-video --test vtx_live -- --ignored --test-threads=1`, and `python -m pytest python/tests/test_sitl_video.py` |
 | Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL) |
-| Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` |
+| Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` (after `python -m pip install -e "python[dev]"`, which brings the recording, Parquet and Rerun extras the tests use) |
+| Live Python tests in WSL | from `python/`: `OFS_SIM_BIN=$HOME/ofs/target/debug/ofs-sim OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf PYTHONPATH=. uv run --no-project --with grpcio,protobuf,pytest,mcap,pandas,pyarrow,'rerun-sdk>=0.39,<0.40' python -m pytest tests` (a Linux-built `ofs-sim`) |
+| Build the Python package | `python -m build python --outdir dist` (wheel and sdist; CI publishes them on `v*` tags only) |
 | Godot client tests | `bash scripts/run-godot-tests.sh` (see "Godot pilot client" below) |
 | Real-time session (for Configurator) | `OFS_SITL_LAUNCH=<cmd> python python/examples/serve_realtime.py` |
 | Regenerate Python stubs | `python -m grpc_tools.protoc -I proto --python_out=python --pyi_out=python --grpc_python_out=python proto/ofs/v1/sim.proto` |
@@ -207,6 +209,34 @@ The client and server speak **protocol 8**: the faults' wire shapes live in the 
 `sim.clear_faults()`), and the models, constants and their estimate status in `docs/research/faults.md` —
 regenerate the stubs with the table's protoc recipe after changing the proto.
 
+## Recording, scripted inputs and the package (M4c)
+
+The client and server speak **protocol 9**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`, a fault's
+optional `at_s`, world names in `LoadRequest.world_path`, and `HandshakeReply.logs_dir`.
+
+- **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
+  client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A
+  record carries the state `GetState` reports at its time (`{"v": x}`, `{"x", "y", "z"}` or `{"w", "x", "y",
+  "z"}` JSON with a JSON schema); the default rates are `ofs_log::DEFAULT_RATES`. The files are deterministic:
+  the `mcap` crate is pinned to an upstream revision that writes its summary in id order
+  (`docs/research/mcap-determinism.md`), and the writer pins its library string, single-threaded zstd and no
+  per-message index records (smaller files; readers use the chunk index).
+- **Python:** a lockstep `load` starts a recording (`record=False` does not), `sim.log` stops and returns it,
+  `ofs.reader` reads any recording (`mcap` + `pandas`; Parquet also `pyarrow`), `ofs.rerun.view(sim)` is the live
+  view (`rerun-sdk` 0.39.x, pinned by the extra).
+- **Scripted inputs** (`sim.play_inputs(path)`): the client sends the CSV's text (the server accepts requests up
+  to 64 MiB, `MAX_REQUEST_BYTES`, so a long flight's file fits); the server validates it once
+  (`crates/ofs-sim/src/inputs.rs`) and applies each row on the first tick at or after its time. Faults with `at=`
+  use the same tick rule. Both apply right after the step that reaches their time, so a `run` that ends there
+  already shows them.
+- **Worlds by name:** `load(world="flat")` reads `worlds/flat.toml` beside the quad's directory, as parts resolve
+  against `library/`.
+- **Blackbox:** the shipped diffs set `blackbox_device = VIRTUAL`; SITL writes `LOGnnnnn.BFL` into the quad's
+  firmware directory, and the session copies the logs it wrote into the logs directory when it ends.
+- **Packaging:** the PyPI distribution is `open-fpv-sim` (import `ofs`), pure Python; `launch()` still needs an
+  `ofs-sim` binary. The `publish` CI job runs on `v*` tags only, checks the tag equals `python/pyproject.toml`'s
+  version and uploads through PyPI trusted publishing (the `pypi` environment); no token is stored.
+
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
 - **Symptom:** SITL looks silent and runs fail with "no motor output within 5000 ms" or a first-exchange timeout.
@@ -219,7 +249,8 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   CARGO_TARGET_DIR=$HOME/ofs/target OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf cargo test --workspace --locked -- --include-ignored --test-threads=1
   ```
   The second command runs every Rust test, the live ones (`sitl_live`, `vtx_live`) included.
-  WSL has no Python grpc module, so the Python tests need Windows.
+  WSL's system Python has no grpc module: run the Python tests there through `uv` (the "Live Python tests in
+  WSL" command above), or from Windows.
 
 ## Sessions
 - **Lockstep** (default): simulated time advances only through `Run`. Runs are deterministic, Betaflight included.
@@ -233,7 +264,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 
 ## Firmware state
 - **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log` and any Blackbox logs.
-- **Diff changes:** the quad's diff is applied only on first boot, so Configurator changes persist. If the quad's diff changes later, loading fails until you delete `eeprom.bin` (which also discards Configurator changes).
+- **Diff changes:** the quad's diff is applied only on first boot, so Configurator changes persist. If the quad's diff changes later, loading fails until you delete `eeprom.bin` (which also discards Configurator changes). M4c changed both shipped diffs (`set blackbox_device = VIRTUAL`): delete the `eeprom.bin` of each quad you flew before it, once.
 - **Reboots:** a Betaflight reboot (Configurator "Save", MSP_REBOOT) relaunches SITL from its EEPROM; `State.fc_restarts` counts them.
 
 ## Betaflight Configurator
