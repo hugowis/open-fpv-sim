@@ -317,7 +317,7 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
                 },
                 Some(Command::SetRadioLoss(on)) => {
                     let result = if on {
-                        let fault = pb::Fault { kind: Some(pb::fault::Kind::RadioLinkLoss(pb::RadioLinkLoss {})) };
+                        let fault = pb::Fault { kind: Some(pb::fault::Kind::RadioLinkLoss(pb::RadioLinkLoss {})), at_s: None };
                         client.inject_fault(fault).await.map(|_| ())
                     } else {
                         client.clear_faults(pb::Empty {}).await.map(|_| ())

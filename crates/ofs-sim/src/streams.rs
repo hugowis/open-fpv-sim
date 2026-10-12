@@ -192,6 +192,10 @@ pub async fn pilot(
         if !setup_link.alive.load(Ordering::Acquire) {
             return Err(Status::cancelled("the pilot went away before connecting"));
         }
+        if let Some(playing) = session.vehicle.inputs_playing() {
+            let message = format!("{playing} is playing scripted inputs; StopInputs before piloting");
+            return Err(error("invalid_state", Code::FailedPrecondition, message));
+        }
         session.vehicle.set_sticks(&first_sticks);
         session.vehicle.set_transmitter(true);
         setup_link.session.store(session.id, Ordering::Release);

@@ -434,6 +434,14 @@ pub enum EventKind {
     FaultInjected,
     /// A fault stopped being active (the message names it).
     FaultCleared,
+    /// An inputs file started playing (the message names it).
+    InputsStarted,
+    /// An inputs file finished or was stopped.
+    InputsEnded,
+    /// A recording started (the message is its path).
+    RecordingStarted,
+    /// A recording stopped or failed.
+    RecordingStopped,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -456,6 +464,10 @@ impl EventKind {
             EventKind::Collision => "collision",
             EventKind::FaultInjected => "fault_injected",
             EventKind::FaultCleared => "fault_cleared",
+            EventKind::InputsStarted => "inputs_started",
+            EventKind::InputsEnded => "inputs_ended",
+            EventKind::RecordingStarted => "recording_started",
+            EventKind::RecordingStopped => "recording_stopped",
             EventKind::Unknown => "unknown",
         }
     }
@@ -487,6 +499,10 @@ impl Event {
             Ok(pb::EventKind::Collision) => EventKind::Collision,
             Ok(pb::EventKind::FaultInjected) => EventKind::FaultInjected,
             Ok(pb::EventKind::FaultCleared) => EventKind::FaultCleared,
+            Ok(pb::EventKind::InputsStarted) => EventKind::InputsStarted,
+            Ok(pb::EventKind::InputsEnded) => EventKind::InputsEnded,
+            Ok(pb::EventKind::RecordingStarted) => EventKind::RecordingStarted,
+            Ok(pb::EventKind::RecordingStopped) => EventKind::RecordingStopped,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

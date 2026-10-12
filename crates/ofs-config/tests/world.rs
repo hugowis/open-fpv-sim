@@ -321,3 +321,15 @@ position_ned_m = [-3.0, 2.0, -1.2]
     .unwrap_err();
     assert!(bare.to_string().contains("handset.antennas"), "{bare}");
 }
+
+#[test]
+fn a_world_name_resolves_beside_the_quads_directory_and_a_path_stays_a_path() {
+    assert_eq!(world::resolve("flat", Path::new("quads/x.toml")), Path::new("worlds").join("flat.toml"));
+    assert_eq!(world::resolve("flat", Path::new("/data/sim/quads/x.toml")), Path::new("/data/sim/worlds").join("flat.toml"));
+    assert_eq!(world::resolve("flat", Path::new("x.toml")), Path::new(".").join("worlds").join("flat.toml"));
+    assert_eq!(world::resolve("worlds/flat.toml", Path::new("quads/x.toml")), Path::new("worlds/flat.toml"));
+    assert_eq!(world::resolve("flat.toml", Path::new("quads/x.toml")), Path::new("flat.toml"), "a file name is a path");
+    assert_eq!(world::resolve(r"C:\sim\flat", Path::new("quads/x.toml")), Path::new(r"C:\sim\flat"));
+    let shipped = world::resolve("flat", Path::new(QUAD));
+    assert_eq!(world::load(&shipped).unwrap().name, "Flat field");
+}

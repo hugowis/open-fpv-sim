@@ -344,6 +344,16 @@ pub(crate) fn check_beamwidth(c: &mut Checker, kind: AntennaKind, beamwidth_deg:
     }
 }
 
+/// The file a session's world names. A name (`flat`: no path separator, no `.toml`) is `worlds/<name>.toml` beside
+/// the quad's directory (`<quad dir>/../worlds`, as parts resolve against `library/`); anything else is a path.
+pub fn resolve(world: &str, quad_path: &Path) -> PathBuf {
+    if world.contains(['/', '\\']) || world.ends_with(".toml") {
+        return PathBuf::from(world);
+    }
+    let quads = quad_path.parent().unwrap_or(Path::new("."));
+    quads.parent().unwrap_or(Path::new(".")).join("worlds").join(format!("{world}.toml"))
+}
+
 pub fn load(path: &Path) -> Result<WorldConfig, ConfigError> {
     let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io { path: path.to_path_buf(), source })?;
     let parse_err = |message: String| ConfigError::Parse { path: path.to_path_buf(), message };

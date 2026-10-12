@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use ofs_sim::pb::sim_server::SimServer;
-use ofs_sim::server::SimService;
+use ofs_sim::server::{sim_server, SimService};
 
 #[derive(Parser)]
 #[command(about = "Open FPV Sim headless server")]
@@ -55,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), args.listen);
     let service = SimService::new(args.data_dir);
     let (signalled, on_signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tonic::transport::Server::builder().add_service(SimServer::new(service.clone())).serve_with_shutdown(
+    let server = tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_shutdown(
         args.listen,
         async move {
             shutdown_signal().await;

@@ -13,14 +13,27 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Request, Response, Status, Streaming};
 
+use crate::blackbox::BlackboxCopy;
+use crate::inputs;
 use crate::pacer::OverrunPolicy;
-use crate::pb::{self, sim_server::Sim};
+use crate::pb::{self, sim_server::Sim, sim_server::SimServer};
 use crate::runner;
 use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
+use ofs_log::recorder::next_log_path;
+use ofs_log::{RecordError, SignalRate};
 
 pub use ofs_proto::PROTOCOL_VERSION;
+
+/// The largest request the server accepts (tonic's default is 4 MiB): a scripted-inputs CSV of a long flight is
+/// bigger than that.
+pub const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
+
+/// The gRPC service with this server's limits: what `main` and the tests serve.
+pub fn sim_server(service: SimService) -> SimServer<SimService> {
+    SimServer::new(service).max_decoding_message_size(MAX_REQUEST_BYTES)
+}
 
 #[derive(Clone)]
 pub struct SimService {
@@ -56,6 +69,14 @@ pub(crate) fn loaded(slot: &mut Slot) -> Result<&mut Session, Status> {
 
 fn invalid_state(message: &str) -> Status {
     error("invalid_state", Code::FailedPrecondition, message)
+}
+
+fn record_error(e: RecordError) -> Status {
+    match e {
+        RecordError::AlreadyRecording | RecordError::NotRecording => invalid_state(&e.to_string()),
+        RecordError::Spec(m) => error("invalid_argument", Code::InvalidArgument, m),
+        RecordError::Io(_) => error("internal", Code::Internal, e.to_string()),
+    }
 }
 
 /// NED metres from the proto's optional Vec3 (absent = the origin).
@@ -110,6 +131,12 @@ impl SimService {
             let _ = handle.join();
         }
         *self.shared.lock() = None;
+    }
+
+    /// Where recordings and copied Blackbox logs land: `<data_dir>/logs`.
+    pub fn logs_dir(&self) -> PathBuf {
+        let logs = self.data_dir.join("logs");
+        std::path::absolute(&logs).unwrap_or(logs)
     }
 
     #[cfg(test)]
@@ -180,7 +207,11 @@ impl Sim for SimService {
         if v != PROTOCOL_VERSION {
             return Err(error("protocol", Code::FailedPrecondition, format!("client speaks protocol {v}, server speaks {PROTOCOL_VERSION}")));
         }
-        Ok(Response::new(pb::HandshakeReply { protocol_version: PROTOCOL_VERSION, server_version: env!("CARGO_PKG_VERSION").into() }))
+        Ok(Response::new(pb::HandshakeReply {
+            protocol_version: PROTOCOL_VERSION,
+            server_version: env!("CARGO_PKG_VERSION").into(),
+            logs_dir: self.logs_dir().display().to_string(),
+        }))
     }
 
     async fn load(&self, req: Request<pb::LoadRequest>) -> Result<Response<pb::LoadReply>, Status> {
@@ -202,16 +233,22 @@ impl Sim for SimService {
         let world = if req.world_path.is_empty() {
             WorldConfig::open_field()
         } else {
-            ofs_config::world::load(Path::new(&req.world_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
+            let path = ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path));
+            ofs_config::world::load(&path).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
         };
         let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world };
         let keep_alive = req.keep_alive;
+        let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
+        let blackbox = (opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl)
+            .then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
         self.blocking(move |shared, slot| {
             *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
             let configurator_address = vehicle.configurator_address().unwrap_or_default();
             let mut session = Session::new(vehicle, mode, policy, keep_alive);
             session.watched = shared.watchers.load(Ordering::Acquire) > 0;
+            session.quad_stem = quad_stem;
+            session.blackbox = blackbox;
             *slot = Some(session);
             Ok(pb::LoadReply { quad_name: cfg.name.clone(), base_hz: cfg.sim.base_hz, configurator_address })
         })
@@ -221,7 +258,12 @@ impl Sim for SimService {
     async fn set_sticks(&self, req: Request<pb::Sticks>) -> Result<Response<pb::Empty>, Status> {
         let sticks = parse_sticks(req.into_inner())?;
         self.blocking(move |_, slot| {
-            loaded(slot)?.vehicle.set_sticks(&sticks);
+            let s = loaded(slot)?;
+            if let Some(playing) = s.vehicle.inputs_playing() {
+                let message = format!("{playing} is playing: SetSticks would be overwritten (call StopInputs first)");
+                return Err(error("invalid_argument", Code::InvalidArgument, message));
+            }
+            s.vehicle.set_sticks(&sticks);
             Ok(pb::Empty {})
         })
         .await
@@ -360,7 +402,9 @@ impl Sim for SimService {
     }
 
     async fn inject_fault(&self, req: Request<pb::Fault>) -> Result<Response<pb::Empty>, Status> {
-        let fault = match req.into_inner().kind {
+        let req = req.into_inner();
+        let at_s = req.at_s;
+        let fault = match req.kind {
             Some(pb::fault::Kind::RadioLinkLoss(_)) => Fault::RadioLinkLoss,
             Some(pb::fault::Kind::RadioLoss(m)) => Fault::RadioLoss { fraction: m.fraction },
             Some(pb::fault::Kind::BurstLoss(m)) => {
@@ -380,7 +424,12 @@ impl Sim for SimService {
             None => return Err(error("invalid_argument", Code::InvalidArgument, "the fault has no kind")),
         };
         self.blocking(move |_, slot| {
-            loaded(slot)?.vehicle.set_fault(fault, true).map_err(|e| sim_error(&e))?;
+            let vehicle = &mut loaded(slot)?.vehicle;
+            match at_s {
+                Some(at_s) => vehicle.schedule_fault(fault, at_s),
+                None => vehicle.set_fault(fault, true),
+            }
+            .map_err(|e| sim_error(&e))?;
             Ok(pb::Empty {})
         })
         .await
@@ -389,6 +438,72 @@ impl Sim for SimService {
     async fn clear_faults(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
         self.blocking(|_, slot| {
             loaded(slot)?.vehicle.clear_faults();
+            Ok(pb::Empty {})
+        })
+        .await
+    }
+
+    async fn start_recording(&self, req: Request<pb::StartRecordingRequest>) -> Result<Response<pb::RecordingStarted>, Status> {
+        let requests: Vec<SignalRate> = req
+            .into_inner()
+            .signals
+            .into_iter()
+            .map(|s| SignalRate { pattern: s.pattern, rate_hz: (s.rate_hz != 0.0).then_some(s.rate_hz) })
+            .collect();
+        let logs = self.logs_dir();
+        self.blocking(move |shared, slot| {
+            let s = loaded(slot)?;
+            if s.vehicle.is_recording() {
+                return Err(record_error(RecordError::AlreadyRecording));
+            }
+            let path = next_log_path(&logs, &s.quad_stem).map_err(|e| record_error(RecordError::Io(format!("{}: {e}", logs.display()))))?;
+            let signals = s.vehicle.start_recording(&requests, &path).map_err(record_error)?;
+            let path = path.display().to_string();
+            shared.publish([event(s.vehicle.time_s(), pb::EventKind::RecordingStarted, path.clone())]);
+            Ok(pb::RecordingStarted { path, signals })
+        })
+        .await
+    }
+
+    async fn stop_recording(&self, _req: Request<pb::Empty>) -> Result<Response<pb::RecordingSummary>, Status> {
+        self.blocking(|shared, slot| {
+            let s = loaded(slot)?;
+            let summary = s.vehicle.stop_recording().map_err(record_error)?;
+            let path = summary.path.display().to_string();
+            let message = format!("{path}: {} messages", summary.messages);
+            shared.publish([event(s.vehicle.time_s(), pb::EventKind::RecordingStopped, message)]);
+            Ok(pb::RecordingSummary { path, messages: summary.messages, first_s: summary.first_s, last_s: summary.last_s })
+        })
+        .await
+    }
+
+    async fn play_inputs(&self, req: Request<pb::InputsFile>) -> Result<Response<pb::Empty>, Status> {
+        let file = req.into_inner();
+        let name = if file.name.is_empty() { "inputs".to_string() } else { file.name };
+        let inputs = inputs::parse(&name, &file.csv).map_err(|m| error("config", Code::InvalidArgument, m))?;
+        self.blocking(move |shared, slot| {
+            let s = loaded(slot)?;
+            if shared.pilot.load(Ordering::Acquire) {
+                return Err(invalid_state("a pilot is connected: scripted inputs would fight the pilot's sticks"));
+            }
+            if let Some(playing) = s.vehicle.inputs_playing() {
+                return Err(invalid_state(&format!("{playing} is still playing; call StopInputs first")));
+            }
+            let message = format!("{name}: {} rows over {} s", inputs.rows.len(), inputs.duration_s());
+            s.vehicle.play_inputs(inputs).map_err(|e| sim_error(&e))?;
+            shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsStarted, message)]);
+            shared.publish(s.changes()); // a file whose rows are all at t_s = 0 has already finished
+            Ok(pb::Empty {})
+        })
+        .await
+    }
+
+    async fn stop_inputs(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
+        self.blocking(|shared, slot| {
+            let s = loaded(slot)?;
+            if let Some(name) = s.vehicle.stop_inputs() {
+                shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsEnded, format!("{name}: stopped"))]);
+            }
             Ok(pb::Empty {})
         })
         .await

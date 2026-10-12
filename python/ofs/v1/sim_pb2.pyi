@@ -44,6 +44,10 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_COLLISION: _ClassVar[EventKind]
     EVENT_KIND_FAULT_INJECTED: _ClassVar[EventKind]
     EVENT_KIND_FAULT_CLEARED: _ClassVar[EventKind]
+    EVENT_KIND_INPUTS_STARTED: _ClassVar[EventKind]
+    EVENT_KIND_INPUTS_ENDED: _ClassVar[EventKind]
+    EVENT_KIND_RECORDING_STARTED: _ClassVar[EventKind]
+    EVENT_KIND_RECORDING_STOPPED: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
@@ -70,6 +74,10 @@ EVENT_KIND_VIDEO_RESTORED: EventKind
 EVENT_KIND_COLLISION: EventKind
 EVENT_KIND_FAULT_INJECTED: EventKind
 EVENT_KIND_FAULT_CLEARED: EventKind
+EVENT_KIND_INPUTS_STARTED: EventKind
+EVENT_KIND_INPUTS_ENDED: EventKind
+EVENT_KIND_RECORDING_STARTED: EventKind
+EVENT_KIND_RECORDING_STOPPED: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -82,12 +90,14 @@ class HandshakeRequest(_message.Message):
     def __init__(self, protocol_version: _Optional[int] = ...) -> None: ...
 
 class HandshakeReply(_message.Message):
-    __slots__ = ("protocol_version", "server_version")
+    __slots__ = ("protocol_version", "server_version", "logs_dir")
     PROTOCOL_VERSION_FIELD_NUMBER: _ClassVar[int]
     SERVER_VERSION_FIELD_NUMBER: _ClassVar[int]
+    LOGS_DIR_FIELD_NUMBER: _ClassVar[int]
     protocol_version: int
     server_version: str
-    def __init__(self, protocol_version: _Optional[int] = ..., server_version: _Optional[str] = ...) -> None: ...
+    logs_dir: str
+    def __init__(self, protocol_version: _Optional[int] = ..., server_version: _Optional[str] = ..., logs_dir: _Optional[str] = ...) -> None: ...
 
 class LoadRequest(_message.Message):
     __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive", "world_path")
@@ -396,7 +406,7 @@ class VtxInterference(_message.Message):
     def __init__(self, freq_mhz: _Optional[float] = ..., power_mw: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ...) -> None: ...
 
 class Fault(_message.Message):
-    __slots__ = ("radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference")
+    __slots__ = ("radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference", "at_s")
     RADIO_LINK_LOSS_FIELD_NUMBER: _ClassVar[int]
     RADIO_LOSS_FIELD_NUMBER: _ClassVar[int]
     BURST_LOSS_FIELD_NUMBER: _ClassVar[int]
@@ -405,6 +415,7 @@ class Fault(_message.Message):
     WEAK_CELL_FIELD_NUMBER: _ClassVar[int]
     GYRO_FAULT_FIELD_NUMBER: _ClassVar[int]
     VTX_INTERFERENCE_FIELD_NUMBER: _ClassVar[int]
+    AT_S_FIELD_NUMBER: _ClassVar[int]
     radio_link_loss: RadioLinkLoss
     radio_loss: RadioLoss
     burst_loss: BurstLoss
@@ -413,7 +424,50 @@ class Fault(_message.Message):
     weak_cell: WeakCell
     gyro_fault: GyroFault
     vtx_interference: VtxInterference
-    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ..., radio_loss: _Optional[_Union[RadioLoss, _Mapping]] = ..., burst_loss: _Optional[_Union[BurstLoss, _Mapping]] = ..., motor_failure: _Optional[_Union[MotorFailure, _Mapping]] = ..., prop_damage: _Optional[_Union[PropDamage, _Mapping]] = ..., weak_cell: _Optional[_Union[WeakCell, _Mapping]] = ..., gyro_fault: _Optional[_Union[GyroFault, _Mapping]] = ..., vtx_interference: _Optional[_Union[VtxInterference, _Mapping]] = ...) -> None: ...
+    at_s: float
+    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ..., radio_loss: _Optional[_Union[RadioLoss, _Mapping]] = ..., burst_loss: _Optional[_Union[BurstLoss, _Mapping]] = ..., motor_failure: _Optional[_Union[MotorFailure, _Mapping]] = ..., prop_damage: _Optional[_Union[PropDamage, _Mapping]] = ..., weak_cell: _Optional[_Union[WeakCell, _Mapping]] = ..., gyro_fault: _Optional[_Union[GyroFault, _Mapping]] = ..., vtx_interference: _Optional[_Union[VtxInterference, _Mapping]] = ..., at_s: _Optional[float] = ...) -> None: ...
+
+class RecordingSignal(_message.Message):
+    __slots__ = ("pattern", "rate_hz")
+    PATTERN_FIELD_NUMBER: _ClassVar[int]
+    RATE_HZ_FIELD_NUMBER: _ClassVar[int]
+    pattern: str
+    rate_hz: float
+    def __init__(self, pattern: _Optional[str] = ..., rate_hz: _Optional[float] = ...) -> None: ...
+
+class StartRecordingRequest(_message.Message):
+    __slots__ = ("signals",)
+    SIGNALS_FIELD_NUMBER: _ClassVar[int]
+    signals: _containers.RepeatedCompositeFieldContainer[RecordingSignal]
+    def __init__(self, signals: _Optional[_Iterable[_Union[RecordingSignal, _Mapping]]] = ...) -> None: ...
+
+class RecordingStarted(_message.Message):
+    __slots__ = ("path", "signals")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    SIGNALS_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    signals: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, path: _Optional[str] = ..., signals: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class RecordingSummary(_message.Message):
+    __slots__ = ("path", "messages", "first_s", "last_s")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
+    FIRST_S_FIELD_NUMBER: _ClassVar[int]
+    LAST_S_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    messages: int
+    first_s: float
+    last_s: float
+    def __init__(self, path: _Optional[str] = ..., messages: _Optional[int] = ..., first_s: _Optional[float] = ..., last_s: _Optional[float] = ...) -> None: ...
+
+class InputsFile(_message.Message):
+    __slots__ = ("name", "csv")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    CSV_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    csv: str
+    def __init__(self, name: _Optional[str] = ..., csv: _Optional[str] = ...) -> None: ...
 
 class ReceiverAntenna(_message.Message):
     __slots__ = ("name", "kind", "gain_dbi", "beamwidth_deg", "polarization", "aim_az_deg", "aim_el_deg")

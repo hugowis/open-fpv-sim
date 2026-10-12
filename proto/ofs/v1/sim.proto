@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 8: protocol 7 plus the v1 fault catalog's wire shape, events and python
-// dataclasses (M4b).
-// Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
-// state, and the world with its analog video link. One session (loaded quad) per server.
+// Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
+// faults scheduled at a simulated time and world names (M4c).
+// Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
+// VTX state, and the world with its analog video link. One session (loaded quad) per server.
 service Sim {
   rpc Handshake(HandshakeRequest) returns (HandshakeReply);
   rpc Load(LoadRequest) returns (LoadReply);
@@ -33,6 +33,15 @@ service Sim {
   rpc StreamOsd(StreamRequest) returns (stream OsdFrame);
   // The world the session flies in, as loaded and validated (the built-in open field when Load named none).
   rpc GetWorld(Empty) returns (World);
+  // Records the bus to a new MCAP file the server names (<data_dir>/logs/<quad>-<n>.mcap); one at a time.
+  rpc StartRecording(StartRecordingRequest) returns (RecordingStarted);
+  // Finishes the running recording's file (it is readable from then on).
+  rpc StopRecording(Empty) returns (RecordingSummary);
+  // Plays a stick-inputs CSV sample-and-hold from now; SetSticks is refused while it plays. The file travels in the
+  // request: the server reads no client paths.
+  rpc PlayInputs(InputsFile) returns (Empty);
+  // Stops the playing inputs file, if any (the sticks keep their last values).
+  rpc StopInputs(Empty) returns (Empty);
 }
 
 message Empty {}
@@ -41,6 +50,7 @@ message HandshakeRequest { uint32 protocol_version = 1; }
 message HandshakeReply {
   uint32 protocol_version = 1;
   string server_version = 2;
+  string logs_dir = 3;  // absolute: where recordings and copied Blackbox logs land
 }
 
 enum Mode {
@@ -63,7 +73,9 @@ message LoadRequest {
   bool open_loop_fc = 4;  // testing aid: replace the configured FC with throttle-only open loop
   OverrunPolicy overrun_policy = 5;
   bool keep_alive = 6;  // keep the session when its last watcher disconnects
-  string world_path = 7;  // a world file (worlds/flat.toml); empty: the built-in open field
+  // A world file (worlds/flat.toml), or a world name (flat: worlds/flat.toml beside the quad's directory, as
+  // parts resolve against library/); empty: the built-in open field.
+  string world_path = 7;
 }
 message LoadReply {
   string quad_name = 1;
@@ -213,6 +225,10 @@ enum EventKind {
   EVENT_KIND_COLLISION = 13;       // the quad hit something: the message names the object and the speed
   EVENT_KIND_FAULT_INJECTED = 14;  // a fault became active: the message names it
   EVENT_KIND_FAULT_CLEARED = 15;   // a fault stopped being active: the message names it
+  EVENT_KIND_INPUTS_STARTED = 16;  // an inputs file started playing: the message names it
+  EVENT_KIND_INPUTS_ENDED = 17;    // it finished or was stopped (the message says which)
+  EVENT_KIND_RECORDING_STARTED = 18;  // the message is the file's path
+  EVENT_KIND_RECORDING_STOPPED = 19;  // stopped, or failed (a disk error): the message says which
 }
 
 message Event {
@@ -271,6 +287,35 @@ message Fault {
     GyroFault gyro_fault = 7;
     VtxInterference vtx_interference = 8;
   }
+  optional double at_s = 9;  // activate at this simulated time (absent: now); refused once that time has passed
+}
+
+// A recorded signal pattern: `*` matches any run of characters (dots included), `?` one character.
+message RecordingSignal {
+  string pattern = 1;
+  double rate_hz = 2;  // 0: each matched signal's rate from the default table
+}
+
+message StartRecordingRequest {
+  repeated RecordingSignal signals = 1;  // empty: every signal at the default table's rates
+}
+
+message RecordingStarted {
+  string path = 1;
+  repeated string signals = 2;  // the recorded signals' bus names
+}
+
+message RecordingSummary {
+  string path = 1;
+  uint64 messages = 2;
+  double first_s = 3;  // simulated time of the first and last record (0 when there are none)
+  double last_s = 4;
+}
+
+// A stick-inputs CSV: header t_s plus any of roll, pitch, yaw, throttle, aux1..aux4; t_s increasing from 0.
+message InputsFile {
+  string name = 1;  // shown in errors and events (the client sends the file's name)
+  string csv = 2;
 }
 
 // The world file, NED metres from home (up is negative). Strings name the kinds: antenna "omni" or "patch";

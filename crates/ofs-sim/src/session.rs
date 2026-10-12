@@ -11,6 +11,7 @@ use ofs_video::link::VideoSync;
 use ofs_video::osd::OsdFrame;
 use tokio::sync::broadcast;
 
+use crate::blackbox::BlackboxCopy;
 use crate::pacer::{OverrunPolicy, Pacer};
 use crate::pb;
 use crate::vehicle::{VideoInfo, Vehicle, VehicleState, VtxInfo};
@@ -49,6 +50,11 @@ pub struct Session {
     /// Unit tests only: the next `step` panics (exercises panic containment).
     #[cfg(test)]
     pub panic_on_step: bool,
+    /// The quad file's stem: recordings are `<logs dir>/<stem>-<n>.mcap`.
+    pub quad_stem: String,
+    /// Betaflight sessions: copies SITL's Blackbox logs when the session ends. Declared last on purpose: fields
+    /// drop in order, so the vehicle (and SITL) is gone before the copy runs.
+    pub blackbox: Option<BlackboxCopy>,
 }
 
 pub type Slot = Option<Session>;
@@ -200,6 +206,8 @@ impl Session {
             last_faults: Vec::new(),
             #[cfg(test)]
             panic_on_step: false,
+            quad_stem: "quad".into(),
+            blackbox: None,
         }
     }
 
@@ -229,11 +237,19 @@ impl Session {
     }
 
     /// Events implied by the vehicle since the last call: radio link up or down, Betaflight restarts,
-    /// VTX changes, dropped UART bytes, video sync lost or regained, faults activating or clearing.
+    /// VTX changes, dropped UART bytes, video sync lost or regained, faults activating or clearing, an inputs file
+    /// finishing, a recording failing.
     pub fn changes(&mut self) -> Vec<pb::Event> {
         let faults = self.vehicle.active_fault_names();
         let s = self.vehicle.state();
-        self.events_for(&s, faults)
+        let mut out = self.events_for(&s, faults);
+        if let Some(name) = self.vehicle.take_finished_inputs() {
+            out.push(event(s.time_s, pb::EventKind::InputsEnded, format!("{name}: finished")));
+        }
+        if let Some(message) = self.vehicle.take_recording_failure() {
+            out.push(event(s.time_s, pb::EventKind::RecordingStopped, format!("recording failed: {message}")));
+        }
+        out
     }
 
     /// The events a vehicle state implies, compared against the remembered previous state; `faults` is the

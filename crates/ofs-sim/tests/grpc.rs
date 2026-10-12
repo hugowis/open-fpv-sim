@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use ofs_sim::pb::sim_client::SimClient;
-use ofs_sim::pb::sim_server::SimServer;
 use ofs_sim::pb::{
-    fault, Empty, EventKind, Fault, HandshakeRequest, LoadRequest, Mode, PilotInput, RadioLinkLoss, RunRequest, Sticks,
-    StreamRequest, VideoSync,
+    fault, Empty, EventKind, Fault, HandshakeRequest, InputsFile, LoadRequest, Mode, PilotInput, RadioLinkLoss, RecordingSignal,
+    RunRequest, StartRecordingRequest, Sticks, StreamRequest, VideoSync,
 };
-use ofs_sim::server::{SimService, PROTOCOL_VERSION};
+use ofs_sim::server::{sim_server, SimService, PROTOCOL_VERSION};
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
@@ -24,7 +23,7 @@ async fn start_with_service() -> (SimClient<Channel>, SimService) {
     let service = SimService::new(data_dir);
     tokio::spawn(
         tonic::transport::Server::builder()
-            .add_service(SimServer::new(service.clone()))
+            .add_service(sim_server(service.clone()))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     (SimClient::connect(format!("http://{addr}")).await.unwrap(), service)
@@ -199,7 +198,7 @@ async fn faults_drop_the_radio_link_and_events_report_it() {
     let mut events = service.subscribe();
     load_open_loop(&mut c).await;
     c.run(RunRequest { seconds: 0.5 }).await.unwrap();
-    let fault = Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})) };
+    let fault = Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})), at_s: None };
     c.inject_fault(fault).await.unwrap();
     let s = c.run(RunRequest { seconds: 0.5 }).await.unwrap().into_inner();
     assert!(!s.radio.unwrap().link_up);
@@ -213,7 +212,7 @@ async fn faults_drop_the_radio_link_and_events_report_it() {
     // The fault injection and the clear are events now (M4b): injected before the link drops, cleared as the
     // link comes back.
     assert_eq!(kinds, vec![EventKind::LinkUp, EventKind::FaultInjected, EventKind::LinkDown, EventKind::LinkUp, EventKind::FaultCleared]);
-    let err = c.inject_fault(Fault { kind: None }).await.unwrap_err();
+    let err = c.inject_fault(Fault { kind: None, at_s: None }).await.unwrap_err();
     assert_eq!(kind(&err), "invalid_argument");
 }
 
@@ -406,4 +405,155 @@ async fn a_pilot_that_never_reads_its_states_frees_the_slot_when_its_session_end
     let mut states = c.pilot(ReceiverStream::new(rx2)).await.expect("the idle pilot still holds the slot").into_inner();
     assert!(states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
     drop(tx);
+}
+
+/// The events published since `events` subscribed, as (kind, message), keeping only `wanted` kinds.
+fn drain(events: &mut tokio::sync::broadcast::Receiver<ofs_sim::pb::Event>, wanted: &[EventKind]) -> Vec<(EventKind, String)> {
+    let mut out = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if wanted.contains(&e.kind()) {
+            out.push((e.kind(), e.message));
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_handshake_names_the_logs_directory() {
+    let (mut c, service) = start_with_service().await;
+    let reply = c.handshake(HandshakeRequest { protocol_version: PROTOCOL_VERSION }).await.unwrap().into_inner();
+    assert_eq!(std::path::PathBuf::from(&reply.logs_dir), service.logs_dir());
+    assert!(std::path::Path::new(&reply.logs_dir).is_absolute(), "{}", reply.logs_dir);
+    assert!(reply.logs_dir.ends_with("logs"), "{}", reply.logs_dir);
+}
+
+#[tokio::test]
+async fn the_server_names_recordings_and_reports_them_as_events() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    let signals = vec![
+        RecordingSignal { pattern: "battery.*".into(), rate_hz: 0.0 },
+        RecordingSignal { pattern: "imu.gyro_frd_radps".into(), rate_hz: 500.0 },
+    ];
+    let started = c.start_recording(StartRecordingRequest { signals }).await.unwrap().into_inner();
+    assert_eq!(std::path::PathBuf::from(&started.path), service.logs_dir().join("opendrone-5f-freestyle-1.mcap"));
+    assert_eq!(started.signals, ["battery.consumed_mah", "battery.current_a", "battery.soc", "battery.voltage_v", "imu.gyro_frd_radps"]);
+    assert_eq!(kind(&c.start_recording(StartRecordingRequest::default()).await.unwrap_err()), "invalid_state", "one at a time");
+    c.run(RunRequest { seconds: 1.0 }).await.unwrap();
+    let summary = c.stop_recording(Empty {}).await.unwrap().into_inner();
+    assert_eq!(summary.path, started.path);
+    assert_eq!(summary.messages, 4 * 10 + 500, "battery at the default 10 Hz, the gyro at 500 Hz");
+    assert_eq!((summary.first_s, summary.last_s), (0.002, 1.0));
+    assert_eq!(kind(&c.stop_recording(Empty {}).await.unwrap_err()), "invalid_state");
+    let next = c.start_recording(StartRecordingRequest::default()).await.unwrap().into_inner();
+    assert!(next.path.ends_with("opendrone-5f-freestyle-2.mcap"), "{}", next.path);
+    let got = drain(&mut events, &[EventKind::RecordingStarted, EventKind::RecordingStopped]);
+    assert_eq!(
+        got,
+        [
+            (EventKind::RecordingStarted, started.path.clone()),
+            (EventKind::RecordingStopped, format!("{}: 540 messages", started.path)),
+            (EventKind::RecordingStarted, next.path.clone()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_recording_pattern_matching_nothing_is_refused_with_its_near_misses() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let signals = vec![RecordingSignal { pattern: "gyro.*".into(), rate_hz: 0.0 }];
+    let err = c.start_recording(StartRecordingRequest { signals }).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_argument");
+    assert_eq!(err.message(), "pattern 'gyro.*' matches no signal (similar: fault.imu.gyro_bias_radps, imu.gyro_frd_radps)");
+}
+
+#[tokio::test]
+async fn inputs_play_refuse_set_sticks_and_report_events() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    let file = |name: &str, csv: &str| InputsFile { name: name.into(), csv: csv.into() };
+    let bad = c.play_inputs(file("bad.csv", "t_s,throttle\n0,2\n")).await.unwrap_err();
+    assert_eq!(kind(&bad), "config");
+    assert_eq!(bad.message(), "bad.csv line 2: throttle 2 is outside [0, 1]");
+    c.play_inputs(file("climb.csv", "t_s,throttle\n0,0.3\n0.5,1\n")).await.unwrap();
+    let refused = c.set_sticks(Sticks::default()).await.unwrap_err();
+    assert_eq!(kind(&refused), "invalid_argument");
+    assert!(refused.message().contains("climb.csv is playing"), "{}", refused.message());
+    assert_eq!(kind(&c.play_inputs(file("other.csv", "t_s,yaw\n0,0\n")).await.unwrap_err()), "invalid_state");
+    let s = c.run(RunRequest { seconds: 0.6 }).await.unwrap().into_inner();
+    assert_eq!(s.motor_cmd, [1.0; 4]);
+    c.set_sticks(Sticks::default()).await.unwrap(); // finished: the sticks are the script's again
+    c.play_inputs(file("hold.csv", "t_s,throttle\n0,0.2\n9,0.2\n")).await.unwrap();
+    c.stop_inputs(Empty {}).await.unwrap();
+    c.stop_inputs(Empty {}).await.unwrap(); // nothing playing: nothing to do
+    c.set_sticks(Sticks::default()).await.unwrap();
+    let got = drain(&mut events, &[EventKind::InputsStarted, EventKind::InputsEnded]);
+    assert_eq!(
+        got,
+        [
+            (EventKind::InputsStarted, "climb.csv: 2 rows over 0.5 s".to_string()),
+            (EventKind::InputsEnded, "climb.csv: finished".to_string()),
+            (EventKind::InputsStarted, "hold.csv: 2 rows over 9 s".to_string()),
+            (EventKind::InputsEnded, "hold.csv: stopped".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_inputs_file_larger_than_grpcs_default_limit_plays() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let mut csv = String::from("t_s,throttle,roll,pitch,yaw\n");
+    for i in 0..200_000 {
+        csv.push_str(&format!("{:.3},0.5,0.1,-0.1,0.0\n", f64::from(i) * 0.001));
+    }
+    assert!(csv.len() > 4 * 1024 * 1024, "{} bytes", csv.len());
+    c.play_inputs(InputsFile { name: "long.csv".into(), csv }).await.unwrap();
+    let s = c.run(RunRequest { seconds: 0.1 }).await.unwrap().into_inner();
+    assert_eq!(s.motor_cmd, [0.5; 4]);
+}
+
+#[tokio::test]
+async fn scripted_inputs_and_a_pilot_exclude_each_other() {
+    let mut c = start().await;
+    c.load(open_loop(Mode::Realtime)).await.unwrap();
+    c.play_inputs(InputsFile { name: "hold.csv".into(), csv: "t_s,throttle\n0,0.2\n9,0.2\n".into() }).await.unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+    assert_eq!(kind(&c.pilot(ReceiverStream::new(rx)).await.unwrap_err()), "invalid_state");
+    c.stop_inputs(Empty {}).await.unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(PilotInput { sticks: Some(Sticks::default()), state_rate_hz: 50 }).await.unwrap();
+    let _states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    let err = c.play_inputs(InputsFile { name: "hold.csv".into(), csv: "t_s,throttle\n0,0.2\n".into() }).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_state");
+    drop(tx);
+}
+
+#[tokio::test]
+async fn a_fault_can_wait_for_its_time_but_not_for_a_passed_one() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let at = |at_s: f64| Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})), at_s: Some(at_s) };
+    c.inject_fault(at(0.5)).await.unwrap();
+    let s = c.run(RunRequest { seconds: 0.4 }).await.unwrap().into_inner();
+    assert!(s.radio.unwrap().link_up, "not yet");
+    let s = c.run(RunRequest { seconds: 0.6 }).await.unwrap().into_inner();
+    assert!(!s.radio.unwrap().link_up, "lost since 0.5 s");
+    let err = c.inject_fault(at(0.2)).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_argument");
+    assert_eq!(err.message(), "fault time 0.2 s has passed (the session is at 1 s)");
+}
+
+#[tokio::test]
+async fn a_world_can_be_named() {
+    let mut c = start().await;
+    c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    assert_eq!(c.get_world(Empty {}).await.unwrap().into_inner().name, "Flat field");
+    let err = c.load(LoadRequest { world_path: "nowhere".into(), ..open_loop(Mode::Lockstep) }).await.unwrap_err();
+    assert_eq!(kind(&err), "config");
+    assert!(err.message().contains("nowhere.toml"), "{}", err.message());
 }
