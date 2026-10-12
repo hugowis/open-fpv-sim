@@ -257,8 +257,10 @@ pub struct VideoLink {
     last_pos: Option<DVec3>,
     tracker: SyncTracker,
     diversity: Diversity,
-    /// Interference per antenna for the frequency it was computed for (the emitters and the goggles do not move).
-    interference: Option<(f64, Vec<f64>)>,
+    /// Interference per antenna for the frequency it was computed for (the emitters and the goggles do not
+    /// move), keyed on the injected emitter too: a runtime injection or clear must take effect on its next
+    /// field even though the frequency is unchanged.
+    interference: Option<(f64, Option<Emitter>, Vec<f64>)>,
     pos: Signal<DVec3>,
     att: Signal<DQuat>,
     vtx_present: Signal<f64>,
@@ -316,15 +318,16 @@ impl VideoLink {
     }
 
     fn interference_for(&mut self, freq_mhz: f64) -> Vec<f64> {
+        let injected = self.handle.emitter();
         match &self.interference {
-            Some((f, values)) if *f == freq_mhz => values.clone(),
+            Some((f, e, values)) if *f == freq_mhz && *e == injected => values.clone(),
             _ => {
                 let mut emitters = self.params.world.emitters.clone();
-                if let Some(e) = self.handle.emitter() {
+                if let Some(e) = injected {
                     emitters.push(e);
                 }
                 let values = interference_dbm(&LinkWorld { emitters, ..self.params.world.clone() }, freq_mhz, self.params.ground_bounce);
-                self.interference = Some((freq_mhz, values.clone()));
+                self.interference = Some((freq_mhz, injected, values.clone()));
                 values
             }
         }

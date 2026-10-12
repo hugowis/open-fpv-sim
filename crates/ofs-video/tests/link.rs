@@ -1,8 +1,8 @@
 use glam::{DQuat, DVec3};
-use ofs_core::{names, Bus, Model, StepCtx};
+use ofs_core::{names, Bus, Model, Scheduler, StepCtx};
 use ofs_video::link::*;
 use ofs_core::shape::Shape;
-use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_rf::propagation::{fspl_db, power_sum_dbm, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -344,4 +344,57 @@ fn odd_positions_give_finite_values() {
         }
         assert!(rig.get(&names::video_rssi("omni")).is_finite(), "rssi at {pos}");
     }
+}
+
+fn emitter() -> Emitter {
+    Emitter {
+        position: DVec3::new(5.0, 0.0, -1.7),
+        freq_mhz: 5700.0,
+        power_mw: 500.0,
+        antenna: omni(DVec3::NEG_Z),
+    }
+}
+
+fn get(s: &Scheduler, name: &str) -> f64 {
+    s.bus().get(s.bus().lookup::<f64>(name).unwrap())
+}
+
+/// Builds the link over the bare open field (the clean-picture rig: the quad parked 50 m north, transmitting
+/// 25 mW on 5800), runs 0.2 s (ten fields), and returns (snr_db, interference_dbm) as published.
+fn run_link(emitter: Option<Emitter>) -> (f64, f64) {
+    let params = bare(open_field());
+    let handle = VtxInterferenceHandle::default();
+    handle.set(emitter);
+    let mut bus = Bus::new();
+    let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+    bus.set(pos, DVec3::new(50.0, 0.0, -10.0));
+    let att = bus.signal::<DQuat>(names::BODY_ATT);
+    bus.set(att, DQuat::IDENTITY);
+    for (name, value) in [(names::VTX_PRESENT, 1.0), (names::VTX_FREQ_MHZ, 5800.0), (names::VTX_POWER_MW, 25.0)] {
+        let sig = bus.signal::<f64>(name);
+        bus.set(sig, value);
+    }
+    let link = VideoLink::new(params, 160, 7, handle, &mut bus);
+    let mut s = Scheduler::new(8000, bus);
+    s.add(Box::new(link));
+    s.run_for(0.2).unwrap();
+    (get(&s, names::VIDEO_SNR), get(&s, names::VIDEO_INTERFERENCE))
+}
+
+#[test]
+fn the_injected_emitter_degrades_the_picture() {
+    let noisy = run_link(Some(emitter()));
+    let clean = run_link(None);
+    assert!(noisy.1 > clean.1 + 3.0, "interference {} -> {}", clean.1, noisy.1);
+    // The receiver sums the interference with its noise floor in the power domain, so the SNR falls by
+    // exactly that sum's rise. The clean run publishes NO_SIGNAL_DBM (no emitters at all), which sits under
+    // the floor, so the rise is measured floor to interference, not clean-published to noisy-published.
+    let floor = bare(open_field()).world.noise_floor_dbm;
+    let rise = power_sum_dbm([floor, noisy.1]) - power_sum_dbm([floor, clean.1]);
+    assert!(
+        (clean.0 - noisy.0 - rise).abs() < 1e-6,
+        "SNR fell {} dB, the floor-plus-interference sum rose {} dB",
+        clean.0 - noisy.0,
+        rise
+    );
 }

@@ -1,4 +1,4 @@
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 
@@ -82,4 +82,51 @@ fn a_motor_without_vibration_params_stays_clean() {
     assert_eq!(gyro, DVec3::ZERO);
     assert_eq!(accel.x, 0.0);
     assert_eq!(accel.y, 0.0);
+}
+
+#[test]
+fn the_gyro_fault_adds_its_bias_exactly() {
+    let mut bus = Bus::new();
+    let bias = bus.signal::<DVec3>(names::FAULT_IMU_GYRO_BIAS);
+    bus.set(bias, DVec3::new(0.1, 0.0, 0.0));
+    let rate = bus.signal::<DVec3>(names::BODY_RATE_FRD);
+    bus.set(rate, DVec3::ZERO);
+    let att = bus.signal::<DQuat>(names::BODY_ATT);
+    bus.set(att, DQuat::IDENTITY);
+    let accel_ned = bus.signal::<DVec3>(names::BODY_ACCEL_NED);
+    bus.set(accel_ned, DVec3::new(0.0, 0.0, -ofs_core::consts::GRAVITY_MPS2));
+    let mut imu = Imu::new(params(None), 7, &mut bus);
+    imu.step(&ofs_core::StepCtx { tick: 0, time_s: 0.0, dt_s: DT }, &mut bus).unwrap();
+    let gyro = bus.get(bus.lookup::<DVec3>(names::IMU_GYRO).unwrap());
+    assert!((gyro.x - 0.1).abs() < 1e-12, "{gyro:?}");
+    assert_eq!(gyro.y, 0.0);
+    assert_eq!(gyro.z, 0.0);
+}
+
+#[test]
+fn the_gyro_fault_scales_the_noise_std_exactly() {
+    // Same seed, std 0.002: scale 3.0 triples every sample, so the sample std is exactly 3x.
+    fn sampled_std(noise_scale: f64) -> f64 {
+        let mut bus = Bus::new();
+        let p = ImuParams {
+            gyro_noise_std_radps: 0.002,
+            gyro_bias_radps: DVec3::ZERO,
+            accel_noise_std_mps2: 0.0,
+            accel_bias_mps2: DVec3::ZERO,
+            vibration: None,
+        };
+        let mut imu = Imu::new(p, 7, &mut bus);
+        // The model builds the multiplicative seam at its identity, so the scale goes in after construction.
+        let scale = bus.signal::<f64>(names::FAULT_IMU_NOISE_SCALE);
+        bus.set(scale, noise_scale);
+        let mut samples = Vec::with_capacity(1000);
+        for k in 0..1000 {
+            imu.step(&ofs_core::StepCtx { tick: k, time_s: k as f64 * DT, dt_s: DT }, &mut bus).unwrap();
+            samples.push(bus.get(bus.lookup::<DVec3>(names::IMU_GYRO).unwrap()).x);
+        }
+        let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+        (samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / samples.len() as f64).sqrt()
+    }
+    let ratio = sampled_std(3.0) / sampled_std(1.0);
+    assert!((ratio - 3.0).abs() < 1e-9, "the same samples scaled: {ratio}");
 }

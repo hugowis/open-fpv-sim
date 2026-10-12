@@ -60,6 +60,31 @@ fn load_step_sags_instantly_then_relaxes() {
 }
 
 #[test]
+fn a_weak_cell_deepens_the_sag_exactly_by_its_offsets() {
+    let mut clean = sim(params());
+    load(&mut clean, 10.0);
+    clean.step().unwrap();
+    let mut weak = sim(params());
+    {
+        let bus = weak.bus_mut();
+        for (name, value) in [
+            (names::FAULT_BATTERY_R_OFFSET_OHM, 0.02),
+            (names::FAULT_BATTERY_V_OFFSET_V, 0.1),
+            (names::FAULT_BATTERY_WEAK_CELL, 1.0),
+        ] {
+            let sig = bus.signal::<f64>(name);
+            bus.set(sig, value);
+        }
+    }
+    load(&mut weak, 10.0);
+    weak.step().unwrap();
+    let drop = get(&clean, names::BATTERY_VOLTAGE) - get(&weak, names::BATTERY_VOLTAGE);
+    assert!((drop - (10.0 * 0.02 + 0.1)).abs() < 1e-9, "sag deepens by I·Δr + Δv, got {drop}");
+    // The Thevenin state is untouched: the same SoC and consumed charge.
+    assert_eq!(get(&weak, names::BATTERY_SOC), get(&clean, names::BATTERY_SOC));
+}
+
+#[test]
 fn consumed_capacity_integrates_current() {
     let mut s = sim(params());
     load(&mut s, 10.0);

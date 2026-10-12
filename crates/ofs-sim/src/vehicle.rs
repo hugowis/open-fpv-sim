@@ -1478,4 +1478,51 @@ mod tests {
         let shadowed = snr_at(north, east, true, 1);
         assert!(open.snr_db - shadowed.snr_db > 15.0, "open {} dB, behind the building {} dB", open.snr_db, shadowed.snr_db);
     }
+
+    #[test]
+    fn cell_voltages_synthesize_equal_shares_and_the_weak_delta() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.run_for(0.1).unwrap();
+        let clean = vehicle.state();
+        assert_eq!(clean.battery_cell_voltages.len(), 6);
+        let share = clean.battery_voltage_v / 6.0;
+        assert!(clean.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
+        vehicle.set_fault(Fault::WeakCell { cell: 0, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap();
+        let weak = vehicle.state();
+        assert!(weak.battery_cell_voltages[0] < share - 0.05, "cell 0 carries the delta: {:?}", weak.battery_cell_voltages);
+        assert!((weak.battery_cell_voltages[3] - share).abs() < 1e-9, "the healthy cells are unchanged");
+        vehicle.clear_faults();
+        let back = vehicle.state();
+        assert!(back.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
+    }
+
+    #[test]
+    fn the_injected_emitter_reaches_the_state_snapshot() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.run_for(0.2).unwrap();
+        let clean = vehicle.state().video;
+        vehicle
+            .set_fault(
+                Fault::VtxInterference {
+                    freq_mhz: 5700.0,
+                    power_mw: 500.0,
+                    position_ned_m: DVec3::new(5.0, 0.0, -1.7),
+                },
+                true,
+            )
+            .unwrap();
+        vehicle.run_for(0.2).unwrap();
+        let noisy = vehicle.state().video;
+        assert!(
+            noisy.interference_dbm > clean.interference_dbm + 3.0,
+            "{:?} -> {:?}",
+            clean.interference_dbm,
+            noisy.interference_dbm
+        );
+        assert!(noisy.snr_db < clean.snr_db);
+        vehicle.clear_faults();
+        vehicle.run_for(0.2).unwrap();
+        let back = vehicle.state().video;
+        assert!((back.interference_dbm - clean.interference_dbm).abs() < 0.5, "clears back: {:?}", back.interference_dbm);
+    }
 }
