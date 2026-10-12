@@ -81,9 +81,15 @@ mod tests {
         assert!(!s.running);
         assert!(matches!(&s.failure, Some(SimError::Other(m)) if m.contains("internal panic: test panic in step")), "{:?}", s.failure);
         drop(slot);
-        let e = events.try_recv().unwrap();
-        assert_eq!(e.kind, pb::EventKind::SimError as i32);
-        assert!(e.message.contains("test panic in step"), "{}", e.message);
+        // A slow machine may also publish an Overrun first, so look through every event.
+        let mut seen = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            seen.push((e.kind, e.message));
+        }
+        assert!(
+            seen.iter().any(|(k, m)| *k == pb::EventKind::SimError as i32 && m.contains("test panic in step")),
+            "{seen:?}"
+        );
         assert_eq!(pace_once(&shared), IDLE, "a poisoned session is left alone");
     }
 
