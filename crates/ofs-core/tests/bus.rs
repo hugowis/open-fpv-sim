@@ -138,3 +138,16 @@ fn tables_must_be_non_empty_and_strictly_increasing() {
     assert!(interp::check_table(&[(1.0, 1.0), (1.0, 2.0)], "t").unwrap_err().contains("strictly increasing"));
     assert!(interp::check_table(&[(0.0, f64::NAN)], "t").unwrap_err().contains("finite"));
 }
+
+#[test]
+fn lists_every_signal_with_its_kind_in_name_order() {
+    let mut bus = Bus::new();
+    let _q: Signal<DQuat> = bus.signal("b.att");
+    let _s: Signal<f64> = bus.signal("a.x");
+    let _v: Signal<DVec3> = bus.signal("c.pos");
+    let listed: Vec<(&str, ofs_core::SignalKind)> = bus.signals().collect();
+    assert_eq!(
+        listed,
+        [("a.x", ofs_core::SignalKind::Scalar), ("b.att", ofs_core::SignalKind::Quat), ("c.pos", ofs_core::SignalKind::Vec3)]
+    );
+}

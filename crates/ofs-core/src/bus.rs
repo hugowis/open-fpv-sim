@@ -110,6 +110,11 @@ impl Bus {
         T::arena_mut(self)[s.index] = value;
     }
 
+    /// Every registered signal's name and kind, in name order (the recorder resolves its patterns against this).
+    pub fn signals(&self) -> impl Iterator<Item = (&str, SignalKind)> + '_ {
+        self.names.iter().map(|(name, &(kind, _))| (name.as_str(), kind))
+    }
+
     /// Hash of every signal's name and exact bit pattern, in name order.
     pub fn digest(&self) -> u64 {
         let mut h = Fnv1a::new();

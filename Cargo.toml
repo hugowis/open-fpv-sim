@@ -27,6 +27,11 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 tempfile = "3"
 proptest = "1"
+# Pinned upstream, not crates.io: mcap 0.25.0 writes the summary's channel and schema records in HashMap order,
+# so identical runs give different files. 00e47a1b (0.25.1, unreleased) writes them in id order
+# (foxglove/mcap#1838). See docs/research/mcap-determinism.md; switch to the release once it ships.
+mcap = { git = "https://github.com/foxglove/mcap.git", rev = "00e47a1b", default-features = false, features = ["zstd"] }
+serde_json = "1"
 ofs-core = { path = "crates/ofs-core" }
 ofs-physics = { path = "crates/ofs-physics" }
 ofs-electrical = { path = "crates/ofs-electrical" }
@@ -38,3 +43,4 @@ ofs-rf = { path = "crates/ofs-rf" }
 ofs-video = { path = "crates/ofs-video" }
 ofs-proto = { path = "crates/ofs-proto" }
 ofs-client = { path = "crates/ofs-client" }
+ofs-log = { path = "crates/ofs-log" }
