@@ -8,3 +8,5 @@ __pycache__/
 /godot/.godot/
 /build/
 /.worktrees/
+/python/build/
+/dist/

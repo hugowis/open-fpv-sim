@@ -1,6 +1,7 @@
 """Client for the ofs-sim gRPC server."""
 from __future__ import annotations
 
+import atexit
 import collections
 import collections.abc
 import math
@@ -11,6 +12,7 @@ import socket
 import subprocess
 import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 
 import grpc
@@ -535,6 +537,12 @@ def connect(address: str = "127.0.0.1:50051") -> Sim:
     return Sim(address)
 
 
+def _close_at_exit(ref) -> None:
+    sim = ref()
+    if sim is not None:
+        sim.close()
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -543,7 +551,9 @@ def _free_port() -> int:
 
 def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".ofs-data",
            timeout_s: float = 15.0) -> Sim:
-    """Starts an ofs-sim server on a free local port and connects to it."""
+    """Starts an ofs-sim server on a free local port and connects to it. The server stops with `close()`, or when
+    the script exits (a script need not close it: its session's recording and Blackbox logs are finished either
+    way)."""
     if not headless:
         raise NotImplementedError("the Godot pilot client arrives with M2b; only headless=True is available")
     binary = binary or os.environ.get("OFS_SIM_BIN") or shutil.which("ofs-sim")
@@ -567,8 +577,10 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
     finally:
         channel.close()
     try:
-        return Sim(address, proc)
+        sim = Sim(address, proc)
     except BaseException:  # e.g. ProtocolMismatch: don't leave the server running
         proc.kill()
         proc.wait()
         raise
+    atexit.register(_close_at_exit, weakref.ref(sim))
+    return sim

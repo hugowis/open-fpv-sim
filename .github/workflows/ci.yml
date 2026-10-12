@@ -96,7 +96,15 @@ jobs:
       - run: cargo test -p ofs-video --test vtx_live --locked -- --ignored --test-threads=1
       - run: cargo build -p ofs-sim --locked
       - run: python -m pip install -e "python[dev]"
-      - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py python/tests/test_sitl_telemetry.py python/tests/test_sitl_tramp.py python/tests/test_sitl_video.py python/tests/test_sitl_faults.py -v
+      - run: python -m pytest python/tests/test_sitl_hover.py python/tests/test_sitl_radio.py python/tests/test_sitl_telemetry.py python/tests/test_sitl_tramp.py python/tests/test_sitl_video.py python/tests/test_sitl_faults.py python/tests/test_sitl_sandbox.py -v
+      # The package as PyPI would ship it (spec §8): the built wheel alone in a clean venv runs the §6.2 example
+      # against real Betaflight. Run from the repository root, `import ofs` finds the installed wheel, not python/.
+      - run: python -m build python --outdir dist
+      - run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install "$(ls dist/*.whl)[log]" pytest
+          "$RUNNER_TEMP/wheel-venv/bin/python" -c "import ofs; assert 'site-packages' in ofs.__file__, ofs.__file__"
+          OFS_SIM_BIN=target/debug/ofs-sim "$RUNNER_TEMP/wheel-venv/bin/python" -m pytest python/tests/test_sitl_sandbox.py -v
       - uses: actions/cache@v4
         with:
           path: build/godot-dl
@@ -104,3 +112,27 @@ jobs:
       # The game against real Betaflight (OFS_SITL_LAUNCH is set above): arm, climb, failsafe on a radio cut, reload.
       # The runner builds ofs-sim and ofs-godot and downloads the pinned Godot itself.
       - run: bash scripts/run-godot-tests.sh e2e
+
+  # PyPI, on version tags only (v*): nothing publishes from merges or branch pushes. Trusted publishing: the PyPI
+  # project trusts this workflow's `pypi` environment, so no token is stored. The first tag that publishes is the
+  # maintainer's call.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core, windows, sitl]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: The tag names the package version
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
+          test "$GITHUB_REF_NAME" = "v$version" || { echo "tag $GITHUB_REF_NAME does not match the package version $version"; exit 1; }
+      - run: python -m pip install build
+      - run: python -m build python --outdir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

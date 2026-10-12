@@ -42,3 +42,6 @@ serial 5 8192 115200 57600 0 115200
 set vtx_band = 5
 set vtx_channel = 1
 set vtx_power = 2
+# M4c Blackbox: SITL's VIRTUAL device writes LOGnnnnn.BFL into the quad's firmware directory each time it is armed;
+# the server copies a session's logs into <data_dir>/logs when the session ends.
+set blackbox_device = VIRTUAL

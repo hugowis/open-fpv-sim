@@ -1,6 +1,8 @@
 """M1 exit criteria. Needs Betaflight SITL: set OFS_SITL_LAUNCH (cleanup defaults automatically on Linux and under WSL)."""
+import hashlib
 import importlib.util
 import os
+import pathlib
 
 import pytest
 
@@ -26,7 +28,8 @@ def test_betaflight_sitl_hover(sim, tmp_path):
 
 
 def test_betaflight_sitl_hover_is_deterministic(sim):
-    """Spec §5.5/§9: same quad + seed + inputs in lockstep give identical runs, Betaflight SITL included.
+    """Spec §5.5/§9: same quad + seed + inputs in lockstep give identical runs, Betaflight SITL included, down to
+    the bytes of their MCAP recordings (§8.4; each lockstep load records).
 
     Every load() relaunches SITL from <data_dir>/<quad stem>-<hash>/eeprom.bin. The first-ever load also applies
     betaflight.diff, so a warm-up flight runs first and both compared flights boot from the same EEPROM.
@@ -38,9 +41,11 @@ def test_betaflight_sitl_hover_is_deterministic(sim):
         sim.load(QUAD, seed=1)
         flights.append(hover.fly_hover(sim))
         flights[-1]["final"] = sim.state()
+        flights[-1]["recording"] = hashlib.sha256(pathlib.Path(sim.log.path).read_bytes()).hexdigest()
     a, b = flights[1], flights[2]
     assert a["armed"], "motors never spun"
     assert len(a["states"]) == len(b["states"])
     diverged = next((i for i, (x, y) in enumerate(zip(a["states"], b["states"])) if x != y), None)
     assert diverged is None, f"runs diverge at state {diverged}:\n{a['states'][diverged]}\n{b['states'][diverged]}"
     assert a["final"] == b["final"]
+    assert a["recording"] == b["recording"], "the two flights' recordings differ"
