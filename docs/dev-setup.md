@@ -200,6 +200,13 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
    snaps to the built-in table. A band/channel change does nothing — Tramp is frequency-only; the live test
    pins the frequency path.
 
+## The fault catalog (M4b)
+
+The client and server speak **protocol 8**: the faults' wire shapes live in the `Fault` oneof of
+`proto/ofs/v1/sim.proto`, the injectable Python dataclasses in `python/ofs/faults.py` (`sim.inject(...)` /
+`sim.clear_faults()`), and the models, constants and their estimate status in `docs/research/faults.md` —
+regenerate the stubs with the table's protoc recipe after changing the proto.
+
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
 - **Symptom:** SITL looks silent and runs fail with "no motor output within 5000 ms" or a first-exchange timeout.

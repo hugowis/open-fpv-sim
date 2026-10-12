@@ -106,4 +106,38 @@ inline) are refused at load with a message naming the move; the three shipped qu
 (`quads/opendrone-5f-freestyle.toml`, `quads/opendrone-5f-tramp.toml`, `quads/opendrone-5f-weak-link.toml`)
 are the worked example of the migration.
 
+## The fault catalog
+
+Scripts can break the aircraft in the ways real aircraft break: eight faults, injectable mid-flight from Python
+or gRPC, each raising `fault_injected` / `fault_cleared` events and all cleared by `clear_faults()`. Fault
+randomness draws from its own stream, so a fault-inactive run stays bit-identical to a fault-free one. The
+mechanisms, constants and their estimate status are in `docs/research/faults.md`.
+
+| Fault | Meaning |
+|---|---|
+| `RadioLinkLoss()` | every uplink packet is lost: the receiver goes silent, Betaflight fails safe |
+| `RadioLoss(fraction)` | an extra per-packet uplink loss probability on top of the link model's own |
+| `BurstLoss(on_ms, off_ms)` | the uplink dies for `on_ms`, delivers for `off_ms`, repeating from session start |
+| `MotorFailure(motor, scale)` | motor `motor` makes `scale` of its torque and current; 0 = dead, coasting down through prop drag |
+| `PropDamage(prop, thrust_scale, imbalance_kgm)` | the prop loses thrust and torque and gains `imbalance_kgm` of airframe vibration |
+| `WeakCell(cell, r_offset_ohm, v_offset_v)` | one cell sags deeper under load; Betaflight's own telemetry reads it |
+| `GyroFault(bias_radps, noise_scale)` | the gyro reads an extra bias and a multiple of its normal noise |
+| `VtxInterference(freq_mhz, power_mw, position_ned_m)` | a transmitter next door breaks up the picture |
+
+The §6.2 shape of the spec's scripting example, against the shipped API:
+
+    import ofs
+
+    sim = ofs.launch(binary="target/debug/ofs-sim")
+    sim.load("quads/opendrone-5f-freestyle.toml", open_loop_fc=True)
+    sim.set_sticks(throttle=0.6)
+    sim.run(1.0)
+    sim.inject(ofs.faults.MotorFailure(motor=2, scale=0.0))   # motor 3 dies in flight
+    sim.run(2.0)
+    print(sim.state().motor_rpm)                              # the dead one falls behind
+    sim.clear_faults()
+    sim.close()
+
+The same faults fly from the game: the **K** key injects and clears `RadioLinkLoss`.
+
 License: GPL-3.0-or-later.
