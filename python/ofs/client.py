@@ -19,7 +19,7 @@ from ofs.v1 import sim_pb2_grpc as pbg
 
 from .errors import ProtocolMismatch, from_rpc_error
 
-PROTOCOL_VERSION = 7
+PROTOCOL_VERSION = 8
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -214,6 +214,7 @@ class State:
     serial_dropped_bytes: int = 0
     video: VideoLink = field(default_factory=VideoLink)
     collision_speed_mps: float = 0.0  # the last collision's inward speed (0 until one happens)
+    battery_cell_voltages: tuple = ()  # per-cell voltage (equal shares; the weak cell droops)
 
     @property
     def altitude_m(self) -> float:
@@ -292,6 +293,7 @@ def _state(m) -> State:
         serial_dropped_bytes=m.serial_dropped_bytes,
         video=_video(m.video),
         collision_speed_mps=m.collision_speed_mps,
+        battery_cell_voltages=tuple(m.battery_cell_voltages),
     )
 
 

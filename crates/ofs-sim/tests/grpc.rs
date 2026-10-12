@@ -210,7 +210,9 @@ async fn faults_drop_the_radio_link_and_events_report_it() {
     while let Ok(e) = events.try_recv() {
         kinds.push(e.kind());
     }
-    assert_eq!(kinds, vec![EventKind::LinkUp, EventKind::LinkDown, EventKind::LinkUp]);
+    // The fault injection and the clear are events now (M4b): injected before the link drops, cleared as the
+    // link comes back.
+    assert_eq!(kinds, vec![EventKind::LinkUp, EventKind::FaultInjected, EventKind::LinkDown, EventKind::LinkUp, EventKind::FaultCleared]);
     let err = c.inject_fault(Fault { kind: None }).await.unwrap_err();
     assert_eq!(kind(&err), "invalid_argument");
 }

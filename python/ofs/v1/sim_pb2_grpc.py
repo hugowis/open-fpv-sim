@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 7: protocol 6 plus the video link's field validity and glass-to-glass latency (M3e).
+    """Simulator control, protocol version 8: protocol 7 plus the v1 fault catalog's wire shape, events and python
+    dataclasses (M4b).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
     state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -120,7 +121,8 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 7: protocol 6 plus the video link's field validity and glass-to-glass latency (M3e).
+    """Simulator control, protocol version 8: protocol 7 plus the v1 fault catalog's wire shape, events and python
+    dataclasses (M4b).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
     state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -323,7 +325,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 7: protocol 6 plus the video link's field validity and glass-to-glass latency (M3e).
+    """Simulator control, protocol version 8: protocol 7 plus the v1 fault catalog's wire shape, events and python
+    dataclasses (M4b).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
     state, and the world with its analog video link. One session (loaded quad) per server.
     """

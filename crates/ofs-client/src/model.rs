@@ -430,6 +430,10 @@ pub enum EventKind {
     VideoLost,
     VideoRestored,
     Collision,
+    /// A fault became active (the message names it).
+    FaultInjected,
+    /// A fault stopped being active (the message names it).
+    FaultCleared,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -450,6 +454,8 @@ impl EventKind {
             EventKind::VideoLost => "video_lost",
             EventKind::VideoRestored => "video_restored",
             EventKind::Collision => "collision",
+            EventKind::FaultInjected => "fault_injected",
+            EventKind::FaultCleared => "fault_cleared",
             EventKind::Unknown => "unknown",
         }
     }
@@ -479,6 +485,8 @@ impl Event {
             Ok(pb::EventKind::VideoLost) => EventKind::VideoLost,
             Ok(pb::EventKind::VideoRestored) => EventKind::VideoRestored,
             Ok(pb::EventKind::Collision) => EventKind::Collision,
+            Ok(pb::EventKind::FaultInjected) => EventKind::FaultInjected,
+            Ok(pb::EventKind::FaultCleared) => EventKind::FaultCleared,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

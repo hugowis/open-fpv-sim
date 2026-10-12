@@ -44,6 +44,8 @@ pub struct Session {
     last_vtx: Option<VtxInfo>,
     last_dropped: u64,
     last_video_lost: Option<bool>,
+    /// The faults that were active at the last `events_for`; its edge raises the fault events.
+    last_faults: Vec<String>,
     /// Unit tests only: the next `step` panics (exercises panic containment).
     #[cfg(test)]
     pub panic_on_step: bool,
@@ -195,6 +197,7 @@ impl Session {
             last_vtx: None,
             last_dropped: 0,
             last_video_lost: None,
+            last_faults: Vec::new(),
             #[cfg(test)]
             panic_on_step: false,
         }
@@ -226,15 +229,16 @@ impl Session {
     }
 
     /// Events implied by the vehicle since the last call: radio link up or down, Betaflight restarts,
-    /// VTX changes, dropped UART bytes, video sync lost or regained.
+    /// VTX changes, dropped UART bytes, video sync lost or regained, faults activating or clearing.
     pub fn changes(&mut self) -> Vec<pb::Event> {
+        let faults = self.vehicle.active_fault_names();
         let s = self.vehicle.state();
-        self.events_for(&s)
+        self.events_for(&s, faults)
     }
 
-    /// The events a vehicle state implies, compared against the remembered previous state. Split from
-    /// `changes` so the rules are testable with a hand-built state.
-    pub(crate) fn events_for(&mut self, s: &VehicleState) -> Vec<pb::Event> {
+    /// The events a vehicle state implies, compared against the remembered previous state; `faults` is the
+    /// active faults' names. Split from `changes` so the rules are testable with a hand-built state.
+    pub(crate) fn events_for(&mut self, s: &VehicleState, faults: Vec<String>) -> Vec<pb::Event> {
         let mut out = Vec::new();
         if s.radio.link_up != self.last_link_up {
             self.last_link_up = s.radio.link_up;
@@ -282,6 +286,17 @@ impl Session {
             }
             self.last_video_lost = Some(lost);
         }
+        for name in &faults {
+            if !self.last_faults.contains(name) {
+                out.push(event(s.time_s, pb::EventKind::FaultInjected, name.clone()));
+            }
+        }
+        for name in &self.last_faults {
+            if !faults.contains(name) {
+                out.push(event(s.time_s, pb::EventKind::FaultCleared, name.clone()));
+            }
+        }
+        self.last_faults = faults;
         out
     }
 
@@ -295,6 +310,7 @@ impl Session {
             rate_frd_radps: vec3(s.rate_frd_radps),
             battery_voltage_v: s.battery_voltage_v,
             battery_current_a: s.battery_current_a,
+            battery_cell_voltages: s.battery_cell_voltages,
             motor_rpm: s.motor_rpm,
             motor_cmd: s.motor_cmd,
             radio: Some(pb::RadioLink {
@@ -442,16 +458,16 @@ mod tests {
         let mut session = testing::open_loop_session(RunMode::Lockstep);
         let mut s = session.vehicle.state();
         s.vtx = VtxInfo { present: true, band: 5, channel: 1, freq_mhz: 5658, power_mw: 200, pit_mode: false };
-        let first = session.events_for(&s);
+        let first = session.events_for(&s, session.vehicle.active_fault_names());
         assert!(first.iter().all(|e| e.kind != pb::EventKind::VtxChanged as i32), "the first sample is not a change");
         s.vtx.channel = 3;
         s.vtx.freq_mhz = 5732;
-        let events = session.events_for(&s);
+        let events = session.events_for(&s, session.vehicle.active_fault_names());
         let change = events.iter().find(|e| e.kind == pb::EventKind::VtxChanged as i32).expect("a vtx_changed event");
         assert_eq!(change.message, "R3 5732 MHz 200 mW");
-        assert!(session.events_for(&s).is_empty(), "no change, no event");
+        assert!(session.events_for(&s, session.vehicle.active_fault_names()).is_empty(), "no change, no event");
         s.serial_dropped_bytes = 12;
-        let events = session.events_for(&s);
+        let events = session.events_for(&s, session.vehicle.active_fault_names());
         let overflow = events.iter().find(|e| e.kind == pb::EventKind::SerialOverflow as i32).expect("a serial_overflow event");
         assert!(overflow.message.contains("12 byte"), "{}", overflow.message);
     }
@@ -479,19 +495,19 @@ mod tests {
                 .filter(|e| e.kind == pb::EventKind::VideoLost as i32 || e.kind == pb::EventKind::VideoRestored as i32)
                 .collect::<Vec<_>>()
         };
-        assert!(video_events(session.events_for(&s)).is_empty(), "the first sample is not a change");
+        assert!(video_events(session.events_for(&s, session.vehicle.active_fault_names())).is_empty(), "the first sample is not a change");
         s.video.sync = VideoSync::Unstable;
-        assert!(video_events(session.events_for(&s)).is_empty(), "tearing is not a loss");
+        assert!(video_events(session.events_for(&s, session.vehicle.active_fault_names())).is_empty(), "tearing is not a loss");
         s.video.sync = VideoSync::Lost;
         s.video.snr_db = -2.04;
-        let lost = video_events(session.events_for(&s));
+        let lost = video_events(session.events_for(&s, session.vehicle.active_fault_names()));
         assert_eq!(lost.len(), 1);
         assert_eq!(lost[0].kind, pb::EventKind::VideoLost as i32);
         assert_eq!(lost[0].message, "video lost: SNR -2.0 dB on omni");
-        assert!(video_events(session.events_for(&s)).is_empty(), "still lost: no new event");
+        assert!(video_events(session.events_for(&s, session.vehicle.active_fault_names())).is_empty(), "still lost: no new event");
         s.video.sync = VideoSync::Locked;
         s.video.snr_db = 9.0;
-        let back = video_events(session.events_for(&s));
+        let back = video_events(session.events_for(&s, session.vehicle.active_fault_names()));
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].kind, pb::EventKind::VideoRestored as i32);
         assert_eq!(back[0].message, "video restored: SNR 9.0 dB on omni");
@@ -518,6 +534,7 @@ mod tests {
             rate_frd_radps: glam::DVec3::ZERO,
             battery_voltage_v: 25.0,
             battery_current_a: 0.0,
+            battery_cell_voltages: vec![25.0 / 6.0; 6],
             motor_rpm: vec![0.0; 4],
             motor_cmd: vec![0.0; 4],
             radio: crate::vehicle::RadioState {
@@ -548,19 +565,42 @@ mod tests {
             collision_object: building_a,
             collision_event_count: 1,
         };
-        let events = session.events_for(&state);
+        let events = session.events_for(&state, session.vehicle.active_fault_names());
         assert_eq!(events.len(), 1, "{events:?}");
         assert_eq!(events[0].kind, pb::EventKind::Collision as i32);
         assert_eq!(events[0].message, "HIT BuildingA 7.2 m/s");
         // The same count again raises nothing: the edge is the counter.
-        assert!(session.events_for(&state).is_empty());
+        assert!(session.events_for(&state, session.vehicle.active_fault_names()).is_empty());
         // A negative object index is the ground.
         let mut ground = state;
         ground.collision_object = -1;
         ground.collision_event_count = 2;
-        let events = session.events_for(&ground);
+        let events = session.events_for(&ground, session.vehicle.active_fault_names());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].message, "HARD LANDING 7.2 m/s");
+    }
+
+    #[test]
+    fn faults_activating_and_clearing_become_one_event_each() {
+        let mut session = testing::open_loop_session(RunMode::Lockstep);
+        let s = session.vehicle.state();
+        assert!(session.events_for(&s, Vec::new()).is_empty(), "no faults, no events");
+        let set = || vec!["radio_loss".to_string(), "weak_cell".to_string()];
+        let events = session.events_for(&s, set());
+        assert_eq!(
+            events.iter().map(|e| (e.kind(), e.message.as_str())).collect::<Vec<_>>(),
+            [(pb::EventKind::FaultInjected, "radio_loss"), (pb::EventKind::FaultInjected, "weak_cell")],
+            "each newly active fault raises one fault_injected naming it"
+        );
+        assert!(session.events_for(&s, set()).is_empty(), "an unchanged set raises nothing");
+        let events = session.events_for(&s, vec!["weak_cell".to_string()]);
+        assert_eq!(
+            events.iter().map(|e| (e.kind(), e.message.as_str())).collect::<Vec<_>>(),
+            [(pb::EventKind::FaultCleared, "radio_loss")],
+            "only the fault that went away is cleared"
+        );
+        let events = session.events_for(&s, Vec::new());
+        assert_eq!(events.iter().map(|e| (e.kind(), e.message.as_str())).collect::<Vec<_>>(), [(pb::EventKind::FaultCleared, "weak_cell")]);
     }
 
     #[test]

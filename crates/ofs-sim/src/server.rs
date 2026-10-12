@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use glam::DVec3;
 use ofs_config::{FcKind, WorldConfig};
 use ofs_core::scheduler::MAX_RUN_FOR_S;
 use ofs_core::{names::RC_AUX_COUNT, SimError};
@@ -55,6 +56,12 @@ pub(crate) fn loaded(slot: &mut Slot) -> Result<&mut Session, Status> {
 
 fn invalid_state(message: &str) -> Status {
     error("invalid_state", Code::FailedPrecondition, message)
+}
+
+/// NED metres from the proto's optional Vec3 (absent = the origin).
+fn dvec3(v: Option<pb::Vec3>) -> DVec3 {
+    let v = v.unwrap_or_default();
+    DVec3::new(v.x, v.y, v.z)
 }
 
 /// Validates sticks from a request (finite values, at most four aux channels; missing aux read -1).
@@ -355,10 +362,25 @@ impl Sim for SimService {
     async fn inject_fault(&self, req: Request<pb::Fault>) -> Result<Response<pb::Empty>, Status> {
         let fault = match req.into_inner().kind {
             Some(pb::fault::Kind::RadioLinkLoss(_)) => Fault::RadioLinkLoss,
+            Some(pb::fault::Kind::RadioLoss(m)) => Fault::RadioLoss { fraction: m.fraction },
+            Some(pb::fault::Kind::BurstLoss(m)) => {
+                Fault::BurstLoss { on_s: f64::from(m.on_ms) / 1000.0, off_s: f64::from(m.off_ms) / 1000.0 }
+            }
+            Some(pb::fault::Kind::MotorFailure(m)) => Fault::MotorFailure { motor: m.motor as usize, scale: m.scale },
+            Some(pb::fault::Kind::PropDamage(m)) => {
+                Fault::PropDamage { prop: m.prop as usize, thrust_scale: m.thrust_scale, imbalance_kgm: m.imbalance_kgm }
+            }
+            Some(pb::fault::Kind::WeakCell(m)) => {
+                Fault::WeakCell { cell: m.cell as usize, r_offset_ohm: m.r_offset_ohm, v_offset_v: m.v_offset_v }
+            }
+            Some(pb::fault::Kind::GyroFault(m)) => Fault::GyroFault { bias_radps: dvec3(m.bias_radps), noise_scale: m.noise_scale },
+            Some(pb::fault::Kind::VtxInterference(m)) => {
+                Fault::VtxInterference { freq_mhz: m.freq_mhz, power_mw: m.power_mw, position_ned_m: dvec3(m.position_ned_m) }
+            }
             None => return Err(error("invalid_argument", Code::InvalidArgument, "the fault has no kind")),
         };
         self.blocking(move |_, slot| {
-            loaded(slot)?.vehicle.set_fault(fault, true);
+            loaded(slot)?.vehicle.set_fault(fault, true).map_err(|e| sim_error(&e))?;
             Ok(pb::Empty {})
         })
         .await

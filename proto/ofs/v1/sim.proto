@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 7: protocol 6 plus the video link's field validity and glass-to-glass latency (M3e).
+// Simulator control, protocol version 8: protocol 7 plus the v1 fault catalog's wire shape, events and python
+// dataclasses (M4b).
 // Still: lockstep and real-time sessions, state and event streams, the pilot link, fault injection, OSD and VTX
 // state, and the world with its analog video link. One session (loaded quad) per server.
 service Sim {
@@ -192,6 +193,7 @@ message State {
   VideoLink video = 16;
   double collision_speed_mps = 17;   // the last collision's inward speed (0 until one happens)
   FcTelemetry fc_telemetry = 18;
+  repeated double battery_cell_voltages = 19;  // per-cell voltage (equal shares; the weak cell droops)
 }
 
 enum EventKind {
@@ -209,6 +211,8 @@ enum EventKind {
   EVENT_KIND_VIDEO_LOST = 11;      // the goggles lost sync
   EVENT_KIND_VIDEO_RESTORED = 12;  // and found it again
   EVENT_KIND_COLLISION = 13;       // the quad hit something: the message names the object and the speed
+  EVENT_KIND_FAULT_INJECTED = 14;  // a fault became active: the message names it
+  EVENT_KIND_FAULT_CLEARED = 15;   // a fault stopped being active: the message names it
 }
 
 message Event {
@@ -219,9 +223,53 @@ message Event {
 
 message RadioLinkLoss {}
 
+message RadioLoss {
+  double fraction = 1;  // extra per-packet loss probability, [0, 1]
+}
+
+message BurstLoss {
+  uint32 on_ms = 1;   // the window loses every uplink packet
+  uint32 off_ms = 2;  // then delivers normally; both > 0
+}
+
+message MotorFailure {
+  uint32 motor = 1;  // 0-based motor index
+  double scale = 2;  // torque/current scale, [0, 1]; 0 = dead motor
+}
+
+message PropDamage {
+  uint32 prop = 1;            // 0-based prop index
+  double thrust_scale = 2;    // thrust and torque scale, >= 0
+  double imbalance_kgm = 3;   // vibration amplitude (m·r), >= 0
+}
+
+message WeakCell {
+  uint32 cell = 1;            // 0-based cell index
+  double r_offset_ohm = 2;    // extra series resistance
+  double v_offset_v = 3;      // extra voltage drop
+}
+
+message GyroFault {
+  Vec3 bias_radps = 1;       // added to the IMU's gyro bias
+  double noise_scale = 2;    // multiplies the gyro noise std, >= 0
+}
+
+message VtxInterference {
+  double freq_mhz = 1;
+  double power_mw = 2;
+  Vec3 position_ned_m = 3;
+}
+
 message Fault {
   oneof kind {
     RadioLinkLoss radio_link_loss = 1;  // every uplink packet is lost while active
+    RadioLoss radio_loss = 2;
+    BurstLoss burst_loss = 3;
+    MotorFailure motor_failure = 4;
+    PropDamage prop_damage = 5;
+    WeakCell weak_cell = 6;
+    GyroFault gyro_fault = 7;
+    VtxInterference vtx_interference = 8;
   }
 }
 

@@ -116,7 +116,7 @@ fn step_ticks_advances_exactly_that_many_base_ticks() {
 #[test]
 fn the_link_loss_fault_drops_the_link_until_cleared() {
     let mut v = vehicle(1);
-    v.set_fault(Fault::RadioLinkLoss, true);
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
     v.run_for(0.5).unwrap();
     assert!(!v.state().radio.link_up);
     v.clear_faults();

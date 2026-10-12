@@ -261,6 +261,15 @@ def test_cutting_the_radio_raises_link_down(sim):
     assert "link_down" in [e.kind for e in sim.events()], [e.kind for e in sim.events()]
 
 
+def test_a_radio_loss_fault_round_trips_through_the_generated_stub():
+    from ofs.faults import RadioLoss
+    from ofs.v1 import sim_pb2 as pb
+
+    fault = RadioLoss(0.5)._to_pb()
+    assert fault.WhichOneof("kind") == "radio_loss"
+    assert fault.radio_loss.fraction == 0.5
+
+
 def test_two_lockstep_runs_give_identical_body_and_radio_signals(sim):
     runs = []
     for _ in range(2):

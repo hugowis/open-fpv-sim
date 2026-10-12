@@ -71,7 +71,7 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
     v.run_for(1.0).unwrap();
     assert!(armed(v), "never armed: {:?}", v.state().motor_cmd);
-    v.set_fault(Fault::RadioLinkLoss, true);
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
     let cut = v.state().time_s;
     let mut disarmed_after = None;
     while v.state().time_s < cut + 4.0 {

@@ -42,6 +42,8 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_VIDEO_LOST: _ClassVar[EventKind]
     EVENT_KIND_VIDEO_RESTORED: _ClassVar[EventKind]
     EVENT_KIND_COLLISION: _ClassVar[EventKind]
+    EVENT_KIND_FAULT_INJECTED: _ClassVar[EventKind]
+    EVENT_KIND_FAULT_CLEARED: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
@@ -66,6 +68,8 @@ EVENT_KIND_SERIAL_OVERFLOW: EventKind
 EVENT_KIND_VIDEO_LOST: EventKind
 EVENT_KIND_VIDEO_RESTORED: EventKind
 EVENT_KIND_COLLISION: EventKind
+EVENT_KIND_FAULT_INJECTED: EventKind
+EVENT_KIND_FAULT_CLEARED: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -276,7 +280,7 @@ class VideoLink(_message.Message):
     def __init__(self, present: _Optional[bool] = ..., snr_db: _Optional[float] = ..., interference_dbm: _Optional[float] = ..., rssi: _Optional[_Iterable[_Union[AntennaRssi, _Mapping]]] = ..., active_antenna: _Optional[str] = ..., noise: _Optional[float] = ..., sparkles: _Optional[float] = ..., chroma: _Optional[float] = ..., sync: _Optional[_Union[VideoSync, str]] = ..., field_valid: _Optional[bool] = ..., latency_ms: _Optional[int] = ...) -> None: ...
 
 class State(_message.Message):
-    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video", "collision_speed_mps", "fc_telemetry")
+    __slots__ = ("time_s", "position_ned_m", "velocity_ned_mps", "attitude", "rate_frd_radps", "battery_voltage_v", "battery_current_a", "motor_rpm", "motor_cmd", "radio", "running", "overruns", "fc_restarts", "vtx", "serial_dropped_bytes", "video", "collision_speed_mps", "fc_telemetry", "battery_cell_voltages")
     TIME_S_FIELD_NUMBER: _ClassVar[int]
     POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     VELOCITY_NED_MPS_FIELD_NUMBER: _ClassVar[int]
@@ -295,6 +299,7 @@ class State(_message.Message):
     VIDEO_FIELD_NUMBER: _ClassVar[int]
     COLLISION_SPEED_MPS_FIELD_NUMBER: _ClassVar[int]
     FC_TELEMETRY_FIELD_NUMBER: _ClassVar[int]
+    BATTERY_CELL_VOLTAGES_FIELD_NUMBER: _ClassVar[int]
     time_s: float
     position_ned_m: Vec3
     velocity_ned_mps: Vec3
@@ -313,7 +318,8 @@ class State(_message.Message):
     video: VideoLink
     collision_speed_mps: float
     fc_telemetry: FcTelemetry
-    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ..., collision_speed_mps: _Optional[float] = ..., fc_telemetry: _Optional[_Union[FcTelemetry, _Mapping]] = ...) -> None: ...
+    battery_cell_voltages: _containers.RepeatedScalarFieldContainer[float]
+    def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ..., collision_speed_mps: _Optional[float] = ..., fc_telemetry: _Optional[_Union[FcTelemetry, _Mapping]] = ..., battery_cell_voltages: _Optional[_Iterable[float]] = ...) -> None: ...
 
 class Event(_message.Message):
     __slots__ = ("time_s", "kind", "message")
@@ -329,11 +335,85 @@ class RadioLinkLoss(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class RadioLoss(_message.Message):
+    __slots__ = ("fraction",)
+    FRACTION_FIELD_NUMBER: _ClassVar[int]
+    fraction: float
+    def __init__(self, fraction: _Optional[float] = ...) -> None: ...
+
+class BurstLoss(_message.Message):
+    __slots__ = ("on_ms", "off_ms")
+    ON_MS_FIELD_NUMBER: _ClassVar[int]
+    OFF_MS_FIELD_NUMBER: _ClassVar[int]
+    on_ms: int
+    off_ms: int
+    def __init__(self, on_ms: _Optional[int] = ..., off_ms: _Optional[int] = ...) -> None: ...
+
+class MotorFailure(_message.Message):
+    __slots__ = ("motor", "scale")
+    MOTOR_FIELD_NUMBER: _ClassVar[int]
+    SCALE_FIELD_NUMBER: _ClassVar[int]
+    motor: int
+    scale: float
+    def __init__(self, motor: _Optional[int] = ..., scale: _Optional[float] = ...) -> None: ...
+
+class PropDamage(_message.Message):
+    __slots__ = ("prop", "thrust_scale", "imbalance_kgm")
+    PROP_FIELD_NUMBER: _ClassVar[int]
+    THRUST_SCALE_FIELD_NUMBER: _ClassVar[int]
+    IMBALANCE_KGM_FIELD_NUMBER: _ClassVar[int]
+    prop: int
+    thrust_scale: float
+    imbalance_kgm: float
+    def __init__(self, prop: _Optional[int] = ..., thrust_scale: _Optional[float] = ..., imbalance_kgm: _Optional[float] = ...) -> None: ...
+
+class WeakCell(_message.Message):
+    __slots__ = ("cell", "r_offset_ohm", "v_offset_v")
+    CELL_FIELD_NUMBER: _ClassVar[int]
+    R_OFFSET_OHM_FIELD_NUMBER: _ClassVar[int]
+    V_OFFSET_V_FIELD_NUMBER: _ClassVar[int]
+    cell: int
+    r_offset_ohm: float
+    v_offset_v: float
+    def __init__(self, cell: _Optional[int] = ..., r_offset_ohm: _Optional[float] = ..., v_offset_v: _Optional[float] = ...) -> None: ...
+
+class GyroFault(_message.Message):
+    __slots__ = ("bias_radps", "noise_scale")
+    BIAS_RADPS_FIELD_NUMBER: _ClassVar[int]
+    NOISE_SCALE_FIELD_NUMBER: _ClassVar[int]
+    bias_radps: Vec3
+    noise_scale: float
+    def __init__(self, bias_radps: _Optional[_Union[Vec3, _Mapping]] = ..., noise_scale: _Optional[float] = ...) -> None: ...
+
+class VtxInterference(_message.Message):
+    __slots__ = ("freq_mhz", "power_mw", "position_ned_m")
+    FREQ_MHZ_FIELD_NUMBER: _ClassVar[int]
+    POWER_MW_FIELD_NUMBER: _ClassVar[int]
+    POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
+    freq_mhz: float
+    power_mw: float
+    position_ned_m: Vec3
+    def __init__(self, freq_mhz: _Optional[float] = ..., power_mw: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ...) -> None: ...
+
 class Fault(_message.Message):
-    __slots__ = ("radio_link_loss",)
+    __slots__ = ("radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference")
     RADIO_LINK_LOSS_FIELD_NUMBER: _ClassVar[int]
+    RADIO_LOSS_FIELD_NUMBER: _ClassVar[int]
+    BURST_LOSS_FIELD_NUMBER: _ClassVar[int]
+    MOTOR_FAILURE_FIELD_NUMBER: _ClassVar[int]
+    PROP_DAMAGE_FIELD_NUMBER: _ClassVar[int]
+    WEAK_CELL_FIELD_NUMBER: _ClassVar[int]
+    GYRO_FAULT_FIELD_NUMBER: _ClassVar[int]
+    VTX_INTERFERENCE_FIELD_NUMBER: _ClassVar[int]
     radio_link_loss: RadioLinkLoss
-    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ...) -> None: ...
+    radio_loss: RadioLoss
+    burst_loss: BurstLoss
+    motor_failure: MotorFailure
+    prop_damage: PropDamage
+    weak_cell: WeakCell
+    gyro_fault: GyroFault
+    vtx_interference: VtxInterference
+    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ..., radio_loss: _Optional[_Union[RadioLoss, _Mapping]] = ..., burst_loss: _Optional[_Union[BurstLoss, _Mapping]] = ..., motor_failure: _Optional[_Union[MotorFailure, _Mapping]] = ..., prop_damage: _Optional[_Union[PropDamage, _Mapping]] = ..., weak_cell: _Optional[_Union[WeakCell, _Mapping]] = ..., gyro_fault: _Optional[_Union[GyroFault, _Mapping]] = ..., vtx_interference: _Optional[_Union[VtxInterference, _Mapping]] = ...) -> None: ...
 
 class ReceiverAntenna(_message.Message):
     __slots__ = ("name", "kind", "gain_dbi", "beamwidth_deg", "polarization", "aim_az_deg", "aim_el_deg")

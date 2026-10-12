@@ -159,11 +159,69 @@ impl Default for VideoInfo {
     }
 }
 
-/// Faults a script can inject (spec §6.2). The v1 catalog completes in M4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Faults a script can inject (spec §6.2). Names here are the `active_fault_names` strings.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Fault {
     /// Every radio uplink packet is lost: the receiver goes silent and Betaflight fails safe.
     RadioLinkLoss,
+    /// Extra per-packet uplink loss on top of the link model's own, `fraction` in [0, 1].
+    RadioLoss {
+        fraction: f64,
+    },
+    /// Every uplink packet is lost for `on_s`, then the link delivers normally for `off_s`, repeating.
+    BurstLoss {
+        on_s: f64,
+        off_s: f64,
+    },
+    /// Motor `motor` (0-based) produces `scale` of its torque and current; 0 = dead motor.
+    MotorFailure {
+        motor: usize,
+        scale: f64,
+    },
+    /// Prop `prop` (0-based) produces `thrust_scale` of its thrust and torque, with `imbalance_kgm` of vibration.
+    PropDamage {
+        prop: usize,
+        thrust_scale: f64,
+        imbalance_kgm: f64,
+    },
+    /// Cell `cell` (0-based) carries `r_offset_ohm` of extra series resistance and `v_offset_v` of extra droop.
+    WeakCell {
+        cell: usize,
+        r_offset_ohm: f64,
+        v_offset_v: f64,
+    },
+    /// The IMU's gyro reads `bias_radps` of extra bias and `noise_scale` times its normal noise.
+    GyroFault {
+        bias_radps: DVec3,
+        noise_scale: f64,
+    },
+    /// A transmitter at `position_ned_m` on `freq_mhz` at `power_mw` interferes with the video link while active.
+    VtxInterference {
+        freq_mhz: f64,
+        power_mw: f64,
+        position_ned_m: DVec3,
+    },
+}
+
+impl Fault {
+    /// The fault's name, as the events and `active_fault_names` spell it.
+    fn name(&self) -> &'static str {
+        match self {
+            Fault::RadioLinkLoss => "radio_link_loss",
+            Fault::RadioLoss { .. } => "radio_loss",
+            Fault::BurstLoss { .. } => "burst_loss",
+            Fault::MotorFailure { .. } => "motor_failure",
+            Fault::PropDamage { .. } => "prop_damage",
+            Fault::WeakCell { .. } => "weak_cell",
+            Fault::GyroFault { .. } => "gyro_fault",
+            Fault::VtxInterference { .. } => "vtx_interference",
+        }
+    }
+}
+
+/// The weak-cell signal (1-based, 0 = none) as a 0-based cell index.
+fn weak_cell_index(weak: f64) -> Option<usize> {
+    (weak > 0.0).then(|| weak as usize - 1)
 }
 
 /// The receiver's UART buffer. With no flight controller draining it (open-loop FC), the oldest bytes are
@@ -184,6 +242,8 @@ pub struct VehicleState {
     pub rate_frd_radps: DVec3,
     pub battery_voltage_v: f64,
     pub battery_current_a: f64,
+    /// Per-cell voltage: equal shares of the pack, the weak cell carrying the fault's droop.
+    pub battery_cell_voltages: Vec<f64>,
     pub motor_rpm: Vec<f64>,
     pub motor_cmd: Vec<f64>,
     pub radio: RadioState,
@@ -273,24 +333,17 @@ struct Handles {
     lq: Signal<f64>,
     rssi: Signal<f64>,
     fault_radio_loss: Signal<f64>,
-    /// Uplink loss fraction 0..1 — written from M4b Task 3; the ELRS model reads it per packet.
-    #[allow(dead_code)]
+    /// Uplink loss fraction 0..1 — written by set_fault's RadioLoss arm; the ELRS model reads it per packet.
     fault_radio_loss_fraction: Signal<f64>,
-    /// Burst window edges, s — written from M4b Task 3 (Task 4 consumes).
-    #[allow(dead_code)]
+    /// Burst window edges, s — written by set_fault's BurstLoss arm (Task 4 consumes).
     fault_burst_on: Signal<f64>,
-    #[allow(dead_code)]
     fault_burst_off: Signal<f64>,
-    /// Battery Thevenin offsets — written from M4b Task 3 (Task 5 consumes).
-    #[allow(dead_code)]
+    /// Battery Thevenin offsets — written by set_fault's WeakCell arm (Task 5 consumes).
     fault_battery_r_offset: Signal<f64>,
-    #[allow(dead_code)]
     fault_battery_v_offset: Signal<f64>,
-    /// 1-based weak-cell index, 0 = none — written from M4b Task 3 (Task 5 consumes).
-    #[allow(dead_code)]
+    /// 1-based weak-cell index, 0 = none — written by set_fault's WeakCell arm (Task 5 consumes).
     fault_battery_weak_cell: Signal<f64>,
-    /// Gyro bias offset, FRD rad/s — written from M4b Task 3 (Task 2 consumes).
-    #[allow(dead_code)]
+    /// Gyro bias offset, FRD rad/s — written by set_fault's GyroFault arm.
     fault_imu_gyro_bias: Signal<DVec3>,
     fault_imu_noise_scale: Signal<f64>,
     fault_motor_scale: Vec<Signal<f64>>,
@@ -377,18 +430,16 @@ pub struct Vehicle {
     world: WorldConfig,
     /// The quad file's radio antenna names, by index (the state's `active_antenna`).
     radio_antenna_names: Vec<String>,
-    /// The video link's runtime-emitter handle, written from M4b Task 3's set_fault.
-    #[allow(dead_code)]
+    /// The video link's runtime-emitter handle, written by set_fault's VtxInterference arm.
     vtx_interference: VtxInterferenceHandle,
-    /// Per-motor part imbalance at build time; `clear_faults` restores it (M4b Task 3).
-    #[allow(dead_code)]
+    /// Per-motor part imbalance at build time; `clear_faults` restores it.
     prop_imbalance_baseline: Vec<f64>,
-    /// Pack cell count, for the weak-cell fault (M4b Task 3).
-    #[allow(dead_code)]
+    /// Pack cell count, for the weak-cell fault.
     battery_cells: u32,
-    /// Whether the quad has a VTX, for the VtxInterference fault (M4b Task 3).
-    #[allow(dead_code)]
+    /// Whether the quad has a VTX, for the VtxInterference fault.
     has_vtx: bool,
+    /// The active faults' names in injection order; `active_fault_names` sorts them for the events.
+    active_faults: Vec<String>,
 }
 
 /// Per-quad firmware directory: `<data_dir>/<quad file stem>-<hash of the quad file's path>`, so quads with
@@ -781,6 +832,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         prop_imbalance_baseline: cfg.props.iter().map(|p| p.imbalance_kgm).collect(),
         battery_cells: cfg.battery.cells,
         has_vtx: cfg.vtx.is_some(),
+        active_faults: Vec::new(),
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
@@ -821,15 +873,139 @@ impl Vehicle {
         self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
     }
 
-    pub fn set_fault(&mut self, fault: Fault, active: bool) {
-        let s = match fault {
-            Fault::RadioLinkLoss => self.h.fault_radio_loss,
-        };
-        self.scheduler.bus_mut().set(s, if active { 1.0 } else { 0.0 });
+    /// Activates (`active = true`) or deactivates a fault. A fault that fails validation leaves nothing
+    /// behind: no signal moves and it is not recorded as active.
+    pub fn set_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
+        let b = self.scheduler.bus_mut();
+        match &fault {
+            Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
+            Fault::RadioLoss { fraction } => {
+                if !(0.0..=1.0).contains(fraction) {
+                    return Err(SimError::InvalidArgument(format!("radio loss fraction must be in [0, 1], got {fraction}")));
+                }
+                b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 });
+            }
+            Fault::BurstLoss { on_s, off_s } => {
+                if *on_s <= 0.0 || *off_s <= 0.0 {
+                    return Err(SimError::InvalidArgument(format!(
+                        "burst on_ms and off_ms must both be > 0, got on {on_s} s / off {off_s} s"
+                    )));
+                }
+                let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
+                b.set(self.h.fault_burst_on, on);
+                b.set(self.h.fault_burst_off, off);
+            }
+            Fault::MotorFailure { motor, scale } => {
+                if *motor >= self.h.fault_motor_scale.len() {
+                    return Err(SimError::InvalidArgument(format!(
+                        "motor {motor} does not exist (the quad has {})",
+                        self.h.fault_motor_scale.len()
+                    )));
+                }
+                if !(0.0..=1.0).contains(scale) {
+                    return Err(SimError::InvalidArgument(format!("motor failure scale must be in [0, 1], got {scale}")));
+                }
+                b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 });
+            }
+            Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
+                if *prop >= self.h.fault_prop_thrust_scale.len() {
+                    return Err(SimError::InvalidArgument(format!(
+                        "prop {prop} does not exist (the quad has {})",
+                        self.h.fault_prop_thrust_scale.len()
+                    )));
+                }
+                if *thrust_scale < 0.0 || *imbalance_kgm < 0.0 {
+                    return Err(SimError::InvalidArgument(format!(
+                        "prop damage thrust_scale and imbalance_kgm must be >= 0, got {thrust_scale} / {imbalance_kgm}"
+                    )));
+                }
+                b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
+                b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
+            }
+            Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
+                if *cell as u32 >= self.battery_cells {
+                    return Err(SimError::InvalidArgument(format!(
+                        "cell {cell} does not exist (the pack has {} cells)",
+                        self.battery_cells
+                    )));
+                }
+                if *r_offset_ohm < 0.0 || *v_offset_v < 0.0 {
+                    return Err(SimError::InvalidArgument("weak-cell offsets must be >= 0".into()));
+                }
+                b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
+                b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
+                b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
+            }
+            Fault::GyroFault { bias_radps, noise_scale } => {
+                if *noise_scale < 0.0 || !bias_radps.is_finite() {
+                    return Err(SimError::InvalidArgument("gyro fault noise_scale must be >= 0 and bias finite".into()));
+                }
+                b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
+                b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
+            }
+            Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
+                if !self.has_vtx {
+                    return Err(SimError::InvalidArgument("vtx interference needs a quad with a [vtx] section".into()));
+                }
+                if *freq_mhz <= 0.0 || *power_mw <= 0.0 || !position_ned_m.is_finite() {
+                    return Err(SimError::InvalidArgument(format!(
+                        "vtx interference needs a positive frequency and power and a finite position, got {freq_mhz} MHz / {power_mw} mW / {position_ned_m:?}"
+                    )));
+                }
+                self.vtx_interference.set(active.then_some(Emitter {
+                    position: *position_ned_m,
+                    freq_mhz: *freq_mhz,
+                    power_mw: *power_mw,
+                    antenna: Antenna {
+                        kind: AntennaKind::Omni,
+                        gain_dbi: 2.0,
+                        polarization: Polarization::Rhcp,
+                        axis: DVec3::NEG_Z,
+                    },
+                }));
+            }
+        }
+        self.record_fault_active(&fault, active); // maintains self.active_faults
+        Ok(())
     }
 
+    /// Remembers the fault as active (replacing an existing same-name entry, so a re-inject updates the
+    /// parameters without duplicating) or forgets it.
+    fn record_fault_active(&mut self, fault: &Fault, active: bool) {
+        let name = fault.name();
+        self.active_faults.retain(|n| n != name);
+        if active {
+            self.active_faults.push(name.to_string());
+        }
+    }
+
+    /// The active faults' names, in the spec table's order: the event stream is deterministic regardless of
+    /// injection order.
+    pub fn active_fault_names(&self) -> Vec<String> {
+        const ORDER: [&str; 8] =
+            ["radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference"];
+        let mut names = self.active_faults.clone();
+        names.sort_by_key(|n| ORDER.iter().position(|o| o == n).unwrap_or(ORDER.len()));
+        names
+    }
+
+    /// Clears every fault: the multiplicative signals back to their identities, the additive ones to zero,
+    /// the radio_link_loss signal and the runtime emitter off. Never fails.
     pub fn clear_faults(&mut self) {
-        self.set_fault(Fault::RadioLinkLoss, false);
+        let imbalance = self.prop_imbalance_baseline.clone();
+        self.init_fault_identities(&imbalance);
+        let h = &self.h;
+        let bus = self.scheduler.bus_mut();
+        bus.set(h.fault_radio_loss, 0.0);
+        bus.set(h.fault_radio_loss_fraction, 0.0);
+        bus.set(h.fault_burst_on, 0.0);
+        bus.set(h.fault_burst_off, 0.0);
+        bus.set(h.fault_battery_r_offset, 0.0);
+        bus.set(h.fault_battery_v_offset, 0.0);
+        bus.set(h.fault_battery_weak_cell, 0.0);
+        bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
+        self.vtx_interference.set(None);
+        self.active_faults.clear();
     }
 
     pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
@@ -870,14 +1046,25 @@ impl Vehicle {
     pub fn state(&self) -> VehicleState {
         let b = self.scheduler.bus();
         let h = &self.h;
+        let battery_voltage_v = b.get(h.vbat);
+        let battery_current_a = b.get(h.ibat);
+        // Per-cell voltages (Ruling 7): equal shares of the pack; the weak cell carries the fault's whole
+        // additive term (the extra resistance's droop at the pack current, plus the extra voltage offset).
+        let weak = b.get(h.fault_battery_weak_cell);
+        let share = battery_voltage_v / self.battery_cells.max(1) as f64;
+        let droop_share = b.get(h.fault_battery_r_offset) * battery_current_a + b.get(h.fault_battery_v_offset);
+        let battery_cell_voltages = (0..self.battery_cells)
+            .map(|c| if Some(c as usize) == weak_cell_index(weak) { share - droop_share } else { share })
+            .collect();
         VehicleState {
             time_s: self.scheduler.time_s(),
             pos_ned_m: b.get(h.pos),
             vel_ned_mps: b.get(h.vel),
             att: b.get(h.att),
             rate_frd_radps: b.get(h.rate),
-            battery_voltage_v: b.get(h.vbat),
-            battery_current_a: b.get(h.ibat),
+            battery_voltage_v,
+            battery_current_a,
+            battery_cell_voltages,
             motor_rpm: h.omega.iter().map(|s| b.get(*s) * 60.0 / (2.0 * PI)).collect(),
             motor_cmd: h.cmd.iter().map(|s| b.get(*s)).collect(),
             radio: {
@@ -1084,6 +1271,60 @@ mod tests {
         assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
         assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
         assert_eq!(b.get(vehicle.h.fault_battery_weak_cell), 0.0);
+    }
+
+    #[test]
+    fn an_unknown_motor_index_is_invalid_argument() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let err = vehicle.set_fault(Fault::MotorFailure { motor: 7, scale: 0.0 }, true).unwrap_err();
+        assert!(err.to_string().contains("motor 7"), "{err}");
+        assert!(err.to_string().contains("does not exist"), "{err}");
+        assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+    }
+
+    #[test]
+    fn vtx_interference_without_a_vtx_is_invalid_argument() {
+        let mut cfg = shipped_quad();
+        cfg.vtx = None;
+        let mut vehicle = open_loop(&cfg, WorldConfig::open_field());
+        let err = vehicle
+            .set_fault(Fault::VtxInterference { freq_mhz: 5700.0, power_mw: 100.0, position_ned_m: DVec3::X }, true)
+            .unwrap_err();
+        assert!(err.to_string().contains("[vtx]"), "{err}");
+    }
+
+    #[test]
+    fn injected_and_cleared_faults_are_named_in_order() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.set_fault(Fault::WeakCell { cell: 2, r_offset_ohm: 0.01, v_offset_v: 0.05 }, true).unwrap();
+        vehicle.set_fault(Fault::RadioLinkLoss, true).unwrap();
+        assert_eq!(vehicle.active_fault_names(), vec!["radio_link_loss".to_string(), "weak_cell".to_string()]);
+        vehicle.clear_faults();
+        assert!(vehicle.active_fault_names().is_empty());
+    }
+
+    #[test]
+    fn the_active_faults_list_replaces_removes_and_sorts() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        // Injected out of the spec table's order...
+        for fault in [
+            Fault::GyroFault { bias_radps: DVec3::ZERO, noise_scale: 2.0 },
+            Fault::RadioLinkLoss,
+            Fault::WeakCell { cell: 2, r_offset_ohm: 0.01, v_offset_v: 0.05 },
+        ] {
+            vehicle.set_fault(fault, true).unwrap();
+        }
+        // ...the names still come back in the spec table's order.
+        assert_eq!(
+            vehicle.active_fault_names(),
+            ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string)
+        );
+        // A re-inject updates the entry instead of duplicating it.
+        vehicle.set_fault(Fault::RadioLinkLoss, true).unwrap();
+        assert_eq!(vehicle.active_fault_names(), ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string));
+        // Deactivating removes the name.
+        vehicle.set_fault(Fault::RadioLinkLoss, false).unwrap();
+        assert_eq!(vehicle.active_fault_names(), ["weak_cell", "gyro_fault"].map(str::to_string));
     }
 
     #[test]
