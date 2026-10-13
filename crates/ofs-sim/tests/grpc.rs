@@ -20,6 +20,8 @@ async fn start_with_service() -> (SimClient<Channel>, SimService) {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let data_dir = std::env::temp_dir().join(format!("ofs-grpc-test-data-{}-{n}", std::process::id()));
+    // Fresh: a directory an earlier run with the same pid left behind would number this run's recordings after its own.
+    std::fs::remove_dir_all(&data_dir).ok();
     let service = SimService::new(data_dir);
     tokio::spawn(
         tonic::transport::Server::builder()
