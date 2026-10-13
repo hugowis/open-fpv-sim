@@ -60,9 +60,11 @@ struct LogSink {
     reset_seen: bool,
     /// The `bind port ... failed` lines, kept whole: the tail alone loses them under the first boot's EEPROM writes.
     failed_binds: Vec<String>,
-    /// Who held each failed bind's port, read the moment the line arrived: a holder that releases the port before
-    /// the error is built is still named (run 38453432260 attempt 5 was checked too late and said "no socket found").
-    bind_holders: Vec<String>,
+    /// What each failed bind's port showed the moment its line arrived: `Some((port, holders))` — possibly empty,
+    /// meaning checked and nobody there — or `None` when the line named no port. A holder that releases the port
+    /// before the error is built is still named (run 38453432260 attempt 5 was checked too late and said "no socket
+    /// found"); a port that was free at the bind and is held when the error is built is reported as a late holder.
+    bind_holders: Vec<Option<(u16, Vec<String>)>>,
     /// `[FLASH_ProgramWord]` lines seen (written to sitl.log, counted instead of kept in the tail).
     flash_lines: usize,
     /// Output streams (stdout, stderr) read to their end: a process's exit does not mean its last lines were read.
@@ -75,9 +77,12 @@ impl LogSink {
         if is_bind_failure(&line) {
             self.bind_failed = true;
             if let Some(port) = bound_port(&line) {
-                let holders = holders_text(port, port_holders(port));
-                self.bind_holders.push(holders.clone());
-                bind_snapshot = Some((port, holders));
+                let holders = port_holders(port);
+                let text = holders_text(port, &holders);
+                self.bind_holders.push(Some((port, holders)));
+                bind_snapshot = Some((port, text));
+            } else {
+                self.bind_holders.push(None);
             }
             self.failed_binds.push(line.clone());
         }
@@ -343,8 +348,8 @@ fn bound_port(line: &str) -> Option<u16> {
     line.split("bind port ").nth(1)?.split_whitespace().next()?.parse().ok()
 }
 
-/// The holders rendered for the error text and sitl.log: what `port_holders` saw at the moment of the failure.
-fn holders_text(port: u16, holders: Vec<String>) -> String {
+/// The holders rendered for sitl.log: what `port_holders` saw at the moment of the failure.
+fn holders_text(port: u16, holders: &[String]) -> String {
     if holders.is_empty() {
         format!("port {port}: no socket found (or not visible from this platform)")
     } else {
@@ -352,30 +357,33 @@ fn holders_text(port: u16, holders: Vec<String>) -> String {
     }
 }
 
-/// The bind-failure error's text: each failing line, and who held its port when the line arrived. A snapshot that
-/// found nothing is said so; the port is checked again now, and a holder that appeared since is reported too.
+/// The bind-failure error's text: each failing line, and what its port showed when the line arrived. A bind that
+/// found no holder is checked again now, and a holder that appeared since is reported as such.
 fn bind_error_text(log: &SharedLog) -> String {
-    let (lines, snapshots) = log
+    let (lines, findings) = log
         .lock()
         .map(|l| (l.failed_binds.clone(), l.bind_holders.clone()))
         .unwrap_or_default();
     let mut what =
         "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)".to_string();
-    for (line, snapshot) in lines.iter().zip(snapshots.iter()) {
+    for (line, finding) in lines.iter().zip(findings.iter()) {
         what.push_str(&format!("\n  {line}"));
-        if !snapshot.is_empty() {
-            what.push_str(&format!("\n    {snapshot}"));
-        } else if let Some(port) = bound_port(line) {
-            let now = port_holders(port);
-            if now.is_empty() {
-                what.push_str(&format!(
-                    "\n    port {port}: no socket found when the bind failed (or not visible from this platform)"
-                ));
-            } else {
-                what.push_str(&format!("\n    port {port}: no socket when the bind failed, held now by:"));
-                for h in now {
-                    what.push_str(&format!("\n    port {port}: {h}"));
-                }
+        let Some((port, holders)) = finding else { continue };
+        if !holders.is_empty() {
+            for h in holders {
+                what.push_str(&format!("\n    port {port}: {h}"));
+            }
+            continue;
+        }
+        let now = port_holders(*port);
+        if now.is_empty() {
+            what.push_str(&format!(
+                "\n    port {port}: no socket found when the bind failed (or not visible from this platform)"
+            ));
+        } else {
+            what.push_str(&format!("\n    port {port}: no socket when the bind failed, held now by:"));
+            for h in now {
+                what.push_str(&format!("\n    port {port}: {h}"));
             }
         }
     }
@@ -442,6 +450,22 @@ pub(crate) fn run_cleanup(argv: &[String]) {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    /// A port that was free when the bind failed but is held by the time the error is built (something grabbed it
+    /// in between): the late holder is reported as such, not lost.
+    #[test]
+    fn a_late_holder_is_reported_when_the_bind_failed_on_a_free_port() {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let log: SharedLog = Arc::new(Mutex::new(LogSink::default()));
+        log.lock().unwrap_or_else(|e| e.into_inner()).push(format!("bind port {port} for UART1 failed!!"));
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let text = bind_error_text(&log);
+        drop(listener);
+        assert!(text.contains(&format!("port {port}: no socket when the bind failed, held now by:")), "{text}");
+        assert!(text.contains(&format!("port {port}: LISTEN by pid {}", std::process::id())), "{text}");
+    }
 
     /// CI (run 38453432260, attempt 5) caught the flake as `no socket found`: the holders were read when the error
     /// was built, after SITL had booted well past the failure, and the holder had released the port by then. They
