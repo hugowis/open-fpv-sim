@@ -381,6 +381,8 @@ impl Model for ElrsLink {
         }
         let active = self.quad_diversity.choose(rssi);
         let draw: f64 = self.rng.gen();
+        // Drawn every packet from its own stream, fault or not, so the model's own draws (fading, loss, downlink)
+        // never shift with a fault (tests/elrs.rs: the_models_own_stream_ignores_the_fault_fraction).
         let fault_draw: f64 = self.fault_rng.gen();
         let fraction = bus.get(self.fault_loss_fraction);
         let burst_on = bus.get(self.fault_burst_on);

@@ -246,8 +246,8 @@ fn zero_fraction_is_a_no_op() {
     set(&mut faulted, names::FAULT_RADIO_LOSS_FRACTION, 0.0);
     packets(&mut clean, 500);
     packets(&mut faulted, 500);
-    // The dedicated fault stream consumed draws; the model's own stream did not move, so the
-    // LQ histories agree exactly.
+    // With fading off the only draws are loss decisions, so this pins that a zero fraction loses nothing; that the
+    // model's own stream never moves is pinned by `the_models_own_stream_ignores_the_fault_fraction`.
     close(get(&clean, names::RADIO_LQ), get(&faulted, names::RADIO_LQ), 0.0, "LQ identical");
 }
 
@@ -442,5 +442,34 @@ mod fc_telemetry {
         let (mut s, _uart, _telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
         s.run_for(0.05).unwrap();
         assert_eq!(fc.latest(), FcTelemetry::default(), "frame_count 0, everything zero, no mode");
+    }
+}
+
+/// m4b debt: `zero_fraction_is_a_no_op` runs with fading off, where a draw leaking from the fault stream into the
+/// model's would shift both rigs alike. Here fading is on, at the downlink's sensitivity edge, and only the uplink
+/// fault fraction differs: the downlink's loss history comes from the model's own stream alone, so whatever the
+/// fault draws, it must not move.
+#[test]
+fn the_models_own_stream_ignores_the_fault_fraction() {
+    let downlink_lq = |fraction: f64, north: f64| -> Vec<f64> {
+        let mut p = LinkParams::ideal(500);
+        p.fading = true;
+        let (mut s, _uart, _telemetry_in, _fc) = rig(p, 21);
+        set_pos(&mut s, DVec3::new(north, 0.0, -1.7));
+        set(&mut s, names::FAULT_RADIO_LOSS_FRACTION, fraction);
+        (0..400)
+            .map(|_| {
+                packets(&mut s, 1);
+                get(&s, names::RADIO_DOWNLINK_LQ)
+            })
+            .collect()
+    };
+    let edge = [5_000.0, 10_000.0, 20_000.0, 30_000.0, 42_000.0, 60_000.0, 90_000.0]
+        .into_iter()
+        .find(|&north| downlink_lq(0.0, north).iter().any(|&lq| lq > 0.0 && lq < 100.0))
+        .expect("a distance where the downlink sits at its sensitivity edge");
+    let clean = downlink_lq(0.0, edge);
+    for fraction in [0.3, 0.9] {
+        assert_eq!(downlink_lq(fraction, edge), clean, "fault fraction {fraction} moved the model's own draws");
     }
 }
