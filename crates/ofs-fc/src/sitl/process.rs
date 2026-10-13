@@ -16,6 +16,8 @@ pub const REBOOT_GRACE: Duration = Duration::from_secs(3);
 const EXIT_FLUSH: Duration = Duration::from_millis(200);
 /// How long after the ready line a late `bind port ... failed` is still waited for.
 const BIND_GRACE: Duration = Duration::from_millis(300);
+/// How long after the diff-applying run exits its output may still be on its way through the pipes.
+const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -60,6 +62,8 @@ struct LogSink {
     failed_binds: Vec<String>,
     /// `[FLASH_ProgramWord]` lines seen (written to sitl.log, counted instead of kept in the tail).
     flash_lines: usize,
+    /// Output streams (stdout, stderr) read to their end: a process's exit does not mean its last lines were read.
+    streams_ended: u8,
 }
 
 impl LogSink {
@@ -295,6 +299,12 @@ fn apply_diff(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
         }
         std::thread::sleep(Duration::from_millis(50));
     };
+    // The exit can be seen before the readers have the last lines (the "EEPROM saved" line comes last): wait for both
+    // streams to end, within a bound (a child the run left behind could hold them open).
+    let drained = Instant::now() + OUTPUT_DRAIN;
+    while log.lock().map(|l| l.streams_ended < 2).unwrap_or(false) && Instant::now() < drained {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     // SITL creates eeprom.bin at boot, so its existence proves nothing: the run must exit cleanly having said so.
     let output = log.lock().map(|l| l.tail_text()).unwrap_or_default();
     let saved = log.lock().map(|l| l.tail.iter().any(|t| t.contains("[CONFIG] Config file processed, EEPROM saved"))).unwrap_or(false);
@@ -312,7 +322,12 @@ fn pipe_lines(stream: impl Read + Send + 'static, log: SharedLog) {
         loop {
             buf.clear();
             match reader.read_until(b'\n', &mut buf) {
-                Ok(0) | Err(_) => break,
+                Ok(0) | Err(_) => {
+                    if let Ok(mut l) = log.lock() {
+                        l.streams_ended += 1;
+                    }
+                    break;
+                }
                 Ok(_) => {
                     let line = String::from_utf8_lossy(&buf).trim_end().to_string();
                     tracing::debug!(target: "sitl", "{line}");

@@ -252,3 +252,20 @@ fn a_config_run_that_fails_is_an_error_even_if_eeprom_bin_exists() {
     let shown = err.to_string();
     assert!(shown.contains("prepareSave failed") && shown.contains("exit"), "{shown}");
 }
+
+/// The config run's last line ("EEPROM saved") comes after a flood of EEPROM writes; the process can exit before the
+/// pipe readers have read it. Found live: a good first boot refused as "did not apply the diff" (1 run in 12).
+#[cfg(unix)]
+#[test]
+fn a_config_run_is_judged_on_its_whole_output() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    // The saved line reaches the pipe 300 ms after the process exits (a background writer still holds stdout): the
+    // check must wait for the end of the output, not for the exit.
+    let config_run = "head -c 64 /dev/zero > eeprom.bin; (sleep 0.3; echo '[CONFIG] Config file processed, EEPROM saved') & exit 0";
+    let script = format!("if [ \"$1\" = --config ]; then {config_run}; else echo '[SITL] ready for the simulator'; sleep 5; fi");
+    let cfg = config(dir.path(), &["sh", "-c", &script, "sitl"]);
+    let started = SitlProcess::start(&cfg.launch);
+    assert!(started.is_ok(), "a config run that saved is accepted: {:?}", started.err().map(|e| e.to_string()));
+}
