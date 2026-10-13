@@ -40,9 +40,12 @@
 - **Sticks have one owner**: `SetSticks` during playback is `InvalidArgument` (the spec's ruling); a pilot and a
   playing file exclude each other (`InvalidState` either way round).
 - **Python records lockstep sessions by default**; `sim.log` stops the recording (an MCAP file is readable once
-  finished); a new `load` finishes the previous session's file on the server.
+  finished) and only ever returns this session's recording — a new `load` finishes the previous session's file on
+  the server, and it stays reachable as `sim.recording.last`.
 - **A world name** (`world="flat"`) is `<quad dir>/../worlds/<name>.toml`, as parts resolve against `library/`.
 - **The Blackbox copy is a `Session` field declared last**: fields drop in declaration order, so SITL is gone and
   its files closed before the copy runs, on every way a session ends.
-- **`launch()` closes its server at interpreter exit** (a weak reference through `atexit`), so the §6.2 script,
-  which never calls `close()`, still finishes its recording and Blackbox logs.
+- **A launched server stops exactly once** — at `close()`, when its `Sim` is garbage-collected, or at interpreter
+  exit (`weakref.finalize`, holding the stub, channel and process but not the `Sim`), so the §6.2 script, which never
+  calls `close()`, still finishes its recording and Blackbox logs, and a `Sim` dropped inside a function never
+  orphans its server.

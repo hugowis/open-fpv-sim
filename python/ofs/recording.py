@@ -21,7 +21,8 @@ class Recording:
     def __init__(self, sim):
         self._sim = sim
         self.path = None  # the running recording's file, None when none runs
-        self.last = None  # the last finished recording, as a reader.Log
+        self.last = None  # the last finished recording, as a reader.Log (possibly an earlier session's)
+        self.session_last = None  # the last recording this session finished: what `sim.log` returns
 
     @property
     def active(self) -> bool:
@@ -40,7 +41,7 @@ class Recording:
         """Finishes the running recording's file and returns it as a `reader.Log`."""
         m = self._sim._call(self._sim._stub.StopRecording, pb.Empty())
         self.path = None
-        self.last = Log(m.path, messages=m.messages, first_s=m.first_s, last_s=m.last_s)
+        self.last = self.session_last = Log(m.path, messages=m.messages, first_s=m.first_s, last_s=m.last_s)
         return self.last
 
     def _session_ended(self) -> None:
@@ -48,3 +49,4 @@ class Recording:
         if self.path is not None:
             self.last = Log(self.path)
             self.path = None
+        self.session_last = None

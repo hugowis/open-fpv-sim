@@ -17,7 +17,8 @@ os.environ.setdefault("OFS_LIBRARY", str(REPO / "library"))
 def sim_bin():
     env = os.environ.get("OFS_SIM_BIN")
     if env:
-        return env
+        # Absolute: a test that changes directory (the sandbox example's) must still find a relative path (CI's).
+        return str(pathlib.Path(env).resolve())
     exe = REPO / "target" / "debug" / ("ofs-sim.exe" if sys.platform == "win32" else "ofs-sim")
     if not exe.exists():
         pytest.fail("ofs-sim not built: run `cargo build -p ofs-sim` or set OFS_SIM_BIN")

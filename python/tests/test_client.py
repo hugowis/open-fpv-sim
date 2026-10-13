@@ -1,5 +1,9 @@
+import os
+import signal
 import subprocess
+import sys
 
+import grpc
 import pytest
 
 import ofs
@@ -65,6 +69,33 @@ def test_close_unloads_before_stopping_a_launched_server(sim_bin, tmp_path):
     assert returncode_at_unload is None, "server was already stopped when Unload was sent"
     assert timeout is not None and timeout <= 10.0, "Unload needs a short deadline"
     assert proc.poll() is not None
+
+
+def test_a_launched_server_stops_when_its_sim_is_dropped_without_close(sim_bin, tmp_path):
+    """A script that never calls close() (spec 6.2's) must not orphan its server: the Sim's finalizer stops it,
+    at collection or at exit. Here the Sim only lives inside main() and the cyclic GC collects it."""
+    script = tmp_path / "drop.py"
+    script.write_text(
+        "import gc, os, ofs\n"
+        "def main():\n"
+        f"    s = ofs.launch(binary={sim_bin!r}, data_dir={str(tmp_path)!r})\n"
+        "    print(s.address, s._process.pid, flush=True)\n"
+        "main()\n"
+        "gc.collect()\n"
+    )
+    log = tmp_path / "drop.out"
+    with open(log, "w") as out:  # a file, not a pipe: an orphaned server would hold a pipe open forever
+        subprocess.run([sys.executable, str(script)], stdout=out, timeout=60, check=True)
+    address, pid = log.read_text().split()
+    channel = grpc.insecure_channel(address)
+    try:
+        with pytest.raises(grpc.FutureTimeoutError):
+            grpc.channel_ready_future(channel).result(timeout=2)  # nothing answers: the server stopped
+    except BaseException:
+        os.kill(int(pid), signal.SIGTERM)  # don't leave the orphan running
+        raise
+    finally:
+        channel.close()
 
 
 def test_close_tolerates_a_dead_server(sim_bin, tmp_path):

@@ -108,6 +108,16 @@ def test_a_new_load_finishes_the_previous_recording(sim):
     assert ofs.reader.Log(first).to_dataframe("battery.voltage_v").shape[0] == 10, "the server finished it"
 
 
+def test_sim_log_never_returns_another_sessions_recording(sim):
+    _climb(sim)
+    previous = sim.recording.path
+    sim.load(QUAD, open_loop_fc=True, record=False)
+    sim.run(0.2)
+    with pytest.raises(ofs.InvalidState):
+        sim.log  # this session recorded nothing; the last one's file is not its log
+    assert sim.recording.last.path == previous, "the previous session's file stays reachable"
+
+
 def _sha(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 

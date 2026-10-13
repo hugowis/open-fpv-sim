@@ -1,7 +1,6 @@
 """Client for the ofs-sim gRPC server."""
 from __future__ import annotations
 
-import atexit
 import collections
 import collections.abc
 import math
@@ -342,6 +341,9 @@ class Sim:
             self._channel.close()
             raise
         self.logs_dir = reply.logs_dir  # where the server writes recordings and copies Blackbox logs
+        # A launched server stops exactly once: at close(), when this Sim is collected, or at interpreter exit,
+        # whichever comes first (a script need not close it). The finalizer holds no reference to the Sim.
+        self._stop_server = weakref.finalize(self, _stop_server, self._stub, self._channel, process) if process else None
 
     @staticmethod
     def _call(method, request):
@@ -479,9 +481,10 @@ class Sim:
         stopped first: an MCAP file is readable once it is finished."""
         if self.recording.active:
             return self.recording.stop()
-        if self.recording.last is None:
-            raise InvalidState("no recording: a lockstep load records by default, or call sim.recording.start()")
-        return self.recording.last
+        if self.recording.session_last is None:
+            raise InvalidState("this session has no recording: a lockstep load records by default, or call "
+                               "sim.recording.start() (an earlier session's file is sim.recording.last)")
+        return self.recording.session_last
 
     def blackbox_files(self) -> list:
         """Betaflight's own Blackbox logs the server copied into its logs directory, sorted. A session's logs
@@ -509,22 +512,11 @@ class Sim:
             if self._watch is not None:
                 watch, self._watch = self._watch, None
                 watch.cancel()
-            if self._process is not None:
-                try:
-                    self._stub.Unload(pb.Empty(), timeout=UNLOAD_TIMEOUT_S)
-                except Exception:  # best effort: the server may already be gone or failing
-                    pass
         finally:
-            try:
+            if self._stop_server is not None:
+                self._stop_server()  # unloads, then stops the launched server; a no-op the second time
+            else:
                 self._channel.close()
-            finally:
-                if self._process is not None:
-                    process, self._process = self._process, None
-                    process.terminate()
-                    try:
-                        process.wait(5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
 
     def __enter__(self) -> "Sim":
         return self
@@ -537,10 +529,22 @@ def connect(address: str = "127.0.0.1:50051") -> Sim:
     return Sim(address)
 
 
-def _close_at_exit(ref) -> None:
-    sim = ref()
-    if sim is not None:
-        sim.close()
+def _stop_server(stub, channel, process) -> None:
+    """Unloads (stopping Betaflight SITL cleanly; terminating the server alone would orphan it on Windows, where
+    TerminateProcess skips its cleanup), then stops a server `launch` started."""
+    try:
+        stub.Unload(pb.Empty(), timeout=UNLOAD_TIMEOUT_S)
+    except Exception:  # best effort: the server may already be gone or failing
+        pass
+    finally:
+        try:
+            channel.close()
+        finally:
+            process.terminate()
+            try:
+                process.wait(5)
+            except subprocess.TimeoutExpired:
+                process.kill()
 
 
 def _free_port() -> int:
@@ -551,9 +555,9 @@ def _free_port() -> int:
 
 def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".ofs-data",
            timeout_s: float = 15.0) -> Sim:
-    """Starts an ofs-sim server on a free local port and connects to it. The server stops with `close()`, or when
-    the script exits (a script need not close it: its session's recording and Blackbox logs are finished either
-    way)."""
+    """Starts an ofs-sim server on a free local port and connects to it. The server stops with `close()`, when the
+    returned Sim is garbage-collected, or when the script exits (a script need not close it: its session's
+    recording and Blackbox logs are finished either way)."""
     if not headless:
         raise NotImplementedError("the Godot pilot client arrives with M2b; only headless=True is available")
     binary = binary or os.environ.get("OFS_SIM_BIN") or shutil.which("ofs-sim")
@@ -582,5 +586,4 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
         proc.kill()
         proc.wait()
         raise
-    atexit.register(_close_at_exit, weakref.ref(sim))
     return sim
