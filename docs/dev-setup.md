@@ -305,6 +305,7 @@ WSL 2 on the same machine, with Betaflight SITL:
 
 The lockstep exchange with SITL is the cost: every configuration clears the 2× target, the Betaflight ones by
 almost four times.
+On CI's shared Linux runner (native, no WSL; run 38453432260) the Betaflight rows measured 12.4× and 13.8×.
 
 ## Ports
 SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.

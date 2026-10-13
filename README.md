@@ -3,10 +3,20 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-Status: **M4 — the sandbox (v1).**
+**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`). v1 does what its design set out to
+(`docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md` §1.4, with the evidence for each point):
+a developer flies a simulated OpenDrone 5" quad running real Betaflight SITL with a joystick, through a simulated
+ExpressLRS/CRSF link, watching Betaflight's real OSD on a degrading analog picture; the real Betaflight Configurator
+connects, and settings saved over its port persist; and a Python script runs the same quad headless and deterministically, injects
+faults and gets every signal back as a DataFrame. What it does not do — level-2/3 firmware fidelity, real radios,
+digital video, GPS, INAV/ArduPilot, macOS — and what comes next are in `docs/roadmap.md`.
+
+What is in it:
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
-- Betaflight Configurator should connect to the running simulator (the manual check with the desktop app is pending). A reboot sent to its port makes the simulator relaunch SITL from its EEPROM (verified live).
+- Betaflight Configurator connects to the running simulator; a PID saved over its port persists through the reboot
+  a Save triggers and into the next session (verified live), and a reboot makes the simulator relaunch SITL from
+  its EEPROM.
 - A Godot pilot client flies the simulator from a game window, through the same radio link (see below).
 - Betaflight's own OSD, a SmartAudio VTX and the battery reach the FPV view (M3a), and a 5.8 GHz analog link model
   breaks the picture up with distance, attitude, buildings and interference (M3b, `docs/research/video-link.md`).
@@ -25,9 +35,13 @@ Status: **M4 — the sandbox (v1).**
   write byte-identical files, Betaflight included), pandas/CSV/Parquet export, a live Rerun view, scripted stick
   inputs, faults at a simulated time, and Betaflight's own Blackbox logs (M4c, `docs/research/mcap-determinism.md`).
 
-- Design: `docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`
-- SITL interface findings: `docs/research/sitl-interface.md`
-- Developer setup: `docs/dev-setup.md`
+Documentation:
+- `docs/dev-setup.md` — building, running and testing on Windows and Linux (and the performance numbers).
+- `docs/architecture.md` — how the crates, the server and the clients fit together, and how to add a part, a model,
+  a fault or a recorded signal.
+- `docs/roadmap.md` — v1's known limitations and what comes next.
+- `CONTRIBUTING.md` — the test tiers, CI and the release steps. `CHANGELOG.md` — what changed, by release.
+- `docs/research/` — the models' equations and every constant's provenance; `docs/superpowers/specs/` — the designs.
 
 ## Install the Python package
 

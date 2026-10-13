@@ -2,6 +2,7 @@
 
 - **Date:** 2026-10-04
 - **Status:** Approved 2026-10-04
+- **v1 complete:** 2026-10-13 (milestones M0–M4; open-fpv-sim 0.1.0). Known limitations and what comes next: `docs/roadmap.md`.
 - **Short name:** `ofs` (crate/package prefix)
 
 ## 1. Intent
@@ -29,8 +30,17 @@ The simulator is not tied to OpenDrone: any component can be described in the sa
 
 ### 1.4 v1 success criteria
 - A developer flies a simulated OpenDrone 5" quad running **real Betaflight SITL**, with a joystick, through a simulated **ELRS/CRSF** link, seeing an FPV view with **Betaflight's real OSD** and **analog video degradation**.
+  *Evidence:* the Godot e2e against Betaflight (`godot/tests/e2e_betaflight.gd`: arm, climb, failsafe on a radio cut,
+  reload) in CI's sitl job; the radio, OSD and video tests (`python/tests/test_sitl_radio.py`,
+  `test_sitl_video.py`, `test_sitl_link.py`); the maintainer's flight checks (2026-10-11).
 - The real **Betaflight Configurator** connects to the simulated FC; changed PIDs/rates take effect and persist.
+  *Evidence:* the Configurator connected (the maintainer, 2026-10-08); a PID saved over MSP is live at once and
+  persists through the reboot and into a new session (`test_a_pid_saved_over_msp_persists_through_a_reboot_and_a_new_session`);
+  the Configurator application's own Save checked by hand: pending.
 - A Python script can run the same quad **headless and deterministically**, inject faults, and get every signal back as a DataFrame.
+  *Evidence:* `test_betaflight_sitl_hover_is_deterministic` and `test_two_identical_lockstep_sessions_write_identical_files`
+  (identical recordings); the §6.2 example run as printed against Betaflight (`python/tests/test_sitl_sandbox.py`:
+  a fault, scripted inputs, a DataFrame back); the fault catalog live (`python/tests/test_sitl_faults.py`).
 
 ### 1.5 Decisions made during brainstorming
 - **Fidelity:** every component is swappable between fidelity levels. v1 ships **level 1** (behavioral models + host-compiled Betaflight SITL); **level 2** (AM32 and ExpressLRS as host-compiled firmware-in-the-loop) follows. **Level 3** (full MCU emulation of real target binaries, e.g. via Renode) is out of scope but the interfaces must not preclude it.
@@ -193,25 +203,25 @@ runs as printed.)
 
 ## 8. Testing
 
-1. **Model unit tests vs analytic results** — free fall; energy/angular-momentum conservation without torque; motor steady-state RPM ≈ KV·(V − I·R) and stall current; battery sag = I·R; free-space path loss.
-2. **Protocol tests** — CRSF round-trip and CRC; golden frames from the CRSF/ELRS spec and real captures; `proptest` fuzzing of every parser (malformed bytes never crash the sim).
-3. **CI integration tests (Linux, headless, real Betaflight SITL)** — arm and hover; angle mode self-levels; radio cut → failsafe within expected timing; MSP over TCP returns API version; SmartAudio channel change reaches the VTX model.
-4. **Determinism test** — two lockstep runs with the same seed produce identical MCAP hashes.
-5. **Validation reports** (tracked, not gating initially) — simulated vs measured thrust-stand data for OpenMotor/prop combinations; simulated vs real Blackbox step responses for the same quad and tune. Community measurements feed these.
-6. **Performance benchmark** — real-time factor tracked; target ≥ 2× real-time headless on a mid-range PC.
-7. **Godot smoke test** — boots and renders one frame headlessly; flight feel tested manually.
+1. **Model unit tests vs analytic results** — free fall; energy/angular-momentum conservation without torque; motor steady-state RPM ≈ KV·(V − I·R) and stall current; battery sag = I·R; free-space path loss. (crates/*/tests and in-crate unit tests: `cargo test --workspace`)
+2. **Protocol tests** — CRSF round-trip and CRC; golden frames from the CRSF/ELRS spec and real captures; `proptest` fuzzing of every parser (malformed bytes never crash the sim). (proptest suites: `crates/ofs-radio/tests/crsf.rs`, `crates/ofs-video/tests/vtx.rs`, `crates/ofs-client/tests/frames.rs`; MSP and SITL codecs in `crates/ofs-fc/tests`)
+3. **CI integration tests (Linux, headless, real Betaflight SITL)** — arm and hover; angle mode self-levels; radio cut → failsafe within expected timing; MSP over TCP returns API version; SmartAudio channel change reaches the VTX model. (CI's sitl job: `crates/ofs-fc/tests/sitl_live.rs`, `crates/ofs-sim/tests/sitl_live.rs`, `crates/ofs-video/tests/vtx_live.rs`, `python/tests/test_sitl_*.py`, `godot/tests/e2e_betaflight.gd`)
+4. **Determinism test** — two lockstep runs with the same seed produce identical MCAP hashes. (`test_betaflight_sitl_hover_is_deterministic`; `test_two_identical_lockstep_sessions_write_identical_files`; `crates/ofs-log/tests/determinism.rs`)
+5. **Validation reports** (tracked, not gating initially) — simulated vs measured thrust-stand data for OpenMotor/prop combinations; simulated vs real Blackbox step responses for the same quad and tune. Community measurements feed these. (not built in v1: `docs/roadmap.md`, Validation)
+6. **Performance benchmark** — real-time factor tracked; target ≥ 2× real-time headless on a mid-range PC. (`scripts/benchmark.py`, in CI's sitl job summary; 7.4× with Betaflight SITL on the maintainer's PC, `docs/dev-setup.md`, Performance)
+7. **Godot smoke test** — boots and renders one frame headlessly; flight feel tested manually. (`scripts/run-godot-tests.sh unit` and `e2e`, CI's godot job)
 
 ## 9. Milestones
 
-| # | Milestone | Exit criteria |
-|---|---|---|
-| **M0** | Spike (throwaway code) | Written answers to the risks in §10, with a recommended approach for each. |
-| **M1** | Headless core | Python script arms and hovers the quad in lockstep with physics, electrical and sensor models against real Betaflight SITL; determinism test passes. |
-| **M2** | Radio + pilot | Fly with a joystick in Godot (grey-box world, FPV camera) through the ELRS/CRSF stack; failsafe works; Configurator connects. |
-| **M3** | Video | VTX model controlled via SmartAudio; real Betaflight OSD rendered; analog degradation driven by link model. |
-| **M4** | Sandbox | OpenDrone component library with provenance; v1 fault catalog; MCAP + Rerun; installable Python package. |
+| # | Milestone | Exit criteria | Status |
+|---|---|---|---|
+| **M0** | Spike (throwaway code) | Written answers to the risks in §10, with a recommended approach for each. | done — 845303f |
+| **M1** | Headless core | Python script arms and hovers the quad in lockstep with physics, electrical and sensor models against real Betaflight SITL; determinism test passes. | done — c1514e2 |
+| **M2** | Radio + pilot | Fly with a joystick in Godot (grey-box world, FPV camera) through the ELRS/CRSF stack; failsafe works; Configurator connects. | done — 357577e (M2a), d8b4a1f (M2b) |
+| **M3** | Video | VTX model controlled via SmartAudio; real Betaflight OSD rendered; analog degradation driven by link model. | done — c1f3292 (M3a), 40ac096 (M3b), 4b0fb8f (M3c), 1975b26 (M3d), 99443f6 (M3e) |
+| **M4** | Sandbox | OpenDrone component library with provenance; v1 fault catalog; MCAP + Rerun; installable Python package. | done — ed4a289 (M4a), 174d85a (M4b), ee2e808 (M4c) |
 
-Each milestone gets its own implementation plan. The first plan covers M0 and M1.
+Each milestone got its own implementation plan (`docs/superpowers/plans/`); the v1 close-out (`2026-10-13-v1-closeout.md`) followed M4.
 
 ## 10. Risks to resolve in M0
 
