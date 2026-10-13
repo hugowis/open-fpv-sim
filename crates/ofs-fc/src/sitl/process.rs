@@ -56,12 +56,17 @@ struct LogSink {
     bind_failed: bool,
     ready_seen: bool,
     reset_seen: bool,
+    /// The `bind port ... failed` lines, kept whole: the tail alone loses them under the first boot's EEPROM writes.
+    failed_binds: Vec<String>,
+    /// `[FLASH_ProgramWord]` lines seen (written to sitl.log, counted instead of kept in the tail).
+    flash_lines: usize,
 }
 
 impl LogSink {
     fn push(&mut self, line: String) {
         if is_bind_failure(&line) {
             self.bind_failed = true;
+            self.failed_binds.push(line.clone());
         }
         if is_ready_line(&line) {
             self.ready_seen = true;
@@ -72,10 +77,22 @@ impl LogSink {
         if let Some(f) = self.file.as_mut() {
             let _ = writeln!(f, "{line}");
         }
+        if line.starts_with("[FLASH_ProgramWord]") {
+            self.flash_lines += 1;
+            return;
+        }
         if self.tail.len() == TAIL_LINES {
             self.tail.pop_front();
         }
         self.tail.push_back(line);
+    }
+
+    fn tail_text(&self) -> String {
+        let mut text = self.tail.iter().cloned().collect::<Vec<_>>().join("\n");
+        if self.flash_lines > 0 {
+            text.push_str(&format!("\n({} [FLASH_ProgramWord] lines not shown; all of them are in sitl.log)", self.flash_lines));
+        }
+        text
     }
 }
 
@@ -161,8 +178,21 @@ impl SitlProcess {
     }
 
     fn bind_error(&self) -> FcError {
-        let what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)";
-        FcError::Startup(what.into(), self.log_tail())
+        let lines = self.log.lock().map(|l| l.failed_binds.clone()).unwrap_or_default();
+        let mut what = "could not bind its ports (a stale SITL is probably still running; see fc.cleanup / OFS_SITL_CLEANUP)".to_string();
+        for line in &lines {
+            what.push_str(&format!("\n  {line}"));
+            if let Some(port) = bound_port(line) {
+                let holders = port_holders(port);
+                if holders.is_empty() {
+                    what.push_str(&format!("\n    port {port}: no socket found (or not visible from this platform)"));
+                }
+                for h in holders {
+                    what.push_str(&format!("\n    port {port}: {h}"));
+                }
+            }
+        }
+        FcError::Startup(what, self.log_tail())
     }
 
     pub fn exit_status(&mut self) -> Option<ExitStatus> {
@@ -193,7 +223,7 @@ impl SitlProcess {
     }
 
     pub fn log_tail(&self) -> String {
-        self.log.lock().map(|l| l.tail.iter().cloned().collect::<Vec<_>>().join("\n")).unwrap_or_default()
+        self.log.lock().map(|l| l.tail_text()).unwrap_or_default()
     }
 }
 
@@ -251,7 +281,7 @@ fn apply_diff(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
     std::fs::copy(&cfg.diff_file, workdir.join("betaflight.diff"))?;
     let mut argv = cfg.launch.clone();
     argv.extend(["--config".to_string(), "betaflight.diff".to_string()]);
-    let log: SharedLog = Arc::new(Mutex::new(LogSink::default()));
+    let log: SharedLog = Arc::new(Mutex::new(LogSink { file: File::create(workdir.join("sitl-config.log")).ok(), ..LogSink::default() }));
     let mut child = spawn_logged(&argv, workdir, &log)?;
     let deadline = Instant::now() + cfg.startup_timeout;
     let status = loop {
@@ -265,9 +295,12 @@ fn apply_diff(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    if !workdir.join("eeprom.bin").exists() {
-        let tail = log.lock().map(|l| l.tail.iter().cloned().collect::<Vec<_>>().join("\n")).unwrap_or_default();
-        return Err(FcError::Config(format!("`{}` exited with {status} without writing eeprom.bin; output:\n{tail}", argv.join(" "))));
+    // SITL creates eeprom.bin at boot, so its existence proves nothing: the run must exit cleanly having said so.
+    let output = log.lock().map(|l| l.tail_text()).unwrap_or_default();
+    let saved = log.lock().map(|l| l.tail.iter().any(|t| t.contains("[CONFIG] Config file processed, EEPROM saved"))).unwrap_or(false);
+    if !status.success() || !saved || !workdir.join("eeprom.bin").exists() {
+        let _ = std::fs::remove_file(workdir.join("eeprom.bin")); // the next load applies the diff again
+        return Err(FcError::Config(format!("`{}` did not apply the diff ({status}); output:\n{output}", argv.join(" "))));
     }
     Ok(())
 }
@@ -290,6 +323,62 @@ fn pipe_lines(stream: impl Read + Send + 'static, log: SharedLog) {
             }
         }
     });
+}
+
+/// The port of a `bind port 5762 for UART2 failed!!` line.
+fn bound_port(line: &str) -> Option<u16> {
+    line.split("bind port ").nth(1)?.split_whitespace().next()?.parse().ok()
+}
+
+/// Every TCP socket bound to `port`, with its state, and for a listener the process that owns it (pid, command,
+/// state, parent pid, working directory): what a bind failure needs to say who holds the port. Linux only (read
+/// from /proc); empty elsewhere, and under WSL from Windows (SITL's sockets live in the WSL VM).
+#[cfg(target_os = "linux")]
+pub fn port_holders(port: u16) -> Vec<String> {
+    const STATES: [&str; 12] =
+        ["?", "ESTABLISHED", "SYN_SENT", "SYN_RECV", "FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE", "CLOSE_WAIT", "LAST_ACK", "LISTEN", "CLOSING"];
+    let mut sockets = Vec::new(); // (state, inode)
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        let Ok(text) = std::fs::read_to_string(table) else { continue };
+        for line in text.lines().skip(1) {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let local = f.get(1).and_then(|a| a.rsplit(':').next()).and_then(|p| u16::from_str_radix(p, 16).ok());
+            if f.len() > 9 && local == Some(port) {
+                let state = usize::from_str_radix(f[3], 16).ok().and_then(|s| STATES.get(s)).copied().unwrap_or("?");
+                sockets.push((state, f[9].to_string()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (state, inode) in sockets {
+        let mut owner = String::new();
+        if state == "LISTEN" {
+            let target = format!("socket:[{inode}]");
+            for p in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+                let pid = p.file_name().to_string_lossy().to_string();
+                if !pid.bytes().all(|b| b.is_ascii_digit()) {
+                    continue;
+                }
+                let Ok(fds) = std::fs::read_dir(p.path().join("fd")) else { continue };
+                if fds.flatten().any(|fd| std::fs::read_link(fd.path()).is_ok_and(|l| l.to_string_lossy() == target)) {
+                    let comm = std::fs::read_to_string(p.path().join("comm")).unwrap_or_default();
+                    let stat = std::fs::read_to_string(p.path().join("stat")).unwrap_or_default();
+                    let mut rest = stat.rsplit_once(')').map_or("", |(_, s)| s).split_whitespace();
+                    let (pstate, ppid) = (rest.next().unwrap_or("?"), rest.next().unwrap_or("?"));
+                    let cwd = std::fs::read_link(p.path().join("cwd")).map(|c| c.display().to_string()).unwrap_or_default();
+                    owner = format!(" by pid {pid} ({}, state {pstate}, parent {ppid}, cwd {cwd})", comm.trim());
+                    break;
+                }
+            }
+        }
+        out.push(format!("{state}{owner}"));
+    }
+    out
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn port_holders(_port: u16) -> Vec<String> {
+    Vec::new()
 }
 
 pub(crate) fn run_cleanup(argv: &[String]) {

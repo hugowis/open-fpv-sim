@@ -200,3 +200,55 @@ fn an_eeprom_whose_diff_is_unknown_is_refused() {
     assert!(matches!(err, FcError::Config(_)), "{err}");
     assert!(err.to_string().contains("eeprom.bin"), "{err}");
 }
+
+/// The CI flake's evidence was lost: the bind line scrolled out of a tail full of EEPROM writes, and nothing said
+/// who held the port. The error must carry the failing bind lines themselves, the flash writes only as a count, and
+/// (on Linux) the process listening on the port.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_bind_failure_names_the_port_and_who_holds_it() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let holder = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = holder.local_addr().unwrap().port();
+    let dir = tempfile::tempdir().unwrap();
+    let script = format!(
+        "echo 'bind port {port} for UART2 failed!!' >&2; i=0; while [ $i -lt 400 ]; do echo \"[FLASH_ProgramWord]0x0 = 0\"; i=$((i+1)); done; echo '[SITL] ready for the simulator'; sleep 5"
+    );
+    let cfg = config(dir.path(), &["sh", "-c", &script]);
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
+    let err = SitlProcess::start(&cfg.launch).err().unwrap().to_string();
+    assert!(err.contains(&format!("bind port {port} for UART2 failed!!")), "the failing line itself: {err}");
+    assert!(err.contains(&format!("pid {}", std::process::id())), "the listener on the port: {err}");
+    assert!(err.contains("400 [FLASH_ProgramWord] lines"), "flash writes as a count: {err}");
+    assert!(!err.contains("[FLASH_ProgramWord]0x0"), "not the lines themselves");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn port_holders_finds_a_listener_and_nothing_on_a_free_port() {
+    use ofs_fc::sitl::process::port_holders;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let found = port_holders(port);
+    assert!(found.iter().any(|h| h.contains("LISTEN") && h.contains(&format!("pid {}", std::process::id()))), "{found:?}");
+    drop(listener);
+    assert!(port_holders(port).iter().all(|h| !h.contains("LISTEN")), "a closed listener is gone");
+}
+
+/// SITL creates eeprom.bin at boot, so its existence does not prove the diff was applied: a config run that exits
+/// non-zero (Betaflight's `[CONFIG] prepareSave failed`) must be a startup error, not a quad flying the defaults.
+#[cfg(unix)]
+#[test]
+fn a_config_run_that_fails_is_an_error_even_if_eeprom_bin_exists() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), &["sh", "-c", "head -c 64 /dev/zero > eeprom.bin; echo '[CONFIG] prepareSave failed'; exit 1"]);
+    let err = SitlProcess::start(&cfg.launch).err().unwrap();
+    assert!(matches!(err, FcError::Config(_)), "{err}");
+    let shown = err.to_string();
+    assert!(shown.contains("prepareSave failed") && shown.contains("exit"), "{shown}");
+}
