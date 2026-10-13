@@ -71,6 +71,6 @@ func stop() -> Dictionary:
 
 
 func _timestamp() -> String:
-	# Plus a millisecond uniqueness suffix: start/stop/start within one second must not truncate the previous
-	# recording (the muxer's File::create truncates a same-name file instead of the start failing).
+	# Plus a millisecond uniqueness suffix: start/stop/start within one second gets a new name (a same-name start
+	# would fail: the muxer never overwrites a recording).
 	return "%s_%03d" % [Time.get_datetime_string_from_system(true).replace(":", "").replace("-", "").replace("T", "_"), Time.get_ticks_msec() % 1000]

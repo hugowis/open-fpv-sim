@@ -179,12 +179,18 @@ pub struct DvrWriter {
 
 impl DvrWriter {
     /// Starts a recording at `fps` frames a second with `width` × `height` pixels; every `write_frame` must
-    /// hand JPEG bytes of that size (Godot's encoder does). Creates the file's directory.
+    /// hand JPEG bytes of that size (Godot's encoder does). Creates the file's directory; fails if the file exists
+    /// (a recording never overwrites another).
     pub fn start(path: PathBuf, fps: u32, width: u32, height: u32) -> Result<DvrWriter, String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", path.display()))?;
         }
-        let file = File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = File::create_new(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                format!("{} already exists: a recording never overwrites another", path.display())
+            }
+            _ => format!("{}: {e}", path.display()),
+        })?;
         let header = Header { microsec_per_frame: 1_000_000 / fps.max(1), fps, width, height };
         let (tx, rx) = sync_channel(FRAME_CHANNEL_CAPACITY);
         let dropped = std::sync::Arc::new(AtomicU64::new(0));

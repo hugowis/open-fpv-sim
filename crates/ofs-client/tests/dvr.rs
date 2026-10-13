@@ -111,6 +111,7 @@ fn write_two_frames(path: &Path) -> ofs_client::dvr::DvrSummary {
 #[test]
 fn two_frames_round_trip_with_padding_and_a_patched_index() {
     let dir = std::env::temp_dir().join(format!("ofs-dvr-test-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("two.avi");
     let summary = write_two_frames(&path);
@@ -128,6 +129,7 @@ fn two_frames_round_trip_with_padding_and_a_patched_index() {
 #[test]
 fn zero_frames_writes_a_valid_empty_avi() {
     let dir = std::env::temp_dir().join(format!("ofs-dvr-empty-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("empty.avi");
     let writer = DvrWriter::start(path.clone(), 50, 4, 2).unwrap();
@@ -142,11 +144,29 @@ fn zero_frames_writes_a_valid_empty_avi() {
 #[test]
 fn a_missing_directory_is_created_and_a_bad_frame_size_does_not_corrupt() {
     let dir = std::env::temp_dir().join(format!("ofs-dvr-mkdir-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
     let path = dir.join("nested/deep/rec.avi");
     let writer = DvrWriter::start(path.clone(), 50, 4, 2).unwrap();
     writer.write_frame(vec![0xFF; 40]); // whatever bytes: the muxer does not validate JPEG content
     let summary = writer.stop().unwrap();
     assert_eq!(summary.frames, 1);
     assert!(path.exists());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_start_on_an_existing_file_fails_and_leaves_it_untouched() {
+    // m3e debt: File::create truncated a same-name recording (a clock without millisecond resolution, a scripted
+    // caller) instead of the start failing.
+    let dir = std::env::temp_dir().join(format!("ofs-dvr-exists-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rec.avi");
+    write_two_frames(&path);
+    let before = std::fs::read(&path).unwrap();
+    let err = DvrWriter::start(path.clone(), 50, 4, 2).err().expect("a start on an existing file fails");
+    assert!(err.contains(&path.display().to_string()), "the error names the file: {err}");
+    assert!(err.contains("already exists"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "the earlier recording is untouched");
     std::fs::remove_dir_all(&dir).ok();
 }

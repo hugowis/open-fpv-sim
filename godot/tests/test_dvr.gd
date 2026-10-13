@@ -47,6 +47,7 @@ func _count_frames(path: String) -> int:
 func test_a_recording_round_trips() -> void:
 	var client := await _client()
 	var path := OS.get_user_data_dir() + "/test_dvr_roundtrip.avi"
+	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
 	eq(client.dvr_start(path, 4, 2), "", "starts")
 	for i in 10:
 		client.dvr_write_frame(PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))  # a JPEG-shaped blob; the muxer does not validate
@@ -64,6 +65,7 @@ func test_stop_without_start_and_double_start_are_honest() -> void:
 	var client := await _client()
 	eq(client.dvr_stop().size(), 0, "stop without start is empty")
 	var path := OS.get_user_data_dir() + "/test_dvr_double.avi"
+	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
 	eq(client.dvr_start(path, 4, 2), "", "first start")
 	ok(client.dvr_start(path, 4, 2) != "", "a second start fails")
 	client.dvr_stop()
