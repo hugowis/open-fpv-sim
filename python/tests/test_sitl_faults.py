@@ -3,7 +3,6 @@ import os
 
 import pytest
 
-import ofs
 from ofs.faults import BurstLoss, MotorFailure, VtxInterference, WeakCell
 
 from conftest import QUAD
@@ -40,17 +39,19 @@ def test_motor_failure_takes_the_quad_down(sim):
 def test_burst_loss_failsafes_and_betaflight_flags_it(sim):
     _armed_and_hovering(sim)
     status = StatusClient(sim)
-    sim.inject(BurstLoss(on_ms=2500, off_ms=1000))
-    sim.run(2.0)  # stage 1 flags at once, stage 2 completes its landing ~1.6 s in; the burst's
-    # off-window restores the link at 2.5 s and FAILSAFE clears ~1 s later, so check inside the window
-    flags = status.arming_disable_flags()
-    assert flags & ARMING_DISABLED_RX_FAILSAFE, hex(flags)
-    assert flags & ARMING_DISABLED_FAILSAFE, hex(flags)
-    sim.clear_faults()
-    sim.run(2.0)
-    flags = status.arming_disable_flags()
-    assert not flags & ARMING_DISABLED_FAILSAFE, f"recovered: {flags:#x}"
-    status.close()
+    try:
+        sim.inject(BurstLoss(on_ms=2500, off_ms=1000))
+        sim.run(2.0)  # stage 1 flags at once, stage 2 completes its landing ~1.6 s in; the burst's
+        # off-window restores the link at 2.5 s and FAILSAFE clears ~1 s later, so check inside the window
+        flags = status.arming_disable_flags()
+        assert flags & ARMING_DISABLED_RX_FAILSAFE, hex(flags)
+        assert flags & ARMING_DISABLED_FAILSAFE, hex(flags)
+        sim.clear_faults()
+        sim.run(2.0)
+        flags = status.arming_disable_flags()
+        assert not flags & ARMING_DISABLED_FAILSAFE, f"recovered: {flags:#x}"
+    finally:
+        status.close()
 
 
 def test_weak_cell_reads_through_betaflight_telemetry(sim):

@@ -1,5 +1,6 @@
 """The ELRS link end to end against real Betaflight (M3c): arms over the geometric link at home; 50 km out at
-10 mW the receiver is silent, Betaflight fails safe and the OSD's LQ cell reads 0. Needs OFS_SITL_LAUNCH."""
+10 mW the receiver is silent, Betaflight fails safe (its own RX-loss flag, read over MSP) and the OSD's LQ cell
+reads 0. Needs OFS_SITL_LAUNCH."""
 import os
 import pathlib
 import re
@@ -8,6 +9,7 @@ import shutil
 import pytest
 
 from conftest import QUAD
+from msp_status import ARMING_DISABLED_RX_FAILSAFE, StatusClient
 
 pytestmark = pytest.mark.skipif(not os.environ.get("OFS_SITL_LAUNCH"),
                                 reason="set OFS_SITL_LAUNCH to run against Betaflight SITL")
@@ -38,6 +40,14 @@ def test_fifty_km_out_at_ten_milliwatts_betaflight_fails_safe(sim, tmp_path):
     sim.set_sticks(aux=ARM_AND_ANGLE)
     s = sim.run(2.0)
     assert max(s.motor_cmd) == 0.0, f"Betaflight armed without a receiver: {s.motor_cmd}"
+    # m3c debt: "never arms" could hide a failsafe for the wrong reason. Betaflight raises RX_FAILSAFE itself when no
+    # valid RX data arrived within its failure period (failsafe.c, failsafeCheckDataFailurePeriod).
+    status = StatusClient(sim)
+    try:
+        flags = status.arming_disable_flags()
+    finally:
+        status.close()
+    assert flags & ARMING_DISABLED_RX_FAILSAFE, f"Betaflight's own RX-loss flag: {flags:#x}"
     # The shipped diff places the LQ element on the OSD (osd_link_quality_pos): it reads 0 with no link. Betaflight
     # renders the CRSF element as icon, RF mode, ":<lq>" (osd_elements.c) — the plain "LQ 0" form is only the
     # craft-name fallback — so with the receiver silent it reads e.g. "{0: 0".

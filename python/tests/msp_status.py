@@ -13,6 +13,24 @@ ARMING_DISABLED_FAILSAFE = 1 << 1
 ARMING_DISABLED_RX_FAILSAFE = 1 << 2
 
 
+def reply_payload(buf, cmd):
+    """The payload of the first complete `$M>` reply to `cmd` in `buf`, or None while it has not fully arrived.
+
+    A reply is `$M>`, a size byte, the command, the payload and a checksum; a TCP read can end anywhere in it."""
+    i = buf.find(b"$M>")
+    while i != -1:
+        if len(buf) < i + 5:
+            return None
+        size, got = buf[i + 3], buf[i + 4]
+        end = i + 6 + size
+        if len(buf) < end:
+            return None
+        if got == cmd:
+            return buf[i + 5:end - 1]
+        i = buf.find(b"$M>", end)
+    return None
+
+
 class StatusClient:
     """One MSP_STATUS channel over the Configurator TCP port, pumped by simulated time."""
 
@@ -23,16 +41,14 @@ class StatusClient:
         self._sim = sim
 
     def _exchange(self, cmd):
-        ck = cmd
-        self._sock.sendall(b"$M<" + bytes([0, cmd]) + bytes([ck]))
+        self._sock.sendall(b"$M<" + bytes([0, cmd, cmd]))  # size 0, so the checksum is the command
+        buf = b""
         while True:
             self._sim.run(0.02)  # MSP is serviced only while simulated time advances
-            b = self._sock.recv(4096)
-            if b"$M>" in b:
-                i = b.index(b"$M>")
-                n, got = b[i + 3], b[i + 4]
-                if got == cmd:
-                    return b[i + 5:i + 5 + n]
+            buf += self._sock.recv(4096)
+            payload = reply_payload(buf, cmd)
+            if payload is not None:
+                return payload
 
     def arming_disable_flags(self):
         """One MSP_STATUS exchange: walks the pinned payload to the u32 LE arming-disable flags.
