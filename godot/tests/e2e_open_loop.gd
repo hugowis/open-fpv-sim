@@ -42,6 +42,26 @@ func _free_port() -> int:
 	return port
 
 
+## The frames of an MJPEG AVI the client's muxer wrote: a minimal RIFF walk to the movi list, then its 00dc chunks.
+func _avi_frames(path: String) -> Array:
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var frames: Array = []
+	if bytes.size() < 12 or bytes.slice(0, 4).get_string_from_ascii() != "RIFF" or bytes.slice(8, 12).get_string_from_ascii() != "AVI ":
+		_check(false, "the recording is a RIFF AVI: %s (%d bytes)" % [path, bytes.size()])
+		return frames
+	var movi := -1
+	for i in range(12, bytes.size() - 4):
+		if bytes[i] == 0x6D and bytes.slice(i, i + 4).get_string_from_ascii() == "movi":
+			movi = i
+			break
+	var at := movi + 4
+	while movi >= 0 and at + 8 <= bytes.size() and bytes.slice(at, at + 4).get_string_from_ascii() == "00dc":
+		var size := bytes.decode_u32(at + 4)
+		frames.append(bytes.slice(at + 8, at + 8 + size))
+		at += 8 + size + (size & 1)
+	return frames
+
+
 func _run() -> void:
 	var data_dir := OS.get_user_data_dir().path_join("e2e-data")
 	OS.set_environment("OFS_OPEN_LOOP", "1")
@@ -156,6 +176,31 @@ func _run() -> void:
 	app.set_chase_view(false)
 	_check(app.video.is_active(), "and the FPV view degraded again")
 	app.set_process(true)
+
+	# The DVR end to end (m3e debt): the D key records two simulated seconds through dvr.gd and the client's muxer.
+	# Headless Godot renders nothing, so a synthetic image stands in for the SubViewport's picture; the field dedup,
+	# the JPEG encode and the muxer are the real ones.
+	var size: Vector2i = app.fpv_viewport.size
+	app.dvr.image_source = func() -> Image:
+		var image := Image.create(maxi(size.x, 16), maxi(size.y, 16), false, Image.FORMAT_RGB8)
+		image.fill(Color(0.4, 0.5, 0.6))
+		return image
+	var started: Array = []
+	app.dvr.started.connect(func(path: String): started.append(path))
+	var t0: float = app.client.get_telemetry()["time_s"]
+	_press(app, KEY_D)
+	_check(app.dvr.recording, "D starts the DVR")
+	await _wait_for(func(): return float(app.client.get_telemetry()["time_s"]) >= t0 + 2.0, 20.0)
+	var t1: float = app.client.get_telemetry()["time_s"]
+	_press(app, KEY_D)
+	_check(not app.dvr.recording and started.size() == 1, "D again stops it")
+	if started.size() == 1:
+		var frames := _avi_frames(ProjectSettings.globalize_path(started[0]))
+		var expected := int((t1 - t0) * 50.0)
+		_check(frames.size() >= int(expected * 0.8) and frames.size() <= expected + 3,
+			"%d frames for %.2f simulated seconds at 50 fields a second (about %d)" % [frames.size(), t1 - t0, expected])
+		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
+			"every frame is a JPEG")
 
 	app.queue_free()
 	await process_frame

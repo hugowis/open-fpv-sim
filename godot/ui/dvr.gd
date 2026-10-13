@@ -18,6 +18,9 @@ var _client: Object
 var _viewport: SubViewport
 var _last_target := -1
 var _last_jpeg := PackedByteArray()
+## Where a current field's picture comes from: the FPV SubViewport, unless a test sets this to a Callable returning
+## an Image (headless Godot renders nothing; the tests feed synthetic images through the same encode-and-write path).
+var image_source := Callable()
 
 
 func start(client: Object, viewport: SubViewport) -> String:
@@ -52,7 +55,7 @@ func capture(view: Dictionary) -> void:
 		if not _last_jpeg.is_empty():
 			_client.dvr_write_frame(_last_jpeg)
 		return
-	var image: Image = _viewport.get_texture().get_image()
+	var image: Image = image_source.call() if image_source.is_valid() else _viewport.get_texture().get_image()
 	if image == null or image.is_empty():
 		return  # headless or the texture not yet rendered: this field is simply not in the recording
 	_last_jpeg = image.save_jpg_to_buffer(JPEG_QUALITY)

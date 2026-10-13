@@ -97,3 +97,35 @@ func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	eq(dvr._last_target, 5, "the dedup key is the integer field the client renders for")
 	eq(dvr.stop()["frames"], 2, "the stand-in reports what was fed")
 	dvr.queue_free()
+
+
+func _synthetic_image() -> Image:
+	var image := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	image.fill(Color(0.2, 0.6, 0.3))
+	return image
+
+
+## m3e debt: the encode path was only checked by eye. A current field goes through Image -> save_jpg_to_buffer at
+## JPEG_QUALITY -> dvr_write_frame, and what arrives must be a real, decodable JPEG.
+func test_a_current_field_is_encoded_as_a_jpeg_at_the_dvr_quality() -> void:
+	ok(Dvr.JPEG_QUALITY > 0.0 and Dvr.JPEG_QUALITY <= 1.0, "Godot's JPEG quality is on the 0-1 scale")
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var viewport := SubViewport.new()
+	await add_to_tree(viewport)
+	var mock := MockClient.new()
+	eq(dvr.start(mock, viewport), "", "starts against the stand-in")
+	dvr.image_source = _synthetic_image
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	eq(mock.frames.size(), 1, "a current field writes one frame")
+	if mock.frames.size() == 1:
+		var jpeg: PackedByteArray = mock.frames[0]
+		ok(jpeg.size() > 100, "a real encode, not an empty buffer: %d bytes" % jpeg.size())
+		eq(jpeg.slice(0, 2), PackedByteArray([0xFF, 0xD8]), "it starts with the JPEG SOI marker")
+		eq(jpeg.slice(jpeg.size() - 2), PackedByteArray([0xFF, 0xD9]), "and ends with EOI")
+		var decoded := Image.new()
+		eq(decoded.load_jpg_from_buffer(jpeg), OK, "Godot decodes it back")
+		eq(decoded.get_size(), Vector2i(64, 48), "at the captured size")
+	dvr.stop()
+	dvr.queue_free()
+	viewport.queue_free()
