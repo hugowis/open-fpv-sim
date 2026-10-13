@@ -19,9 +19,12 @@
 - **A Blackbox log of a session that ends armed is cut short** — the session kills SITL; disarm first (documented).
 - **A recording stopped by a write error is left unfinished** — no summary section, so indexed readers refuse it;
   the `recording_stopped` event names the error.
-- **The first PyPI tag needs setup on pypi.org** — the `open-fpv-sim` project and its trusted publisher (this
-  repository, workflow `ci.yml`, environment `pypi`) must exist before the first `v*` tag; which tag publishes first
-  is the maintainer's call.
+- **Published to PyPI** — `open-fpv-sim` 0.1.0 (wheel and sdist) from tag `v0.1.0`, 2026-10-13, through the
+  trusted publisher (this repository, workflow `ci.yml`, environment `pypi`, which needs a `v*` tag rule and a
+  reviewer's approval). Later releases: bump `python/pyproject.toml`'s version and push the matching `v*` tag.
+- **The SITL port-bind flake reaches the sandbox test** — on the `v0.1.0` tag, the wheel step's
+  `test_sitl_sandbox.py` failed with "could not bind its ports" 16 s after the same test passed in the step before
+  it; a re-run passed. It holds back `publish` (which needs `sitl`), so a release tag may need a re-run.
 - Inherited and still open: fcs/receivers/cameras part kinds (m4a); windmilling drag, battery capacity fade,
   vibration transmissibility (m4b); `test_sitl_link.py` not in the sitl job's list (m3e). (The flaky
   `runner::tests::a_panicking_step_poisons_the_session_and_keeps_the_runner_alive`, found while planning M4c, was
