@@ -319,6 +319,8 @@ impl VideoLink {
 
     fn interference_for(&mut self, freq_mhz: f64) -> Vec<f64> {
         let injected = self.handle.emitter();
+        // Exact equality on purpose: the cache holds only for the very same frequency and injected emitter, and any
+        // difference recomputes. Fault validation rejects non-finite payloads at inject, so NaN never reaches the key.
         match &self.interference {
             Some((f, e, values)) if *f == freq_mhz && *e == injected => values.clone(),
             _ => {

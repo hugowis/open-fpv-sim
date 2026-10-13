@@ -297,7 +297,8 @@ impl VideoHandles {
 
     fn read(&self, b: &Bus) -> VideoInfo {
         if b.get(self.present) < 0.5 {
-            return VideoInfo::default();
+            // Nothing transmits, but the goggles' glass-to-glass latency is still theirs.
+            return VideoInfo { latency_ms: self.latency_ms, ..VideoInfo::default() };
         }
         let active = b.get(self.antenna) as usize;
         VideoInfo {
@@ -910,7 +911,7 @@ impl Vehicle {
             Fault::BurstLoss { on_s, off_s } => {
                 if !on_s.is_finite() || !off_s.is_finite() || *on_s <= 0.0 || *off_s <= 0.0 {
                     return Err(SimError::InvalidArgument(format!(
-                        "burst on_ms and off_ms must both be finite and > 0, got on {on_s} s / off {off_s} s"
+                        "burst on and off windows must both be finite and > 0 s, got on {on_s} s / off {off_s} s"
                     )));
                 }
             }
@@ -1307,6 +1308,19 @@ mod tests {
     }
 
     #[test]
+    fn the_goggles_latency_is_reported_without_a_transmitting_vtx() {
+        // m3e debt: glass-to-glass latency belongs to the goggles, not the VTX; read() zeroed it when nothing
+        // transmitted (no [vtx], pit mode, a dead VTX).
+        let mut world = WorldConfig::open_field();
+        world.receiver.latency_ms = 60;
+        let mut bus = Bus::new();
+        let video = VideoHandles::register(&mut bus, &world);
+        let info = video.read(&bus);
+        assert!(!info.present, "nothing set video.present");
+        assert_eq!(info.latency_ms, 60);
+    }
+
+    #[test]
     fn the_latency_quantizes_down_to_whole_fields() {
         assert_eq!(quantize_latency_ms(40), 40, "the default is already two fields");
         assert_eq!(quantize_latency_ms(37), 20, "37 ms delivers one field");
@@ -1378,7 +1392,9 @@ mod tests {
         vehicle.run_for(0.05).unwrap();
         let state = vehicle.state();
         assert!(!state.vtx.present);
-        assert_eq!(state.video, VideoInfo::default());
+        // No link, but the goggles keep their latency (close-out: it is not VTX-conditional).
+        let latency_ms = quantize_latency_ms(flat_world().receiver.latency_ms);
+        assert_eq!(state.video, VideoInfo { latency_ms, ..VideoInfo::default() });
     }
 
     #[test]
@@ -1482,7 +1498,7 @@ mod tests {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         for (on_s, off_s) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (1.0, 0.0)] {
             let err = vehicle.set_fault(Fault::BurstLoss { on_s, off_s }, true).unwrap_err();
-            assert!(err.to_string().contains("burst on_ms"), "{on_s} / {off_s}: {err}");
+            assert!(err.to_string().contains("burst on and off windows"), "{on_s} / {off_s}: {err}");
             assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
         }
     }
