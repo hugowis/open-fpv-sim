@@ -1,3 +1,6 @@
+> Retired at the v1 close-out (2026-10-13): every item here now lives in `docs/roadmap.md` or was fixed (see
+> `CHANGELOG.md`); this file is kept as history.
+
 # M1 carried debt
 
 These findings came out of the M1 task reviews and the final whole-branch review. Each was deliberately left out of M1 and listed for later milestones. The minors cleanup after M3b (branch `minors-cleanup`) closed most of them; what remains is listed under "Still open".

@@ -14,3 +14,7 @@ Betaflight Configurator is licensed under the GNU General Public License v3.0 (i
 project is GPL-3.0-or-later; the atlas is a derivative of the font and stays under the GPL-3.0 terms of its source.
 
 Betaflight sends character codes, not pictures; the symbols (battery, units, arrows) only look right with this font.
+
+**Maintainer's ruling (2026-10-13):** accepted. The atlas stays under GPL-3.0 (not "or later") inside this
+GPL-3.0-or-later project; GPL-3.0 is compatible with GPL-3.0-or-later, so the combined work is distributed under
+GPL-3.0. Replacing the atlas with a font under GPL-3.0-or-later (or a more permissive licence) would lift that.

@@ -137,7 +137,7 @@ Receiver diversity (one or two antennas in the quad file's `[[radio.antennas]]` 
 `[[handset.antennas]]`) changes antenna only when the other one is better by 2 dB
 (`ofs_rf::fading::Diversity`), so a fade has to persist to switch. The handset transmits on its *active* antenna —
 the one it receives best — and the quad answers on the antenna it receives best. Real dual-antenna handsets
-alternate per packet instead; this is a modelling simplification (see `docs/superpowers/m3c-carried-debt.md`).
+alternate per packet instead; this is a modelling simplification (see `docs/roadmap.md`).
 
 ## Link budget check
 

@@ -94,7 +94,7 @@ centres are one tip radius apart (the chord `2·6.35·sin 30°` = 6.35 cm) and 2
 2 cm spheres. The widest ring-to-body gap is on the ring sphere farthest out: the ring's six angles straddle the
 45° motor arm, and the outer one lands 15° past it, 17.5 cm from the quad's centre, leaving `17.5 − 2 − 4` =
 **11.5 cm** of air to the body sphere. The spec's first figure for the prop spheres, 1.5 cm, left 12.02 cm there —
-the claim failed by 0.24 mm — so the radius is 2 cm (see `docs/superpowers/m3c-carried-debt.md`).
+the claim failed by 0.24 mm — so the radius is 2 cm (see `docs/roadmap.md`).
 
 And nothing is missed between steps: at 8 kHz the 30 m/s quad moves 3.75 mm per step, and a sphere is found the
 step its centre crosses the surface.

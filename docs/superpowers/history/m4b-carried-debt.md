@@ -1,3 +1,6 @@
+> Retired at the v1 close-out (2026-10-13): every item here now lives in `docs/roadmap.md` or was fixed (see
+> `CHANGELOG.md`); this file is kept as history.
+
 # M4b carried debt
 
 ## Deferred features

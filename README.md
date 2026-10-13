@@ -175,4 +175,7 @@ The spec's sandbox example (`python/examples/sandbox.py`): run it from the repos
   battery, motor, link and video curves, the events as text. It follows the state stream (up to 240 Hz); the 8 kHz
   signals are in the recording.
 
-License: GPL-3.0-or-later.
+## Licence
+Open FPV Sim is GPL-3.0-or-later (`LICENSE`). One file is GPL-3.0 only: the OSD font atlas `godot/ui/osd_font.png`,
+converted from Betaflight Configurator's fonts (`godot/ui/OSD_FONT_LICENSE.md`). The two licences are compatible,
+so the combined work is distributed under GPL-3.0. Part data files in `library/` are CC-BY-SA-4.0.

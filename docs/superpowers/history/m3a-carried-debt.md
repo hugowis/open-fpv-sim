@@ -1,3 +1,6 @@
+> Retired at the v1 close-out (2026-10-13): every item here now lives in `docs/roadmap.md` or was fixed (see
+> `CHANGELOG.md`); this file is kept as history.
+
 # M3a carried debt
 
 These items were deliberately left out of M3a, or surfaced while building it. They are listed so M3b/M4 planning and the maintainer can pick them up.
