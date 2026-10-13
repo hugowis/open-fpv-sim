@@ -281,5 +281,30 @@ Persistence over MSP is covered live by `test_a_pid_saved_over_msp_persists_thro
 2. reconnect and confirm the value persisted;
 3. note `betaflight restarts=1` in the script's output.
 
+## Performance
+`scripts/benchmark.py` measures the real-time factor (simulated seconds per wall second) of headless lockstep runs
+of the shipped quad: open loop and with Betaflight SITL, recording on and off. The parent spec's target (§8.6) is
+at least 2× on a mid-range PC; CI's sitl job runs it against a release build, prints the table in the job summary
+and fails only below 1× (shared runners are noisy).
+
+Measured on an AMD Ryzen 9 9900X3D, release build, 2026-10-13. Windows, open loop (no Betaflight):
+
+| Configuration | Simulated (s) | Wall (s) | Real-time factor |
+|---|---|---|---|
+| open loop, recording | 30.0 | 0.31 | 97.8x |
+| open loop, no recording | 30.0 | 0.10 | 295.7x |
+
+WSL 2 on the same machine, with Betaflight SITL:
+
+| Configuration | Simulated (s) | Wall (s) | Real-time factor |
+|---|---|---|---|
+| open loop, recording | 30.0 | 0.36 | 84.3x |
+| open loop, no recording | 30.0 | 0.14 | 208.0x |
+| Betaflight SITL, recording | 30.0 | 4.08 | 7.4x |
+| Betaflight SITL, no recording | 30.0 | 3.82 | 7.9x |
+
+The lockstep exchange with SITL is the cost: every configuration clears the 2× target, the Betaflight ones by
+almost four times.
+
 ## Ports
 SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.
