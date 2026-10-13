@@ -134,3 +134,45 @@ def test_two_identical_lockstep_sessions_write_identical_files(sim):
     assert _sha(a) == _sha(b)
     assert _sha(a) != _sha(c)
     assert not math.isnan(ofs.reader.to_dataframe(a, "body.pos_ned_m").iloc[-1, 2])
+
+
+# Geometric steps of 15 %: the drop band is only 3 dB of SNR wide, so the search must not step over it.
+DISTANCES_M = [round(100 * 1.15 ** i) for i in range(36)]
+
+
+def _marginal_world(tmp_path, north_m):
+    """An open field, one omni goggle antenna `north_m` north of the parked quad and 60 ms of latency: far enough out,
+    the 5.8 GHz link sits in its field-drop band."""
+    path = tmp_path / f"marginal-{north_m}.toml"
+    path.write_text(
+        'schema_version = 1\nname = "Marginal"\n\n'
+        f"[pilot]\nposition_ned_m = [{north_m:.1f}, 0.0, -1.7]\nfacing_deg = 180.0\n\n"
+        "[receiver]\nnoise_floor_dbm = -93.0\ndiversity = false\nlatency_ms = 60\n\n"
+        '[[receiver.antennas]]\nname = "omni"\nkind = "omni"\ngain_dbi = 2.0\npolarization = "rhcp"\n'
+    )
+    return str(path)
+
+
+def _parked_run(sim, world, seed):
+    sim.load(QUAD, seed=seed, open_loop_fc=True, world=world)
+    state = sim.run(2.0)
+    log = sim.log
+    valid = log.to_dataframe("video.field_valid")["video.field_valid"].dropna()
+    return state, log.path, valid
+
+
+def test_lockstep_runs_with_latency_and_field_drops_write_identical_files(sim, tmp_path):
+    """The M3e spec's simulator test (m3e debt): two same-seed lockstep runs with latency and field drops configured
+    are byte-identical, because the drops are drawn from the link model's seeded stream."""
+    for north in DISTANCES_M:
+        world = _marginal_world(tmp_path, north)
+        state, first, valid = _parked_run(sim, world, seed=5)
+        dropped = int((valid < 0.5).sum())
+        if 0 < dropped < len(valid):
+            break
+    else:
+        pytest.fail("no distance put the video link in its field-drop band")
+    assert state.video.latency_ms == 60, state.video
+    _, second, _ = _parked_run(sim, world, seed=5)
+    assert first != second
+    assert _sha(first) == _sha(second), f"{dropped} dropped fields at {north} m, yet the files differ"
