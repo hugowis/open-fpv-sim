@@ -563,6 +563,10 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
     binary = binary or os.environ.get("OFS_SIM_BIN") or shutil.which("ofs-sim")
     if not binary:
         raise FileNotFoundError("ofs-sim binary not found: set OFS_SIM_BIN or put ofs-sim on PATH")
+    if "/" in binary or os.sep in binary:
+        # A path, not a name to look up: absolute, with native separators. Windows' CreateProcess refuses a
+        # relative path written with forward slashes (`target/debug/ofs-sim`).
+        binary = os.path.abspath(binary)
     address = f"127.0.0.1:{_free_port()}"
     proc = subprocess.Popen([binary, "--listen", address, "--data-dir", data_dir])
     deadline = time.monotonic() + timeout_s

@@ -7,7 +7,7 @@ import grpc
 import pytest
 
 import ofs
-from conftest import QUAD, WORLD
+from conftest import QUAD, REPO, WORLD
 
 
 def test_open_loop_rest_then_climb(sim):
@@ -96,6 +96,15 @@ def test_a_launched_server_stops_when_its_sim_is_dropped_without_close(sim_bin, 
         raise
     finally:
         channel.close()
+
+
+def test_launch_takes_a_relative_path_with_forward_slashes(sim_bin, tmp_path, monkeypatch):
+    """The README's `ofs.launch(binary='target/debug/ofs-sim')`: Windows' CreateProcess refuses a relative path
+    written with forward slashes unless launch resolves it."""
+    monkeypatch.chdir(REPO)
+    relative = os.path.relpath(sim_bin, REPO).replace("\\", "/")
+    s = ofs.launch(binary=relative, data_dir=str(tmp_path))
+    s.close()
 
 
 def test_close_tolerates_a_dead_server(sim_bin, tmp_path):
