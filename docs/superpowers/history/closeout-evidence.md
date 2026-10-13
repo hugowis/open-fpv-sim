@@ -18,3 +18,12 @@ three. Keeping the connection open until the relaunch (as `test_the_osd_and_vtx_
 passes. Betaflight reboots only once the command's reply has gone out, and with the connection gone it appears to wait
 for good. Whether the Betaflight Configurator hangs up that early after a Save is what the maintainer's manual check
 answers; the roadmap records it either way.
+
+## Betaflight SITL can abort while it resets (found by Task 11)
+
+Once, both reboot tests of `python/tests/test_sitl_video.py` failed in the same run: after `[system]Reset!` and
+`tcpThread end!!`, glibc reported `tcache_thread_shutdown(): unaligned tcache chunk detected` and SITL died of SIGABRT,
+so the simulator reported a firmware crash instead of a reboot. Heap corruption inside SITL's teardown (the TCP serial
+thread is the last to end), not in the simulator. It did not come back in 38 later reboots (16 runs of both reboot
+tests, three runs of the whole file). Recorded in the roadmap as an open upstream-SITL item; a reboot that crashes
+this way fails the session loudly, it does not corrupt anything.
