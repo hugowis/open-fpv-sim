@@ -255,7 +255,8 @@ impl OfsClient {
     /// field-quantized instant; a dropped field holds the previous one. Empty before the first field: `pose`
     /// (Transform3D), `render_time_s`, `video_present`, `video_noise`, `video_sparkles`, `video_chroma`,
     /// `video_sync` ("locked"/"unstable"/"lost"), `field_valid`, `held_fields` (how many field boundaries the
-    /// shown field lags the render target by; 0 is current, ≥ 1 means held fields), `latency_ms`, and `osd`
+    /// shown field lags the render target by; 0 is current, ≥ 1 means held fields), `target_field` (the integer
+    /// index of the field boundary the picture renders for — what the DVR dedups on), `latency_ms`, and `osd`
     /// (the Dictionary `get_osd` returns, or empty).
     #[func]
     fn get_fpv_view(&self) -> VarDictionary {
@@ -272,6 +273,7 @@ impl OfsClient {
         d.set("video_sync", &GString::from(v.uniforms.sync.as_str()));
         d.set("field_valid", v.field_valid);
         d.set("held_fields", i64::from(v.held_fields));
+        d.set("target_field", ofs_client::fpv::target_field(v.render_time_s, v.held_fields));
         d.set("latency_ms", v.latency_ms);
         match &v.osd {
             Some(frame) => d.set("osd", &osd_dict(frame)),

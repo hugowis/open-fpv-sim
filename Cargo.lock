@@ -912,6 +912,7 @@ name = "ofs-client"
 version = "0.1.0"
 dependencies = [
  "glam 0.29.3",
+ "ofs-core",
  "ofs-proto",
  "ofs-sim",
  "proptest",
@@ -925,6 +926,7 @@ dependencies = [
 name = "ofs-config"
 version = "0.1.0"
 dependencies = [
+ "ofs-core",
  "serde",
  "tempfile",
  "thiserror 1.0.69",

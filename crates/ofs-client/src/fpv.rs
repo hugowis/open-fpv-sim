@@ -6,10 +6,8 @@ use std::collections::VecDeque;
 use crate::interp::Pose;
 use crate::model::{OsdFrame, VideoSync};
 
-/// One analog video field: 20 ms of simulated time (50 fields a second; the same rate as
-/// `ofs-video::link::FIELD_RATE_HZ`, duplicated here because ofs-video is not a client dependency —
-/// carried debt records the pairing).
-pub const FIELD_PERIOD_S: f64 = 0.02;
+/// One analog video field: 20 ms of simulated time (50 fields a second), the same constant the video link runs at.
+pub use ofs_core::consts::VIDEO_FIELD_PERIOD_S as FIELD_PERIOD_S;
 /// Fields kept (1.28 s of picture) and OSD frames kept (0.64 s of OSD): ample for a goggle's latency.
 const MAX_FIELDS: usize = 64;
 const MAX_OSD_FRAMES: usize = 32;
@@ -51,6 +49,18 @@ pub fn field_floor(sim_time_s: f64) -> f64 {
 /// the target is exactly recoverable as `render_time_s + held_fields × FIELD_PERIOD_S`.
 pub fn held_fields(target_s: f64, render_time_s: f64) -> u32 {
     ((target_s - render_time_s) / FIELD_PERIOD_S).round() as u32
+}
+
+/// The integer index of the field boundary nearest `time_s` (boundary k is at k × FIELD_PERIOD_S). Boundaries are
+/// computed in floating point, so anything that dedups on fields keys on this index, never on the boundary time.
+pub fn field_index(time_s: f64) -> i64 {
+    (time_s / FIELD_PERIOD_S).round() as i64
+}
+
+/// The field the picture renders for: the shown field plus the boundaries dropped fields held it back by. The DVR
+/// writes one frame per target field.
+pub fn target_field(render_time_s: f64, held_fields: u32) -> i64 {
+    field_index(render_time_s) + i64::from(held_fields)
 }
 
 #[derive(Debug, Default)]

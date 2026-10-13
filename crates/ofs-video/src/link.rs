@@ -16,7 +16,7 @@ use rand_chacha::ChaCha8Rng;
 
 pub const MODEL_NAME: &str = "video.link";
 /// One PAL field.
-pub const FIELD_RATE_HZ: u32 = 50;
+pub use ofs_core::consts::VIDEO_FIELD_RATE_HZ as FIELD_RATE_HZ;
 /// Received power reported when nothing arrives (no transmitter, or no other emitters).
 pub const NO_SIGNAL_DBM: f64 = -150.0;
 

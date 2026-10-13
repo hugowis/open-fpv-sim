@@ -79,19 +79,19 @@ func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	eq(dvr.start(mock, viewport), "", "starts against the stand-in")
 	dvr._last_jpeg = PackedByteArray([1, 2, 3])  # the held frame, as a previous encode left it
 	# A drop stretch: render_time_s holds at 0.04 while the boundaries advance through the held_fields count.
-	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "field_valid": false})
+	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "target_field": 3, "field_valid": false})
 	eq(mock.frames.size(), 1, "the held frame repeats on the next boundary")
 	eq(mock.frames[0], PackedByteArray([1, 2, 3]), "the repeated bytes are the held frame, not a re-encode")
-	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "field_valid": false})
+	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "target_field": 3, "field_valid": false})
 	eq(mock.frames.size(), 1, "the same boundary does not repeat it twice")
-	dvr.capture({"render_time_s": 0.04, "held_fields": 2, "field_valid": false})
+	dvr.capture({"render_time_s": 0.04, "held_fields": 2, "target_field": 4, "field_valid": false})
 	eq(mock.frames.size(), 2, "and the boundary after repeats it again")
 	# The stretch ends: the recovered field renders for the boundary the last repeat already covered.
-	dvr.capture({"render_time_s": 0.08, "held_fields": 0, "field_valid": true})
+	dvr.capture({"render_time_s": 0.08, "held_fields": 0, "target_field": 4, "field_valid": true})
 	eq(mock.frames.size(), 2, "the recovery boundary is deduped: one frame per boundary")
 	# The next current field would encode from the viewport; headless has no picture, so nothing is written.
-	dvr.capture({"render_time_s": 0.1, "held_fields": 0, "field_valid": true})
+	dvr.capture({"render_time_s": 0.1, "held_fields": 0, "target_field": 5, "field_valid": true})
 	eq(mock.frames.size(), 2, "headless: no picture to encode, no frame written")
-	near(dvr._last_target, 0.1, "the dedup key tracks the rendered boundary", 1e-9)
+	eq(dvr._last_target, 5, "the dedup key is the integer field the client renders for")
 	eq(dvr.stop()["frames"], 2, "the stand-in reports what was fed")
 	dvr.queue_free()

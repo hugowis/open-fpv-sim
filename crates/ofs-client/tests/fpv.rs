@@ -1,4 +1,4 @@
-use ofs_client::fpv::{field_floor, held_fields, FieldUniforms, FpvBuffer};
+use ofs_client::fpv::{field_floor, field_index, held_fields, target_field, FieldUniforms, FpvBuffer, FIELD_PERIOD_S};
 use ofs_client::model::{OsdFrame, VideoSync};
 
 fn uniforms(present: bool, valid: bool) -> (FieldUniforms, bool) {
@@ -74,4 +74,21 @@ fn the_osd_picks_the_newest_frame_at_or_before_the_instant() {
     assert_eq!(b.osd_at(0.03).unwrap().seq, 1, "a frame drawn after the instant is not shown yet");
     assert_eq!(b.osd_at(0.05).unwrap().seq, 2, "exactly at the boundary the newer frame counts as drawn");
     assert!(b.osd_at(0.0).is_none());
+}
+
+#[test]
+fn field_indices_are_exact_over_a_ten_hour_flight() {
+    // m3e debt: the DVR compared floating-point boundaries, which drift by an ulp late in a long flight. Every
+    // boundary `field_floor` computes, out to 10 h of fields, maps back to its own integer index.
+    for k in (0..1_800_000i64).step_by(7) {
+        let t = field_floor(k as f64 * FIELD_PERIOD_S + 0.001);
+        assert_eq!(field_index(t), k, "field {k} at {t}");
+    }
+}
+
+#[test]
+fn the_target_field_advances_through_a_drop_stretch() {
+    let shown = field_floor(3600.03);
+    assert_eq!(target_field(shown, 0), field_index(shown));
+    assert_eq!(target_field(shown, 2), field_index(shown) + 2, "two held fields: two boundaries later");
 }

@@ -499,7 +499,7 @@ pub const BODY_SPHERE_RADIUS_M: f64 = 0.04;
 pub const SPHERES_PER_PROP: usize = 6;
 
 /// The video link model runs once per PAL field.
-pub const VIDEO_FIELD_RATE_HZ: u32 = 50;
+pub use ofs_core::consts::VIDEO_FIELD_RATE_HZ;
 
 fn default_vtx_band() -> String {
     "R".into()
