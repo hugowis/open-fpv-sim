@@ -219,8 +219,8 @@ optional `at_s`, world names in `LoadRequest.world_path`, and `HandshakeReply.lo
   record carries the state `GetState` reports at its time (`{"v": x}`, `{"x", "y", "z"}` or `{"w", "x", "y",
   "z"}` JSON with a JSON schema); the default rates are `ofs_log::DEFAULT_RATES`. The files are deterministic:
   the `mcap` crate is pinned to an upstream revision that writes its summary in id order
-  (`docs/research/mcap-determinism.md`), and the writer pins its library string, single-threaded zstd and no
-  per-message index records (smaller files; readers use the chunk index).
+  (`docs/research/mcap-determinism.md`), and the writer pins its library string and single-threaded zstd. It keeps
+  the per-message index records: Foxglove refuses a file without them.
 - **Python:** a lockstep `load` starts a recording (`record=False` does not), `sim.log` stops and returns it,
   `ofs.reader` reads any recording (`mcap` + `pandas`; Parquet also `pyarrow`), `ofs.rerun.view(sim)` is the live
   view (`rerun-sdk` 0.39.x, pinned by the extra).

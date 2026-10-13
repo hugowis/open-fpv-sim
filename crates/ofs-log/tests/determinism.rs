@@ -55,6 +55,20 @@ fn a_many_channel_recording_is_byte_identical() {
     }
 }
 
+/// Foxglove's reader (@mcap/core's McapIndexedReader) finds messages only through each chunk's message index
+/// records, and refuses a chunk that has none ("a chunk index without message indexes and non-zero start and end
+/// times"): every chunk must index every channel it carries.
+#[test]
+fn every_chunk_indexes_its_messages_for_foxglove() {
+    let bytes = recording(24);
+    let summary = mcap::Summary::read(&bytes).unwrap().expect("a summary section");
+    assert!(!summary.chunk_indexes.is_empty());
+    for chunk in &summary.chunk_indexes {
+        assert_eq!(chunk.message_index_offsets.len(), 24, "chunk at {} indexes every channel", chunk.chunk_start_offset);
+        assert!(chunk.message_index_length > 0);
+    }
+}
+
 #[test]
 fn records_are_compact_json_objects() {
     let mut out = Vec::new();

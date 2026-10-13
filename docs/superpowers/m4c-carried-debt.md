@@ -2,8 +2,8 @@
 
 ## Deferred features
 - **The repro bundle** (parent spec §7) — post-v1; M4c provides its halves: recordings and scripted inputs.
-- **MCAP in Foxglove** — the files are standard MCAP with a JSON schema per record shape, but opening them in
-  Foxglove (and live tailing a recording still being written) is untested; manual check.
+- **MCAP in Foxglove** — Foxglove's reader (`@mcap/core`) reads the recordings (checked after the fix below);
+  plotting in app.foxglove.dev is a manual check, and live tailing a recording still being written is untested.
 - **`mcap` is a git pin** (`00e47a1b`, 0.25.1 unreleased) — switch the workspace dependency to the crates.io release
   that carries the summary-order fix (foxglove/mcap#1838) once it ships, and re-run `crates/ofs-log/tests/determinism.rs`.
 - **The reader is pure Python** — `ofs.reader` decodes one JSON record at a time: about 3.7 s for three patterns of a
@@ -27,8 +27,9 @@
 ## Rulings worth remembering
 - **Records are JSON objects** (`{"v"}`, `{"x","y","z"}`, `{"w","x","y","z"}`) with a JSON schema per shape, not the
   spec's bare arrays: Foxglove's message paths need object roots.
-- **No per-message index records** — 9.9 MB instead of 24.9 MB per simulated minute at the default rates; readers
-  use the chunk index (`docs/research/mcap-determinism.md`).
+- **The per-message index records stay** — about 25 MB per simulated minute at the default rates instead of 9.9 MB.
+  M4c first dropped them (the Python and Rust readers cope), and Foxglove refused every recording: its reader needs
+  them (`docs/research/mcap-determinism.md`).
 - **A record is stamped with the time after its tick**, `(tick + 1) / base_hz`: the state `GetState` reports then.
 - **Scheduled faults and inputs rows apply right after the step that reaches their time**, so a `run` ending at
   that time already shows them (and its fault events); the physics is the same as applying them before the next.

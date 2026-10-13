@@ -59,15 +59,19 @@ The bytes also match a hand-patched 0.25.0 that sorts the summary by id, so #184
 output. The Python reader reads every variant fully: indexed, filtered by topic, by time window and as a
 stream.
 
-## File size: no per-message index records
+## File size: the per-message index records stay
 
 Measured in M4c with the shipped quad, open loop, 60 simulated seconds at the default rates (105 signals, 15 456
 records per simulated second): **24.9 MB** with the crate's defaults, **9.9 MB** with `emit_message_indexes(false)`.
-A message index record is 16 uncompressed bytes per message, written after each chunk, so it outweighed the
-zstd-compressed records themselves. Readers do not need it: the Python reader's indexed, topic-filtered and
-time-window reads and the Rust `MessageStream` all read the files without it (they use the chunk index and decompress
-whole chunks). `ofs-log` writes without them. Reading back costs about 3.7 s for three patterns of a one-minute
-recording in pure Python (`ofs.reader`), 11.7 s for every signal.
+A message index record is 16 uncompressed bytes per message, written after each chunk, so it outweighs the
+zstd-compressed records themselves. The Python reader and the Rust `MessageStream` read files without them, and M4c
+first shipped without them, but **Foxglove cannot**: its reader (`@mcap/core`'s `McapIndexedReader`) finds messages
+only through each chunk's message index records and refuses a chunk that has none ("Encountered a chunk index without
+message indexes and non-zero start and end times"; checked with `@mcap/core` against a sandbox recording, and seen in
+app.foxglove.dev). Since the spec requires the files to open in Foxglove unchanged, `ofs-log` keeps the crate's
+default, and `crates/ofs-log/tests/determinism.rs` pins that every chunk indexes its channels. The sandbox flight
+(Betaflight, 106 signals) records about 4.8 MB per 10 simulated seconds. Reading back costs about 3.7 s for three
+patterns of a one-minute recording in pure Python (`ofs.reader`), 11.7 s for every signal.
 
 ## Test data must avoid platform libm
 

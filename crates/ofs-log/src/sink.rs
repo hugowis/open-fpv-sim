@@ -89,8 +89,9 @@ impl<W: Write + Seek> McapSink<W> {
             .library(LIBRARY)
             .compression(Some(Compression::Zstd))
             // Single-threaded: identical bytes whatever the machine's core count, and no worker threads.
-            .compression_threads(0)
-            .emit_message_indexes(false);
+            // Message index records stay on (the default): Foxglove's reader finds messages only through them and
+            // refuses a chunk without them, though they are most of the file's size.
+            .compression_threads(0);
         let mut writer = opts.create(w).map_err(describe)?;
         let mut schema = |name: &str, data: &str| writer.add_schema(name, "jsonschema", data.as_bytes());
         let schemas = [
