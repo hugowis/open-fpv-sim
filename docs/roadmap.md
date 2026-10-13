@@ -45,8 +45,9 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   (`docs/superpowers/history/closeout-evidence.md`).
 - Betaflight SITL aborted once with heap corruption while resetting (glibc `tcache` check), so a reboot failed as a
   firmware crash; not seen again in 38 reboots. Inside SITL's teardown, upstream of the simulator.
-- The port-bind flake: open. Caught twice by CI's sitl job (run 38453432260); a failure now names the port and
-  who held it at the moment of the bind (`docs/superpowers/history/closeout-evidence.md`).
+- The port-bind flake: open. Caught three times by CI (runs 38437153244 and 38440416805, then 38453432260
+  attempt 5 with the diagnostics); a failure now names the port and who held it at the moment of the bind
+  (`docs/superpowers/history/closeout-evidence.md`).
 
 ### Logging (`docs/research/mcap-determinism.md`)
 - Recording rates are whole divisors of the tick: 240 Hz on an 8 kHz quad records at 242.4 Hz (the channel's
@@ -140,4 +141,9 @@ These explain behaviour that would otherwise look like a bug.
 - **A world name** (`world="flat"`) is `<quad dir>/../worlds/<name>.toml`.
 - **The Blackbox copy runs last** as a session ends (it is the `Session` field declared last).
 - **A launched server stops exactly once**: at `close()`, when its `Sim` is collected, or at interpreter exit.
+- **The `world.has("handset_position")` guard is kept** (`godot/world/world.gd`): it serves the empty-dictionary
+  clear path (`build({})`), where the key is legitimately absent; the HUD shows `SNR –` while the link is down.
+- **The m3c VTX timeout was a one-off**: `no MSP reply to command 89` once (run 38078545752, 2026-10-10); every
+  ci.yml run from 2026-10-10 to 2026-10-13 searched — 7 runs, all with logs — no recurrence
+  (`docs/superpowers/history/closeout-evidence.md`).
 - **A DVR start never overwrites a file**, and its frames are keyed on an integer field index.
