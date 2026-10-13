@@ -149,6 +149,26 @@ fn displayport_frames_come_back_in_the_reply() {
     println!("DisplayPort: {} frames, {} bytes in 3 s", displayport.len(), bytes.len());
 }
 
+/// m3a debt: `serial_overflow` had only ever fired from a counter. Betaflight's OSD writes hundreds of DisplayPort
+/// bytes a second into UART4; a 64-byte tap nobody drains must overflow, and every byte it drops is counted in
+/// `fc.serial_dropped_bytes` (which the session turns into the `serial_overflow` event: ofs-sim's
+/// `vtx_changes_and_dropped_bytes_become_events`).
+#[test]
+#[ignore]
+fn a_full_tap_counts_the_bytes_betaflight_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let osd = Wire::new(64);
+    let tap = SerialTap { uart_index: 3, tx: osd.clone() }; // UART4, never drained
+    let mut s = still_quad(dir.path(), OSD_DIFF, vec![], vec![tap], |_| None);
+    s.run_for(3.0).unwrap();
+    let dropped = s.bus().get(s.bus().lookup::<f64>(names::FC_SERIAL_DROPPED).unwrap());
+    assert!(osd.dropped() > 0, "3 s of DisplayPort cannot fit in 64 bytes");
+    // The bridge counts a wire's drops at the start of each step, before routing that step's reply, so the newest
+    // reply's drops are counted one step later: the count trails the wire by at most one exchange.
+    assert!(dropped > 0.0, "the drops reach fc.serial_dropped_bytes");
+    assert!(dropped as u64 <= osd.dropped(), "never more than the wire lost: {dropped} > {}", osd.dropped());
+}
+
 /// Holds constant battery readings on the bus, like a battery model under a steady load.
 struct FixedBattery {
     voltage: Signal<f64>,
