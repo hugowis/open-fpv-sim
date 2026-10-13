@@ -105,6 +105,10 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/pip" install "$(ls dist/*.whl)[log]" pytest
           "$RUNNER_TEMP/wheel-venv/bin/python" -c "import ofs; assert 'site-packages' in ofs.__file__, ofs.__file__"
           OFS_SIM_BIN=target/debug/ofs-sim "$RUNNER_TEMP/wheel-venv/bin/python" -m pytest python/tests/test_sitl_sandbox.py -v
+      # Parent spec §8.6: the real-time factor of headless runs, in the job summary. Fails only below 1x real time
+      # (shared runners are noisy: the floor catches regressions, the 2x target is measured on a real PC).
+      - run: cargo build -p ofs-sim --release --locked
+      - run: python scripts/benchmark.py --binary target/release/ofs-sim --summary --floor 1
       - uses: actions/cache@v4
         with:
           path: build/godot-dl
