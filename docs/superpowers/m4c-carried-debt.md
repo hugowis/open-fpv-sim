@@ -5,6 +5,8 @@
 - **MCAP in Foxglove** — recordings open and plot in app.foxglove.dev (checked by hand 2026-10-13, after the fix
   below: `battery.voltage_v` and `imu.gyro_frd_radps` of a sandbox flight); live tailing a recording still being
   written is untested.
+- **The Rerun live view and Blackbox Explorer** — checked by hand 2026-10-13: `ofs.rerun.view` streams a realtime
+  open-loop climb to the Rerun viewer, and the sandbox flight's `LOG*.BFL` opens in Blackbox Explorer.
 - **`mcap` is a git pin** (`00e47a1b`, 0.25.1 unreleased) — switch the workspace dependency to the crates.io release
   that carries the summary-order fix (foxglove/mcap#1838) once it ships, and re-run `crates/ofs-log/tests/determinism.rs`.
 - **The reader is pure Python** — `ofs.reader` decodes one JSON record at a time: about 3.7 s for three patterns of a
