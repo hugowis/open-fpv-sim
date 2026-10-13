@@ -275,7 +275,8 @@ SITL serves MSP on `tcp://127.0.0.1:5761` (also from Windows, through WSL's loca
 
 The web Betaflight App cannot open raw TCP connections.
 
-To check that Configurator changes persist (this check has not been run yet), connect as above, then:
+Persistence over MSP is covered live by `test_a_pid_saved_over_msp_persists_through_a_reboot_and_a_new_session`
+(`python/tests/test_sitl_video.py`). To check it with the Configurator application itself, connect as above, then:
 1. change one PID value and press Save;
 2. reconnect and confirm the value persisted;
 3. note `betaflight restarts=1` in the script's output.

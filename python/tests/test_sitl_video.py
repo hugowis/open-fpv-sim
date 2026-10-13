@@ -16,6 +16,9 @@ pytestmark = pytest.mark.skipif(not os.environ.get("OFS_SITL_LAUNCH"),
 
 MSP_PORT = 5761
 MSP_REBOOT = 68
+MSP_PID = 112
+MSP_SET_PID = 202
+MSP_EEPROM_WRITE = 250
 MSP_SET_VTX_CONFIG = 89
 
 
@@ -153,6 +156,47 @@ def test_the_osd_and_vtx_survive_a_betaflight_reboot(sim):
     assert sim.get_osd().present, "the OSD never came back after the reboot"
     assert state.vtx.present and state.vtx.freq_mhz == 5658, state.vtx
 
+
+
+def test_a_pid_saved_over_msp_persists_through_a_reboot_and_a_new_session(sim):
+    """Parent spec §1.4: Configurator changes take effect and persist. Its PID tab sends MSP_SET_PID then
+    MSP_EEPROM_WRITE on this port; the new value must read back at once, after the reboot a Save triggers, and in a
+    new session of the same quad (its firmware directory keeps eeprom.bin)."""
+    sim.load(QUAD, seed=1)
+    sim.run(4.0)
+    msp = Msp(sim)
+    try:
+        before = msp.request(MSP_PID)
+        assert len(before) == 15, before  # roll, pitch, yaw, level, mag: P, I, D each
+        changed = bytearray(before)
+        changed[0] = before[0] + 3  # roll P
+        changed = bytes(changed)
+        msp.request(MSP_SET_PID, changed)
+        msp.request(MSP_EEPROM_WRITE)
+        assert msp.request(MSP_PID) == changed, "the new roll P is live at once"
+        # The connection stays open until the reboot: Betaflight reboots once the command's reply has gone out.
+        msp.send(MSP_REBOOT)
+        state = sim.run(1.0)
+        for _ in range(30):  # Betaflight reboots (about 1.6 s of real time), the simulator relaunches it
+            if state.fc_restarts == 1:
+                break
+            state = sim.run(0.5)
+    finally:
+        msp.close()
+    assert state.fc_restarts == 1, "Betaflight rebooted"
+    sim.run(1.0)
+    msp = Msp(sim)
+    try:
+        assert msp.request(MSP_PID) == changed, "the saved roll P survived the reboot"
+    finally:
+        msp.close()
+    sim.load(QUAD, seed=1)  # a new session of the same quad: the same firmware directory
+    sim.run(4.0)
+    msp = Msp(sim)
+    try:
+        assert msp.request(MSP_PID) == changed, "and a new session"
+    finally:
+        msp.close()
 
 def far_pilot_world(tmp_path):
     """The flat field with the pilot 300 m south of the launch pad, looking north at it: far enough for the VTX power
