@@ -92,7 +92,7 @@ limitations section. **Ruling**: kept in the roadmap's "rulings worth rememberin
 | DShot extended telemetry and MSP-over-CRSF | Roadmap |
 | Config-less telemetry slot ratio | Roadmap |
 | Modelling simplifications (1:4 slot ratio, no UART contention model) | Limitation |
-| Pole pairs constant vs Betaflight's `motor_poles` (a mismatched diff silently scales the RPM filter) | **W2** |
+| Pole pairs constant vs Betaflight's `motor_poles` (a mismatched diff silently scales the RPM filter) | Closed (M4a: the diff's `motor_poles` is checked against the motors' pole pairs at load, `crates/ofs-config/src/lib.rs`) |
 | Rulings (PWM motor protocol, FC telemetry outside the digest, battery values verbatim, a stale SITL binary refused loudly) | Ruling |
 
 ### M3e
@@ -152,6 +152,12 @@ limitations section. **Ruling**: kept in the roadmap's "rulings worth rememberin
 | The SITL port-bind flake reaches the sandbox test | **W1** |
 | Rulings (JSON object records, message indexes kept, record stamping, scheduled-row timing, inputs semantics, 64 MiB requests, one stick owner, Python records lockstep by default, world names, the Blackbox copy last, the launched server stops once) | Ruling |
 
+### 3a. Found while planning (2026-10-13)
+| Item | Disposition |
+|---|---|
+| Parent spec §1.4's "changed PIDs/rates take effect and persist" was never checked (`docs/dev-setup.md`: "this check has not been run yet") | **W3** (an automated MSP test) and the maintainer's manual Configurator check |
+| `apply_diff` accepts a failed config run: SITL creates `eeprom.bin` at boot, so the existence check proves nothing and the quad would fly Betaflight's defaults | **W1** (with the flake's diagnostics) |
+
 ## 4. W1 — CI and flakes
 
 **`test_sitl_link.py` in CI.** Add it to the sitl job's pytest list (`.github/workflows/ci.yml`). If it fails there,
@@ -168,6 +174,14 @@ the Python `_stop_server` escalates `Unload` (5 s timeout) → `terminate` → 5
 **Lead hypothesis:** a server that is SIGKILLed (or dies) never runs `Drop`, so its SITL survives and holds ports
 5760+ for the next session; the sandbox test's unload (finishing a ~5 MB recording, copying the Blackbox log) is
 the slowest unload there is.
+
+**Found while planning** (the plan's Task 2 has the detail): CI failed this way in two of the three runs on
+2026-10-13, both on the first SITL launch of a fresh process; six cycles of CI's sequence on WSL did not reproduce
+it; the pre-launch `pkill` already removes plain orphans; the failing bind line itself is lost in our log tail
+(SITL's stderr and stdout interleave, and the first boot's EEPROM writes fill the tail). And `PR_SET_PDEATHSIG` is
+tied to the spawning *thread*: `Load` runs on tokio's blocking pool, whose idle threads exit, so it needs a
+process-lifetime spawner thread. The procedure therefore starts with diagnostics that name the port and its
+holder, captures the failure on CI, and fixes what that evidence shows.
 
 **Procedure (systematic debugging):**
 1. Reproduce on WSL: launch a SITL session, SIGKILL the server, check whether SITL survives; time the sandbox test's
@@ -197,8 +211,6 @@ Every W2 and W3 item is a test-first change: a failing test, then the fix.
   comparing floating-point boundaries; a test over a long flight time shows no one-ulp stretch.
 - **Latency without a VTX** (`crates/ofs-sim/src/vehicle.rs`, `VideoHandles::read`): report the world receiver's
   quantized latency whether or not a VTX is present.
-- **`motor_poles`**: a SITL quad whose diff sets `motor_poles` to anything other than 2 × its motors' pole pairs is a
-  config error at load; a diff with no `motor_poles` is checked against Betaflight's default, 14.
 - **The burst validation message** says seconds (`on_s`/`off_s`), and its test greps the new words.
 - **The interference cache key** gets the one-line comment (exact equality is intended; non-finite payloads cannot
   reach it).
@@ -221,6 +233,8 @@ Every W2 and W3 item is a test-first change: a failing test, then the fix.
   RX_FAILSAFE/FAILSAFE) besides "never arms" and the OSD LQ cell.
 - **`msp_status.py`**: `_exchange` buffers until a whole `$M>` frame has arrived.
 - **`test_sitl_faults.py`**: `status.close()` in try/finally; the unused `import ofs` removed.
+- **PID persistence over MSP** (found while planning, §3a): a live test saves a PID with `MSP_SET_PID` +
+  `MSP_EEPROM_WRITE` and reads it back at once, after the reboot a Save triggers, and in a new session.
 
 ### W4 — the benchmark (spec §8.6)
 `scripts/benchmark.py` drives a server through the public Python API:
