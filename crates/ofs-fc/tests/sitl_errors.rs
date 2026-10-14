@@ -269,3 +269,55 @@ fn a_config_run_is_judged_on_its_whole_output() {
     let started = SitlProcess::start(&cfg.launch);
     assert!(started.is_ok(), "a config run that saved is accepted: {:?}", started.err().map(|e| e.to_string()));
 }
+
+/// The port-bind flake (docs/superpowers/history/closeout-evidence.md): the cleanup's `pkill` only *signals* its
+/// victim, whose sockets close one by one while it dies, so a launch that immediately follows can fail to bind.
+/// The cleanup must wait for the victim to be really gone — escalating to SIGKILL when it ignores SIGTERM.
+
+/// Spawns `<dir>/betaflight_SITL -c <script>`: a copy of /bin/sh under the SITL name, so the process's comm is
+/// the name the cleanup waits for, without touching a real SITL.
+#[cfg(target_os = "linux")]
+fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> std::process::Child {
+    let fake = dir.join("betaflight_SITL");
+    std::fs::copy("/bin/sh", &fake).unwrap();
+    std::process::Command::new(&fake).arg("-c").arg(sh_script).spawn().unwrap()
+}
+
+/// A victim that ignores SIGTERM (a SITL in a slow teardown) must not survive the cleanup: the wait escalates to
+/// SIGKILL and returns only when it is gone (or a zombie, which holds no ports).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_victim_that_ignores_sigterm_is_sigkilled() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut victim = spawn_fake_sitl(dir.path(), "trap \"\" TERM; sleep 30; sleep 30");
+    let pid = victim.id();
+    std::process::Command::new("kill").arg(pid.to_string()).status().unwrap();
+    std::thread::sleep(Duration::from_millis(50)); // let the signal land
+    ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);
+    let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    assert!(
+        state.is_empty() || state.rsplit_once(')').is_some_and(|(_, s)| s.trim_start().starts_with('Z')),
+        "the victim ignored SIGTERM and was not escalated: {state}"
+    );
+    let _ = victim.kill();
+    let _ = victim.wait();
+}
+
+/// The common path — the victim is already dying or dead — must fall through fast, not cost every launch.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_cleanup_does_not_hang_when_nobody_survives() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut victim = spawn_fake_sitl(dir.path(), "sleep 30");
+    victim.kill().unwrap();
+    victim.wait().unwrap();
+    let started = std::time::Instant::now();
+    ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);
+    assert!(
+        started.elapsed() < Duration::from_millis(600),
+        "no survivors: the wait must fall through fast, took {:?}",
+        started.elapsed()
+    );
+}

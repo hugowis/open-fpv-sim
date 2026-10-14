@@ -7,6 +7,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::net;
 use super::FcError;
 
 const TAIL_LINES: usize = 200;
@@ -147,6 +148,7 @@ impl SitlProcess {
             check_diff_unchanged(cfg, &workdir)?;
         }
         run_cleanup(&cfg.cleanup);
+        await_cleanup(&cfg.launch);
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
         }
@@ -239,6 +241,7 @@ impl Drop for SitlProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
         run_cleanup(&self.cleanup);
+        await_cleanup(&self.argv);
     }
 }
 
@@ -445,6 +448,82 @@ pub(crate) fn run_cleanup(argv: &[String]) {
     if let Some((program, args)) = argv.split_first() {
         let _ = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
+}
+
+/// How long a victim has to die of the cleanup's SIGTERM before it is SIGKILLed, and how long the SIGKILL then
+/// has to finish. A victim that is merely slow costs the first grace once; the poll is 10 ms.
+#[cfg(target_os = "linux")]
+const CLEANUP_TERM_GRACE: Duration = Duration::from_millis(300);
+#[cfg(target_os = "linux")]
+const CLEANUP_KILL_GRACE: Duration = Duration::from_secs(1);
+
+/// The victims' view from inside the WSL VM, where the Windows host cannot read /proc: wait for the last
+/// `betaflight_SITL` to be gone — a zombie holds no ports, but `pgrep` matches it, so init's reap ends the wait —
+/// escalating to SIGKILL after [`CLEANUP_TERM_GRACE`].
+const WSL_WAIT_SCRIPT: &str = "\
+pkill -0 -x betaflight_SITL 2>/dev/null || exit 0
+i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
+pkill -9 -x betaflight_SITL 2>/dev/null
+i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
+exit 0";
+
+/// Waits for the cleanup's victims to actually die before a new SITL binds. The `pkill` in the cleanup only
+/// *signals* them, and their sockets close one by one during teardown, so a launch that immediately follows can
+/// fail to bind (`bind port ... failed!!` — the port-bind flake, see
+/// `docs/superpowers/history/closeout-evidence.md`). A victim that ignores SIGTERM is SIGKILLed after
+/// [`CLEANUP_TERM_GRACE`]; the whole wait gives up after [`CLEANUP_KILL_GRACE`] and the launch proceeds — the
+/// startup diagnostics name any holder if the bind still fails. Under WSL the victims live in the VM, so the
+/// wait runs there too; on plain Windows there is nothing to wait for.
+pub fn await_cleanup(launch: &[String]) {
+    if let Some(prefix) = net::wsl_prefix(launch) {
+        let mut argv = prefix;
+        argv.extend(["sh", "-c", WSL_WAIT_SCRIPT].map(String::from));
+        let _ = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).status();
+    } else {
+        #[cfg(target_os = "linux")]
+        await_cleanup_native();
+    }
+}
+
+/// The native-Linux half of [`await_cleanup`]: poll /proc for live `betaflight_SITL` processes.
+#[cfg(target_os = "linux")]
+fn await_cleanup_native() {
+    let started = Instant::now();
+    let mut escalated = false;
+    loop {
+        let victims = live_victims();
+        if victims.is_empty() {
+            return;
+        }
+        if !escalated && started.elapsed() >= CLEANUP_TERM_GRACE {
+            let _ = Command::new("pkill").args(["-9", "-x", net::SITL_PROCESS_NAME]).status();
+            escalated = true;
+        }
+        if started.elapsed() >= CLEANUP_TERM_GRACE + CLEANUP_KILL_GRACE {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// The pids of live `betaflight_SITL` processes (a zombie holds no ports and does not count).
+#[cfg(target_os = "linux")]
+fn live_victims() -> Vec<u32> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else { continue };
+        if comm.trim() != net::SITL_PROCESS_NAME {
+            continue;
+        }
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
+        let Some((_, rest)) = stat.rsplit_once(')') else { continue };
+        if rest.trim_start().starts_with('Z') {
+            continue;
+        }
+        out.push(pid);
+    }
+    out
 }
 
 #[cfg(all(test, target_os = "linux"))]

@@ -24,6 +24,10 @@ impl SitlNet {
     }
 }
 
+/// The process *name* every SITL instance runs under, as `pkill -x` matches it (Linux truncates
+/// `betaflight_SITL.elf` to 15 characters): the cleanup kills it, and the pre-launch wait looks for it.
+pub(crate) const SITL_PROCESS_NAME: &str = "betaflight_SITL";
+
 /// The `wsl.exe … -e` prefix of a launch argv, if SITL is launched through WSL.
 pub fn wsl_prefix(launch: &[String]) -> Option<Vec<String>> {
     let first = launch.first()?;
@@ -42,7 +46,7 @@ pub fn wsl_prefix(launch: &[String]) -> Option<Vec<String>> {
 /// `pkill -f` would also match (and kill) any shell whose command line contains the binary path.
 /// Under WSL it runs inside the VM; natively it needs a unix host, so plain Windows gets none.
 pub fn default_cleanup(launch: &[String]) -> Vec<String> {
-    let pkill = ["pkill", "-x", "betaflight_SITL"].map(String::from);
+    let pkill = ["pkill", "-x", SITL_PROCESS_NAME].map(String::from);
     match wsl_prefix(launch) {
         Some(mut prefix) => {
             prefix.extend(pkill);
