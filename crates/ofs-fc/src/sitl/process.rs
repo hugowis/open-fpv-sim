@@ -535,9 +535,12 @@ fn parse_wait_output(stdout: Vec<u8>) -> AwaitCleanup {
 /// The native-Linux half of [`await_cleanup`]: poll /proc for live `betaflight_SITL` processes.
 #[cfg(target_os = "linux")]
 fn await_cleanup_native() -> AwaitCleanup {
+    let first = live_victims_count();
+    if first == 0 {
+        return AwaitCleanup::NONE;
+    }
     let started = Instant::now();
     let mut escalated = false;
-    let first = live_victims_count();
     loop {
         if live_victims_count() == 0 {
             return AwaitCleanup {
