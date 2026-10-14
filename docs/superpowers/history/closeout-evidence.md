@@ -75,6 +75,18 @@ any holder), and under WSL the wait runs inside the VM, where the Windows host c
 (405 ms to escalation and gone). **Verdict: fixed, pending CI** — closed when the sitl job has run without a
 recurrence; should it recur, the error names the holder at the moment of the bind.
 
+**The flake recurred on the fix branch (run 38610663296, 2026-10-14), and that occurrence rules the race out as
+the whole story.** `test_weak_cell_reads_through_betaflight_telemetry` failed on `bind port 5764 for UART4
+failed!!`. The previous test's SITL had been torn down cleanly (the session's Drop kills and reaps it
+synchronously, and the new launch's wait found nothing recorded either way), the boot bound 5762, 5763, 5765 and
+5761 successfully, and at the moment the failing line was read the snapshot and the live re-check saw **zero
+sockets on 5764 in any state** — not even a TIME_WAIT. No dying victim can explain that: the cause points inside
+Betaflight's SITL serial driver, whose bind is a single `dyad_listenEx` attempt (`serial_tcp.c`; SO_REUSEADDR is
+set, there is no retry, and a failed bind still boots to ready). `await_cleanup` now reports what it saw at every
+launch (`seen=<n> escalated=<0|1> ms=<t>` on the server's stderr), so the next occurrence says whether a victim
+existed at launch at all. The remaining hardening candidate is a bounded bind retry in
+`third_party/betaflight/ofs-sitl.patch` — the maintainer to decide.
+
 ## The DVR's recording plays in VLC (checked by hand, 2026-10-14)
 
 The maintainer flew the Godot client against Betaflight SITL in real time, pressed **D** twice around a flight,

@@ -148,7 +148,10 @@ impl SitlProcess {
             check_diff_unchanged(cfg, &workdir)?;
         }
         run_cleanup(&cfg.cleanup);
-        await_cleanup(&cfg.launch);
+        let awaited = await_cleanup(&cfg.launch);
+        if awaited != AwaitCleanup::NONE {
+            eprintln!("ofs-sitl: waited for the cleanup's victims: {awaited:?}");
+        }
         if !workdir.join("eeprom.bin").exists() {
             apply_diff(cfg, &workdir)?;
         }
@@ -241,7 +244,10 @@ impl Drop for SitlProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
         run_cleanup(&self.cleanup);
-        await_cleanup(&self.argv);
+        let awaited = await_cleanup(&self.argv);
+        if awaited != AwaitCleanup::NONE {
+            eprintln!("ofs-sitl: waited for the cleanup's victims on drop: {awaited:?}");
+        }
     }
 }
 
@@ -450,6 +456,20 @@ pub(crate) fn run_cleanup(argv: &[String]) {
     }
 }
 
+/// What a cleanup wait saw: `victims_seen` live processes at the start, whether the SIGTERM grace ran out and
+/// the SIGKILL had to fire, and how long the wait took. [`AwaitCleanup::NONE`] is the every-launch case:
+/// nobody was there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AwaitCleanup {
+    pub victims_seen: u32,
+    pub escalated: bool,
+    pub waited_ms: u64,
+}
+
+impl AwaitCleanup {
+    pub const NONE: AwaitCleanup = AwaitCleanup { victims_seen: 0, escalated: false, waited_ms: 0 };
+}
+
 /// How long a victim has to die of the cleanup's SIGTERM before it is SIGKILLed, and how long the SIGKILL then
 /// has to finish. A victim that is merely slow costs the first grace once; the poll is 10 ms.
 #[cfg(target_os = "linux")]
@@ -459,12 +479,20 @@ const CLEANUP_KILL_GRACE: Duration = Duration::from_secs(1);
 
 /// The victims' view from inside the WSL VM, where the Windows host cannot read /proc: wait for the last
 /// `betaflight_SITL` to be gone — a zombie holds no ports, but `pgrep` matches it, so init's reap ends the wait —
-/// escalating to SIGKILL after [`CLEANUP_TERM_GRACE`].
+/// escalating to SIGKILL after [`CLEANUP_TERM_GRACE`], then report what was seen as `seen=<n> escalated=<0|1>
+/// ms=<t>` for [`await_cleanup`] to parse.
 const WSL_WAIT_SCRIPT: &str = "\
-pkill -0 -x betaflight_SITL 2>/dev/null || exit 0
+pkill -0 -x betaflight_SITL 2>/dev/null || { echo 'seen=0 escalated=0 ms=0'; exit 0; }
+t0=$(date +%s%N)
 i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
-pkill -9 -x betaflight_SITL 2>/dev/null
-i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
+esc=0
+if pkill -0 -x betaflight_SITL 2>/dev/null; then
+  pkill -9 -x betaflight_SITL 2>/dev/null
+  esc=1
+  i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
+fi
+t1=$(date +%s%N)
+echo \"seen=1 escalated=$esc ms=$(( (t1-t0)/1000000 ))\"
 exit 0";
 
 /// Waits for the cleanup's victims to actually die before a new SITL binds. The `pkill` in the cleanup only
@@ -473,45 +501,72 @@ exit 0";
 /// `docs/superpowers/history/closeout-evidence.md`). A victim that ignores SIGTERM is SIGKILLed after
 /// [`CLEANUP_TERM_GRACE`]; the whole wait gives up after [`CLEANUP_KILL_GRACE`] and the launch proceeds — the
 /// startup diagnostics name any holder if the bind still fails. Under WSL the victims live in the VM, so the
-/// wait runs there too; on plain Windows there is nothing to wait for.
-pub fn await_cleanup(launch: &[String]) {
+/// wait runs there too; on plain Windows there is nothing to wait for. Returns what was seen, so a recurrence
+/// of the flake says whether a victim existed at launch at all.
+pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
     if let Some(prefix) = net::wsl_prefix(launch) {
         let mut argv = prefix;
         argv.extend(["sh", "-c", WSL_WAIT_SCRIPT].map(String::from));
-        let _ = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).status();
-    } else {
-        #[cfg(target_os = "linux")]
-        await_cleanup_native();
+        let output = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output();
+        return parse_wait_output(output.ok().map(|o| o.stdout).unwrap_or_default());
     }
+    #[cfg(target_os = "linux")]
+    return await_cleanup_native();
+    #[cfg(not(target_os = "linux"))]
+    AwaitCleanup::NONE
+}
+
+/// Reads the WSL wait script's `seen=<n> escalated=<0|1> ms=<t>` line; anything unreadable is the no-victim case
+/// (the wait ran, the launch proceeds, and the launch's own diagnostics cover a holder).
+fn parse_wait_output(stdout: Vec<u8>) -> AwaitCleanup {
+    let text = String::from_utf8_lossy(&stdout);
+    let (mut seen, mut escalated, mut ms) = (0, false, 0);
+    for field in text.lines().last().unwrap_or("").split_whitespace() {
+        match field.split_once('=') {
+            Some(("seen", n)) => seen = n.parse().unwrap_or(0),
+            Some(("escalated", e)) => escalated = e == "1",
+            Some(("ms", t)) => ms = t.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    AwaitCleanup { victims_seen: seen, escalated, waited_ms: ms }
 }
 
 /// The native-Linux half of [`await_cleanup`]: poll /proc for live `betaflight_SITL` processes.
 #[cfg(target_os = "linux")]
-fn await_cleanup_native() {
+fn await_cleanup_native() -> AwaitCleanup {
     let started = Instant::now();
     let mut escalated = false;
+    let first = live_victims_count();
     loop {
-        let victims = live_victims();
-        if victims.is_empty() {
-            return;
+        if live_victims_count() == 0 {
+            return AwaitCleanup {
+                victims_seen: first,
+                escalated,
+                waited_ms: started.elapsed().as_millis() as u64,
+            };
         }
         if !escalated && started.elapsed() >= CLEANUP_TERM_GRACE {
             let _ = Command::new("pkill").args(["-9", "-x", net::SITL_PROCESS_NAME]).status();
             escalated = true;
         }
         if started.elapsed() >= CLEANUP_TERM_GRACE + CLEANUP_KILL_GRACE {
-            return;
+            return AwaitCleanup {
+                victims_seen: first,
+                escalated,
+                waited_ms: started.elapsed().as_millis() as u64,
+            };
         }
         std::thread::sleep(Duration::from_millis(10));
     }
 }
 
-/// The pids of live `betaflight_SITL` processes (a zombie holds no ports and does not count).
+/// The number of live `betaflight_SITL` processes (a zombie holds no ports and does not count).
 #[cfg(target_os = "linux")]
-fn live_victims() -> Vec<u32> {
-    let mut out = Vec::new();
+fn live_victims_count() -> u32 {
+    let mut count = 0u32;
     for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let Some(_) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
         let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else { continue };
         if comm.trim() != net::SITL_PROCESS_NAME {
             continue;
@@ -521,9 +576,9 @@ fn live_victims() -> Vec<u32> {
         if rest.trim_start().starts_with('Z') {
             continue;
         }
-        out.push(pid);
+        count += 1;
     }
-    out
+    count
 }
 
 #[cfg(all(test, target_os = "linux"))]

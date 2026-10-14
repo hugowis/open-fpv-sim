@@ -45,10 +45,12 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   (`docs/superpowers/history/closeout-evidence.md`) — the Configurator's own Save does not do this (checked by hand, 2026-10-14).
 - Betaflight SITL aborted once with heap corruption while resetting (glibc `tcache` check), so a reboot failed as a
   firmware crash; not seen again in 38 reboots. Inside SITL's teardown, upstream of the simulator.
-- The port-bind flake: fixed (2026-10-14). The cleanup's `pkill` only signalled its victim, whose sockets close
-  one by one during teardown, so a launch immediately after could hit a port still closing. The pre-launch
-  cleanup now waits for its victims to exit (SIGKILL after a grace), under WSL inside the VM; should it recur,
-  the error names the port and who held it at the moment of the bind
+- The port-bind flake: open, narrowed. The pre-launch cleanup now waits for its victims to exit (SIGKILL after a
+  grace, under WSL inside the VM) — and one recurrence survived that wait (run 38610663296: the previous SITL
+  cleanly reaped, four ports bound, then 5764 failed with zero sockets in any state at the failed bind). The
+  evidence points at Betaflight SITL's single-attempt serial bind (`serial_tcp.c`); a bounded retry in
+  `third_party/betaflight/ofs-sitl.patch` is the remaining candidate. A launch now also reports whether a victim
+  existed, and a failed bind names the port and anyone holding it at that moment
   (`docs/superpowers/history/closeout-evidence.md`).
 
 ### Logging (`docs/research/mcap-determinism.md`)
