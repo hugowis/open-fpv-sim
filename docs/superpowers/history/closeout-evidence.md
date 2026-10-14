@@ -17,7 +17,9 @@ never rebooted and SITL stopped answering (`no motor output within 500 ms`, a `F
 three. Keeping the connection open until the relaunch (as `test_the_osd_and_vtx_survive_a_betaflight_reboot` does)
 passes. Betaflight reboots only once the command's reply has gone out, and with the connection gone it appears to wait
 for good. Whether the Betaflight Configurator hangs up that early after a Save is what the maintainer's manual check
-answers; the roadmap records it either way.
+answers: it does not — the check (2026-10-14) connected the real desktop app, saved a PID change that
+survived a reconnect, and the session stayed healthy throughout (radio up, zero overruns, restarts 0; the
+PID tab's Save does not reboot Betaflight at all).
 
 ## Betaflight SITL can abort while it resets (found by Task 11)
 

@@ -14,9 +14,9 @@ digital video, GPS, INAV/ArduPilot, macOS — and what comes next are in `docs/r
 What is in it:
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
 - Sessions run in lockstep (deterministic, Betaflight included) or paced to the wall clock.
-- Betaflight Configurator connects to the running simulator; a PID saved over its port persists through the reboot
-  a Save triggers and into the next session (verified live), and a reboot makes the simulator relaunch SITL from
-  its EEPROM.
+- Betaflight Configurator connects to the running simulator and a PID saved through it persists (checked by hand
+  2026-10-14, and live over MSP through a reboot and a new session), and a reboot makes the simulator relaunch
+  SITL from its EEPROM.
 - A Godot pilot client flies the simulator from a game window, through the same radio link (see below).
 - Betaflight's own OSD, a SmartAudio VTX and the battery reach the FPV view (M3a), and a 5.8 GHz analog link model
   breaks the picture up with distance, attitude, buildings and interference (M3b, `docs/research/video-link.md`).

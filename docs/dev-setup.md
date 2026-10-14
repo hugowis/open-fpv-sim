@@ -265,13 +265,13 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 ## Firmware state
 - **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log` and any Blackbox logs.
 - **Diff changes:** the quad's diff is applied only on first boot, so Configurator changes persist. If the quad's diff changes later, loading fails until you delete `eeprom.bin` (which also discards Configurator changes). M4c changed both shipped diffs (`set blackbox_device = VIRTUAL`): delete the `eeprom.bin` of each quad you flew before it, once.
-- **Reboots:** a Betaflight reboot (Configurator "Save", MSP_REBOOT) relaunches SITL from its EEPROM; `State.fc_restarts` counts them.
+- **Reboots:** a Betaflight reboot (`MSP_REBOOT`, the Configurator's Reboot, flashing) relaunches SITL from its EEPROM; `State.fc_restarts` counts them. The PID tab's Save is not a reboot (see "Betaflight Configurator" below).
 
 ## Betaflight Configurator
 SITL serves MSP on `tcp://127.0.0.1:5761` (also from Windows, through WSL's localhost forwarding), but only while simulated time advances. So connect while a real-time session runs:
 1. Start `python python/examples/serve_realtime.py` (with `OFS_SITL_LAUNCH` set). It prints the Configurator address.
 2. In the Betaflight Configurator desktop app, enable manual connection in the options, enter `tcp://127.0.0.1:5761`, and press Connect.
-3. Saving reboots Betaflight and the simulator relaunches it, so the Configurator should reconnect. The relaunch is verified live (an `MSP_REBOOT` sent to the Configurator port made the simulator relaunch SITL from its EEPROM in about 1.6 s, and the radio link came back up), but the Configurator application itself has not been tried yet: the manual check below is pending.
+3. A Save persists the change to EEPROM. The PID tab's Save does **not** reboot Betaflight (checked by hand, 2026-10-14: a change survived a reconnect and the script's `betaflight restarts` stayed 0). A reboot sent to the port does make the simulator relaunch SITL from its EEPROM — verified live: an `MSP_REBOOT` sent to the Configurator port relaunched SITL in about 1.6 s, the radio link came back up, and the Configurator reconnected.
 
 The web Betaflight App cannot open raw TCP connections.
 
@@ -279,7 +279,7 @@ Persistence over MSP is covered live by `test_a_pid_saved_over_msp_persists_thro
 (`python/tests/test_sitl_video.py`). To check it with the Configurator application itself, connect as above, then:
 1. change one PID value and press Save;
 2. reconnect and confirm the value persisted;
-3. note `betaflight restarts=1` in the script's output.
+3. the script's `betaflight restarts` stays 0 (the PID tab's Save writes EEPROM without rebooting).
 
 ## Performance
 `scripts/benchmark.py` measures the real-time factor (simulated seconds per wall second) of headless lockstep runs

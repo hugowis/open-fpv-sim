@@ -36,7 +36,9 @@ The simulator is not tied to OpenDrone: any component can be described in the sa
 - The real **Betaflight Configurator** connects to the simulated FC; changed PIDs/rates take effect and persist.
   *Evidence:* the Configurator connected (the maintainer, 2026-10-08); a PID saved over MSP is live at once and
   persists through the reboot and into a new session (`test_a_pid_saved_over_msp_persists_through_a_reboot_and_a_new_session`);
-  the Configurator application's own Save checked by hand: pending.
+  the Configurator application's own Save checked by hand (the maintainer, 2026-10-14: a PID change
+  persisted across a reconnect; the PID tab's Save does not reboot Betaflight — the reboot half rests on the
+  live test above).
 - A Python script can run the same quad **headless and deterministically**, inject faults, and get every signal back as a DataFrame.
   *Evidence:* `test_betaflight_sitl_hover_is_deterministic` and `test_two_identical_lockstep_sessions_write_identical_files`
   (identical recordings); the §6.2 example run as printed against Betaflight (`python/tests/test_sitl_sandbox.py`:
