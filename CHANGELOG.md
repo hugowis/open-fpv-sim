@@ -14,6 +14,8 @@ repository). The format follows Keep a Changelog.
   the video field rate is defined once (`ofs-core`).
 - The goggles' latency is reported without a transmitting VTX.
 - The burst-loss validation message states its units (seconds).
+- The pre-launch SITL cleanup waits for its victims to exit before the next launch binds (the port-bind flake
+  caught by CI); under WSL the wait runs in the VM, and a victim that ignores SIGTERM is SIGKILLed after a grace.
 ### Added
 - `scripts/benchmark.py`: the real-time factor of headless runs, in CI's job summary (fails below 1×).
 - Tests: the ELRS link test runs in CI; a PID saved over MSP persists through a reboot and a new session; a real

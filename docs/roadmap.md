@@ -45,8 +45,10 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   (`docs/superpowers/history/closeout-evidence.md`) — the Configurator's own Save does not do this (checked by hand, 2026-10-14).
 - Betaflight SITL aborted once with heap corruption while resetting (glibc `tcache` check), so a reboot failed as a
   firmware crash; not seen again in 38 reboots. Inside SITL's teardown, upstream of the simulator.
-- The port-bind flake: open. Caught three times by CI (runs 38437153244 and 38440416805, then 38453432260
-  attempt 5 with the diagnostics); a failure now names the port and who held it at the moment of the bind
+- The port-bind flake: fixed (2026-10-14). The cleanup's `pkill` only signalled its victim, whose sockets close
+  one by one during teardown, so a launch immediately after could hit a port still closing. The pre-launch
+  cleanup now waits for its victims to exit (SIGKILL after a grace), under WSL inside the VM; should it recur,
+  the error names the port and who held it at the moment of the bind
   (`docs/superpowers/history/closeout-evidence.md`).
 
 ### Logging (`docs/research/mcap-determinism.md`)

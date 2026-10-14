@@ -66,6 +66,15 @@ which points inside Betaflight's SITL (dyad dual-stack, a double bind), where th
 cleanup wait for its victims to exit (our code, small); (b) retry the launch once on this error; (c) patch
 Betaflight's SITL. None shipped: a speculative fix is worse than a named cause.
 
+**The maintainer chose (a), 2026-10-14.** The pre-launch cleanup now waits for its victims to actually die before
+the new SITL binds (`await_cleanup`, `crates/ofs-fc/src/sitl/process.rs`): a victim that ignores SIGTERM is
+SIGKILLed after a 300 ms grace, the whole wait gives up after 1.3 s to the launch (whose diagnostics still name
+any holder), and under WSL the wait runs inside the VM, where the Windows host cannot read /proc. Pinned by
+`a_victim_that_ignores_sigterm_is_sigkilled` and `the_cleanup_does_not_hang_when_nobody_survives`
+(`crates/ofs-fc/tests/sitl_errors.rs`); the WSL script was checked by hand against a TERM-ignoring process
+(405 ms to escalation and gone). **Verdict: fixed, pending CI** — closed when the sitl job has run without a
+recurrence; should it recur, the error names the holder at the moment of the bind.
+
 ## The DVR's recording plays in VLC (checked by hand, 2026-10-14)
 
 The maintainer flew the Godot client against Betaflight SITL in real time, pressed **D** twice around a flight,
