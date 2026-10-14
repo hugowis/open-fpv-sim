@@ -65,3 +65,11 @@ which points inside Betaflight's SITL (dyad dual-stack, a double bind), where th
 `third_party/betaflight/ofs-sitl.patch`. Candidate fixes for the maintainer to choose between: (a) make the Linux
 cleanup wait for its victims to exit (our code, small); (b) retry the launch once on this error; (c) patch
 Betaflight's SITL. None shipped: a speculative fix is worse than a named cause.
+
+## The DVR's recording plays in VLC (checked by hand, 2026-10-14)
+
+The maintainer flew the Godot client against Betaflight SITL in real time, pressed **D** twice around a flight,
+and played the resulting `.avi` from `user://recordings/` in VLC: it plays as a proper video. The file's insides
+are already pinned by the e2e (`_avi_frames`: a RIFF walk to the movi list, every `00dc` chunk a JPEG) and the
+unit pin `test_a_current_field_is_encoded_as_a_jpeg_at_the_dvr_quality`; this check closes the outside view — a
+real player accepts the muxer's output.
