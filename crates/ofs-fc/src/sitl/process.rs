@@ -589,14 +589,21 @@ mod tests {
     /// in between): the late holder is reported as such, not lost.
     #[test]
     fn a_late_holder_is_reported_when_the_bind_failed_on_a_free_port() {
-        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
         let log: SharedLog = Arc::new(Mutex::new(LogSink::default()));
-        log.lock().unwrap_or_else(|e| e.into_inner()).push(format!("bind port {port} for UART1 failed!!"));
-        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        // The bind line is pushed while the port is free, then the port is taken: on a busy CI runner another
+        // process can snatch the released port first, so the rebind retries with a fresh port until it wins.
+        let (port, _listener) = loop {
+            let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            log.lock().unwrap_or_else(|e| e.into_inner()).push(format!("bind port {port} for UART1 failed!!"));
+            match std::net::TcpListener::bind(("127.0.0.1", port)) {
+                Ok(listener) => break (port, listener),
+                Err(_) => continue,
+            }
+        };
         let text = bind_error_text(&log);
-        drop(listener);
+        drop(_listener);
         assert!(text.contains(&format!("port {port}: no socket when the bind failed, held now by:")), "{text}");
         assert!(text.contains(&format!("port {port}: LISTEN by pid {}", std::process::id())), "{text}");
     }
