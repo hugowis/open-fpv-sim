@@ -41,6 +41,8 @@ fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
 fn bind_failure_lines_are_recognised() {
     // A stale SITL keeps the ports; the new one prints this and keeps running (M0 §6).
     assert!(is_bind_failure("bind port 5761 for UART1 failed!!"));
+    assert!(is_bind_failure("bind port 5761 for UART1 failed!! after 20 attempts (errno 98)"));
+    assert!(!is_bind_failure("bind port 5761 for UART1 retry 3/20 (errno 98)"));
     assert!(!is_bind_failure("bind port 5761 for UART1"));
     assert!(!is_bind_failure("[SITL] init PwmOut UDP link to gazebo 127.0.0.1:9002...0"));
 }
@@ -324,4 +326,27 @@ fn the_cleanup_does_not_hang_when_nobody_survives() {
         started.elapsed()
     );
     assert_eq!(outcome, ofs_fc::sitl::process::AwaitCleanup::NONE, "the victim was already reaped: {outcome:?}");
+}
+
+/// The SITL patch retries a busy port for about half a second, printing `retry n/m` lines, and a plain success line
+/// when one lands (the port-bind flake's dying holder). A session must start then: a retry line is not a verdict.
+#[test]
+fn a_bind_that_succeeds_after_retries_starts_the_session() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let script = "echo 'bind port 5761 for UART1 retry 1/20 (errno 98)' >&2; \
+                  echo 'bind port 5761 for UART1 retry 2/20 (errno 98)' >&2; \
+                  echo 'bind port 5761 for UART1' >&2; \
+                  echo '[SITL] ready for the simulator'; sleep 5";
+    let cfg = config(dir.path(), &["sh", "-c", script]);
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
+    let started = SitlProcess::start(&cfg.launch);
+    assert!(
+        started.is_ok(),
+        "a bind that landed on a retry starts the session: {:?}",
+        started.err().map(|e| e.to_string())
+    );
 }

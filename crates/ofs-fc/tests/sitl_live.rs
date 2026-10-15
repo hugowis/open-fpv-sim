@@ -244,3 +244,28 @@ fn esc_telemetry_frames_become_battery_state() {
     assert!((amps - 8.0).abs() < 0.4, "current {amps}");
     assert!((i32::from(mah) - 120).abs() <= 6, "consumed {mah} mAh");
 }
+
+/// The port-bind flake (docs/superpowers/history/closeout-evidence.md): serial_tcp.c bound each UART once and
+/// kept booting on failure. The patch retries for about half a second and names the errno, so a port released
+/// within the window self-heals and a permanently held one fails the start with the attempts on the record.
+#[test]
+#[ignore]
+fn a_held_serial_port_is_retried_then_refused_with_the_errno() {
+    let launch = argv("OFS_SITL_LAUNCH");
+    assert!(!launch.is_empty(), "set OFS_SITL_LAUNCH");
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = LaunchConfig {
+        launch,
+        cleanup: vec![], // the holder is this test, not a stray SITL
+        workdir: dir.path().join("fc"),
+        diff_file: OSD_DIFF.into(),
+        startup_timeout: Duration::from_secs(15),
+    };
+    std::fs::create_dir_all(&cfg.workdir).unwrap();
+    std::fs::copy(OSD_DIFF, cfg.workdir.join("betaflight.diff")).unwrap();
+    let _holder = std::net::TcpListener::bind("127.0.0.1:5761").unwrap();
+    let err = ofs_fc::sitl::process::SitlProcess::start(&cfg).err().expect("a held MSP port fails the start");
+    let text = err.to_string();
+    assert!(text.contains("bind port 5761 for UART1 failed!! after 20 attempts"), "the spent retries are on the record: {text}");
+    assert!(text.contains("errno"), "the failure names the errno: {text}");
+}

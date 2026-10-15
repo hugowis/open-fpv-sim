@@ -32,8 +32,10 @@ pub struct LaunchConfig {
     pub startup_timeout: Duration,
 }
 
-/// A stale SITL still holds the ports: a new instance prints this (e.g. `bind port 5761 for UART1 failed!!`)
-/// and keeps running, and the simulator would talk to the old one. Treated as a startup error.
+/// A stale SITL still holds the ports: a new instance prints this (e.g. `bind port 5761 for UART1 failed!! after 20
+/// attempts (errno 98)`) once its bind retries are spent, and keeps running, and the simulator would talk to the old
+/// one. Treated as a startup error. The `bind port 5761 for UART1 retry 3/20 (errno 98)` lines before it are
+/// progress, not a verdict, and carry no "failed".
 pub fn is_bind_failure(line: &str) -> bool {
     line.contains("bind port") && line.contains("failed")
 }
