@@ -23,7 +23,7 @@ index 236ebf9..fefc234 100644
  extern uint8_t atomic_BASEPRI;
  
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
-index a922cc7..b944b10 100644
+index a922cc7..8ffe64d 100644
 --- a/src/main/drivers/serial_tcp.c
 +++ b/src/main/drivers/serial_tcp.c
 @@ -35,6 +35,11 @@
@@ -38,10 +38,12 @@ index a922cc7..b944b10 100644
  #include "io/serial.h"
  #include "serial_tcp.h"
  
-@@ -86,6 +91,38 @@ static void onAccept(dyad_Event *e)
+@@ -86,6 +91,40 @@ static void onAccept(dyad_Event *e)
      dyad_addListener(e->remote, DYAD_EVENT_CLOSE, onClose, e->udata);
  }
  
++pthread_mutex_t tcpDyadLock = PTHREAD_MUTEX_INITIALIZER;
++
 +#define BIND_ATTEMPTS 20
 +#define BIND_RETRY_US (25 * 1000)
 +
@@ -77,10 +79,13 @@ index a922cc7..b944b10 100644
  static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
  {
      if (tcpPortInitialized[id]) {
-@@ -115,11 +152,33 @@ static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
-     s->serv = dyad_newStream();
-     dyad_setNoDelay(s->serv, 1);
-     dyad_addListener(s->serv, DYAD_EVENT_ACCEPT, onAccept, s);
+@@ -112,14 +151,37 @@ static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
+     s->clientCount = 0;
+     s->id = id;
+     s->conn = NULL;
+-    s->serv = dyad_newStream();
+-    dyad_setNoDelay(s->serv, 1);
+-    dyad_addListener(s->serv, DYAD_EVENT_ACCEPT, onAccept, s);
 -
 -    if (dyad_listenEx(s->serv, NULL, BASE_PORT + id + 1, 10) == 0) {
 -        fprintf(stderr, "bind port %u for UART%u\n", (unsigned)BASE_PORT + id + 1, (unsigned)id + 1);
@@ -91,10 +96,9 @@ index a922cc7..b944b10 100644
 +        const int attempts = BIND_ATTEMPTS;
 +        int attempt;
 +        int probeErrno = 0;
-+        // The port-bind flake: a previous SITL's sockets close one by one during its teardown, so the first
-+        // bind can land while the port is still being released. Wait for the port with throwaway sockets, at
-+        // most about half a second. dyad is touched once: a failed dyad_listenEx closes its stream, and dyad's
-+        // worker thread then destroys it, so the stream cannot be listened on again.
++        // A holder that is still releasing the port (a previous SITL's teardown closes its sockets one by
++        // one): wait for the port with throwaway sockets, at most about half a second. Nothing of dyad's is
++        // touched meanwhile, and a failed dyad_listenEx closes its stream for good, so it is not retried.
 +        for (attempt = 1; attempt <= attempts; attempt++) {
 +            probeErrno = bindProbe(bindPort);
 +            if (probeErrno == 0) {
@@ -107,16 +111,21 @@ index a922cc7..b944b10 100644
 +                usleep(BIND_RETRY_US);
 +            }
 +        }
++        pthread_mutex_lock(&tcpDyadLock);
++        s->serv = dyad_newStream();
++        dyad_setNoDelay(s->serv, 1);
++        dyad_addListener(s->serv, DYAD_EVENT_ACCEPT, onAccept, s);
 +        if (dyad_listenEx(s->serv, NULL, bindPort, 10) == 0) {
 +            fprintf(stderr, "bind port %u for UART%u\n", bindPort, (unsigned)id + 1);
 +        } else {
 +            fprintf(stderr, "bind port %u for UART%u failed!! after %d attempts (errno %d)\n",
 +                    bindPort, (unsigned)id + 1, attempts, probeErrno != 0 ? probeErrno : errno);
 +        }
++        pthread_mutex_unlock(&tcpDyadLock);
      }
      return s;
  }
-@@ -232,9 +291,76 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
+@@ -232,9 +294,76 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
      tcpDataOut(s);
  }
  
@@ -193,7 +202,7 @@ index a922cc7..b944b10 100644
      if (s->conn == NULL) return;
      pthread_mutex_lock(&s->txLock);
  
-@@ -255,6 +381,15 @@ void tcpDataOut(tcpPort_t *instance)
+@@ -255,6 +384,15 @@ void tcpDataOut(tcpPort_t *instance)
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
@@ -209,7 +218,7 @@ index a922cc7..b944b10 100644
      pthread_mutex_lock(&s->rxLock);
  
      while (size--) {
-@@ -270,17 +405,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+@@ -270,17 +408,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  //    printf("\n");
  }
  
@@ -279,10 +288,10 @@ index a922cc7..b944b10 100644
 +    return true;
 +}
 diff --git a/src/main/drivers/serial_tcp.h b/src/main/drivers/serial_tcp.h
-index a391e10..4ae8055 100644
+index a391e10..5d5a260 100644
 --- a/src/main/drivers/serial_tcp.h
 +++ b/src/main/drivers/serial_tcp.h
-@@ -46,6 +46,9 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
+@@ -46,8 +46,16 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
  
  // tcpPort API
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size);
@@ -291,7 +300,14 @@ index a391e10..4ae8055 100644
 +int tcpSerialTakeTx(uint8_t *out, int room, uint16_t *dropped);  // lockstep: UART2+ TX blocks for the reply datagram
  void tcpDataOut(tcpPort_t *instance);
  
++// Serializes dyad_update (tcpThread) against stream setup: dyad_newStream..dyad_listenEx. A stream is CLOSED
++// until its listen finishes, and dyad_update destroys CLOSED streams, closing their socket: run between the
++// socket() and the bind() of a listen, it makes the bind fail with EBADF on a free port.
++extern pthread_mutex_t tcpDyadLock;
++
  bool tcpIsStart(void);
+ bool* tcpGetUsed(void);
+ tcpPort_t* tcpGetPool(void);
 diff --git a/src/main/osd/osd.c b/src/main/osd/osd.c
 index c4d877b..ffc53de 100644
 --- a/src/main/osd/osd.c
@@ -454,7 +470,7 @@ index d1288e2..db34ec0 100644
          telemetry/srxl.c \
          io/displayport_oled.c
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..341fe23 100644
+index ee216ef..12ff706 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -44,6 +44,8 @@
@@ -734,7 +750,22 @@ index ee216ef..341fe23 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -584,6 +806,16 @@ void systemInit(void)
+@@ -570,7 +792,14 @@ static void* tcpThread(void* data)
+     dyad_setUpdateTimeout(0.01f);
+ 
+     while (workerRunning) {
++        pthread_mutex_lock(&tcpDyadLock);
+         dyad_update();
++        pthread_mutex_unlock(&tcpDyadLock);
++        {
++            // let a waiting stream setup (tcpReconfigure) take the lock
++            const struct timespec pause = { 0, 100 * 1000 };
++            nanosleep(&pause, NULL);
++        }
+     }
+ 
+     dyad_shutdown();
+@@ -584,6 +813,16 @@ void systemInit(void)
      int ret;
  
      clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -751,24 +782,24 @@ index ee216ef..341fe23 100644
      printf("[system]Init...\n");
  
      // Close the GPX track file cleanly on exit
-@@ -691,7 +923,16 @@ uint64_t millis64_real(void)
+@@ -691,7 +930,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
-+uint64_t micros64(void)
+ uint64_t micros64(void)
 +{
 +    return extTimeIsValid() ? __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) : wallScaledMicros64();
 +}
 +
 +static uint64_t wallScaledMicros64(void)
 +#else
- uint64_t micros64(void)
++uint64_t micros64(void)
 +#endif
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +946,11 @@ uint64_t micros64(void)
+@@ -705,6 +953,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
@@ -780,7 +811,7 @@ index ee216ef..341fe23 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +966,85 @@ uint32_t micros(void)
+@@ -720,6 +973,85 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
@@ -866,7 +897,7 @@ index ee216ef..341fe23 100644
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +1085,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +1092,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -879,7 +910,7 @@ index ee216ef..341fe23 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +1101,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +1108,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -892,7 +923,7 @@ index ee216ef..341fe23 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1210,74 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1217,74 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!
