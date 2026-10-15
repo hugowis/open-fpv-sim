@@ -1,6 +1,6 @@
 # M5: the real-radio bridge — design
 
-Status: designed 2026-10-13; approved in conversation. Parent: the phase-2 spec
+Status: **superseded 2026-10-15** by `2026-10-15-m5-radio-components-design.md` - the capture found no CRSF stream on the TX15's USB port (see that spec's §1). Kept as history. Designed 2026-10-13; approved in conversation. Parent: the phase-2 spec
 (`2026-10-13-phase2-real-gear-trusted-numbers-design.md`, §3 is this milestone's contract summary). Predecessor: the
 v1 close-out (merges before M5 executes; this spec is written against the close-out branch's tree). It closes the
 parent spec's oldest deferral — "joystick first; real-radio CRSF-over-serial later" — as phase 2's first milestone.
