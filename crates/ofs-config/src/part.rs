@@ -120,6 +120,8 @@ pub struct VtxHardware {
     pub antenna: VtxAntennaSection,
     #[serde(default = "crate::default_pit_power_mw")]
     pub pit_power_mw: f64,
+    #[serde(default)]
+    pub thermal: Option<crate::VtxThermalSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

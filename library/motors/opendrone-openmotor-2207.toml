@@ -9,6 +9,16 @@ no_load_current_a = 1.2
 rotor_inertia_kgm2 = 6.0e-6
 pole_pairs = 7
 
+[motor.thermal]
+heat_capacity_jpk = 15.0
+resistance_kpw = 1.5
+
+[provenance."motor.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate (about 30 g of copper and steel); not measured"
+[provenance."motor.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate, with prop wash over the bell; not measured"
 [provenance."motor.kv_rpm_per_v"]
 source = "estimated"
 note = "M1 estimate; the OpenMotor datasheet value replaces this when transcribed"

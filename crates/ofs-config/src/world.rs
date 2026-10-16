@@ -48,6 +48,9 @@ pub struct WorldConfig {
     /// What the video receiver makes of the SNR; absent = the defaults (docs/research/video-link.md).
     #[serde(default)]
     pub video: VideoSection,
+    /// The weather the quad flies in; absent = the defaults.
+    #[serde(default)]
+    pub environment: EnvironmentSection,
     #[serde(default)]
     pub objects: Vec<ObjectSection>,
     #[serde(default)]
@@ -121,6 +124,20 @@ impl Default for VideoSection {
             relock_after_fields: 5,
             field_drop_p_max: 0.5,
         }
+    }
+}
+
+/// The environment the quad flies in: for now the ambient air temperature the thermal model starts from and cools to.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EnvironmentSection {
+    /// Ambient air temperature in °C; allowed -40 to 60.
+    pub ambient_c: f64,
+}
+
+impl Default for EnvironmentSection {
+    fn default() -> Self {
+        Self { ambient_c: 25.0 }
     }
 }
 
@@ -278,6 +295,7 @@ impl WorldConfig {
             },
             handset: HandsetSection::default(),
             video: VideoSection::default(),
+            environment: EnvironmentSection::default(),
             objects: Vec::new(),
             emitters: Vec::new(),
             source_path: PathBuf::new(),
@@ -303,6 +321,12 @@ impl WorldConfig {
             c.check(finite(&[a.aim_az_deg, a.aim_el()]), &field("aim_az_deg"), "aims must be finite");
             check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));
         }
+        let ambient = self.environment.ambient_c;
+        c.check(
+            ambient.is_finite() && (-40.0..=60.0).contains(&ambient),
+            "environment.ambient_c",
+            format!("must be between -40 and 60 degrees C (got {ambient})"),
+        );
         let v = &self.video;
         let snrs = [
             v.clean_snr_db,

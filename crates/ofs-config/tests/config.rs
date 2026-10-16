@@ -234,6 +234,32 @@ fn the_shipped_battery_has_no_spread_or_fade() {
 }
 
 #[test]
+fn the_shipped_parts_carry_thermal_data() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let motor = cfg.motors[0].thermal.expect("the motor part has a thermal node");
+    assert_eq!((motor.heat_capacity_jpk, motor.resistance_kpw), (15.0, 1.5));
+    let esc = cfg.escs[0].thermal.expect("the ESC part has a thermal node");
+    assert_eq!((esc.heat_capacity_jpk, esc.resistance_kpw, esc.r_on_ohm, esc.switching_loss_coeff), (3.0, 8.0, 0.004, 0.0024));
+    let vtx = cfg.vtx.as_ref().unwrap().thermal.expect("the VTX part has a thermal node");
+    assert_eq!((vtx.heat_capacity_jpk, vtx.resistance_kpw, vtx.efficiency, vtx.idle_w), (2.0, 15.0, 0.25, 0.4));
+}
+
+#[test]
+fn thermal_problems_are_reported_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    write_part(dir.path(), "motors", "opendrone-openmotor-2207", &part_text("motors", "opendrone-openmotor-2207").replace("resistance_kpw = 1.5", "resistance_kpw = 0.0"));
+    write_part(dir.path(), "escs", "opendrone-4in1-esc", &part_text("escs", "opendrone-4in1-esc").replace("r_on_ohm = 0.004", "r_on_ohm = -0.1"));
+    write_part(dir.path(), "vtx", "opendrone-smartaudio-1w", &part_text("vtx", "opendrone-smartaudio-1w").replace("efficiency = 0.25", "efficiency = 1.5"));
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    for want in ["motors[0].thermal.resistance_kpw", "escs[0].thermal.r_on_ohm", "vtx.thermal.efficiency"] {
+        assert!(fields.contains(&want), "{want} missing from {fields:?}");
+    }
+}
+
+#[test]
 fn the_shipped_prop_turns_windmilling_on() {
     assert_eq!(load(Path::new(QUAD)).unwrap().props[0].windmill_j0, 1.0);
 }

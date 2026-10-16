@@ -38,3 +38,41 @@ cell named it does nothing.
 |---|---|---|
 | `cell_r0_scale`, `cell_capacity_scale` | absent in the shipped pack; the aged example has `[1, 1, 1, 1.2, 1, 1]` | estimated |
 | `cycles`, `capacity_fade_per_cycle`, `resistance_growth_per_cycle` | 0 in the shipped pack; 150, 0.001, 0.004 in the aged example | estimated: orders of magnitude, not measured |
+
+## Thermal model
+
+One lumped RC node per ESC, motor and video transmitter (`crates/ofs-electrical/src/thermal.rs`), heated by losses the
+other models already put on the bus. The part's `thermal` section (motor, ESC, VTX) gives the node; a part without one stays
+at the ambient. **Nothing derates**: temperatures are observable only.
+
+Each node is integrated exactly. With heat capacity `C` (J/K), resistance to the ambient `R` (K/W) and power `P` held over
+the step `dt`:
+
+    T_ss = T_ambient + P·R          T ← T + (T_ss − T)·(1 − e^(−dt/(R·C)))
+
+so the answer does not depend on the step size, and zero power leaves a node exactly where it is (a quad at rest stays at
+the ambient to the last bit). The model steps at 100 Hz after the motors and the battery.
+
+| Node | Power into it |
+|---|---|
+| ESC `i` | `I²·r_on + k_sw·V·\|I\|`: conduction in the FETs plus switching loss, from the motor's phase current `motor.i.current_a` and the bus voltage. `k_sw ≈ ½·(t_rise + t_fall)·f_sw`, here `0.5 · 100 ns · 48 kHz = 0.0024`. |
+| motor `i` | `I²·R_winding + τ_friction·ω`: winding copper loss plus the no-load torque `Ke·I0` that `EscMotor` already takes off the rotor, times the speed. |
+| VTX | `P_rf·(1/η − 1) + idle_w` while `vtx.present`; in pit mode only `idle_w` (`vtx.power_mw` keeps the selected level there, and the pit output is a few mW). |
+
+The ambient is `[environment] ambient_c` in the world file (default 25 °C, allowed −40 to 60).
+
+**Published** (recorded like any signal): `esc.{i}.temp_c`, `motor.{i}.temp_c`, `vtx.temp_c`. Betaflight sees the ESC
+temperatures in the KISS telemetry frames (frame `k` carries ESC `k`, rounded and clamped to 0–255 °C) and the Tramp VTX
+temperature in its status reply (a rounded `i16`); with the default 25 °C ambient and no heating they equal the constant
+v1 reported.
+
+**Limitations.** The thermal resistance is a constant (no airflow dependence: a quad on the bench cools as it does in a
+dive), and with the estimated constants and this model's phase currents the ESC warms only a couple of kelvin where the
+winding warms twenty. The point of the model is the structure; the numbers are for the validation framework to replace.
+
+| Constant | Value | Provenance |
+|---|---|---|
+| ESC `heat_capacity_jpk`, `resistance_kpw`, `r_on_ohm`, `switching_loss_coeff` | 3.0, 8.0, 0.004, 0.0024 | estimated: lumped RC, not measured |
+| motor `heat_capacity_jpk`, `resistance_kpw` | 15.0, 1.5 | estimated: lumped RC, not measured |
+| VTX `heat_capacity_jpk`, `resistance_kpw`, `efficiency`, `idle_w` | 2.0, 15.0, 0.25, 0.4 | estimated: lumped RC, not measured |
+| `ambient_c` | 25.0 | the default; a scenario choice |

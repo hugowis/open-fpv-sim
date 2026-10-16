@@ -6,6 +6,24 @@ name = "OpenDrone 4-in-1 ESC"
 response_tau_s = 0.002
 current_limit_a = 45.0
 
+[esc.thermal]
+heat_capacity_jpk = 3.0
+resistance_kpw = 8.0
+r_on_ohm = 0.004
+switching_loss_coeff = 0.0024
+
+[provenance."esc.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate (a few grams of board and FETs); not measured"
+[provenance."esc.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate; not measured"
+[provenance."esc.thermal.r_on_ohm"]
+source = "estimated"
+note = "a pair of FETs per phase, order of magnitude; not measured"
+[provenance."esc.thermal.switching_loss_coeff"]
+source = "estimated"
+note = "0.5 * (rise + fall time 100 ns) * 48 kHz switching, per volt and amp; not measured"
 [provenance."esc.response_tau_s"]
 source = "estimated"
 note = "M1 estimate"

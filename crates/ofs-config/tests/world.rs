@@ -348,6 +348,18 @@ fn a_video_table_overrides_only_the_keys_it_names() {
 }
 
 #[test]
+fn the_ambient_defaults_to_25_and_is_range_checked() {
+    assert_eq!(world::load(Path::new(WORLD)).unwrap().environment.ambient_c, 25.0);
+    assert_eq!(WorldConfig::open_field().environment.ambient_c, 25.0);
+    let hot = written_world(&(world_text() + "\n[environment]\nambient_c = 35.0\n")).unwrap();
+    assert_eq!(hot.environment.ambient_c, 35.0);
+    for bad in ["90.0", "-50.0", "nan"] {
+        let shown = problems(&(world_text() + &format!("\n[environment]\nambient_c = {bad}\n"))).join("\n");
+        assert!(shown.contains("environment.ambient_c"), "{bad}: {shown}");
+    }
+}
+
+#[test]
 fn video_threshold_problems_are_reported_together() {
     let text = world_text()
         + "\n[video]\nlost_snr_db = 7.0\nsparkle_snr_db = 0.0\ncolor_lost_snr_db = 9.0\nfield_drop_p_max = 1.5\nlost_after_fields = 0\n";

@@ -57,3 +57,21 @@ fn the_kiss_frames_carry_erpm_from_the_motors_pole_pairs() {
         assert_eq!(&frame[7..9], &expected, "{pairs} pole pairs: eRPM = 1000 rpm x pairs, / 100");
     }
 }
+
+#[test]
+fn frame_k_carries_esc_ks_temperature_clamped_to_a_byte() {
+    let mut bus = Bus::new();
+    for (k, t) in [30.4, 61.6, 300.0, -5.0].into_iter().enumerate() {
+        let sig = bus.signal::<f64>(&names::esc_temp(k));
+        bus.set(sig, t);
+    }
+    let uart = Wire::new(256);
+    let mut model = EscTelemetry::new(uart.clone(), 4, 80, 7.0, &mut bus);
+    model.step(&StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 8000.0 }, &mut bus).unwrap();
+    let bytes = uart.take(256);
+    let temperatures: Vec<u8> = bytes.chunks(FRAME_SIZE).map(|f| f[0]).collect();
+    assert_eq!(temperatures, [30, 62, 255, 0], "rounded, and clamped instead of wrapped");
+    for frame in bytes.chunks(FRAME_SIZE) {
+        assert_eq!(frame[9], crc8(&frame[..9]), "every frame keeps its checksum");
+    }
+}

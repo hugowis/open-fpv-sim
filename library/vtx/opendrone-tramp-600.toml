@@ -16,6 +16,24 @@ gain_dbi = 2.0
 polarization = "rhcp"
 mount_frd = [-0.5, 0.0, -1.0]
 
+[vtx.thermal]
+heat_capacity_jpk = 2.0
+resistance_kpw = 15.0
+efficiency = 0.25
+idle_w = 0.4
+
+[provenance."vtx.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate (a few grams of board and shield); not measured"
+[provenance."vtx.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate, little airflow; not measured"
+[provenance."vtx.thermal.efficiency"]
+source = "estimated"
+note = "RF output over DC input, order of magnitude; not measured"
+[provenance."vtx.thermal.idle_w"]
+source = "estimated"
+note = "draw with no RF output, order of magnitude; not measured"
 [provenance."vtx.kind"]
 source = "estimated"
 note = "Tramp behavioural model (M3e)"

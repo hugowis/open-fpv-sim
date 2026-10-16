@@ -11,6 +11,7 @@ use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
+use ofs_electrical::thermal::{EscThermalParams, MotorThermalParams, NodeParams, Thermal, ThermalParams, VtxThermalParams};
 use ofs_fc::open_loop::OpenLoopFc;
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
@@ -726,6 +727,40 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
     })
 }
 
+/// The parts' thermal sections and the world's ambient as the thermal model's parameters.
+pub fn thermal_params(cfg: &QuadConfig, world: &WorldConfig) -> ThermalParams {
+    let node = |c: f64, r: f64| NodeParams { heat_capacity_jpk: c, resistance_kpw: r };
+    ThermalParams {
+        ambient_c: world.environment.ambient_c,
+        esc: cfg
+            .escs
+            .iter()
+            .map(|e| {
+                e.thermal.map(|t| EscThermalParams {
+                    node: node(t.heat_capacity_jpk, t.resistance_kpw),
+                    r_on_ohm: t.r_on_ohm,
+                    switching_loss_coeff: t.switching_loss_coeff,
+                })
+            })
+            .collect(),
+        motor: cfg
+            .motors
+            .iter()
+            .map(|m| {
+                m.thermal.map(|t| MotorThermalParams {
+                    node: node(t.heat_capacity_jpk, t.resistance_kpw),
+                    winding_resistance_ohm: m.resistance_ohm,
+                    // The torque EscMotor takes off the rotor as friction: Ke · I0.
+                    friction_torque_nm: 60.0 / (2.0 * PI * m.kv_rpm_per_v) * m.no_load_current_a,
+                })
+            })
+            .collect(),
+        vtx: cfg.vtx.as_ref().and_then(|v| {
+            v.thermal.map(|t| VtxThermalParams { node: node(t.heat_capacity_jpk, t.resistance_kpw), efficiency: t.efficiency, idle_w: t.idle_w })
+        }),
+    }
+}
+
 /// The world file's `[video]` table as the link model's thresholds.
 pub fn receiver_thresholds(v: &world_cfg::VideoSection) -> ReceiverThresholds {
     ReceiverThresholds {
@@ -782,6 +817,9 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         resistance_factor: 1.0 + cfg.battery.resistance_growth_per_cycle * f64::from(cfg.battery.cycles),
     };
     models.push(Box::new(Battery::new(battery, n, base_hz / cfg.battery.rate_hz, &mut bus)));
+    // After the motors and the battery, so it heats from this tick's currents; 100 Hz is plenty for time constants of
+    // seconds, and the exact integrator does not care about the step.
+    models.push(Box::new(Thermal::new(thermal_params(cfg, &opts.world), (base_hz / 100).max(1), &mut bus)));
 
     let f = &cfg.frame;
     let (restitution, friction_coeff) = cfg.collision_contact();

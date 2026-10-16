@@ -169,6 +169,37 @@ pub struct MotorSection {
     /// Electrical revolutions per mechanical revolution; Betaflight's `motor_poles` / 2 (M4a). Required —
     /// Betaflight takes it as data, so the simulator must not guess it.
     pub pole_pairs: u32,
+    /// Its thermal node (M6b); absent = the winding stays at ambient.
+    #[serde(default)]
+    pub thermal: Option<ThermalNodeSection>,
+}
+
+/// A lumped thermal node: heat capacity (J/K) and thermal resistance to the ambient (K/W).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThermalNodeSection {
+    pub heat_capacity_jpk: f64,
+    pub resistance_kpw: f64,
+}
+
+/// An ESC's thermal node plus its loss constants: conduction `I²·r_on_ohm`, switching `switching_loss_coeff·V·|I|`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EscThermalSection {
+    pub heat_capacity_jpk: f64,
+    pub resistance_kpw: f64,
+    pub r_on_ohm: f64,
+    pub switching_loss_coeff: f64,
+}
+
+/// A video transmitter's thermal node plus its dissipation: `P_rf·(1/efficiency − 1) + idle_w`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VtxThermalSection {
+    pub heat_capacity_jpk: f64,
+    pub resistance_kpw: f64,
+    pub efficiency: f64,
+    pub idle_w: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +222,9 @@ pub struct PropSection {
 pub struct EscSection {
     pub response_tau_s: f64,
     pub current_limit_a: f64,
+    /// Its thermal node and losses (M6b); absent = the ESC stays at ambient.
+    #[serde(default)]
+    pub thermal: Option<EscThermalSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -529,6 +563,9 @@ pub struct VtxSection {
     /// Output power in pit mode.
     #[serde(default = "default_pit_power_mw")]
     pub pit_power_mw: f64,
+    /// Its thermal node and dissipation (M6b); absent = the VTX stays at ambient.
+    #[serde(default)]
+    pub thermal: Option<VtxThermalSection>,
 }
 
 /// The VTX antenna, for the video link model.
@@ -776,6 +813,7 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
                 reply_latency_ms: hardware.reply_latency_ms,
                 antenna: hardware.antenna,
                 pit_power_mw: hardware.pit_power_mw,
+                thermal: hardware.thermal,
             })
         }
         _ => None,
@@ -949,6 +987,10 @@ impl QuadConfig {
                 &format!("motors[{i}].pole_pairs"),
                 format!("must be 1..=32 (got {})", m.pole_pairs),
             );
+            if let Some(t) = &m.thermal {
+                c.positive(t.heat_capacity_jpk, &format!("motors[{i}].thermal.heat_capacity_jpk"));
+                c.positive(t.resistance_kpw, &format!("motors[{i}].thermal.resistance_kpw"));
+            }
         }
         for (i, p) in self.props.iter().enumerate() {
             c.positive(p.diameter_m, &format!("props[{i}].diameter_m"));
@@ -961,6 +1003,12 @@ impl QuadConfig {
         for (i, e) in self.escs.iter().enumerate() {
             c.positive(e.response_tau_s, &format!("escs[{i}].response_tau_s"));
             c.positive(e.current_limit_a, &format!("escs[{i}].current_limit_a"));
+            if let Some(t) = &e.thermal {
+                c.positive(t.heat_capacity_jpk, &format!("escs[{i}].thermal.heat_capacity_jpk"));
+                c.positive(t.resistance_kpw, &format!("escs[{i}].thermal.resistance_kpw"));
+                c.non_negative(t.r_on_ohm, &format!("escs[{i}].thermal.r_on_ohm"));
+                c.non_negative(t.switching_loss_coeff, &format!("escs[{i}].thermal.switching_loss_coeff"));
+            }
         }
 
         let b = &self.battery;
@@ -1105,6 +1153,12 @@ impl QuadConfig {
                 format!("must be one of A, B, E, F, R, L (got {})", v.default_band),
             );
             c.check((1..=8).contains(&v.default_channel), "vtx.default_channel", format!("must be 1..=8 (got {})", v.default_channel));
+            if let Some(t) = &v.thermal {
+                c.positive(t.heat_capacity_jpk, "vtx.thermal.heat_capacity_jpk");
+                c.positive(t.resistance_kpw, "vtx.thermal.resistance_kpw");
+                c.check(t.efficiency.is_finite() && t.efficiency > 0.0 && t.efficiency <= 1.0, "vtx.thermal.efficiency", format!("must be in (0, 1] (got {})", t.efficiency));
+                c.non_negative(t.idle_w, "vtx.thermal.idle_w");
+            }
             c.check(
                 !v.power_levels_mw.is_empty() && v.power_levels_mw.len() <= 8 && v.power_levels_mw.iter().all(|m| *m > 0),
                 "vtx.power_levels_mw",
