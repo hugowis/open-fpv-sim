@@ -34,6 +34,7 @@ use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
 use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
+use ofs_sensors::mount::MountResponse;
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
@@ -806,6 +807,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             positions_frd: f.motor_positions_frd_m.iter().map(|p| v3(*p)).collect(),
             mass_kg: f.mass_kg,
             inertia_kgm2: v3(f.inertia_kgm2),
+            mount: f.fc_mount.as_ref().map(|m| MountResponse { natural_hz: m.natural_hz, damping_ratio: m.damping_ratio }),
         }),
     };
     models.push(Box::new(Imu::new(imu, opts.seed, &mut bus)));

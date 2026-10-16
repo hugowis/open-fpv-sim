@@ -13,7 +13,6 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - Two contact mechanisms, one per job: hits get impulses, resting weight gets the spring-dampers, so a hard
   touchdown both bounces and compresses the legs. Position correction moves only the deepest contact out.
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
-- Vibration is rigid-body and below resonance.
 
 ### Electrical
 - The battery is one Thevenin pack: a weak cell is an offset on it, with no per-cell model and no capacity fade.

@@ -20,6 +20,19 @@ unset agrees by construction (a diff that sets it must match — SITL quads are 
 `prop.imbalance_kgm = 0.0`: there is no measurement, and the parameter is the M4b vibration model's input —
 it stays 0 until that model lands.
 
+## `frames/opendrone-5f-softmount.toml` — OpenDrone 5F frame, soft-mounted FC
+
+The same frame as below plus a flight-controller mount (`[frame.fc_mount]`), the example of a soft-mounted stack. A
+frame part with no `[frame.fc_mount]` is rigid. It is a library part only: no shipped quad uses it, so a quad opts in
+with `frame = "opendrone-5f-softmount"`.
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `frame.fc_mount.natural_hz` | 120.0 | estimated | rubber-grommet FC stack, order of magnitude; not measured |
+| `frame.fc_mount.damping_ratio` | 0.15 | estimated | rubber-grommet FC stack, order of magnitude; not measured |
+
+Every other parameter equals `opendrone-5f`'s. The mount's natural frequency must be at most `sim.base_hz / 10`.
+
 ## `frames/opendrone-5f.toml` — OpenDrone 5F frame
 
 | Parameter | Value | Source | Note |

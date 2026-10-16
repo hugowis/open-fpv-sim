@@ -1,0 +1,62 @@
+# OpenDrone 5" freestyle frame with a rubber-mounted flight controller: the same frame as opendrone-5f, plus an FC mount
+# that cuts the motors' vibration above its resonance. Units are in the key suffixes (SI).
+schema_version = 1
+name = "OpenDrone 5F frame, soft-mounted FC"
+
+[frame]
+mass_kg = 0.65
+inertia_kgm2 = [0.0025, 0.0025, 0.0045]
+cda_m2 = [0.010, 0.010, 0.020]
+angular_damping_nms = 0.0001
+# Betaflight Quad-X order: M1 rear-right, M2 front-right, M3 rear-left, M4 front-left (FRD: x fwd, y right, z down)
+motor_positions_frd_m = [[-0.08, 0.08, 0.0], [0.08, 0.08, 0.0], [-0.08, -0.08, 0.0], [0.08, -0.08, 0.0]]
+# +1 = clockwise seen from above. Betaflight default: M1 CW, M2 CCW, M3 CCW, M4 CW.
+motor_spin = [1, -1, -1, 1]
+contact_points_frd_m = [[-0.08, 0.08, 0.03], [0.08, 0.08, 0.03], [-0.08, -0.08, 0.03], [0.08, -0.08, 0.03]]
+
+[frame.fc_mount]
+natural_hz = 120.0
+damping_ratio = 0.15
+
+[ground]
+stiffness_npm = 3000.0
+damping_nspm = 40.0
+friction_coeff = 0.6
+
+[provenance."frame.mass_kg"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."frame.inertia_kgm2"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."frame.cda_m2"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."frame.angular_damping_nms"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."frame.motor_positions_frd_m"]
+source = "estimated"
+note = "M1 estimate, a 5\" X-frame's arm length"
+[provenance."frame.motor_spin"]
+source = "datasheet"
+link = "https://betaflight.com/docs/development/Mixer"
+note = "Betaflight Quad-X order"
+[provenance."frame.contact_points_frd_m"]
+source = "estimated"
+note = "M1 estimate, legs under the arms"
+[provenance."frame.fc_mount.natural_hz"]
+source = "estimated"
+note = "rubber-grommet FC stack, order of magnitude; not measured"
+[provenance."frame.fc_mount.damping_ratio"]
+source = "estimated"
+note = "rubber-grommet FC stack, order of magnitude; not measured"
+[provenance."ground.stiffness_npm"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."ground.damping_nspm"]
+source = "estimated"
+note = "M1 estimate"
+[provenance."ground.friction_coeff"]
+source = "estimated"
+note = "M1 estimate"

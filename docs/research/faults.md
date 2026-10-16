@@ -97,10 +97,12 @@ component; the moment leads the force by a quarter turn (M ⊥ F). Both disturba
 frequency. The model is deterministic (phase-integrated, no RNG), contributes exactly zero when every imbalance is
 zero (gated, so the all-quiet path stays bit-identical), and a stopped motor contributes exactly zero (no 0/0).
 
-This is **rigid-body transmission, below-resonance amplitude only**: the airframe responds as a rigid body, no
-structural model, no transmissibility — the m3b/m3c debt phrasing applies verbatim: **every constant is an
-estimate; none is measured** (the mass and inertia come from the frame part, whose provenance ledger records
-them as estimates). Real props fail with a spectrum, not a pure tone; the input `imbalance_kgm` is a scenario
+By default this is **rigid-body transmission, below-resonance amplitude only**: the IMU rides the airframe as if
+bolted to it. A frame part may add an `[frame.fc_mount]` (a natural frequency and a damping ratio), which passes
+these disturbances through a second-order transmissibility first, so a soft-mounted flight controller sees the motors'
+buzz cut above its resonance (`docs/research/rotor-dynamics.md`, "Frame response"). The m3b/m3c debt phrasing applies
+verbatim: **every constant is an estimate; none is measured** (the mass and inertia come from the frame part, whose
+provenance ledger records them as estimates). Real props fail with a spectrum, not a pure tone; the input `imbalance_kgm` is a scenario
 figure, and community measurement is the validation path recorded in the M4 spec.
 
 | Constant | Value | Provenance |

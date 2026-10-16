@@ -75,3 +75,38 @@ the advance ratio.
 | Constant | Value | Provenance |
 |---|---|---|
 | `prop.windmill_j0` | 1.0 | estimated: the zero-torque advance ratio of a small propeller, an order of magnitude, not measured |
+
+## Frame response
+
+The motors' imbalance reaches the IMU (`docs/research/faults.md`, "Prop damage and the vibration model") as a rotating
+force and moment. A flight controller is usually not bolted to the frame but hung on rubber grommets or standoffs, a
+mass on a spring and damper, so the IMU feels the vibration through that mount. M6a adds it as an optional
+`[frame.fc_mount]` in the frame part (`natural_hz`, `damping_ratio`); absent, the IMU rides the airframe rigidly, as
+before.
+
+The model is the base-excitation **transmissibility**
+
+    T(s) = (1 + 2ζ·s/ωn) / (1 + 2ζ·s/ωn + s²/ωn²)
+
+which is 1 at DC, peaks at `√(1+4ζ²)/(2ζ)` at `ωn = 2π·natural_hz`, crosses 1 again at `√2·ωn` and falls at
+40 dB/decade above that. Below the resonance the IMU feels the vibration as is; above it, a soft mount cuts it.
+
+It is applied to the vibration disturbance only (the gyro's roll and pitch terms and the accelerometer's x and y
+terms), identically on each axis, never to the airframe's true body rate or specific force, which are slow. Each
+axis is a biquad (`crates/ofs-sensors/src/mount.rs`), the bilinear transform of `T(s)` prewarped at `ωn`, with
+`c = 1/tan(ωn·dt/2)` and `a0 = 1 + 2ζc + c²`:
+
+    b0 = (1+2ζc)/a0   b1 = 2/a0   b2 = (1−2ζc)/a0   a1 = (2−2c²)/a0   a2 = (1−2ζc+c²)/a0
+
+The gain at `ωn` is exact; elsewhere the bilinear transform warps the shape, so the config requires
+`natural_hz <= sim.base_hz / 10` and `0 < damping_ratio <= 5`. The coefficients are built on the IMU's first step,
+when the sample time is known.
+
+The filter runs every tick once a mount is configured, with zero input when no motor contributes, so the output rings
+down after the motors stop rather than cutting off. The disturbance is added only while a motor contributes or the
+filter still holds state, so a mounted IMU with no imbalance anywhere is bit-identical to an unmounted one.
+
+| Constant | Value | Provenance |
+|---|---|---|
+| `frame.fc_mount.natural_hz` | 120.0 (in `opendrone-5f-softmount` only) | estimated: rubber-grommet stack, not measured |
+| `frame.fc_mount.damping_ratio` | 0.15 (in `opendrone-5f-softmount` only) | estimated: rubber-grommet stack, not measured |
