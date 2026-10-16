@@ -19,6 +19,16 @@ pub const BATTERY_CURRENT: &str = "battery.current_a";
 pub const BATTERY_SOC: &str = "battery.soc";
 pub const BATTERY_CONSUMED: &str = "battery.consumed_mah";
 
+/// One cell of the series string: its terminal voltage (V).
+pub fn battery_cell_voltage(i: usize) -> String {
+    format!("battery.cell.{i}.voltage_v")
+}
+
+/// One cell's state of charge, 0..1.
+pub fn battery_cell_soc(i: usize) -> String {
+    format!("battery.cell.{i}.soc")
+}
+
 pub const IMU_GYRO: &str = "imu.gyro_frd_radps";
 /// Specific force, FRD.
 pub const IMU_ACCEL: &str = "imu.accel_frd_mps2";
@@ -110,6 +120,19 @@ pub fn prop_imbalance(i: usize) -> String {
 pub fn prop_inflow(i: usize) -> String {
     format!("prop.{i}.inflow_mps")
 }
+
+/// The ESC's temperature (°C), from the thermal model; read by the KISS telemetry frames.
+pub fn esc_temp(i: usize) -> String {
+    format!("esc.{i}.temp_c")
+}
+
+/// The motor winding's temperature (°C).
+pub fn motor_temp(i: usize) -> String {
+    format!("motor.{i}.temp_c")
+}
+
+/// The video transmitter's temperature (°C); Tramp's status reply reports it.
+pub const VTX_TEMP_C: &str = "vtx.temp_c";
 
 /// Integrated rotor phase, wrapped to [0, 2π) — the vibration model's phase input.
 pub fn motor_theta(i: usize) -> String {

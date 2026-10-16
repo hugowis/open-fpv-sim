@@ -258,9 +258,21 @@ fn the_tramp_vtx_answers_r_v_s_and_applies_f_p_i() {
     assert_eq!(u16::from_le_bytes([reply[2], reply[3]]), 5800);
     assert_eq!(reply[7], 1, "pit on");
 
+    let temperature = rig.bus.signal::<f64>(names::VTX_TEMP_C);
+    rig.bus.set(temperature, 47.4);
     let reply = rig.ask(2.0, &tramp_frame(b's', &[]));
     assert_eq!(reply[1], b's');
-    assert_eq!(i16::from_le_bytes([reply[6], reply[7]]), 25, "the constant temperature");
+    assert_eq!(i16::from_le_bytes([reply[6], reply[7]]), 47, "the VTX's temperature, rounded");
+}
+
+#[test]
+fn tramp_status_encodes_a_negative_temperature() {
+    let mut rig = Rig::new(tramp_params(), VtxKind::Tramp);
+    let temperature = rig.bus.signal::<f64>(names::VTX_TEMP_C);
+    rig.bus.set(temperature, -5.6);
+    let reply = rig.ask(0.0, &tramp_frame(b's', &[]));
+    assert_eq!(reply[1], b's');
+    assert_eq!(i16::from_le_bytes([reply[6], reply[7]]), -6);
 }
 
 proptest! {

@@ -113,17 +113,17 @@ figure, and community measurement is the validation path recorded in the M4 spec
 
 ## Weak cell
 
-`WeakCell(cell, r_offset_ohm, v_offset_v)` is additive on the pack Thevenin, per spec decision 9 — the battery
-model's own state is untouched (`crates/ofs-electrical/src/battery.rs`):
+`WeakCell(cell, r_offset_ohm, v_offset_v)` is additive on **one cell** of the battery's series string
+(`crates/ofs-electrical/src/battery.rs`, `docs/research/battery-and-thermal.md`): the cell the fault names carries
 
-    voltage = OCV(soc) − I·(r0 + Δr) − v1 − Δv
+    cell voltage = OCV(soc) − I·(r0 + Δr) − v1 − Δv
 
-The droop deepens by exactly `I·Δr + Δv` under load; SoC, current and the `v1` polarization state keep the
-untouched math, so the fault is invisible the instant the load is off — like a real weak cell. Cell voltages are
-**synthesized** for the state stream (protocol 8's `State.battery_cell_voltages`): every cell gets the published
-pack voltage divided equally, and the weak cell additionally carries `−Δv − I·Δr`, its own share of the additive
-terms. The equal share is a modelling simplification — a real pack's cells differ — and Betaflight only ever sees
-the pack voltage anyway (the shipped diff leaves `report_cell_voltage` off; see `docs/research/elrs-link.md`).
+so the pack, the sum of its cells, droops by exactly `I·Δr + Δv` under load; every cell's SoC and polarization state
+keep the untouched math, so the fault is invisible the instant the load is off — like a real weak cell. The cell
+voltages in the state stream (protocol 8's `State.battery_cell_voltages`) are the battery model's own
+`battery.cell.{k}.voltage_v` signals, so the named cell is the one that sags (before M6b they were synthesized as equal
+shares). A fault that names no cell (`fault.battery.weak_cell = 0`) changes nothing. Betaflight only ever sees the
+pack voltage anyway (the shipped diff leaves `report_cell_voltage` off; see `docs/research/elrs-link.md`).
 
 | Constant | Value | Provenance |
 |---|---|---|

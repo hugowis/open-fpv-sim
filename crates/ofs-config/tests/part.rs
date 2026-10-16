@@ -123,6 +123,40 @@ fn an_fc_mount_without_provenance_is_refused() {
 }
 
 #[test]
+fn a_battery_part_may_carry_spread_and_fade() {
+    let dir = tempfile::tempdir().unwrap();
+    let shipped = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/batteries/opendrone-6s-1300.toml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let with_fade = format!(
+        "{}[provenance.\"battery.cycles\"]\nsource = \"estimated\"\n",
+        shipped.replacen("c1_f = 2000.0\n", "c1_f = 2000.0\ncycles = 10\n", 1)
+    );
+    let part = load_battery(&write(dir.path(), "b.toml", &with_fade)).unwrap();
+    assert_eq!(part.battery.cycles, 10);
+    assert!(part.battery.cell_r0_scale.is_empty());
+    let missing = shipped.replacen("c1_f = 2000.0\n", "c1_f = 2000.0\ncycles = 10\n", 1);
+    let err = load_battery(&write(dir.path(), "b2.toml", &missing)).unwrap_err();
+    assert!(err.to_string().contains("battery.cycles"), "{err}");
+}
+
+#[test]
+fn a_thermal_section_without_provenance_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let shipped = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/escs/opendrone-4in1-esc.toml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(load_esc(&write(dir.path(), "e.toml", &shipped)).unwrap().esc.thermal.is_some());
+    let stripped = shipped.replace(
+        "[provenance.\"esc.thermal.r_on_ohm\"]\nsource = \"estimated\"\nnote = \"a pair of FETs per phase, order of magnitude; not measured\"\n",
+        "",
+    );
+    assert_ne!(stripped, shipped, "the fixture edit must hit");
+    let err = load_esc(&write(dir.path(), "e2.toml", &stripped)).unwrap_err();
+    assert!(err.to_string().contains("esc.thermal.r_on_ohm"), "{err}");
+}
+
+#[test]
 fn a_bad_source_is_a_parse_error() {
     let dir = tempfile::tempdir().unwrap();
     let bad = FRAME.replace("source = \"estimated\"", "source = \"guessed\"").replace("source = \"measured\"", "source = \"guessed\"");

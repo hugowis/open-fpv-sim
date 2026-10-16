@@ -65,6 +65,27 @@ and beyond, linear in between. The next Raceband channel (37 MHz away) is reject
 | < 3 dB for 3 fields | sync lost: the picture rolls; static at 0 dB and below |
 | ≥ 6 dB for 5 fields | a lost sync relocks |
 
+Every number in that table is world data: the `[video]` table of a world file sets it, and a world without the table
+(or a key) gets the value shown. All are estimates for a typical analog 5.8 GHz receiver; none is measured.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `clean_snr_db` | 25.0 | at or above this the picture is clean |
+| `sparkle_snr_db` | 12.0 | grain reaches half of full static here; sparkles start |
+| `sparkle_full_snr_db` | 4.0 | sparkles cover the picture at or below this |
+| `color_fade_snr_db` | 8.0 | colour starts to fade below this |
+| `color_lost_snr_db` | 5.0 | colour is gone at this |
+| `unstable_snr_db` | 6.0 | below this sync is unstable; a lost sync relocks only above it |
+| `lost_snr_db` | 3.0 | below this for `lost_after_fields` fields in a row, sync is lost |
+| `lost_after_fields` | 3 | |
+| `relock_after_fields` | 5 | fields in a row at or above `unstable_snr_db` that a lost sync needs |
+| `field_drop_p_max` | 0.5 | the drop probability at `lost_snr_db`, ramping down to 0 at `unstable_snr_db` |
+
+The world loader refuses values that would divide by zero or invert a ramp: every threshold finite,
+`sparkle_snr_db > 0`, `clean > sparkle > sparkle_full`, `color_fade > color_lost`, `unstable > lost`, both field counts
+at least 1 and `field_drop_p_max` within 0 to 1. The defaults live in `ofs-video`'s `link.rs` as constants and in the
+world loader as `VideoSection::default()`; a test in `ofs-sim` keeps the two equal.
+
 ## Link budget check
 
 25 mW (14 dBm) with 2 dBi RHCP omnis at both ends, at their peak gain, with the body shadow, the ground bounce and

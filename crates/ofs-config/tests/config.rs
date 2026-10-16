@@ -180,6 +180,85 @@ fn the_shipped_frame_is_rigid() {
     assert!(load(Path::new(QUAD)).unwrap().frame.fc_mount.is_none());
 }
 
+/// The shipped battery part with extra `[battery]` keys and `estimated` provenance for each.
+fn battery_part_with(keys: &[(&str, &str)]) -> String {
+    let mut text = part_text("batteries", "opendrone-6s-1300");
+    let inserted: String = keys.iter().map(|(k, v)| format!("{k} = {v}\n")).collect();
+    text = text.replacen("c1_f = 2000.0\n", &format!("c1_f = 2000.0\n{inserted}"), 1);
+    for (k, _) in keys {
+        text.push_str(&format!("[provenance.\"battery.{k}\"]\nsource = \"estimated\"\n"));
+    }
+    text
+}
+
+#[test]
+fn battery_spread_and_fade_problems_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = battery_part_with(&[
+        ("cell_r0_scale", "[1.0, 1.0]"),
+        ("cell_capacity_scale", "[1.0, 1.0, 1.0, 1.0, 1.0, 0.0]"),
+        ("cycles", "120"),
+        ("capacity_fade_per_cycle", "0.01"),
+    ]);
+    write_part(dir.path(), "batteries", "opendrone-6s-1300", &part);
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    for want in ["battery.cell_r0_scale", "battery.cell_capacity_scale", "battery.cycles"] {
+        assert!(fields.contains(&want), "{want} missing from {fields:?}");
+    }
+}
+
+#[test]
+fn a_battery_part_with_spread_and_fade_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = battery_part_with(&[
+        ("cell_r0_scale", "[1.0, 1.0, 1.0, 1.2, 1.0, 1.0]"),
+        ("cycles", "150"),
+        ("capacity_fade_per_cycle", "0.001"),
+        ("resistance_growth_per_cycle", "0.004"),
+    ]);
+    write_part(dir.path(), "batteries", "opendrone-6s-1300", &part);
+    let b = load(&path).unwrap().battery;
+    assert_eq!((b.cycles, b.cell_r0_scale[3]), (150, 1.2));
+    assert!(b.cell_capacity_scale.is_empty());
+}
+
+#[test]
+fn the_shipped_battery_has_no_spread_or_fade() {
+    let b = load(Path::new(QUAD)).unwrap().battery;
+    assert!(b.cell_r0_scale.is_empty() && b.cell_capacity_scale.is_empty());
+    assert_eq!((b.cycles, b.capacity_fade_per_cycle, b.resistance_growth_per_cycle), (0, 0.0, 0.0));
+}
+
+#[test]
+fn the_shipped_parts_carry_thermal_data() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let motor = cfg.motors[0].thermal.expect("the motor part has a thermal node");
+    assert_eq!((motor.heat_capacity_jpk, motor.resistance_kpw), (15.0, 1.5));
+    let esc = cfg.escs[0].thermal.expect("the ESC part has a thermal node");
+    assert_eq!((esc.heat_capacity_jpk, esc.resistance_kpw, esc.r_on_ohm, esc.switching_loss_coeff), (3.0, 8.0, 0.004, 0.0024));
+    let vtx = cfg.vtx.as_ref().unwrap().thermal.expect("the VTX part has a thermal node");
+    assert_eq!((vtx.heat_capacity_jpk, vtx.resistance_kpw, vtx.efficiency, vtx.idle_w), (2.0, 15.0, 0.25, 0.4));
+}
+
+#[test]
+fn thermal_problems_are_reported_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    write_part(dir.path(), "motors", "opendrone-openmotor-2207", &part_text("motors", "opendrone-openmotor-2207").replace("resistance_kpw = 1.5", "resistance_kpw = 0.0"));
+    write_part(dir.path(), "escs", "opendrone-4in1-esc", &part_text("escs", "opendrone-4in1-esc").replace("r_on_ohm = 0.004", "r_on_ohm = -0.1"));
+    write_part(dir.path(), "vtx", "opendrone-smartaudio-1w", &part_text("vtx", "opendrone-smartaudio-1w").replace("efficiency = 0.25", "efficiency = 1.5"));
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    for want in ["motors[0].thermal.resistance_kpw", "escs[0].thermal.r_on_ohm", "vtx.thermal.efficiency"] {
+        assert!(fields.contains(&want), "{want} missing from {fields:?}");
+    }
+}
+
 #[test]
 fn the_shipped_prop_turns_windmilling_on() {
     assert_eq!(load(Path::new(QUAD)).unwrap().props[0].windmill_j0, 1.0);

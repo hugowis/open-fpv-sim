@@ -15,8 +15,9 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
 
 ### Electrical
-- The battery is one Thevenin pack: a weak cell is an offset on it, with no per-cell model and no capacity fade.
-- ESC and VTX temperatures are a constant 25 °C (the KISS telemetry frames, Tramp's status).
+- The thermal model has no airflow dependence (the thermal resistance is a constant) and nothing derates on
+  overtemperature; with the estimated constants the ESC warms only a couple of kelvin at this model's phase currents
+  (`docs/research/battery-and-thermal.md`).
 
 ### Radio (`docs/research/elrs-link.md`)
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
@@ -52,7 +53,7 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ### Video (`docs/research/video-link.md`)
 - One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
   ray is not obstructed separately; one body-shadow lobe of up to 8 dB.
-- The receiver's thresholds are named constants, not world-file fields; every constant is an estimate.
+- Every video constant is an estimate; the receiver's thresholds are world data (`[video]`) but none is measured.
 - The DVR stops when the picture's size changes mid-recording, and it records what the pilot sees (no clean feed).
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
@@ -92,8 +93,8 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ## Post-v1 backlog
 
 M6 (accuracy and validation) is in progress: M6a (rotor gyroscopic coupling, windmilling, the flight controller's mount
-response; `docs/research/rotor-dynamics.md`) is done; M6b (per-cell battery, thermal model, receiver thresholds as
-world data) and M6c (validation harness, repro bundle) are next.
+response; `docs/research/rotor-dynamics.md`) and M6b (per-cell battery, thermal model, receiver thresholds as world
+data; `docs/research/battery-and-thermal.md`) are done; M6c (validation harness, repro bundle) is next.
 
 ### Fidelity (parent spec §1.5, §2)
 - Level 2: AM32 and ExpressLRS as host-compiled firmware in the loop. Level 3 (MCU emulation) stays out of scope,
@@ -108,11 +109,10 @@ world data) and M6c (validation harness, repro bundle) are next.
   changes every seeded 50 Hz run).
 
 ### Modelling
-- A thermal model (ESCs, motors, VTX); a per-cell battery with capacity fade;
-  vibration transmissibility (a structural model); `RadioLoss` on the downlink.
+- `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
-- Configurable receiver thresholds; a configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
+- A configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
 - A compass, and the heading mapping it needs.
 
 ### Video and OSD

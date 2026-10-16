@@ -11,6 +11,7 @@ use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
+use ofs_electrical::thermal::{EscThermalParams, MotorThermalParams, NodeParams, Thermal, ThermalParams, VtxThermalParams};
 use ofs_fc::open_loop::OpenLoopFc;
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
@@ -35,7 +36,10 @@ use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_sensors::mount::MountResponse;
-use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
+use ofs_video::link::{
+    Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, ReceiverThresholds, VideoLink, VideoSync,
+    VtxInterferenceHandle, FIELD_RATE_HZ,
+};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
 use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
@@ -230,11 +234,6 @@ impl Fault {
     }
 }
 
-/// The weak-cell signal (1-based, 0 = none) as a 0-based cell index.
-fn weak_cell_index(weak: f64) -> Option<usize> {
-    (weak > 0.0).then(|| weak as usize - 1)
-}
-
 /// The receiver's UART buffer. With no flight controller draining it (open-loop FC), the oldest bytes are
 /// dropped like a UART overrun.
 const RECEIVER_UART_CAPACITY: usize = 4096;
@@ -333,6 +332,7 @@ struct Handles {
     rate: Signal<DVec3>,
     vbat: Signal<f64>,
     ibat: Signal<f64>,
+    cell_voltage: Vec<Signal<f64>>,
     omega: Vec<Signal<f64>>,
     cmd: Vec<Signal<f64>>,
     roll: Signal<f64>,
@@ -382,7 +382,7 @@ struct Handles {
 }
 
 impl Handles {
-    fn register(bus: &mut Bus, motors: usize, world: &WorldConfig) -> Self {
+    fn register(bus: &mut Bus, motors: usize, cells: usize, world: &WorldConfig) -> Self {
         Self {
             pos: bus.signal(names::BODY_POS_NED),
             vel: bus.signal(names::BODY_VEL_NED),
@@ -390,6 +390,7 @@ impl Handles {
             rate: bus.signal(names::BODY_RATE_FRD),
             vbat: bus.signal(names::BATTERY_VOLTAGE),
             ibat: bus.signal(names::BATTERY_CURRENT),
+            cell_voltage: (0..cells).map(|k| bus.signal(&names::battery_cell_voltage(k))).collect(),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
             cmd: (0..motors).map(|i| bus.signal(&names::motor_cmd(i))).collect(),
             roll: bus.signal(names::RC_ROLL),
@@ -722,7 +723,58 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
         pit_power_mw: vtx.pit_power_mw,
         fading: true,
         ground_bounce: true,
+        thresholds: receiver_thresholds(&world.video),
     })
+}
+
+/// The parts' thermal sections and the world's ambient as the thermal model's parameters.
+pub fn thermal_params(cfg: &QuadConfig, world: &WorldConfig) -> ThermalParams {
+    let node = |c: f64, r: f64| NodeParams { heat_capacity_jpk: c, resistance_kpw: r };
+    ThermalParams {
+        ambient_c: world.environment.ambient_c,
+        esc: cfg
+            .escs
+            .iter()
+            .map(|e| {
+                e.thermal.map(|t| EscThermalParams {
+                    node: node(t.heat_capacity_jpk, t.resistance_kpw),
+                    r_on_ohm: t.r_on_ohm,
+                    switching_loss_coeff: t.switching_loss_coeff,
+                })
+            })
+            .collect(),
+        motor: cfg
+            .motors
+            .iter()
+            .map(|m| {
+                m.thermal.map(|t| MotorThermalParams {
+                    node: node(t.heat_capacity_jpk, t.resistance_kpw),
+                    winding_resistance_ohm: m.resistance_ohm,
+                    // The torque EscMotor takes off the rotor as friction: Ke · I0.
+                    friction_torque_nm: 60.0 / (2.0 * PI * m.kv_rpm_per_v) * m.no_load_current_a,
+                })
+            })
+            .collect(),
+        vtx: cfg.vtx.as_ref().and_then(|v| {
+            v.thermal.map(|t| VtxThermalParams { node: node(t.heat_capacity_jpk, t.resistance_kpw), efficiency: t.efficiency, idle_w: t.idle_w })
+        }),
+    }
+}
+
+/// The world file's `[video]` table as the link model's thresholds.
+pub fn receiver_thresholds(v: &world_cfg::VideoSection) -> ReceiverThresholds {
+    ReceiverThresholds {
+        clean_snr_db: v.clean_snr_db,
+        sparkle_snr_db: v.sparkle_snr_db,
+        sparkle_full_snr_db: v.sparkle_full_snr_db,
+        color_fade_snr_db: v.color_fade_snr_db,
+        color_lost_snr_db: v.color_lost_snr_db,
+        unstable_snr_db: v.unstable_snr_db,
+        lost_snr_db: v.lost_snr_db,
+        lost_after_fields: v.lost_after_fields,
+        relock_after_fields: v.relock_after_fields,
+        field_drop_p_max: v.field_drop_p_max,
+    }
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
@@ -759,8 +811,15 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         c1_f: cfg.battery.c1_f,
         ocv_table: pairs(&cfg.battery.ocv_table),
         initial_soc: cfg.battery.initial_soc,
+        cell_r0_scale: cfg.battery.cell_r0_scale.clone(),
+        cell_capacity_scale: cfg.battery.cell_capacity_scale.clone(),
+        capacity_factor: 1.0 - cfg.battery.capacity_fade_per_cycle * f64::from(cfg.battery.cycles),
+        resistance_factor: 1.0 + cfg.battery.resistance_growth_per_cycle * f64::from(cfg.battery.cycles),
     };
     models.push(Box::new(Battery::new(battery, n, base_hz / cfg.battery.rate_hz, &mut bus)));
+    // After the motors and the battery, so it heats from this tick's currents; 100 Hz is plenty for time constants of
+    // seconds, and the exact integrator does not care about the step.
+    models.push(Box::new(Thermal::new(thermal_params(cfg, &opts.world), (base_hz / 100).max(1), &mut bus)));
 
     let f = &cfg.frame;
     let (restitution, friction_coeff) = cfg.collision_contact();
@@ -888,7 +947,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let recorder = RecorderHandle::default();
     models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
 
-    let h = Handles::register(&mut bus, n, &opts.world);
+    let h = Handles::register(&mut bus, n, cfg.battery.cells as usize, &opts.world);
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
         scheduler.add(m);
@@ -1225,6 +1284,12 @@ impl Vehicle {
     }
 
     /// The world the vehicle flies in (the open field when the session named none).
+    /// The current value of a scalar bus signal by name (`None` if no model registered it), for tests and tools.
+    pub fn signal(&self, name: &str) -> Option<f64> {
+        let bus = self.scheduler.bus();
+        bus.lookup::<f64>(name).map(|s| bus.get(s))
+    }
+
     pub fn world(&self) -> &WorldConfig {
         &self.world
     }
@@ -1234,14 +1299,8 @@ impl Vehicle {
         let h = &self.h;
         let battery_voltage_v = b.get(h.vbat);
         let battery_current_a = b.get(h.ibat);
-        // Per-cell voltages (Ruling 7): equal shares of the pack; the weak cell carries the fault's whole
-        // additive term (the extra resistance's droop at the pack current, plus the extra voltage offset).
-        let weak = b.get(h.fault_battery_weak_cell);
-        let share = battery_voltage_v / self.battery_cells.max(1) as f64;
-        let droop_share = b.get(h.fault_battery_r_offset) * battery_current_a + b.get(h.fault_battery_v_offset);
-        let battery_cell_voltages = (0..self.battery_cells)
-            .map(|c| if Some(c as usize) == weak_cell_index(weak) { share - droop_share } else { share })
-            .collect();
+        // The battery model's own cell voltages: the weak-cell fault sits on the cell it names.
+        let battery_cell_voltages = h.cell_voltage.iter().map(|s| b.get(*s)).collect();
         VehicleState {
             time_s: self.scheduler.time_s(),
             pos_ned_m: b.get(h.pos),
@@ -1593,6 +1652,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_cell_index_is_invalid_argument() {
+        // The weak-cell fault now lands on a real cell of the series string: a cell the pack lacks must be refused,
+        // not silently applied to nothing.
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let err = vehicle.set_fault(Fault::WeakCell { cell: 6, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap_err();
+        assert!(err.to_string().contains("cell 6"), "{err}");
+        assert!(err.to_string().contains("does not exist"), "{err}");
+        assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        vehicle.set_fault(Fault::WeakCell { cell: 5, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).expect("the last cell exists");
+    }
+
+    #[test]
     fn a_non_finite_or_non_positive_burst_window_is_invalid_argument() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         for (on_s, off_s) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (1.0, 0.0)] {
@@ -1773,7 +1844,7 @@ mod tests {
     }
 
     #[test]
-    fn cell_voltages_synthesize_equal_shares_and_the_weak_delta() {
+    fn cell_voltages_are_equal_shares_and_the_weak_cell_carries_the_delta() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         vehicle.run_for(0.1).unwrap();
         let clean = vehicle.state();
@@ -1781,10 +1852,12 @@ mod tests {
         let share = clean.battery_voltage_v / 6.0;
         assert!(clean.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
         vehicle.set_fault(Fault::WeakCell { cell: 0, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap();
+        vehicle.run_for(0.002).unwrap(); // the battery model republishes every 8th tick
         let weak = vehicle.state();
         assert!(weak.battery_cell_voltages[0] < share - 0.05, "cell 0 carries the delta: {:?}", weak.battery_cell_voltages);
         assert!((weak.battery_cell_voltages[3] - share).abs() < 1e-9, "the healthy cells are unchanged");
         vehicle.clear_faults();
+        vehicle.run_for(0.002).unwrap();
         let back = vehicle.state();
         assert!(back.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
     }

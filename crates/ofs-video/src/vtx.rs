@@ -102,6 +102,8 @@ pub struct VtxModel {
     freq: Signal<f64>,
     power: Signal<f64>,
     pit: Signal<f64>,
+    /// The thermal model's VTX temperature, for Tramp's status reply.
+    temperature: Signal<f64>,
 }
 
 impl VtxModel {
@@ -136,6 +138,7 @@ impl VtxModel {
             freq: bus.signal(names::VTX_FREQ_MHZ),
             power: bus.signal(names::VTX_POWER_MW),
             pit: bus.signal(names::VTX_PIT),
+            temperature: bus.signal(names::VTX_TEMP_C),
         }
     }
 
@@ -233,7 +236,7 @@ impl VtxModel {
 
     /// Tramp requests. `None` means the FC expects no reply: it confirms 'F', 'P' and 'I' with its next 'v' at
     /// least 200 ms later (the plan's ruling 2), so the model applies them silently.
-    fn handle_tramp(&mut self, request: tramp::Request) -> Option<Vec<u8>> {
+    fn handle_tramp(&mut self, request: tramp::Request, temperature_c: f64) -> Option<Vec<u8>> {
         match request {
             // Limits: the model accepts the SmartAudio frequency window (5000..5999) and its own power table.
             tramp::Request::Reset => {
@@ -248,9 +251,9 @@ impl VtxModel {
             }
             tramp::Request::GetStatus => {
                 // 's': the FC reads the temperature as an i16 at frame byte 6 (the plan's ruling 2) and discards a
-                // zero one. 25 °C is the constant the KISS ESC frames carry (M3a's thermal debt applies).
+                // zero one. It is the thermal model's VTX temperature (the ambient, 25 °C by default, without one).
                 let mut payload = vec![0, 0, 0, 0];
-                payload.extend_from_slice(&25u16.to_le_bytes());
+                payload.extend_from_slice(&(temperature_c.round() as i16).to_le_bytes());
                 Some(tramp::response_frame(tramp::RESP_STATUS, &payload))
             }
             tramp::Request::SetFrequency(freq) => {
@@ -303,7 +306,7 @@ impl Model for VtxModel {
                 }
                 Codec::Tramp(parser) => {
                     for request in parser.push(&bytes) {
-                        if let Some(reply) = self.handle_tramp(request) {
+                        if let Some(reply) = self.handle_tramp(request, bus.get(self.temperature)) {
                             self.pending.push_back((ctx.time_s + self.params.reply_latency_s, reply));
                         }
                     }

@@ -333,3 +333,38 @@ fn a_world_name_resolves_beside_the_quads_directory_and_a_path_stays_a_path() {
     let shipped = world::resolve("flat", Path::new(QUAD));
     assert_eq!(world::load(&shipped).unwrap().name, "Flat field");
 }
+
+#[test]
+fn a_world_without_a_video_table_gets_the_default_thresholds() {
+    assert_eq!(world::load(Path::new(WORLD)).unwrap().video, world::VideoSection::default());
+    assert_eq!(WorldConfig::open_field().video, world::VideoSection::default());
+}
+
+#[test]
+fn a_video_table_overrides_only_the_keys_it_names() {
+    let w = written_world(&(world_text() + "\n[video]\nunstable_snr_db = 8.0\n")).unwrap();
+    assert_eq!(w.video.unstable_snr_db, 8.0);
+    assert_eq!(w.video, world::VideoSection { unstable_snr_db: 8.0, ..world::VideoSection::default() });
+}
+
+#[test]
+fn the_ambient_defaults_to_25_and_is_range_checked() {
+    assert_eq!(world::load(Path::new(WORLD)).unwrap().environment.ambient_c, 25.0);
+    assert_eq!(WorldConfig::open_field().environment.ambient_c, 25.0);
+    let hot = written_world(&(world_text() + "\n[environment]\nambient_c = 35.0\n")).unwrap();
+    assert_eq!(hot.environment.ambient_c, 35.0);
+    for bad in ["90.0", "-50.0", "nan"] {
+        let shown = problems(&(world_text() + &format!("\n[environment]\nambient_c = {bad}\n"))).join("\n");
+        assert!(shown.contains("environment.ambient_c"), "{bad}: {shown}");
+    }
+}
+
+#[test]
+fn video_threshold_problems_are_reported_together() {
+    let text = world_text()
+        + "\n[video]\nlost_snr_db = 7.0\nsparkle_snr_db = 0.0\ncolor_lost_snr_db = 9.0\nfield_drop_p_max = 1.5\nlost_after_fields = 0\n";
+    let shown = problems(&text).join("\n");
+    for field in ["video.unstable_snr_db", "video.sparkle_snr_db", "video.color_fade_snr_db", "video.field_drop_p_max", "video.lost_after_fields"] {
+        assert!(shown.contains(field), "{field} missing from:\n{shown}");
+    }
+}

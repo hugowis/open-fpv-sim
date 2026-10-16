@@ -2,8 +2,6 @@
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 pub const FRAME_SIZE: usize = 10;
-/// Constant until there is a thermal model.
-pub const TEMPERATURE_C: u8 = 25;
 
 /// CRC-8, polynomial 0x07, initial value 0 (Betaflight's `calculateCrc8` in `esc_sensor.c`).
 pub fn crc8(data: &[u8]) -> u8 {
@@ -35,7 +33,8 @@ pub fn kiss_frame(temperature_c: u8, voltage_v: f64, current_a: f64, consumed_ma
 
 /// Writes `motors` identical frames every period to the UART wired to Betaflight's ESC-sensor port. Betaflight sums
 /// current and consumption over its motor slots and averages voltage and RPM, so each frame carries a share of
-/// the pack current and charge and the pack voltage.
+/// the pack current and charge and the pack voltage; frame `k` carries ESC `k`'s temperature (the thermal model's
+/// `esc.{k}.temp_c`, rounded and clamped to a byte).
 ///
 /// eRPM = mechanical rpm × pole pairs (uniform on SITL quads; enforced by ofs-config).
 pub struct EscTelemetry {
@@ -47,6 +46,7 @@ pub struct EscTelemetry {
     current: Signal<f64>,
     consumed: Signal<f64>,
     omega: Vec<Signal<f64>>,
+    temperature: Vec<Signal<f64>>,
 }
 
 impl EscTelemetry {
@@ -61,6 +61,7 @@ impl EscTelemetry {
             current: bus.signal(names::BATTERY_CURRENT),
             consumed: bus.signal(names::BATTERY_CONSUMED),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
+            temperature: (0..motors).map(|i| bus.signal(&names::esc_temp(i))).collect(),
         }
     }
 }
@@ -77,14 +78,15 @@ impl Model for EscTelemetry {
     fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         let share = self.motors as f64;
         let mean_rpm = self.omega.iter().map(|s| bus.get(*s)).sum::<f64>() / share * 60.0 / (2.0 * std::f64::consts::PI);
-        let frame = kiss_frame(
-            TEMPERATURE_C,
-            bus.get(self.voltage),
-            bus.get(self.current) / share,
-            bus.get(self.consumed) / share,
-            mean_rpm * self.pole_pairs,
-        );
-        for _ in 0..self.motors {
+        for k in 0..self.motors {
+            let temperature = bus.get(self.temperature[k]).round().clamp(0.0, 255.0) as u8;
+            let frame = kiss_frame(
+                temperature,
+                bus.get(self.voltage),
+                bus.get(self.current) / share,
+                bus.get(self.consumed) / share,
+                mean_rpm * self.pole_pairs,
+            );
             self.uart.write(&frame);
         }
         Ok(())

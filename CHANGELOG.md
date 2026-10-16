@@ -3,6 +3,27 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M6b: battery, thermal and receiver
+### Added
+- The video receiver's thresholds are world data: an optional `[video]` table in a world file sets the SNR
+  thresholds, field counts and drop probability (`docs/research/video-link.md`). Without it nothing changes.
+- A per-cell battery: the pack is a series string of cells with their own resistance, state of charge and capacity;
+  battery parts may set a per-cell spread and ageing (`cycles`, capacity fade, resistance growth), the library has an
+  aged example pack, and recordings gain `battery.cell.{k}.voltage_v` and `.soc` channels
+  (`docs/research/battery-and-thermal.md`).
+- A thermal model: one RC node per ESC, motor and VTX, heated by the losses already on the bus, with the ambient
+  set by an optional `[environment] ambient_c` in the world file. Parts carry optional `thermal` sections (the library
+  parts ship estimated constants), and recordings gain `esc.{i}.temp_c`, `motor.{i}.temp_c` and `vtx.temp_c`
+  (`docs/research/battery-and-thermal.md`). Nothing derates.
+### Changed
+- The weak-cell fault lands on the cell it names, and the state stream's cell voltages are the battery model's own
+  (they used to be equal shares of the pack voltage).
+- The recording pattern `battery.*` now also matches the per-cell channels (16 signals on the 6S pack instead of 4); a
+  script that counted them, or that relied on `battery.voltage`'s near-miss suggestions, needs a narrower pattern.
+- The KISS telemetry frames carry each ESC's simulated temperature and Tramp's status reply the VTX's, instead of a
+  constant 25 °C (which is what they still report with no heating, at the default ambient).
+- The radio goldens' digests were regenerated for the new recorded channels.
+
 ## Unreleased — M6a: rotor and frame physics
 ### Added
 - Rotor gyroscopic coupling: the spinning rotors' angular momentum now pushes back on a turning airframe

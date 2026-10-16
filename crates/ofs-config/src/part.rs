@@ -82,6 +82,20 @@ pub struct BatteryHardware {
     pub r1_ohm: f64,
     pub c1_f: f64,
     pub ocv_table: Vec<[f64; 2]>,
+    /// Per-cell multipliers of each cell's share of `r0_ohm` and `capacity_mah` (a tired cell, a mismatched pack);
+    /// empty = every cell 1.0, otherwise one entry per cell.
+    #[serde(default)]
+    pub cell_r0_scale: Vec<f64>,
+    #[serde(default)]
+    pub cell_capacity_scale: Vec<f64>,
+    /// Ageing: `1 − capacity_fade_per_cycle·cycles` of the capacity is left and `R0` has grown by
+    /// `resistance_growth_per_cycle·cycles` (both default 0).
+    #[serde(default)]
+    pub cycles: u32,
+    #[serde(default)]
+    pub capacity_fade_per_cycle: f64,
+    #[serde(default)]
+    pub resistance_growth_per_cycle: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -106,6 +120,8 @@ pub struct VtxHardware {
     pub antenna: VtxAntennaSection,
     #[serde(default = "crate::default_pit_power_mw")]
     pub pit_power_mw: f64,
+    #[serde(default)]
+    pub thermal: Option<crate::VtxThermalSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

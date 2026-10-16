@@ -45,6 +45,12 @@ pub struct WorldConfig {
     /// The pilot's handset; the ELRS uplink transmits from here.
     #[serde(default)]
     pub handset: HandsetSection,
+    /// What the video receiver makes of the SNR; absent = the defaults (docs/research/video-link.md).
+    #[serde(default)]
+    pub video: VideoSection,
+    /// The weather the quad flies in; absent = the defaults.
+    #[serde(default)]
+    pub environment: EnvironmentSection,
     #[serde(default)]
     pub objects: Vec<ObjectSection>,
     #[serde(default)]
@@ -76,6 +82,63 @@ pub struct ReceiverSection {
     #[serde(default = "default_latency_ms")]
     pub latency_ms: u32,
     pub antennas: Vec<AntennaSection>,
+}
+
+/// The analog receiver's thresholds, in dB of SNR: how the picture degrades, when sync is unstable, lost and
+/// relocked, and how often a marginal field is dropped. The defaults are the estimates in docs/research/video-link.md
+/// and must equal the constants in `ofs-video`'s `link.rs` (a test in `ofs-sim` checks it).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VideoSection {
+    /// At or above this the picture is clean.
+    pub clean_snr_db: f64,
+    /// Grain reaches half of full static here, where sparkles start.
+    pub sparkle_snr_db: f64,
+    /// Sparkles cover the picture at or below this.
+    pub sparkle_full_snr_db: f64,
+    /// Colour starts to fade below this and is gone at `color_lost_snr_db`.
+    pub color_fade_snr_db: f64,
+    pub color_lost_snr_db: f64,
+    /// Below this sync is unstable; a lost sync relocks only above it.
+    pub unstable_snr_db: f64,
+    /// Below this for `lost_after_fields` fields in a row, sync is lost.
+    pub lost_snr_db: f64,
+    pub lost_after_fields: u32,
+    /// Fields in a row at or above `unstable_snr_db` that a lost sync needs to relock.
+    pub relock_after_fields: u32,
+    /// The chance a field is dropped at the lost edge of the marginal band.
+    pub field_drop_p_max: f64,
+}
+
+impl Default for VideoSection {
+    fn default() -> Self {
+        Self {
+            clean_snr_db: 25.0,
+            sparkle_snr_db: 12.0,
+            sparkle_full_snr_db: 4.0,
+            color_fade_snr_db: 8.0,
+            color_lost_snr_db: 5.0,
+            unstable_snr_db: 6.0,
+            lost_snr_db: 3.0,
+            lost_after_fields: 3,
+            relock_after_fields: 5,
+            field_drop_p_max: 0.5,
+        }
+    }
+}
+
+/// The environment the quad flies in: for now the ambient air temperature the thermal model starts from and cools to.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EnvironmentSection {
+    /// Ambient air temperature in °C; allowed -40 to 60.
+    pub ambient_c: f64,
+}
+
+impl Default for EnvironmentSection {
+    fn default() -> Self {
+        Self { ambient_c: 25.0 }
+    }
 }
 
 fn default_noise_floor_dbm() -> f64 {
@@ -231,6 +294,8 @@ impl WorldConfig {
                 }],
             },
             handset: HandsetSection::default(),
+            video: VideoSection::default(),
+            environment: EnvironmentSection::default(),
             objects: Vec::new(),
             emitters: Vec::new(),
             source_path: PathBuf::new(),
@@ -256,6 +321,35 @@ impl WorldConfig {
             c.check(finite(&[a.aim_az_deg, a.aim_el()]), &field("aim_az_deg"), "aims must be finite");
             check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));
         }
+        let ambient = self.environment.ambient_c;
+        c.check(
+            ambient.is_finite() && (-40.0..=60.0).contains(&ambient),
+            "environment.ambient_c",
+            format!("must be between -40 and 60 degrees C (got {ambient})"),
+        );
+        let v = &self.video;
+        let snrs = [
+            v.clean_snr_db,
+            v.sparkle_snr_db,
+            v.sparkle_full_snr_db,
+            v.color_fade_snr_db,
+            v.color_lost_snr_db,
+            v.unstable_snr_db,
+            v.lost_snr_db,
+            v.field_drop_p_max,
+        ];
+        if !finite(&snrs) {
+            c.check(false, "video", "every threshold must be finite");
+        } else {
+            c.check(v.sparkle_snr_db > 0.0, "video.sparkle_snr_db", "must be > 0 (grain's second ramp runs from here down to 0 dB)");
+            c.check(v.clean_snr_db > v.sparkle_snr_db, "video.clean_snr_db", "must be greater than sparkle_snr_db");
+            c.check(v.sparkle_snr_db > v.sparkle_full_snr_db, "video.sparkle_snr_db", "must be greater than sparkle_full_snr_db");
+            c.check(v.color_fade_snr_db > v.color_lost_snr_db, "video.color_fade_snr_db", "must be greater than color_lost_snr_db");
+            c.check(v.unstable_snr_db > v.lost_snr_db, "video.unstable_snr_db", "must be greater than lost_snr_db");
+            c.check((0.0..=1.0).contains(&v.field_drop_p_max), "video.field_drop_p_max", format!("must be in [0, 1] (got {})", v.field_drop_p_max));
+        }
+        c.check(v.lost_after_fields >= 1, "video.lost_after_fields", "must be at least 1");
+        c.check(v.relock_after_fields >= 1, "video.relock_after_fields", "must be at least 1");
         let h = &self.handset;
         let handset_at = h.position(p);
         // A given position is the handset's own fault; a derived one inherits the pilot's, whose finite
