@@ -9,6 +9,7 @@ use glam::{DQuat, DVec3};
 use ofs_core::{Bus, Model, Signal, SignalKind, SimError, StepCtx};
 
 use crate::sink::{quat_json, scalar_json, vec3_json, McapSink};
+use crate::spec::Channel;
 use crate::spec::{resolve, SignalRate};
 
 /// Anything a recording can be written to: a file in the server, a failing writer in tests.
@@ -49,10 +50,54 @@ pub struct RecordingSummary {
 }
 
 #[derive(Clone, Copy)]
-enum Source {
+pub(crate) enum Source {
     Scalar(Signal<f64>),
     Vec3(Signal<DVec3>),
     Quat(Signal<DQuat>),
+}
+
+impl Source {
+    /// Where channel `c`'s value lives on `bus`.
+    pub(crate) fn of(bus: &Bus, c: &Channel) -> Source {
+        match c.kind {
+            SignalKind::Scalar => Source::Scalar(bus.lookup(&c.name).expect("listed by the bus")),
+            SignalKind::Vec3 => Source::Vec3(bus.lookup(&c.name).expect("listed by the bus")),
+            SignalKind::Quat => Source::Quat(bus.lookup(&c.name).expect("listed by the bus")),
+        }
+    }
+
+    /// The current value.
+    pub(crate) fn read(self, bus: &Bus) -> Value {
+        match self {
+            Source::Scalar(s) => Value::Scalar(bus.get(s)),
+            Source::Vec3(s) => Value::Vec3(bus.get(s)),
+            Source::Quat(s) => Value::Quat(bus.get(s)),
+        }
+    }
+
+    /// The current value as the channel's JSON record, appended to `out`.
+    pub(crate) fn encode(self, bus: &Bus, out: &mut Vec<u8>) {
+        self.read(bus).encode(out);
+    }
+}
+
+/// A signal's value, held until it is written.
+#[derive(Clone, Copy)]
+pub(crate) enum Value {
+    Scalar(f64),
+    Vec3(DVec3),
+    Quat(DQuat),
+}
+
+impl Value {
+    /// The channel's JSON record, appended to `out`.
+    pub(crate) fn encode(self, out: &mut Vec<u8>) {
+        match self {
+            Value::Scalar(v) => scalar_json(out, v),
+            Value::Vec3(v) => vec3_json(out, v),
+            Value::Quat(q) => quat_json(out, q),
+        }
+    }
 }
 
 struct Active {
@@ -136,14 +181,7 @@ impl RecorderHandle {
         let channels = resolve(requests, &signals, base_hz).map_err(RecordError::Spec)?;
         let sources = channels
             .iter()
-            .map(|c| {
-                let source = match c.kind {
-                    SignalKind::Scalar => Source::Scalar(bus.lookup(&c.name).expect("listed by the bus")),
-                    SignalKind::Vec3 => Source::Vec3(bus.lookup(&c.name).expect("listed by the bus")),
-                    SignalKind::Quat => Source::Quat(bus.lookup(&c.name).expect("listed by the bus")),
-                };
-                (source, c.divisor)
-            })
+            .map(|c| (Source::of(bus, c), c.divisor))
             .collect();
         let sink = McapSink::new(writer, &channels).map_err(RecordError::Io)?;
         state.active = Some(Active { sink, path: path.to_path_buf(), sources, record: Vec::with_capacity(96) });
@@ -187,11 +225,7 @@ impl RecorderHandle {
                 continue;
             }
             active.record.clear();
-            match *source {
-                Source::Scalar(s) => scalar_json(&mut active.record, bus.get(s)),
-                Source::Vec3(s) => vec3_json(&mut active.record, bus.get(s)),
-                Source::Quat(s) => quat_json(&mut active.record, bus.get(s)),
-            }
+            source.encode(bus, &mut active.record);
             if let Err(e) = active.sink.write(i, t, &active.record) {
                 failed = Some(format!("{}: {e}", active.path.display()));
                 break;

@@ -13,6 +13,7 @@ use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_electrical::thermal::{EscThermalParams, MotorThermalParams, NodeParams, Thermal, ThermalParams, VtxThermalParams};
 use ofs_fc::open_loop::OpenLoopFc;
+use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
 use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
@@ -456,6 +457,8 @@ pub struct Vehicle {
     active_faults: Vec<String>,
     /// The recorder model's handle: StartRecording/StopRecording go through it.
     recorder: RecorderHandle,
+    /// The rolling tail of the default channel table: a failed session's bundle takes its snapshot.
+    tail: TailHandle,
     /// Faults scheduled with `at`, by due tick (ties in scheduling order).
     pending_faults: Vec<(u64, Fault)>,
     /// The inputs file playing now.
@@ -962,6 +965,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
 
     let h = Handles::register(&mut bus, n, cfg.battery.cells as usize, &opts.world);
+    // After the recorder, once every signal exists: it keeps the last seconds of all of them in memory.
+    let tail = TailHandle::default();
+    models.push(Box::new(
+        TailRecorder::new(tail.clone(), &bus, base_hz, DEFAULT_WINDOW_S).map_err(|e| SimError::Other(format!("tail recorder: {e}")))?,
+    ));
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
         scheduler.add(m);
@@ -981,6 +989,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         has_vtx: cfg.vtx.is_some(),
         active_faults: Vec::new(),
         recorder,
+        tail,
         pending_faults: Vec::new(),
         playback: None,
         finished_inputs: None,
@@ -1421,6 +1430,11 @@ impl Vehicle {
     /// Finishes the running recording's file.
     pub fn stop_recording(&mut self) -> Result<RecordingSummary, RecordError> {
         self.recorder.stop()
+    }
+
+    /// Writes the last ten seconds of the default channel table to a new MCAP file at `path`.
+    pub fn snapshot_tail(&self, path: &Path) -> Result<RecordingSummary, RecordError> {
+        self.tail.snapshot(path)
     }
 
     pub fn is_recording(&self) -> bool {
