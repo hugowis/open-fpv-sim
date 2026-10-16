@@ -12,7 +12,10 @@ use ofs_core::{names, Bus, Scheduler, Wire};
 use ofs_radio::crsf::{
     crc8_dvb_s2, FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE,
 };
-use ofs_radio::elrs::{ElrsLink, FcTelemetryHandle, LinkParams};
+use ofs_radio::chain::RadioChain;
+use ofs_radio::elrs::LinkParams;
+use ofs_radio::receiver::ReceiverParams;
+use ofs_radio::telemetry::FcTelemetryHandle;
 use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
 
 const BASE_HZ: u32 = 8000;
@@ -38,28 +41,20 @@ impl Digest {
 }
 
 fn rig(
-    mut params: LinkParams,
+    params: LinkParams,
     stats_interval: u32,
     seed: u64,
 ) -> (Scheduler, Wire, Wire, FcTelemetryHandle) {
-    params.link_stats_interval_packets = stats_interval;
     let mut bus = Bus::new();
     let uart = Wire::new(1 << 20);
     let telemetry_in = Wire::new(1 << 16);
-    let div = BASE_HZ / params.packet_rate_hz;
-    let link = ElrsLink::new(
-        params,
-        div,
-        seed,
-        uart.clone(),
-        telemetry_in.clone(),
-        &mut bus,
-    );
-    let handle = link.fc_telemetry_handle();
+    let receiver = ReceiverParams { link_stats_interval_packets: stats_interval };
+    let chain = RadioChain::elrs(params, receiver, BASE_HZ, seed, uart.clone(), telemetry_in.clone(), &mut bus);
+    let handle = chain.fc_telemetry_handle();
     let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
     bus.set(tx, 1.0);
     let mut s = Scheduler::new(BASE_HZ, bus);
-    s.add(Box::new(link));
+    s.add(Box::new(chain));
     (s, uart, telemetry_in, handle)
 }
 

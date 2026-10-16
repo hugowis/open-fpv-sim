@@ -23,7 +23,12 @@ use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
-use ofs_radio::elrs::{ElrsLink, FcTelemetry, FcTelemetryHandle, LinkParams};
+use ofs_radio::chain::RadioChain;
+use ofs_radio::elrs::{ElrsLink, LinkParams};
+use ofs_radio::joystick::JoystickHandset;
+use ofs_radio::parts::RfFrontEnd;
+use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
+use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
@@ -556,6 +561,53 @@ pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
     world.objects.iter().map(|o| WorldObject { name: o.name.clone(), shape: object_shape(o) }).collect()
 }
 
+/// The quad file's radio, wired to the flight controller's UART: the joystick handset (at the world's `[handset]`),
+/// the ELRS link and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
+/// the FC's own CRSF telemetry back.
+fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> RadioChain {
+    let r = &cfg.radio;
+    let facing = opts.world.pilot.facing_deg;
+    let handset = &opts.world.handset;
+    let front_end = RfFrontEnd {
+        position: v3(handset.position(&opts.world.pilot)),
+        antennas: handset
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, a.beamwidth_deg),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
+            })
+            .collect(),
+        tx_power_mw: f64::from(r.tx_power_mw),
+    };
+    let link = LinkParams {
+        packet_rate_hz: r.packet_rate_hz,
+        latency_packets: r.latency_packets,
+        tx_power_mw: front_end.tx_power_mw,
+        handset_position: front_end.position,
+        handset_antennas: front_end.antennas.clone(),
+        quad_antennas: r
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, None),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: v3(a.mount_frd).normalize(),
+            })
+            .collect(),
+        obstacles: world_obstacles(&opts.world),
+        fading: true,
+        ground_bounce: true,
+    };
+    let handset = JoystickHandset::new(front_end, bus);
+    let link = ElrsLink::new(link, opts.seed, bus);
+    let receiver = CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in);
+    RadioChain::new(Box::new(handset), Box::new(link), Box::new(receiver), base_hz, bus)
+}
+
 /// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.
 pub fn world_obstacles(world: &WorldConfig) -> Vec<Obstacle> {
     world
@@ -730,44 +782,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
 
     let r = &cfg.radio;
-    let facing = opts.world.pilot.facing_deg;
-    let handset = &opts.world.handset;
-    let link = LinkParams {
-        packet_rate_hz: r.packet_rate_hz,
-        latency_packets: r.latency_packets,
-        tx_power_mw: f64::from(r.tx_power_mw),
-        link_stats_interval_packets: r.link_stats_interval_packets,
-        handset_position: v3(handset.position(&opts.world.pilot)),
-        handset_antennas: handset
-            .antennas
-            .iter()
-            .map(|a| Antenna {
-                kind: antenna_kind(a.kind, a.beamwidth_deg),
-                gain_dbi: a.gain_dbi,
-                polarization: polarization(a.polarization),
-                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
-            })
-            .collect(),
-        quad_antennas: r
-            .antennas
-            .iter()
-            .map(|a| Antenna {
-                kind: antenna_kind(a.kind, None),
-                gain_dbi: a.gain_dbi,
-                polarization: polarization(a.polarization),
-                axis: v3(a.mount_frd).normalize(),
-            })
-            .collect(),
-        obstacles: world_obstacles(&opts.world),
-        fading: true,
-        ground_bounce: true,
-    };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     let radio_tap = Wire::new(VIDEO_TAP_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    let elrs = ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), radio_tap.clone(), &mut bus);
-    let fc_telemetry = elrs.fc_telemetry_handle();
-    models.push(Box::new(elrs));
+    let chain = radio_chain(cfg, opts, base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
+    let fc_telemetry = chain.fc_telemetry_handle();
+    models.push(Box::new(chain));
 
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
