@@ -20,9 +20,10 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-radio` | CRSF framing and the radio as three swappable parts (`Handset`, `Link`, `Receiver`) stepped by `RadioChain`: the `joystick` handset, the `elrs` (2.4 GHz and 900 MHz) and `fixed` links, the `crsf` receiver. | core, rf |
 | `ofs-fc` | The Betaflight SITL bridge (process, UDP exchange, UART taps), MSP, and an open-loop stand-in. | core |
 | `ofs-video` | The SmartAudio and Tramp VTX, Betaflight's OSD over MSP DisplayPort, the 5.8 GHz analog link. | core, config, fc, rf |
-| `ofs-log` | Recording the bus to MCAP (a model appended last that only reads). | core |
+| `ofs-log` | Recording the bus to MCAP (a model appended last that only reads), and the rolling in-memory tail every session keeps for its repro bundle. | core |
 | `ofs-proto` | The gRPC messages and stubs, generated from `proto/ofs/v1/sim.proto`. | — |
-| `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service, scripted inputs and the inputs recorder (`inputs.rs`, `inputs_recorder.rs`). | all of the above |
+| `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service, scripted inputs and the inputs recorder (`inputs.rs`, `inputs_recorder.rs`), the steering journal and the repro bundle (`journal.rs`, `repro.rs`). | all of the above |
+| `ofs-validate` | The validation harness: the submission format, its checker and the thrust-stand comparator (`docs/validation.md`). A command-line tool; nothing depends on it. | core, config, electrical, physics, sim |
 | `ofs-client` | The Rust client: a worker thread, the FPV composite, the DVR muxer. | core, proto |
 | `ofs-godot` | The Godot extension (`OfsClient`), a thin layer over `ofs-client`. | client |
 
@@ -50,6 +51,16 @@ Live sticks have one entry point on the server, `Vehicle::set_sticks`, which the
 `SetSticks` both reach. The **inputs recorder** (`crates/ofs-sim/src/inputs_recorder.rs`) sits there: while it runs it
 writes a CSV row whenever a stick changes, in `PlayInputs`' format, so a live flight can be replayed in lockstep
 (`StartInputsRecording`/`StopInputsRecording`, protocol 10).
+
+## When a session fails
+The `Vehicle` keeps a **journal** (`journal.rs`): every call that steers the run (sticks when they change, the
+transmitter, faults, scheduled faults, `clear_faults`, each played inputs file), stamped with the tick it was made at;
+scheduled faults and playback rows that apply later are consequences of those calls and are not journaled again. A
+`TailRecorder` (`ofs-log`) keeps the last 10 simulated seconds of the default channel table as raw values. When a
+session fails — `Session::step` or `Session::poison` (a firmware failure, a non-finite value, a panic) — it writes the
+**repro bundle** once (`repro.rs`) and the `sim_error` event names it. `repro::replay` rebuilds the bundle's own quad
+and library, applies the journal tick for tick and compares the failure and the bus digest; `ofs-sim --replay` and
+`ofs.repro` front it. See `docs/repro-bundle.md`.
 
 ## Clients
 - **Python (`python/ofs/`):** `ofs.launch()` starts a server and connects; `Sim` wraps the RPCs (load, run, sticks,
