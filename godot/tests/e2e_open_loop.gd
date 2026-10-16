@@ -225,6 +225,24 @@ func _run() -> void:
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")
 
+	# A reload drops the recorder without an event: the indicator must go with it (the sticks recording is last so a
+	# reload here disturbs nothing above).
+	_press(app, KEY_I)
+	var recording_again: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording_again, "I starts a recording before the reload")
+	_press(app, KEY_R)
+	var reloaded_again: bool = await _wait_for(func(): return app.client.get_phase() == "flying" and not app.inputs_recording, 30.0)
+	_check(reloaded_again, "R reloads the quad (phase: %s)" % app.client.get_phase())
+	await _wait_for(func(): return false, 0.3)
+	_check(not app.inputs_recording, "the reload clears the recording state")
+	_check(not app.hud.sim_text().contains("REC STICKS"), "and the status line no longer says REC STICKS: %s" % app.hud.sim_text())
+	_press(app, KEY_I)
+	var recording_after: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording_after, "one I press records again after the reload")
+	_press(app, KEY_I)
+	var stopped_after: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
+	_check(stopped_after, "and the next I press stops it")
+
 	app.queue_free()
 	await process_frame
 	await process_frame

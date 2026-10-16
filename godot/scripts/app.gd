@@ -254,6 +254,8 @@ func _toggle_inputs_recording() -> void:
 
 func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	phase_kind = kind
+	if phase in ["loading", "failed", "stopped"]:
+		inputs_recording = false  # a reloaded quad, or a lost session, has no recorder
 	if phase == "loading":
 		radio_cut = false  # a reloaded quad has no faults
 		_link_was_lost = false
