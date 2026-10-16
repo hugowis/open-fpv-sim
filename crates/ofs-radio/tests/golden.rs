@@ -1,0 +1,303 @@
+//! Characterization of the ELRS radio: the bytes it writes to the flight controller's UART, the signals it
+//! publishes and the telemetry the handset decodes, hashed per scenario. `tests/golden/elrs.digests` was generated
+//! from the pre-split `ElrsLink` (M5 Task 1); the split into handset / link / receiver must reproduce it exactly.
+//! Regenerate only on purpose: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-radio --test golden`.
+use std::path::PathBuf;
+
+use glam::DVec3;
+use ofs_core::shape::Shape;
+use ofs_core::{names, Bus, Scheduler, Wire};
+use ofs_radio::crsf::{
+    crc8_dvb_s2, FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE,
+};
+use ofs_radio::elrs::{ElrsLink, FcTelemetryHandle, LinkParams};
+use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
+
+const BASE_HZ: u32 = 8000;
+/// 0.4 s: 200 packets at 500 Hz.
+const PHASE_TICKS: u64 = 3200;
+
+/// FNV-1a 64 over everything a scenario produces.
+struct Digest(u64);
+
+impl Digest {
+    fn new() -> Self {
+        Digest(0xcbf2_9ce4_8422_2325)
+    }
+    fn bytes(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    fn f64(&mut self, v: f64) {
+        self.bytes(&v.to_bits().to_le_bytes());
+    }
+}
+
+fn rig(
+    mut params: LinkParams,
+    stats_interval: u32,
+    seed: u64,
+) -> (Scheduler, Wire, Wire, FcTelemetryHandle) {
+    params.link_stats_interval_packets = stats_interval;
+    let mut bus = Bus::new();
+    let uart = Wire::new(1 << 20);
+    let telemetry_in = Wire::new(1 << 16);
+    let div = BASE_HZ / params.packet_rate_hz;
+    let link = ElrsLink::new(
+        params,
+        div,
+        seed,
+        uart.clone(),
+        telemetry_in.clone(),
+        &mut bus,
+    );
+    let handle = link.fc_telemetry_handle();
+    let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+    bus.set(tx, 1.0);
+    let mut s = Scheduler::new(BASE_HZ, bus);
+    s.add(Box::new(link));
+    (s, uart, telemetry_in, handle)
+}
+
+fn set(s: &mut Scheduler, name: &str, v: f64) {
+    let sig = s.bus_mut().signal::<f64>(name);
+    s.bus_mut().set(sig, v);
+}
+
+fn get(s: &Scheduler, name: &str) -> f64 {
+    s.bus().get(s.bus().lookup::<f64>(name).unwrap())
+}
+
+fn set_pos(s: &mut Scheduler, pos: DVec3) {
+    let sig = s.bus_mut().lookup::<DVec3>(names::BODY_POS_NED).unwrap();
+    s.bus_mut().set(sig, pos);
+}
+
+/// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
+fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {
+    let mut f = vec![0xC8, (payload.len() + 2) as u8, frame_type];
+    f.extend_from_slice(payload);
+    f.push(crc8_dvb_s2(&f[2..]));
+    f
+}
+
+fn battery_frame(voltage_v: f64, current_a: f64, index: u8) -> Vec<u8> {
+    let mut p = Vec::new();
+    p.extend_from_slice(&((voltage_v * 10.0) as u16).to_be_bytes());
+    p.extend_from_slice(&((current_a * 10.0) as u16).to_be_bytes());
+    p.extend_from_slice(&[0, 0, index]);
+    p.push(100);
+    frame(FRAMETYPE_BATTERY_SENSOR, &p)
+}
+
+fn attitude_frame(pitch_deg: f64, roll_deg: f64, yaw_deg: f64) -> Vec<u8> {
+    let rad = |d: f64| (d.to_radians() * 10_000.0).round() as i16;
+    let mut p = Vec::new();
+    for v in [rad(pitch_deg), rad(roll_deg), rad(yaw_deg)] {
+        p.extend_from_slice(&v.to_be_bytes());
+    }
+    frame(FRAMETYPE_ATTITUDE, &p)
+}
+
+/// Six phases of 0.4 s: the quad at 30 m, 3 km, 42 km, 42.8 km, 100 m and 41.5 km (the last three at the
+/// sensitivity edge of a 250 mW link, where packets drop), with changing sticks, the link-loss fault in phase 1,
+/// the transmitter off in phase 2, a 30 % loss fault in phase 3, a burst fault in phase 5, and telemetry frames
+/// offered every phase (twenty batteries in phase 4, to overflow the 16-frame queue).
+fn run_scenario(params: LinkParams, stats_interval: u32, seed: u64) -> u64 {
+    let (mut s, uart, telemetry_in, fc) = rig(params, stats_interval, seed);
+    let mut d = Digest::new();
+    let norths = [30.0, 3_000.0, 42_000.0, 42_800.0, 100.0, 41_500.0];
+    for (phase, north) in norths.iter().enumerate() {
+        let p = phase as f64;
+        set_pos(&mut s, DVec3::new(*north, 0.0, -1.7));
+        set(&mut s, names::RC_ROLL, 0.1 * p - 0.25);
+        set(&mut s, names::RC_PITCH, 0.2 - 0.07 * p);
+        set(&mut s, names::RC_YAW, -0.3 + 0.05 * p);
+        set(&mut s, names::RC_THROTTLE, 0.15 * p);
+        set(
+            &mut s,
+            &names::rc_aux(0),
+            if phase % 2 == 0 { -1.0 } else { 1.0 },
+        );
+        set(
+            &mut s,
+            names::FAULT_RADIO_LINK_LOSS,
+            if phase == 1 { 1.0 } else { 0.0 },
+        );
+        set(
+            &mut s,
+            names::RADIO_TX_ENABLED,
+            if phase == 2 { 0.0 } else { 1.0 },
+        );
+        set(
+            &mut s,
+            names::FAULT_RADIO_LOSS_FRACTION,
+            if phase == 3 { 0.3 } else { 0.0 },
+        );
+        set(
+            &mut s,
+            names::FAULT_RADIO_BURST_ON_S,
+            if phase == 5 { 0.05 } else { 0.0 },
+        );
+        set(
+            &mut s,
+            names::FAULT_RADIO_BURST_OFF_S,
+            if phase == 5 { 0.05 } else { 0.0 },
+        );
+        if phase == 4 {
+            for i in 0..20u8 {
+                telemetry_in.write(&battery_frame(20.0 + f64::from(i), 1.0, i));
+            }
+        } else {
+            telemetry_in.write(&battery_frame(24.0 + p, p, phase as u8));
+            telemetry_in.write(&attitude_frame(p, -p, 10.0 * p));
+            telemetry_in.write(&frame(FRAMETYPE_FLIGHT_MODE, b"ACRO\0"));
+        }
+        for _ in 0..PHASE_TICKS {
+            s.step().unwrap();
+            d.bytes(&uart.take(usize::MAX));
+            for name in [
+                names::RADIO_LINK_UP,
+                names::RADIO_LQ,
+                names::RADIO_RSSI,
+                names::RADIO_SNR,
+                names::RADIO_ANTENNA,
+                names::RADIO_DOWNLINK_LQ,
+            ] {
+                d.f64(get(&s, name));
+            }
+        }
+    }
+    let t = fc.latest();
+    for v in [
+        t.battery_v,
+        t.battery_a,
+        t.battery_mah,
+        t.roll_deg,
+        t.pitch_deg,
+        t.yaw_deg,
+        t.last_frame_s,
+    ] {
+        d.f64(v);
+    }
+    d.bytes(t.flight_mode.as_bytes());
+    d.bytes(&t.frame_count.to_le_bytes());
+    d.0
+}
+
+fn dipole(axis: DVec3) -> Antenna {
+    Antenna {
+        kind: AntennaKind::Omni,
+        gain_dbi: 2.0,
+        polarization: Polarization::Linear,
+        axis,
+    }
+}
+
+/// (name, params, stats interval in packets, seed). Covers latency 0, latency > 1, one and two antennas, fading
+/// and ground bounce, an obstacle, the packet rates that divide the 8 kHz base (50, 250, 500), and a weak link.
+fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
+    let faded = |rate: u32| LinkParams {
+        fading: true,
+        ground_bounce: true,
+        ..LinkParams::ideal(rate)
+    };
+    let two_antennas = {
+        let mut p = faded(500);
+        p.quad_antennas.push(Antenna {
+            kind: AntennaKind::Patch {
+                beamwidth_deg: 60.0,
+            },
+            gain_dbi: 8.0,
+            polarization: Polarization::Linear,
+            axis: DVec3::NEG_X,
+        });
+        p
+    };
+    let obstructed = {
+        let mut p = LinkParams {
+            ground_bounce: true,
+            ..LinkParams::ideal(50)
+        };
+        let shape = Shape::Box {
+            center: DVec3::new(50.0, 0.0, -10.0),
+            half: DVec3::new(10.0, 10.0, 10.0),
+        };
+        p.obstacles = vec![Obstacle {
+            shape: shape.rooted(),
+            rf_loss_db: 25.0,
+        }];
+        p
+    };
+    vec![
+        ("ideal-500", LinkParams::ideal(500), 50, 1),
+        (
+            "latency-0-250",
+            LinkParams {
+                latency_packets: 0,
+                ..LinkParams::ideal(250)
+            },
+            10,
+            2,
+        ),
+        (
+            "latency-5-500",
+            LinkParams {
+                latency_packets: 5,
+                ..LinkParams::ideal(500)
+            },
+            25,
+            3,
+        ),
+        ("fading-bounce-500", faded(500), 50, 4),
+        ("two-antennas-fading", two_antennas, 20, 5),
+        ("obstacle-50hz", obstructed, 5, 6),
+        (
+            "weak-10mw",
+            LinkParams {
+                tx_power_mw: 10.0,
+                ..faded(250)
+            },
+            50,
+            7,
+        ),
+        (
+            "crossed-dipole",
+            LinkParams {
+                quad_antennas: vec![dipole(DVec3::Y)],
+                ..faded(500)
+            },
+            50,
+            8,
+        ),
+    ]
+}
+
+fn golden_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/elrs.digests")
+}
+
+#[test]
+fn the_elrs_radio_reproduces_its_recorded_digests() {
+    let current: Vec<String> = scenarios()
+        .into_iter()
+        .map(|(name, params, interval, seed)| {
+            format!("{name} {:016x}", run_scenario(params, interval, seed))
+        })
+        .collect();
+    let text = current.join("\n") + "\n";
+    if std::env::var_os("OFS_GOLDEN_WRITE").is_some() {
+        std::fs::create_dir_all(golden_path().parent().unwrap()).unwrap();
+        std::fs::write(golden_path(), &text).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(golden_path())
+        .expect("tests/golden/elrs.digests (run once with OFS_GOLDEN_WRITE=1)");
+    let expected = expected.replace("\r\n", "\n");
+    assert_eq!(
+        text, expected,
+        "the radio's output changed; the split must be byte-identical"
+    );
+}
