@@ -15,7 +15,6 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
 
 ### Electrical
-- The battery is one Thevenin pack: a weak cell is an offset on it, with no per-cell model and no capacity fade.
 - ESC and VTX temperatures are a constant 25 °C (the KISS telemetry frames, Tramp's status).
 
 ### Radio (`docs/research/elrs-link.md`)
@@ -108,7 +107,7 @@ world data) and M6c (validation harness, repro bundle) are next.
   changes every seeded 50 Hz run).
 
 ### Modelling
-- A thermal model (ESCs, motors, VTX); a per-cell battery with capacity fade;
+- A thermal model (ESCs, motors, VTX);
   vibration transmissibility (a structural model); `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.

@@ -233,11 +233,6 @@ impl Fault {
     }
 }
 
-/// The weak-cell signal (1-based, 0 = none) as a 0-based cell index.
-fn weak_cell_index(weak: f64) -> Option<usize> {
-    (weak > 0.0).then(|| weak as usize - 1)
-}
-
 /// The receiver's UART buffer. With no flight controller draining it (open-loop FC), the oldest bytes are
 /// dropped like a UART overrun.
 const RECEIVER_UART_CAPACITY: usize = 4096;
@@ -336,6 +331,7 @@ struct Handles {
     rate: Signal<DVec3>,
     vbat: Signal<f64>,
     ibat: Signal<f64>,
+    cell_voltage: Vec<Signal<f64>>,
     omega: Vec<Signal<f64>>,
     cmd: Vec<Signal<f64>>,
     roll: Signal<f64>,
@@ -385,7 +381,7 @@ struct Handles {
 }
 
 impl Handles {
-    fn register(bus: &mut Bus, motors: usize, world: &WorldConfig) -> Self {
+    fn register(bus: &mut Bus, motors: usize, cells: usize, world: &WorldConfig) -> Self {
         Self {
             pos: bus.signal(names::BODY_POS_NED),
             vel: bus.signal(names::BODY_VEL_NED),
@@ -393,6 +389,7 @@ impl Handles {
             rate: bus.signal(names::BODY_RATE_FRD),
             vbat: bus.signal(names::BATTERY_VOLTAGE),
             ibat: bus.signal(names::BATTERY_CURRENT),
+            cell_voltage: (0..cells).map(|k| bus.signal(&names::battery_cell_voltage(k))).collect(),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
             cmd: (0..motors).map(|i| bus.signal(&names::motor_cmd(i))).collect(),
             roll: bus.signal(names::RC_ROLL),
@@ -779,6 +776,10 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         c1_f: cfg.battery.c1_f,
         ocv_table: pairs(&cfg.battery.ocv_table),
         initial_soc: cfg.battery.initial_soc,
+        cell_r0_scale: cfg.battery.cell_r0_scale.clone(),
+        cell_capacity_scale: cfg.battery.cell_capacity_scale.clone(),
+        capacity_factor: 1.0 - cfg.battery.capacity_fade_per_cycle * f64::from(cfg.battery.cycles),
+        resistance_factor: 1.0 + cfg.battery.resistance_growth_per_cycle * f64::from(cfg.battery.cycles),
     };
     models.push(Box::new(Battery::new(battery, n, base_hz / cfg.battery.rate_hz, &mut bus)));
 
@@ -908,7 +909,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let recorder = RecorderHandle::default();
     models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
 
-    let h = Handles::register(&mut bus, n, &opts.world);
+    let h = Handles::register(&mut bus, n, cfg.battery.cells as usize, &opts.world);
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
         scheduler.add(m);
@@ -1245,6 +1246,12 @@ impl Vehicle {
     }
 
     /// The world the vehicle flies in (the open field when the session named none).
+    /// The current value of a scalar bus signal by name (`None` if no model registered it), for tests and tools.
+    pub fn signal(&self, name: &str) -> Option<f64> {
+        let bus = self.scheduler.bus();
+        bus.lookup::<f64>(name).map(|s| bus.get(s))
+    }
+
     pub fn world(&self) -> &WorldConfig {
         &self.world
     }
@@ -1254,14 +1261,8 @@ impl Vehicle {
         let h = &self.h;
         let battery_voltage_v = b.get(h.vbat);
         let battery_current_a = b.get(h.ibat);
-        // Per-cell voltages (Ruling 7): equal shares of the pack; the weak cell carries the fault's whole
-        // additive term (the extra resistance's droop at the pack current, plus the extra voltage offset).
-        let weak = b.get(h.fault_battery_weak_cell);
-        let share = battery_voltage_v / self.battery_cells.max(1) as f64;
-        let droop_share = b.get(h.fault_battery_r_offset) * battery_current_a + b.get(h.fault_battery_v_offset);
-        let battery_cell_voltages = (0..self.battery_cells)
-            .map(|c| if Some(c as usize) == weak_cell_index(weak) { share - droop_share } else { share })
-            .collect();
+        // The battery model's own cell voltages: the weak-cell fault sits on the cell it names.
+        let battery_cell_voltages = h.cell_voltage.iter().map(|s| b.get(*s)).collect();
         VehicleState {
             time_s: self.scheduler.time_s(),
             pos_ned_m: b.get(h.pos),
@@ -1793,7 +1794,7 @@ mod tests {
     }
 
     #[test]
-    fn cell_voltages_synthesize_equal_shares_and_the_weak_delta() {
+    fn cell_voltages_are_equal_shares_and_the_weak_cell_carries_the_delta() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         vehicle.run_for(0.1).unwrap();
         let clean = vehicle.state();
@@ -1801,10 +1802,12 @@ mod tests {
         let share = clean.battery_voltage_v / 6.0;
         assert!(clean.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
         vehicle.set_fault(Fault::WeakCell { cell: 0, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap();
+        vehicle.run_for(0.002).unwrap(); // the battery model republishes every 8th tick
         let weak = vehicle.state();
         assert!(weak.battery_cell_voltages[0] < share - 0.05, "cell 0 carries the delta: {:?}", weak.battery_cell_voltages);
         assert!((weak.battery_cell_voltages[3] - share).abs() < 1e-9, "the healthy cells are unchanged");
         vehicle.clear_faults();
+        vehicle.run_for(0.002).unwrap();
         let back = vehicle.state();
         assert!(back.battery_cell_voltages.iter().all(|c| (c - share).abs() < 1e-9));
     }

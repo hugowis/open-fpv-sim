@@ -79,9 +79,10 @@ def test_a_recording_can_choose_its_signals_and_rates(sim):
 
 def test_reading_a_pattern_the_file_lacks_names_the_near_misses(sim):
     _climb(sim)
-    with pytest.raises(KeyError, match=r"pattern 'battery.voltage' matches no recorded signal \(similar: "
-                                       r"battery.voltage_v"):
-        sim.log.to_dataframe(["battery.voltage"])
+    # (`battery.voltage` has too many near misses since the per-cell channels, so use a name with one.)
+    with pytest.raises(KeyError, match=r"pattern 'imu.gyro_frd' matches no recorded signal \(similar: "
+                                       r".*imu.gyro_frd_radps"):
+        sim.log.to_dataframe(["imu.gyro_frd"])
 
 
 def test_csv_and_parquet_exports(sim, tmp_path):

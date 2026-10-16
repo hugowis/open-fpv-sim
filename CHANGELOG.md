@@ -7,6 +7,13 @@ repository). The format follows Keep a Changelog.
 ### Added
 - The video receiver's thresholds are world data: an optional `[video]` table in a world file sets the SNR
   thresholds, field counts and drop probability (`docs/research/video-link.md`). Without it nothing changes.
+- A per-cell battery: the pack is a series string of cells with their own resistance, state of charge and capacity;
+  battery parts may set a per-cell spread and ageing (`cycles`, capacity fade, resistance growth), the library has an
+  aged example pack, and recordings gain `battery.cell.{k}.voltage_v` and `.soc` channels
+  (`docs/research/battery-and-thermal.md`).
+### Changed
+- The weak-cell fault lands on the cell it names, and the state stream's cell voltages are the battery model's own
+  (they used to be equal shares of the pack voltage). The radio goldens were regenerated for the new channels.
 
 ## Unreleased — M6a: rotor and frame physics
 ### Added

@@ -440,12 +440,15 @@ async fn the_server_names_recordings_and_reports_them_as_events() {
     ];
     let started = c.start_recording(StartRecordingRequest { signals }).await.unwrap().into_inner();
     assert_eq!(std::path::PathBuf::from(&started.path), service.logs_dir().join("opendrone-5f-freestyle-1.mcap"));
-    assert_eq!(started.signals, ["battery.consumed_mah", "battery.current_a", "battery.soc", "battery.voltage_v", "imu.gyro_frd_radps"]);
+    // `battery.*` is the pack's four signals and, since M6b, two per cell (six cells on the shipped pack).
+    let mut expected: Vec<String> = (0..6).flat_map(|k| [format!("battery.cell.{k}.soc"), format!("battery.cell.{k}.voltage_v")]).collect();
+    expected.extend(["battery.consumed_mah", "battery.current_a", "battery.soc", "battery.voltage_v", "imu.gyro_frd_radps"].map(String::from));
+    assert_eq!(started.signals, expected);
     assert_eq!(kind(&c.start_recording(StartRecordingRequest::default()).await.unwrap_err()), "invalid_state", "one at a time");
     c.run(RunRequest { seconds: 1.0 }).await.unwrap();
     let summary = c.stop_recording(Empty {}).await.unwrap().into_inner();
     assert_eq!(summary.path, started.path);
-    assert_eq!(summary.messages, 4 * 10 + 500, "battery at the default 10 Hz, the gyro at 500 Hz");
+    assert_eq!(summary.messages, 16 * 10 + 500, "sixteen battery signals at the default 10 Hz, the gyro at 500 Hz");
     assert_eq!((summary.first_s, summary.last_s), (0.002, 1.0));
     assert_eq!(kind(&c.stop_recording(Empty {}).await.unwrap_err()), "invalid_state");
     let next = c.start_recording(StartRecordingRequest::default()).await.unwrap().into_inner();
@@ -455,7 +458,7 @@ async fn the_server_names_recordings_and_reports_them_as_events() {
         got,
         [
             (EventKind::RecordingStarted, started.path.clone()),
-            (EventKind::RecordingStopped, format!("{}: 540 messages", started.path)),
+            (EventKind::RecordingStopped, format!("{}: 660 messages", started.path)),
             (EventKind::RecordingStarted, next.path.clone()),
         ]
     );

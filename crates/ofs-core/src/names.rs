@@ -19,6 +19,16 @@ pub const BATTERY_CURRENT: &str = "battery.current_a";
 pub const BATTERY_SOC: &str = "battery.soc";
 pub const BATTERY_CONSUMED: &str = "battery.consumed_mah";
 
+/// One cell of the series string: its terminal voltage (V).
+pub fn battery_cell_voltage(i: usize) -> String {
+    format!("battery.cell.{i}.voltage_v")
+}
+
+/// One cell's state of charge, 0..1.
+pub fn battery_cell_soc(i: usize) -> String {
+    format!("battery.cell.{i}.soc")
+}
+
 pub const IMU_GYRO: &str = "imu.gyro_frd_radps";
 /// Specific force, FRD.
 pub const IMU_ACCEL: &str = "imu.accel_frd_mps2";

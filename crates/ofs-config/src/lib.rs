@@ -204,6 +204,17 @@ pub struct BatterySection {
     pub initial_soc: f64,
     pub rate_hz: u32,
     pub ocv_table: Vec<[f64; 2]>,
+    /// From the battery part: per-cell spread (empty = none) and ageing (see `part::BatteryHardware`).
+    #[serde(default)]
+    pub cell_r0_scale: Vec<f64>,
+    #[serde(default)]
+    pub cell_capacity_scale: Vec<f64>,
+    #[serde(default)]
+    pub cycles: u32,
+    #[serde(default)]
+    pub capacity_fade_per_cycle: f64,
+    #[serde(default)]
+    pub resistance_growth_per_cycle: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -745,6 +756,11 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
         ocv_table: battery_part.battery.ocv_table,
         initial_soc: file.battery.initial_soc,
         rate_hz: file.battery.rate_hz,
+        cell_r0_scale: battery_part.battery.cell_r0_scale,
+        cell_capacity_scale: battery_part.battery.cell_capacity_scale,
+        cycles: battery_part.battery.cycles,
+        capacity_fade_per_cycle: battery_part.battery.capacity_fade_per_cycle,
+        resistance_growth_per_cycle: battery_part.battery.resistance_growth_per_cycle,
     };
     let vtx = match (vtx_path, &file.vtx) {
         (Some(vtx_path), Some(wiring)) => {
@@ -955,6 +971,25 @@ impl QuadConfig {
         c.positive(b.c1_f, "battery.c1_f");
         c.check((0.0..=1.0).contains(&b.initial_soc), "battery.initial_soc", format!("must be in [0, 1] (got {})", b.initial_soc));
         c.table(&b.ocv_table, "battery.ocv_table");
+        for (list, field) in [(&b.cell_r0_scale, "battery.cell_r0_scale"), (&b.cell_capacity_scale, "battery.cell_capacity_scale")] {
+            c.check(
+                list.is_empty() || list.len() == b.cells as usize,
+                field,
+                format!("needs one entry per cell ({}) or none (got {})", b.cells, list.len()),
+            );
+            c.check(list.iter().all(|v| v.is_finite() && *v > 0.0), field, "entries must be finite and > 0");
+        }
+        c.check(
+            b.capacity_fade_per_cycle.is_finite() && (0.0..1.0).contains(&b.capacity_fade_per_cycle),
+            "battery.capacity_fade_per_cycle",
+            format!("must be in [0, 1) (got {})", b.capacity_fade_per_cycle),
+        );
+        c.non_negative(b.resistance_growth_per_cycle, "battery.resistance_growth_per_cycle");
+        c.check(
+            1.0 - b.capacity_fade_per_cycle * f64::from(b.cycles) >= 0.1,
+            "battery.cycles",
+            format!("{} cycles at {} fade per cycle leave less than 10 % of the capacity", b.cycles, b.capacity_fade_per_cycle),
+        );
         c.divides(self.sim.base_hz, b.rate_hz, "battery.rate_hz");
 
         c.non_negative(self.imu.gyro_noise_std_radps, "imu.gyro_noise_std_radps");
