@@ -74,7 +74,7 @@ The hot loop allocates nothing per packet; the dynamic dispatch is three virtual
 ## 4. The shipped parts
 
 - `handset = "joystick"`, `receiver = "crsf"` — the extractions above.
-- `link = "elrs"` — today's model with a **band profile table** (frequency in MHz, noise floor, sensitivity per packet
+- `kind = "elrs"` — today's model with a **band profile table** (frequency in MHz, noise floor, sensitivity per packet
   rate, the CRSF `rf_mode` index per rate). Profiles: `2g4` (today's constants, the default) and `900` (ELRS 900 MHz:
   the frequency feeds `ofs-rf` as it already takes MHz). The `rf_mode` reported in LINK_STATISTICS is the rate's place
   in the band's ascending rate list plus one (0 stays the 4 Hz Crossfire mode), which reproduces today's 2.4 GHz
@@ -82,7 +82,7 @@ The hot loop allocates nothing per packet; the dynamic dispatch is three virtual
   `-174 + 10 log10(500 000) + 6` dBm), downlink power 100 mW, and sensitivities of -123/-120/-117/-112/-111 dBm at
   25/50/100/200/250 Hz — are estimates, the sensitivities read from ExpressLRS's published table
   (https://expresslrs.org/info/signal-health/), and are labelled so.
-- `link = "fixed"` — a geometry-free link: `loss_fraction`, `latency_packets`, optional `burst_on_s`/`burst_off_s`,
+- `kind = "fixed"` — a geometry-free link: `loss_fraction`, `latency_packets`, optional `burst_on_s`/`burst_off_s`,
   seeded. It is the worked example in "Writing a radio model" and the second, structurally different `Link`.
 
 ## 5. Config

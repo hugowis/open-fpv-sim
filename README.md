@@ -86,8 +86,9 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
     godot --path godot                             # Godot 4.7; see docs/dev-setup.md for the binary
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** record the
-FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks to a replayable CSV, **H** show/hide the HUD, **F1** help, **F2** controls
-setup, **F11** fullscreen, **Esc** closes the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
+FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks to a replayable CSV, **H** show/hide
+the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc** closes the screens. Arm with the aux 1
+switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
 command-line flags after `--`. By default the game starts `ofs-sim` itself (from `target/release`, else
