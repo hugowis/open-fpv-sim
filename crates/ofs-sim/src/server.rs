@@ -495,6 +495,11 @@ impl Sim for SimService {
             if shared.pilot.load(Ordering::Acquire) {
                 return Err(invalid_state("a pilot is connected: scripted inputs would fight the pilot's sticks"));
             }
+            if s.vehicle.is_recording_inputs() {
+                return Err(invalid_state(
+                    "an inputs recording is running: it records live sticks only; call StopInputsRecording first",
+                ));
+            }
             if let Some(playing) = s.vehicle.inputs_playing() {
                 return Err(invalid_state(&format!("{playing} is still playing; call StopInputs first")));
             }
@@ -542,7 +547,15 @@ impl Sim for SimService {
     async fn stop_inputs_recording(&self, _req: Request<pb::Empty>) -> Result<Response<pb::InputsRecordingSummary>, Status> {
         self.blocking(|shared, slot| {
             let s = loaded(slot)?;
-            let summary = s.vehicle.stop_inputs_recording().map_err(inputs_record_error)?;
+            let summary = match s.vehicle.stop_inputs_recording() {
+                Ok(summary) => summary,
+                Err(RecordError::Io(m)) => {
+                    // The recording is over either way: tell the clients that track its state, as `Session::changes` does.
+                    shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStopped, format!("inputs recording failed: {m}"))]);
+                    return Err(inputs_record_error(RecordError::Io(m)));
+                }
+                Err(e) => return Err(inputs_record_error(e)),
+            };
             let path = summary.path.display().to_string();
             let message = format!("{path}: {} rows over {} s", summary.rows, summary.duration_s);
             shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStopped, message)]);
@@ -579,6 +592,28 @@ mod tests {
             assert_eq!(kind_of(&err), "firmware", "seconds = {seconds}");
             assert_eq!(err.message(), "simulated failure");
         }
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_failure_at_the_end_of_an_inputs_recording_still_publishes_its_stop_event() {
+        use crate::inputs_recorder::{tests::Faulty, InputsRecorder};
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let mut events = svc.subscribe();
+        {
+            let mut slot = svc.shared.lock();
+            let s = slot.as_mut().unwrap();
+            // Writes reach the buffer; the flush at the end fails.
+            let out = Faulty { budget: usize::MAX, flush_fails: true };
+            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &Sticks::default()).unwrap();
+            s.vehicle.set_inputs_recorder(recorder);
+        }
+        let err = svc.stop_inputs_recording(Request::new(pb::Empty {})).await.unwrap_err();
+        assert_eq!(kind_of(&err), "internal");
+        let event = events.try_recv().expect("the failed stop is announced");
+        assert_eq!(event.kind(), pb::EventKind::InputsRecordingStopped);
+        assert!(event.message.starts_with("inputs recording failed: "), "{}", event.message);
+        assert!(!svc.shared.lock().as_ref().unwrap().vehicle.is_recording_inputs(), "the recording is over");
         svc.shutdown();
     }
 

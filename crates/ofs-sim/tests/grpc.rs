@@ -506,6 +506,24 @@ async fn an_inputs_recording_is_refused_while_a_file_plays_and_without_a_session
 }
 
 #[tokio::test]
+async fn playing_inputs_is_refused_while_an_inputs_recording_runs() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    c.start_inputs_recording(Empty {}).await.unwrap();
+    let err = c.play_inputs(InputsFile { name: "climb.csv".into(), csv: "t_s,throttle
+0,0.3
+30,1
+".into() }).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_state");
+    assert!(err.message().contains("an inputs recording is running"), "{}", err.message());
+    c.stop_inputs_recording(Empty {}).await.unwrap();
+    c.play_inputs(InputsFile { name: "climb.csv".into(), csv: "t_s,throttle
+0,0.3
+30,1
+".into() }).await.unwrap();
+}
+
+#[tokio::test]
 async fn unloading_mid_recording_leaves_a_complete_file() {
     let (mut c, service) = start_with_service().await;
     load_open_loop(&mut c).await;

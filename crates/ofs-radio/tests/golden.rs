@@ -313,6 +313,6 @@ fn the_elrs_radio_reproduces_its_recorded_digests() {
     let expected = expected.replace("\r\n", "\n");
     assert_eq!(
         text, expected,
-        "the radio's output changed; the split must be byte-identical"
+        "the radio's output changed; the split must be byte-identical (or this OS's libm changed: regenerate only from the pre-split commit 1d9f204)"
     );
 }

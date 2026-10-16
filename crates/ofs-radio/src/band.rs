@@ -1,5 +1,5 @@
 //! The ExpressLRS bands the link can run on: carrier frequency, receiver noise floor, and the packet rates each
-//! band's LoRa modes offer with their sensitivities (https://expresslrs.org/info/signal-health/).
+//! band's LoRa modes offer with their sensitivities (<https://expresslrs.org/info/signal-health/>).
 use crate::elrs::{ELRS_FREQ_MHZ, NOISE_FLOOR_DBM};
 
 /// The middle of the 868/915 MHz band, 915 MHz (the FCC side); frequency hopping is not modelled (estimated).

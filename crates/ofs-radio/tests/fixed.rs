@@ -132,3 +132,42 @@ fn a_telemetry_slot_flies_every_fourth_heard_packet() {
     assert_eq!(t.frame_count, 2, "8 heard packets: slots on the 4th and 8th");
     assert!((t.battery_v - 24.6).abs() < 1e-9 && (t.battery_a - 3.2).abs() < 1e-9, "{t:?}");
 }
+
+#[test]
+fn the_burst_fault_loses_exactly_the_packets_of_its_on_window() {
+    // 0.05 s at 500 Hz is 25 packets: 25 lost, 25 delivered, repeating.
+    let (mut s, uart) = rig(params(), 1);
+    set(&mut s, names::FAULT_RADIO_BURST_ON_S, 0.05);
+    set(&mut s, names::FAULT_RADIO_BURST_OFF_S, 0.05);
+    let seen = slots(&mut s, &uart, 100, |_| 0.0);
+    // A packet exactly on a window edge (k % 25 == 0) lands on either side of it by float remainder (`time_s % period`
+    // is a few ulp off at some edges: packet 75 is lost although it starts the off window). The ELRS golden digests
+    // exercise the same formula, so it is frozen; every packet inside a window is asserted.
+    for (k, got) in seen.iter().enumerate().filter(|(k, _)| k % 25 != 0) {
+        assert_eq!(got.is_none(), k % 50 < 25, "packet {k}: the on window is the first 25 packets of each 50");
+    }
+    let lost = seen.iter().filter(|d| d.is_none()).count();
+    assert!((50..=52).contains(&lost), "{lost} of 100 lost: the on windows, give or take an edge packet each");
+}
+
+#[test]
+fn a_fault_does_not_shift_the_links_random_stream() {
+    let delivered = |faulted: bool| {
+        let (mut s, uart) = rig(FixedParams { loss_fraction: 0.25, ..params() }, 9);
+        let mut seen = slots(&mut s, &uart, 100, |_| 0.0);
+        if faulted {
+            set(&mut s, names::FAULT_RADIO_LOSS_FRACTION, 1.0);
+        }
+        let during = slots(&mut s, &uart, 100, |_| 0.0);
+        set(&mut s, names::FAULT_RADIO_LOSS_FRACTION, 0.0);
+        if faulted {
+            assert!(during.iter().all(Option::is_none), "the fault loses packets 100-199");
+        }
+        seen.extend(during);
+        seen.extend(slots(&mut s, &uart, 200, |_| 0.0));
+        seen.iter().map(Option::is_some).collect::<Vec<_>>()
+    };
+    let (clean, faulted) = (delivered(false), delivered(true));
+    assert_eq!(clean[..100], faulted[..100]);
+    assert_eq!(clean[200..], faulted[200..], "after the fault the same packets are lost as in the clean run");
+}

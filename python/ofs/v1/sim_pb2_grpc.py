@@ -297,8 +297,8 @@ class SimServicer:
     def StartInputsRecording(self, request, context):
         """Records the session's sticks to a stick-inputs CSV the server names (<data_dir>/logs/<quad>-inputs-<n>.csv): a row
         whenever a stick changes, in PlayInputs' format, so PlayInputs replays the flight's sticks in lockstep. One at a
-        time; refused while an inputs file plays. The file is finished by StopInputsRecording, Unload, a new Load or the
-        session ending.
+        time; refused while an inputs file plays, and PlayInputs is refused while it runs (it records live sticks only).
+        The file is finished by StopInputsRecording, Unload, a new Load or the session ending.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

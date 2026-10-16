@@ -38,11 +38,14 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   CSV has no transmitter column, so a link cut (**K**) is not captured.
 - `Load` and `Unload` drop a running inputs recording without publishing `inputs_recording_stopped`: a client that
   tracks the recording state must reset it on a new session, as the Godot game does.
+- `PlayInputs` is refused while an inputs recording runs (playback writes the bus directly, so a scripted segment
+  would be missing from the file): stop the recording first.
 - `Vehicle::set_sticks` accepts non-finite values (the gRPC server rejects them, `server.rs`); a direct library
   caller can put a NaN on the bus, which aborts the next run.
-- A stick outside [-1, 1] is clamped in the file but reaches the bus unclamped (a replay could differ if a consumer
-  does not clamp; unverified), a stick change reverted within one tick still writes a redundant row, and a
-  non-finite stick on the bus when a recording starts gives no first row.
+- A stick outside [-1, 1] is clamped in the file but reaches the bus unclamped (every consumer clamps, the CRSF tick
+  conversion and the open-loop FC, so the flight is the same; only the raw `rc.*` channels in an MCAP differ), a stick
+  change reverted within one tick still writes a redundant row, and a non-finite stick on the bus when a recording
+  starts gives no first row.
 
 ### Video (`docs/research/video-link.md`)
 - One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected

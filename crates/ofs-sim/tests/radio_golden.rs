@@ -87,6 +87,6 @@ fn a_recorded_vehicle_flight_reproduces_its_digests() {
     assert_eq!(
         text,
         expected.replace("\r\n", "\n"),
-        "the vehicle's recording changed; the radio chain must be byte-identical"
+        "the vehicle's recording changed; the radio chain must be byte-identical (or this OS's libm changed: regenerate only from the pre-split commit 1d9f204)"
     );
 }

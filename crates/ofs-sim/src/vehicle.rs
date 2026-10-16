@@ -1333,6 +1333,12 @@ impl Vehicle {
         self.inputs_recorder.is_some()
     }
 
+    /// Tests: runs `recorder` (over an injected writer) as the inputs recording.
+    #[cfg(test)]
+    pub(crate) fn set_inputs_recorder(&mut self, recorder: InputsRecorder) {
+        self.inputs_recorder = Some(recorder);
+    }
+
     /// Why the inputs recording died on its own (a write failed), reported once; the recording is over.
     pub fn take_inputs_recording_failure(&mut self) -> Option<String> {
         let message = self.inputs_recorder.as_ref()?.failure()?.to_owned();

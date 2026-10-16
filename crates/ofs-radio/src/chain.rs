@@ -24,8 +24,8 @@ impl RadioChain {
         Self { handset, link, receiver, outputs: LinkOutputs::register(bus), fc_telemetry: FcTelemetryHandle::new(), div: base_hz / rate }
     }
 
-    /// The ELRS 2.4 GHz chain with the joystick handset and the CRSF receiver: what `kind = "elrs"` builds. The
-    /// handset's radio end is read from `params`.
+    /// The ELRS chain (the band is `params.band`) with the joystick handset and the CRSF receiver; the vehicle builds
+    /// the same parts through `radio_chain`.
     pub fn elrs(params: LinkParams, receiver: ReceiverParams, base_hz: u32, seed: u64, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> Self {
         let front_end = RfFrontEnd {
             position: params.handset_position,

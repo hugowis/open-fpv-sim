@@ -479,7 +479,8 @@ class Sim:
         """Starts recording this session's sticks to a CSV the server names under `logs_dir` (one row whenever a
         stick changes, in `play_inputs`' format) and returns its path. Fly the session (the Godot game's sticks, or
         `set_sticks` calls) and finish with `stop_inputs_recording()`; `play_inputs(path)` then replays the sticks in
-        a lockstep session. One recording at a time; refused while an inputs file plays."""
+        a lockstep session. One recording at a time; refused while an inputs file plays, and `play_inputs` is refused
+        while it runs."""
         return self._call(self._stub.StartInputsRecording, pb.Empty()).path
 
     def stop_inputs_recording(self) -> str:

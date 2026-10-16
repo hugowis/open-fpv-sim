@@ -37,7 +37,8 @@ pub struct RfFrontEnd {
 
 /// The controller: stick and switch signals in, one [`TxFrame`] per packet slot out.
 pub trait Handset: Send {
-    /// Where it transmits from; the chain builder uses it to fill a link's transmitter end.
+    /// Where it transmits from. The chain builder fills the link's transmitter end from the same values; nothing calls
+    /// this yet.
     fn rf_front_end(&self) -> &RfFrontEnd;
     fn sample(&mut self, bus: &Bus) -> TxFrame;
 }

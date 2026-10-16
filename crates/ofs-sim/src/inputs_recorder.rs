@@ -23,7 +23,7 @@ pub struct InputsRecordingSummary {
 }
 
 pub struct InputsRecorder {
-    out: BufWriter<std::fs::File>,
+    out: BufWriter<Box<dyn Write + Send>>,
     path: PathBuf,
     base_hz: u32,
     start_tick: u64,
@@ -54,8 +54,18 @@ impl InputsRecorder {
     pub fn start(path: &Path, base_hz: u32, tick: u64, sticks: &Sticks) -> Result<Self, RecordError> {
         let io = |e: std::io::Error| RecordError::Io(format!("{}: {e}", path.display()));
         let file = OpenOptions::new().write(true).create_new(true).open(path).map_err(io)?;
-        let mut out = BufWriter::new(file);
-        writeln!(out, "{HEADER}").map_err(io)?;
+        Self::with_writer(BufWriter::new(Box::new(file)), path, base_hz, tick, sticks)
+    }
+
+    /// `start` over any writer; `path` names the recording in messages.
+    fn with_writer(
+        mut out: BufWriter<Box<dyn Write + Send>>,
+        path: &Path,
+        base_hz: u32,
+        tick: u64,
+        sticks: &Sticks,
+    ) -> Result<Self, RecordError> {
+        writeln!(out, "{HEADER}").map_err(|e| RecordError::Io(format!("{}: {e}", path.display())))?;
         let mut recorder =
             Self { out, path: path.to_owned(), base_hz, start_tick: tick, pending: None, last: None, rows: 0, last_row_ticks: 0, failure: None };
         recorder.record(tick, sticks);
@@ -121,5 +131,84 @@ impl Drop for InputsRecorder {
     fn drop(&mut self) {
         self.write_pending();
         let _ = self.out.flush();
+    }
+}
+
+#[cfg(test)]
+impl InputsRecorder {
+    /// A recorder over `out` instead of a new file (tests inject failing writers).
+    pub(crate) fn over(out: Box<dyn Write + Send>, capacity: usize, base_hz: u32, tick: u64, sticks: &Sticks) -> Result<Self, RecordError> {
+        Self::with_writer(BufWriter::with_capacity(capacity, out), Path::new("test-inputs.csv"), base_hz, tick, sticks)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// Takes `budget` bytes, then every write fails; `flush_fails` makes the flush fail as well.
+    pub(crate) struct Faulty {
+        pub budget: usize,
+        pub flush_fails: bool,
+    }
+
+    impl Write for Faulty {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.len() > self.budget {
+                return Err(std::io::ErrorKind::Other.into());
+            }
+            self.budget -= buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            if self.flush_fails { Err(std::io::ErrorKind::Other.into()) } else { Ok(()) }
+        }
+    }
+
+    fn sticks(throttle: f64) -> Sticks {
+        Sticks { throttle, ..Default::default() }
+    }
+
+    /// A recorder whose writer takes the header and nothing more (no buffering, so a failed write surfaces at once).
+    fn recorder_dying_after_the_header() -> InputsRecorder {
+        let out = Faulty { budget: HEADER.len() + 1, flush_fails: true };
+        InputsRecorder::over(Box::new(out), 0, 500, 0, &sticks(0.1)).unwrap()
+    }
+
+    #[test]
+    fn a_writer_that_fails_at_the_header_fails_start() {
+        let out = Faulty { budget: 0, flush_fails: true };
+        let err = InputsRecorder::over(Box::new(out), 0, 500, 0, &sticks(0.1)).err().expect("the header write fails");
+        assert!(matches!(&err, RecordError::Io(m) if m.contains("test-inputs.csv")), "{err:?}");
+    }
+
+    #[test]
+    fn a_failed_row_write_kills_the_recording_and_counts_no_row() {
+        let mut r = recorder_dying_after_the_header();
+        assert!(r.failure().is_none(), "the first row is pending, not written yet");
+        r.record(10, &sticks(0.2)); // writes the first row: fails
+        let why = r.failure().expect("the failed write is recorded").to_owned();
+        assert!(why.contains("test-inputs.csv"), "{why}");
+        r.record(20, &sticks(0.3)); // a dead recording takes no more rows
+        assert_eq!(r.rows, 0, "a failed write is not counted");
+        assert!(matches!(r.finish(), Err(RecordError::Io(m)) if m == why));
+    }
+
+    #[test]
+    fn a_failure_at_the_flush_is_an_io_error_from_finish() {
+        let out = Faulty { budget: usize::MAX, flush_fails: true };
+        let mut r = InputsRecorder::over(Box::new(out), 8192, 500, 0, &sticks(0.1)).unwrap();
+        r.record(10, &sticks(0.2));
+        assert!(r.failure().is_none(), "writes only reach the buffer");
+        assert!(matches!(r.finish(), Err(RecordError::Io(_))));
+    }
+
+    #[test]
+    fn dropping_a_failed_recorder_does_not_panic() {
+        let mut r = recorder_dying_after_the_header();
+        r.record(10, &sticks(0.2));
+        r.record(20, &sticks(0.3));
+        assert!(r.failure().is_some());
+        drop(r);
     }
 }
