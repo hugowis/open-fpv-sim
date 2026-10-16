@@ -3,6 +3,18 @@
 Thank you for helping. Setup for Windows and Linux (Rust, Python, Godot, Betaflight SITL, WSL) is in
 `docs/dev-setup.md`; how the code fits together is in `docs/architecture.md`.
 
+## Picking something to work on
+Long-term work is tracked as issues under six axes (fidelity, modelling, video, sandbox, tooling, validation); each axis
+has an umbrella issue labelled `epic` that lists its items, and `docs/roadmap.md` stays the ledger of known
+limitations. Filter by `good first issue` for a gentle start, by `area:*` for your part of the stack, and by
+`needs-data` if you have hardware or logs rather than code to offer.
+
+- **Small and clear** (a bug, a doc fix, a `good first issue`): comment to claim it and open a PR.
+- **Large or open-ended** (`research`, or anything spanning crates): comment first with a short plan or proposal. Large
+  items are agreed on the issue, then written up as a spec and a plan in `docs/superpowers/` before the code.
+- **A model change** carries a unit test against an analytic result, a provenance (`datasheet`, `measured` or
+  `estimated`) for every new constant, and the matching `docs/research/` page updated. Seeded runs stay deterministic.
+
 ## Tests, from fastest to slowest
 1. **Rust unit and integration tests:** `cargo test --workspace --locked`, and
    `cargo clippy --workspace --all-targets --locked -- -D warnings` (CI fails on any warning).

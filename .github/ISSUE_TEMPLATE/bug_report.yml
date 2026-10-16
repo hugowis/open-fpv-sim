@@ -1,0 +1,29 @@
+name: Bug report
+description: Something behaves wrongly or a test fails
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The quad file, world, seed and inputs if you can (a recording or a `PlayInputs` CSV makes a run replayable).
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Version and platform
+      description: "`open-fpv-sim` version or commit, OS (Windows / Linux / WSL), and whether Betaflight SITL was in the loop."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      render: text

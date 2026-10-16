@@ -1,0 +1,27 @@
+name: Proposal
+description: A feature, a model upgrade, or a new radio / part you would like to add
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/roadmap.md](https://github.com/hugowis/open-fpv-sim/blob/main/docs/roadmap.md) and the open issues first: the idea may already be tracked
+        under one of the axes (fidelity, modelling, video, sandbox, tooling, validation).
+  - type: textarea
+    id: why
+    attributes:
+      label: What do you want to be able to do, and why?
+      description: The moment you wish this existed matters more than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: Rough idea of how
+      description: Optional. Which crate, which seam (`Handset`, `Link`, `Receiver`, a `Model`, a part kind)? Sourced figures if it is a model.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Are you willing to build it?
+      options:
+        - label: I would like to implement this (I will wait for a short agreement on the issue first)
