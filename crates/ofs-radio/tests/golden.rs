@@ -1,7 +1,9 @@
 //! Characterization of the ELRS radio: the bytes it writes to the flight controller's UART, the signals it
-//! publishes and the telemetry the handset decodes, hashed per scenario. `tests/golden/elrs.digests` was generated
-//! from the pre-split `ElrsLink` (M5 Task 1); the split into handset / link / receiver must reproduce it exactly.
-//! Regenerate only on purpose: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-radio --test golden`.
+//! publishes and the telemetry the handset decodes, hashed per scenario. The digests are per OS
+//! (`tests/golden/elrs.windows.digests`, `elrs.linux.digests`) because libm's f64 maths differs between Windows and
+//! Linux. Each was generated from the pre-split `ElrsLink` (M5 Task 1); the split into handset / link / receiver
+//! must reproduce each OS's own file exactly. Regenerate only on purpose, on the OS whose file you mean to change:
+//! `OFS_GOLDEN_WRITE=1 cargo test -p ofs-radio --test golden`.
 use std::path::PathBuf;
 
 use glam::DVec3;
@@ -101,14 +103,14 @@ fn attitude_frame(pitch_deg: f64, roll_deg: f64, yaw_deg: f64) -> Vec<u8> {
     frame(FRAMETYPE_ATTITUDE, &p)
 }
 
-/// Six phases of 0.4 s: the quad at 30 m, 3 km, 42 km, 42.8 km, 100 m and 41.5 km (the last three at the
-/// sensitivity edge of a 250 mW link, where packets drop), with changing sticks, the link-loss fault in phase 1,
+/// Six phases of 0.4 s: the quad at 30 m, 3 km, then three distances at the sensitivity edge of the link (where
+/// packets drop part of the time; `edge`), 100 m between them, with changing sticks, the link-loss fault in phase 1,
 /// the transmitter off in phase 2, a 30 % loss fault in phase 3, a burst fault in phase 5, and telemetry frames
 /// offered every phase (twenty batteries in phase 4, to overflow the 16-frame queue).
-fn run_scenario(params: LinkParams, stats_interval: u32, seed: u64) -> u64 {
+fn run_scenario(params: LinkParams, stats_interval: u32, seed: u64, edge: [f64; 3]) -> u64 {
     let (mut s, uart, telemetry_in, fc) = rig(params, stats_interval, seed);
     let mut d = Digest::new();
-    let norths = [30.0, 3_000.0, 42_000.0, 42_800.0, 100.0, 41_500.0];
+    let norths = [30.0, 3_000.0, edge[0], edge[1], 100.0, edge[2]];
     for (phase, north) in norths.iter().enumerate() {
         let p = phase as f64;
         set_pos(&mut s, DVec3::new(*north, 0.0, -1.7));
@@ -198,7 +200,7 @@ fn dipole(axis: DVec3) -> Antenna {
 
 /// (name, params, stats interval in packets, seed). Covers latency 0, latency > 1, one and two antennas, fading
 /// and ground bounce, an obstacle, the packet rates that divide the 8 kHz base (50, 250, 500), and a weak link.
-fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
+fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64, [f64; 3])> {
     let faded = |rate: u32| LinkParams {
         fading: true,
         ground_bounce: true,
@@ -231,8 +233,10 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
         }];
         p
     };
+    // Phase 2, 3 and 5 distances (m): at the sensitivity edge of each link, where packets drop part of the time.
+    let far = [42_000.0, 42_800.0, 41_500.0];
     vec![
-        ("ideal-500", LinkParams::ideal(500), 50, 1),
+        ("ideal-500", LinkParams::ideal(500), 50, 1, far),
         (
             "latency-0-250",
             LinkParams {
@@ -241,6 +245,7 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
             },
             10,
             2,
+            far,
         ),
         (
             "latency-5-500",
@@ -250,10 +255,11 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
             },
             25,
             3,
+            far,
         ),
-        ("fading-bounce-500", faded(500), 50, 4),
-        ("two-antennas-fading", two_antennas, 20, 5),
-        ("obstacle-50hz", obstructed, 5, 6),
+        ("fading-bounce-500", faded(500), 50, 4, [3_500.0, 3_600.0, 3_400.0]),
+        ("two-antennas-fading", two_antennas, 20, 5, [5_000.0, 5_100.0, 4_900.0]),
+        ("obstacle-50hz", obstructed, 5, 6, [1_700.0, 1_750.0, 1_650.0]),
         (
             "weak-10mw",
             LinkParams {
@@ -262,6 +268,7 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
             },
             50,
             7,
+            [1_600.0, 1_650.0, 1_550.0],
         ),
         (
             "crossed-dipole",
@@ -271,30 +278,43 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64)> {
             },
             50,
             8,
+            [1_000.0, 1_050.0, 950.0],
         ),
     ]
 }
 
-fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/elrs.digests")
+/// The golden file for this OS, or None where none was recorded.
+fn golden_path() -> Option<PathBuf> {
+    let name = if cfg!(target_os = "windows") {
+        "elrs.windows.digests"
+    } else if cfg!(target_os = "linux") {
+        "elrs.linux.digests"
+    } else {
+        return None;
+    };
+    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name))
 }
 
 #[test]
 fn the_elrs_radio_reproduces_its_recorded_digests() {
+    let Some(golden) = golden_path() else {
+        println!("radio goldens exist for Windows and Linux only; skipping on this OS");
+        return;
+    };
     let current: Vec<String> = scenarios()
         .into_iter()
-        .map(|(name, params, interval, seed)| {
-            format!("{name} {:016x}", run_scenario(params, interval, seed))
+        .map(|(name, params, interval, seed, edge)| {
+            format!("{name} {:016x}", run_scenario(params, interval, seed, edge))
         })
         .collect();
     let text = current.join("\n") + "\n";
     if std::env::var_os("OFS_GOLDEN_WRITE").is_some() {
-        std::fs::create_dir_all(golden_path().parent().unwrap()).unwrap();
-        std::fs::write(golden_path(), &text).unwrap();
+        std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
+        std::fs::write(&golden, &text).unwrap();
         return;
     }
-    let expected = std::fs::read_to_string(golden_path())
-        .expect("tests/golden/elrs.digests (run once with OFS_GOLDEN_WRITE=1)");
+    let expected = std::fs::read_to_string(&golden)
+        .expect("tests/golden/elrs.<os>.digests (run once with OFS_GOLDEN_WRITE=1)");
     let expected = expected.replace("\r\n", "\n");
     assert_eq!(
         text, expected,

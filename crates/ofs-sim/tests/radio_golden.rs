@@ -1,6 +1,8 @@
-//! The radio inside a whole vehicle: two lockstep flights recorded to MCAP, hashed. `tests/golden/radio-flight.digests`
-//! was generated from the pre-split code (M5 Task 1); the radio chain must not change a byte of what the vehicle
-//! records. Regenerate only on purpose: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-sim --test radio_golden`.
+//! The radio inside a whole vehicle: two lockstep flights recorded to MCAP, hashed. The digests are per OS
+//! (`tests/golden/radio-flight.windows.digests`, `radio-flight.linux.digests`) because libm's f64 maths differs
+//! between Windows and Linux. Each was generated from the pre-split code (M5 Task 1); the radio chain (M5 Task 2's
+//! split) must not change a byte of what the vehicle records, on each OS against its own file. Regenerate only on
+//! purpose, on the OS whose file you mean to change: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-sim --test radio_golden`.
 use std::path::{Path, PathBuf};
 
 use ofs_config::{load, FcKind, WorldConfig};
@@ -42,12 +44,24 @@ fn flight(quad: &str, seed: u64, path: &Path) -> u64 {
     fnv1a(&std::fs::read(path).unwrap())
 }
 
-fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/radio-flight.digests")
+/// The golden file for this OS, or None where none was recorded.
+fn golden_path() -> Option<PathBuf> {
+    let name = if cfg!(target_os = "windows") {
+        "radio-flight.windows.digests"
+    } else if cfg!(target_os = "linux") {
+        "radio-flight.linux.digests"
+    } else {
+        return None;
+    };
+    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name))
 }
 
 #[test]
 fn a_recorded_vehicle_flight_reproduces_its_digests() {
+    let Some(golden) = golden_path() else {
+        println!("radio goldens exist for Windows and Linux only; skipping on this OS");
+        return;
+    };
     let dir = tempfile::tempdir().unwrap();
     let current = [
         (
@@ -64,12 +78,12 @@ fn a_recorded_vehicle_flight_reproduces_its_digests() {
         .map(|(name, d)| format!("{name} {d:016x}\n"))
         .collect();
     if std::env::var_os("OFS_GOLDEN_WRITE").is_some() {
-        std::fs::create_dir_all(golden_path().parent().unwrap()).unwrap();
-        std::fs::write(golden_path(), &text).unwrap();
+        std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
+        std::fs::write(&golden, &text).unwrap();
         return;
     }
-    let expected = std::fs::read_to_string(golden_path())
-        .expect("tests/golden/radio-flight.digests (run once with OFS_GOLDEN_WRITE=1)");
+    let expected = std::fs::read_to_string(&golden)
+        .expect("tests/golden/radio-flight.<os>.digests (run once with OFS_GOLDEN_WRITE=1)");
     assert_eq!(
         text,
         expected.replace("\r\n", "\n"),
