@@ -52,7 +52,7 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ### Video (`docs/research/video-link.md`)
 - One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
   ray is not obstructed separately; one body-shadow lobe of up to 8 dB.
-- The receiver's thresholds are named constants, not world-file fields; every constant is an estimate.
+- Every video constant is an estimate; the receiver's thresholds are world data (`[video]`) but none is measured.
 - The DVR stops when the picture's size changes mid-recording, and it records what the pilot sees (no clean feed).
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
@@ -112,7 +112,7 @@ world data) and M6c (validation harness, repro bundle) are next.
   vibration transmissibility (a structural model); `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
-- Configurable receiver thresholds; a configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
+- A configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
 - A compass, and the heading mapping it needs.
 
 ### Video and OSD

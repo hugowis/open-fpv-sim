@@ -43,12 +43,50 @@ pub const RELOCK_AFTER_FIELDS: u32 = 5;
 /// docs/research/video-link.md.
 pub const FIELD_DROP_P_MAX: f64 = 0.5;
 
+/// The receiver's thresholds, as a value (the world file's `[video]` table sets them). `Default` is the constants
+/// above, which are what a world without a `[video]` table gets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReceiverThresholds {
+    pub clean_snr_db: f64,
+    pub sparkle_snr_db: f64,
+    pub sparkle_full_snr_db: f64,
+    pub color_fade_snr_db: f64,
+    pub color_lost_snr_db: f64,
+    pub unstable_snr_db: f64,
+    pub lost_snr_db: f64,
+    pub lost_after_fields: u32,
+    pub relock_after_fields: u32,
+    pub field_drop_p_max: f64,
+}
+
+impl Default for ReceiverThresholds {
+    fn default() -> Self {
+        Self {
+            clean_snr_db: CLEAN_SNR_DB,
+            sparkle_snr_db: SPARKLE_SNR_DB,
+            sparkle_full_snr_db: SPARKLE_FULL_SNR_DB,
+            color_fade_snr_db: COLOR_FADE_SNR_DB,
+            color_lost_snr_db: COLOR_LOST_SNR_DB,
+            unstable_snr_db: UNSTABLE_SNR_DB,
+            lost_snr_db: LOST_SNR_DB,
+            lost_after_fields: LOST_AFTER_FIELDS,
+            relock_after_fields: RELOCK_AFTER_FIELDS,
+            field_drop_p_max: FIELD_DROP_P_MAX,
+        }
+    }
+}
+
 /// The per-field drop probability at `snr_db` (M3e spec §2).
 pub fn field_drop_probability(snr_db: f64) -> f64 {
-    if snr_db >= UNSTABLE_SNR_DB || snr_db < LOST_SNR_DB {
+    field_drop_probability_with(&ReceiverThresholds::default(), snr_db)
+}
+
+/// `field_drop_probability` with the given thresholds.
+pub fn field_drop_probability_with(t: &ReceiverThresholds, snr_db: f64) -> f64 {
+    if snr_db >= t.unstable_snr_db || snr_db < t.lost_snr_db {
         return 0.0;
     }
-    FIELD_DROP_P_MAX * ramp(snr_db, UNSTABLE_SNR_DB, LOST_SNR_DB)
+    t.field_drop_p_max * ramp(snr_db, t.unstable_snr_db, t.lost_snr_db)
 }
 
 /// The receiver's hold on the picture.
@@ -89,11 +127,16 @@ fn ramp(x: f64, from: f64, to: f64) -> f64 {
 /// The picture at a given SNR: grain rises from 25 dB (0.5 at 12 dB, full static at 0 dB), sparkles from 12 dB
 /// (full at 4 dB), colour fades from 8 dB (gone at 5 dB).
 pub fn picture(snr_db: f64) -> Picture {
-    let noise = 0.5 * ramp(snr_db, CLEAN_SNR_DB, SPARKLE_SNR_DB) + 0.5 * ramp(snr_db, SPARKLE_SNR_DB, 0.0);
+    picture_with(&ReceiverThresholds::default(), snr_db)
+}
+
+/// `picture` with the given thresholds.
+pub fn picture_with(t: &ReceiverThresholds, snr_db: f64) -> Picture {
+    let noise = 0.5 * ramp(snr_db, t.clean_snr_db, t.sparkle_snr_db) + 0.5 * ramp(snr_db, t.sparkle_snr_db, 0.0);
     Picture {
         noise,
-        sparkles: ramp(snr_db, SPARKLE_SNR_DB, SPARKLE_FULL_SNR_DB),
-        chroma: 1.0 - ramp(snr_db, COLOR_FADE_SNR_DB, COLOR_LOST_SNR_DB),
+        sparkles: ramp(snr_db, t.sparkle_snr_db, t.sparkle_full_snr_db),
+        chroma: 1.0 - ramp(snr_db, t.color_fade_snr_db, t.color_lost_snr_db),
     }
 }
 
@@ -104,6 +147,7 @@ pub struct SyncTracker {
     state: Option<VideoSync>,
     low_fields: u32,
     good_fields: u32,
+    thresholds: ReceiverThresholds,
 }
 
 impl SyncTracker {
@@ -111,18 +155,23 @@ impl SyncTracker {
         Self::default()
     }
 
+    pub fn with_thresholds(thresholds: ReceiverThresholds) -> Self {
+        Self { thresholds, ..Self::default() }
+    }
+
     pub fn update(&mut self, snr_db: f64) -> VideoSync {
-        let live = if snr_db < UNSTABLE_SNR_DB { VideoSync::Unstable } else { VideoSync::Locked };
+        let t = self.thresholds;
+        let live = if snr_db < t.unstable_snr_db { VideoSync::Unstable } else { VideoSync::Locked };
         let next = match self.state {
-            None if snr_db < LOST_SNR_DB => VideoSync::Lost,
+            None if snr_db < t.lost_snr_db => VideoSync::Lost,
             None => live,
             Some(VideoSync::Lost) => {
-                self.good_fields = if snr_db >= UNSTABLE_SNR_DB { self.good_fields + 1 } else { 0 };
-                if self.good_fields >= RELOCK_AFTER_FIELDS { live } else { VideoSync::Lost }
+                self.good_fields = if snr_db >= t.unstable_snr_db { self.good_fields + 1 } else { 0 };
+                if self.good_fields >= t.relock_after_fields { live } else { VideoSync::Lost }
             }
             Some(_) => {
-                self.low_fields = if snr_db < LOST_SNR_DB { self.low_fields + 1 } else { 0 };
-                if self.low_fields >= LOST_AFTER_FIELDS { VideoSync::Lost } else { live }
+                self.low_fields = if snr_db < t.lost_snr_db { self.low_fields + 1 } else { 0 };
+                if self.low_fields >= t.lost_after_fields { VideoSync::Lost } else { live }
             }
         };
         if (next == VideoSync::Lost) != (self.state == Some(VideoSync::Lost)) {
@@ -196,6 +245,8 @@ pub struct LinkParams {
     /// Fading and the ground bounce; tests that check the bare link budget turn them off.
     pub fading: bool,
     pub ground_bounce: bool,
+    /// What the receiver makes of the SNR (the world file's `[video]` table).
+    pub thresholds: ReceiverThresholds,
 }
 
 /// The VTX signal's path to each receiver antenna, without fading: body shadow included.
@@ -302,7 +353,7 @@ impl VideoLink {
             rng,
             faders,
             last_pos: None,
-            tracker: SyncTracker::new(),
+            tracker: SyncTracker::with_thresholds(params.thresholds),
             diversity: Diversity::default(),
             interference: None,
             pos: bus.signal(names::BODY_POS_NED),
@@ -378,7 +429,7 @@ impl Model for VideoLink {
         let mut field_valid = transmitting;
         if transmitting
             && self.tracker.state() != Some(VideoSync::Lost)
-            && rand::Rng::gen::<f64>(&mut self.rng) < field_drop_probability(snr[active])
+            && rand::Rng::gen::<f64>(&mut self.rng) < field_drop_probability_with(&self.params.thresholds, snr[active])
         {
             field_valid = false;
         }
@@ -387,7 +438,7 @@ impl Model for VideoLink {
         // repeats the previous one, so sync and the picture keep their last values and field_valid marks the miss.
         if field_valid || !transmitting {
             let sync = self.tracker.update(snr[active]);
-            let picture = picture(snr[active]);
+            let picture = picture_with(&self.params.thresholds, snr[active]);
             bus.set(o.present, 1.0);
             bus.set(o.snr, snr[active]);
             for (signal, value) in o.rssi.iter().zip(&rssi) {

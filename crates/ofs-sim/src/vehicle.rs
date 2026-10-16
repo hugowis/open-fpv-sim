@@ -35,7 +35,10 @@ use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_sensors::mount::MountResponse;
-use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
+use ofs_video::link::{
+    Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, ReceiverThresholds, VideoLink, VideoSync,
+    VtxInterferenceHandle, FIELD_RATE_HZ,
+};
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
 use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
@@ -722,7 +725,24 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
         pit_power_mw: vtx.pit_power_mw,
         fading: true,
         ground_bounce: true,
+        thresholds: receiver_thresholds(&world.video),
     })
+}
+
+/// The world file's `[video]` table as the link model's thresholds.
+pub fn receiver_thresholds(v: &world_cfg::VideoSection) -> ReceiverThresholds {
+    ReceiverThresholds {
+        clean_snr_db: v.clean_snr_db,
+        sparkle_snr_db: v.sparkle_snr_db,
+        sparkle_full_snr_db: v.sparkle_full_snr_db,
+        color_fade_snr_db: v.color_fade_snr_db,
+        color_lost_snr_db: v.color_lost_snr_db,
+        unstable_snr_db: v.unstable_snr_db,
+        lost_snr_db: v.lost_snr_db,
+        lost_after_fields: v.lost_after_fields,
+        relock_after_fields: v.relock_after_fields,
+        field_drop_p_max: v.field_drop_p_max,
+    }
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {

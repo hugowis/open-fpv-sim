@@ -3,6 +3,11 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M6b: battery, thermal and receiver
+### Added
+- The video receiver's thresholds are world data: an optional `[video]` table in a world file sets the SNR
+  thresholds, field counts and drop probability (`docs/research/video-link.md`). Without it nothing changes.
+
 ## Unreleased — M6a: rotor and frame physics
 ### Added
 - Rotor gyroscopic coupling: the spinning rotors' angular momentum now pushes back on a turning airframe

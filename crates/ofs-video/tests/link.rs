@@ -26,7 +26,69 @@ fn open_field() -> LinkWorld {
 
 /// A VTX omni standing straight up on the quad (FRD -z is up); bounce and fading off: the bare link budget.
 fn bare(world: LinkWorld) -> LinkParams {
-    LinkParams { world, vtx_antenna: omni(DVec3::NEG_Z), pit_power_mw: 0.1, fading: false, ground_bounce: false }
+    LinkParams {
+        world,
+        vtx_antenna: omni(DVec3::NEG_Z),
+        pit_power_mw: 0.1,
+        fading: false,
+        ground_bounce: false,
+        thresholds: ReceiverThresholds::default(),
+    }
+}
+
+#[test]
+fn the_default_thresholds_are_the_published_constants() {
+    let d = ReceiverThresholds::default();
+    assert_eq!(
+        (d.clean_snr_db, d.sparkle_snr_db, d.sparkle_full_snr_db, d.color_fade_snr_db, d.color_lost_snr_db),
+        (CLEAN_SNR_DB, SPARKLE_SNR_DB, SPARKLE_FULL_SNR_DB, COLOR_FADE_SNR_DB, COLOR_LOST_SNR_DB)
+    );
+    assert_eq!((d.unstable_snr_db, d.lost_snr_db), (UNSTABLE_SNR_DB, LOST_SNR_DB));
+    assert_eq!((d.lost_after_fields, d.relock_after_fields), (LOST_AFTER_FIELDS, RELOCK_AFTER_FIELDS));
+    assert_eq!(d.field_drop_p_max, FIELD_DROP_P_MAX);
+    for step in -10..=70 {
+        let snr = f64::from(step) * 0.5;
+        assert_eq!(picture_with(&d, snr), picture(snr), "picture at {snr} dB");
+        assert_eq!(field_drop_probability_with(&d, snr), field_drop_probability(snr), "drops at {snr} dB");
+    }
+}
+
+#[test]
+fn a_raised_clean_threshold_adds_grain_to_a_strong_signal() {
+    let t = ReceiverThresholds { clean_snr_db: 40.0, ..ReceiverThresholds::default() };
+    assert!(picture_with(&t, 30.0).noise > 0.0);
+    assert_eq!(picture(30.0).noise, 0.0);
+}
+
+#[test]
+fn a_raised_lost_threshold_loses_sync_on_a_weaker_signal() {
+    let t = ReceiverThresholds { unstable_snr_db: 12.0, lost_snr_db: 9.0, ..ReceiverThresholds::default() };
+    let mut raised = SyncTracker::with_thresholds(t);
+    let mut stock = SyncTracker::new();
+    let (mut a, mut b) = (VideoSync::Locked, VideoSync::Locked);
+    for _ in 0..4 {
+        a = raised.update(8.0);
+        b = stock.update(8.0);
+    }
+    assert_eq!(a, VideoSync::Lost);
+    assert_eq!(b, VideoSync::Locked);
+}
+
+#[test]
+fn one_bad_field_loses_sync_when_lost_after_fields_is_one() {
+    let t = ReceiverThresholds { lost_after_fields: 1, ..ReceiverThresholds::default() };
+    let mut quick = SyncTracker::with_thresholds(t);
+    let mut stock = SyncTracker::new();
+    quick.update(20.0);
+    stock.update(20.0);
+    assert_eq!(quick.update(2.0), VideoSync::Lost);
+    assert_ne!(stock.update(2.0), VideoSync::Lost, "the default needs three fields");
+}
+
+#[test]
+fn a_zero_drop_probability_never_drops_a_field() {
+    let t = ReceiverThresholds { field_drop_p_max: 0.0, ..ReceiverThresholds::default() };
+    assert_eq!(field_drop_probability_with(&t, 4.5), 0.0);
 }
 
 fn snr_at(params: &LinkParams, power_mw: f64, north_m: f64) -> f64 {
