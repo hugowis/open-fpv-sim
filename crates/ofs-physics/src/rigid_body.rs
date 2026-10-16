@@ -70,6 +70,7 @@ pub struct RigidBody {
     torque: Vec<Signal<f64>>,
     omega_dot: Vec<Signal<f64>>,
     omega: Vec<Signal<f64>>,
+    inflow: Vec<Signal<f64>>,
     pos: Signal<DVec3>,
     vel: Signal<DVec3>,
     att: Signal<DQuat>,
@@ -91,6 +92,7 @@ impl RigidBody {
             torque: (0..n).map(|i| bus.signal(&names::prop_torque(i))).collect(),
             omega_dot: (0..n).map(|i| bus.signal(&names::motor_omega_dot(i))).collect(),
             omega: (0..n).map(|i| bus.signal(&names::motor_omega(i))).collect(),
+            inflow: (0..n).map(|i| bus.signal(&names::prop_inflow(i))).collect(),
             pos: bus.signal(names::BODY_POS_NED),
             vel: bus.signal(names::BODY_VEL_NED),
             att: bus.signal(names::BODY_ATT),
@@ -202,7 +204,10 @@ impl Model for RigidBody {
         let mut force_body = DVec3::ZERO;
         let mut torque_body = DVec3::ZERO;
         let mut rotor_momentum = DVec3::ZERO;
+        let v_body = to_body * s.vel_ned_mps;
         for (k, m) in self.p.mounts.iter().enumerate() {
+            // The air coming up through this prop's disc: the mount's speed down the body's z axis (the prop axis).
+            bus.set(self.inflow[k], v_body.z + s.rate_frd_radps.cross(m.position_frd_m).z);
             let f = DVec3::new(0.0, 0.0, -bus.get(self.thrust[k]));
             force_body += f;
             torque_body += m.position_frd_m.cross(f);
@@ -210,7 +215,6 @@ impl Model for RigidBody {
             torque_body.z -= m.spin * rotor_torque;
             rotor_momentum.z += m.spin * self.p.rotor_inertia_kgm2[k] * bus.get(self.omega[k]);
         }
-        let v_body = to_body * s.vel_ned_mps;
         force_body -= 0.5 * AIR_DENSITY_KGPM3 * self.p.cda_m2 * v_body.abs() * v_body;
 
         let (contact_force, contact_torque, point_touches) = self.contact(&s);

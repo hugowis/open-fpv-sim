@@ -34,3 +34,44 @@ precesses.
 | Constant | Value | Provenance |
 |---|---|---|
 | `Jₖ` | the motor part's `rotor_inertia_kgm2` plus the prop part's `inertia_kgm2` | estimated (`docs/research/component-library.md`) |
+
+## Windmilling
+
+A rotor with no drive current still turns when air comes up through its disc (the aircraft descending), and past some
+descent speed that air spins it up instead of braking it. The propeller (`crates/ofs-physics/src/propeller.rs`) has
+a torque coefficient `Cp` that is a function of rotor speed only; M6a makes it depend on the **advance ratio**
+`J = V/(n·D)`, `V` the inflow through the disc, `n` rev/s, `D` the diameter:
+
+    Cp_eff = Cp · (1 − J/j0)           for V > 0 and j0 > 0
+
+`j0` (`prop.windmill_j0`) is the advance ratio at which the torque vanishes (autorotation); beyond it the torque
+changes sign and drives the rotor. The torque is evaluated multiplied out,
+
+    Q = Cp · ρ · D⁴ · n · (D·n − V/j0) / 2π
+
+so nothing divides by `n`: it is finite and falls to zero as the rotor stops. Thrust is **not** touched; a climb
+(`V ≤ 0`) is not touched; `j0 = 0` (the default for a part that does not set it) is the old model bit for bit.
+
+The inflow is `prop.{i}.inflow_mps`, published by the rigid body: the mount's velocity along body +Z,
+`v_body.z + (rate × position).z`, positive when the mount moves down. The propeller runs before the body within a
+tick, so it reads the previous tick's value. The prop axis is assumed to be body Z.
+
+The effect applies to every rotor, powered or not, so the rotor speed Betaflight reads (eRPM, ESC telemetry) moves
+continuously when a motor dies in a descent. In powered flight it lowers the torque in a descent, which is real.
+
+**Steady state.** With no drive current the motor's only other torque is its friction `F = Ke·I0` (the model's
+no-load current), so the rotor settles where `Cp·ρ·D⁴·n·(V/j0 − D·n)/2π = F`, i.e. the larger root of
+
+    D·n² − (V/j0)·n + κ = 0,        κ = 2π·F / (ρ·D⁴·Cp)
+
+(`crates/ofs-sim/tests/windmill.rs` checks the speed against this to 1 %). It has no root when `(V/j0)² < 4Dκ`:
+below that descent speed the rotor coasts to a stop. Because the model's friction is the whole no-load current, the
+shipped motor needs a very fast descent to windmill; a part with a smaller no-load current windmills sooner.
+
+**Limitations.** A rotor stopped at exactly 0 rad/s stays stopped: the drive is proportional to `n`, so there is
+no start-up torque from rest. `Cp` is not made to depend on `J` in a powered climb, and thrust does not fall with
+the advance ratio.
+
+| Constant | Value | Provenance |
+|---|---|---|
+| `prop.windmill_j0` | 1.0 | estimated: the zero-torque advance ratio of a small propeller, an order of magnitude, not measured |

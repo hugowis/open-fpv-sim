@@ -63,7 +63,8 @@ torque while current-limited — the transient where the failure is visible:
 
 The published `motor.{i}.current_a` and `esc.{i}.bus_current_a` (`duty·I`) carry the scaled value, so Betaflight's
 ESC telemetry reads the failure too. A dead motor (`scale = 0`) draws no current and coasts down through prop drag
-— the load torque — instead of stopping dead; there is no windmilling model (carried debt). The rotor phase
+— the load torque — instead of stopping dead; in a fast enough descent the air through the disc keeps it turning
+(windmilling, `docs/research/rotor-dynamics.md`). The rotor phase
 `motor.{i}.theta_rad` integrates whatever ω remains (`θ += ω·dt`, wrapped to [0, 2π)) and freezes when the rotor
 stops, which is the physically right input to the vibration model.
 

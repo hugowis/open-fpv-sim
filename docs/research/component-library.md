@@ -54,6 +54,7 @@ it stays 0 until that model lands.
 | `prop.ct_table` | C_T = 0.11, flat over 0–30000 rad/s | estimated | M1 flat-table estimate |
 | `prop.cp_table` | C_P = 0.045, flat over 0–30000 rad/s | estimated | M1 flat-table estimate |
 | `prop.imbalance_kgm` | 0.0 | estimated | no measurement; 0 until the M4b vibration model lands |
+| `prop.windmill_j0` | 1.0 | estimated | zero-torque advance ratio; order-of-magnitude estimate, not measured; 0 turns windmilling off |
 
 ## `escs/opendrone-4in1-esc.toml` — OpenDrone 4-in-1 ESC (AM32)
 

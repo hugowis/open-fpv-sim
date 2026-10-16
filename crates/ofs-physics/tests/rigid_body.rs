@@ -274,6 +274,21 @@ fn spinning_rotors(rotors: &[(f64, f64)], rotor_j: f64, rate: DVec3) -> Schedule
 const ROLLING: DVec3 = DVec3::new(2.0, 0.0, 0.0);
 
 #[test]
+fn a_descending_body_publishes_the_inflow_at_each_mount() {
+    // A mount 8 cm out to the right of a body descending at 5 m/s and rolling right-wing-down at 10 rad/s moves down
+    // at 5 + 10 * 0.08 = 5.8 m/s: that much air comes up through its disc.
+    let mut p = params(vec![MotorMount { position_frd_m: DVec3::new(0.08, 0.08, 0.0), spin: 1.0 }], vec![]);
+    p.rotor_inertia_kgm2 = vec![0.0];
+    let mut s0 = at(DVec3::new(0.0, 0.0, -1000.0));
+    s0.vel_ned_mps = DVec3::new(0.0, 0.0, 5.0);
+    s0.rate_frd_radps = DVec3::new(10.0, 0.0, 0.0);
+    let mut s = sim(p, s0);
+    s.step().unwrap();
+    let inflow = s.bus().get(s.bus().lookup::<f64>(&names::prop_inflow(0)).unwrap());
+    assert!((inflow - 5.8).abs() < 1e-9, "inflow {inflow}");
+}
+
+#[test]
 fn a_spinning_rotor_precesses_a_rotating_body() {
     // h = 1e-4 * 2000 = 0.2 N m s along +z, body rolling at 2 rad/s: the pitch acceleration is
     // -(w x h)_y / I_y = w_x * h / I_y, so one tick of 1/8000 s gives 2 * 0.2 / 0.0025 / 8000 = 0.02 rad/s.

@@ -169,6 +169,9 @@ pub struct PropSection {
     /// Static imbalance (mass × radius) the M4b vibration model turns into IMU disturbance. 0 = none.
     #[serde(default)]
     pub imbalance_kgm: f64,
+    /// The advance ratio `V/(nD)` at which the propeller's torque vanishes (M6a windmilling); 0 = no windmilling.
+    #[serde(default)]
+    pub windmill_j0: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -911,6 +914,7 @@ impl QuadConfig {
             c.table(&p.ct_table, &format!("props[{i}].ct_table"));
             c.table(&p.cp_table, &format!("props[{i}].cp_table"));
             c.non_negative(p.imbalance_kgm, &format!("props[{i}].imbalance_kgm"));
+            c.non_negative(p.windmill_j0, &format!("props[{i}].windmill_j0"));
         }
         for (i, e) in self.escs.iter().enumerate() {
             c.positive(e.response_tau_s, &format!("escs[{i}].response_tau_s"));

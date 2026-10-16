@@ -131,6 +131,23 @@ fn frame_part_problems_are_reported_at_once() {
 }
 
 #[test]
+fn windmill_j0_must_not_be_negative() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("props", "opendrone-5in-prop").replace("windmill_j0 = 1.0", "windmill_j0 = -1.0");
+    write_part(dir.path(), "props", "opendrone-5in-prop", &part);
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    assert!(fields.iter().any(|f| f.ends_with("windmill_j0")), "{fields:?}");
+}
+
+#[test]
+fn the_shipped_prop_turns_windmilling_on() {
+    assert_eq!(load(Path::new(QUAD)).unwrap().props[0].windmill_j0, 1.0);
+}
+
+#[test]
 fn every_problem_is_reported_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let text = quad_text()
