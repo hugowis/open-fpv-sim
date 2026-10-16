@@ -91,6 +91,10 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 
 ## Post-v1 backlog
 
+M6 (accuracy and validation) is in progress: M6a (rotor gyroscopic coupling, windmilling, the flight controller's mount
+response; `docs/research/rotor-dynamics.md`) is done; M6b (per-cell battery, thermal model, receiver thresholds as
+world data) and M6c (validation harness, repro bundle) are next.
+
 ### Fidelity (parent spec §1.5, §2)
 - Level 2: AM32 and ExpressLRS as host-compiled firmware in the loop. Level 3 (MCU emulation) stays out of scope,
   but the interfaces must not preclude it.
