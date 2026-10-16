@@ -1,5 +1,5 @@
-//! 6-DOF rigid body: prop thrust and reaction torque, quadratic body drag, spring-damper contact against the
-//! ground plane and the world's objects.
+//! 6-DOF rigid body: prop thrust and reaction torque, rotor gyroscopic coupling, quadratic body drag,
+//! spring-damper contact against the ground plane and the world's objects.
 use glam::{DQuat, DVec3};
 use crate::collision::{self, CollisionParams, TouchState};
 use ofs_core::shape::{Aabb, Shape};
@@ -69,6 +69,7 @@ pub struct RigidBody {
     thrust: Vec<Signal<f64>>,
     torque: Vec<Signal<f64>>,
     omega_dot: Vec<Signal<f64>>,
+    omega: Vec<Signal<f64>>,
     pos: Signal<DVec3>,
     vel: Signal<DVec3>,
     att: Signal<DQuat>,
@@ -89,6 +90,7 @@ impl RigidBody {
             thrust: (0..n).map(|i| bus.signal(&names::prop_thrust(i))).collect(),
             torque: (0..n).map(|i| bus.signal(&names::prop_torque(i))).collect(),
             omega_dot: (0..n).map(|i| bus.signal(&names::motor_omega_dot(i))).collect(),
+            omega: (0..n).map(|i| bus.signal(&names::motor_omega(i))).collect(),
             pos: bus.signal(names::BODY_POS_NED),
             vel: bus.signal(names::BODY_VEL_NED),
             att: bus.signal(names::BODY_ATT),
@@ -176,9 +178,11 @@ impl RigidBody {
     }
 }
 
-fn angular_accel(p: &AirframeParams, w: DVec3, torque: DVec3) -> DVec3 {
+/// `h` is the rotors' angular momentum relative to the body: the body turning at `w` drags it round, which
+/// pushes back with `-w × h` (the gyroscopic torque; its spin-up part, `-dh/dt`, is in the motors' reaction torque).
+fn angular_accel(p: &AirframeParams, w: DVec3, torque: DVec3, h: DVec3) -> DVec3 {
     let i = p.inertia_kgm2;
-    (torque - w.cross(i * w) - p.angular_damping_nms * w) / i
+    (torque - w.cross(i * w) - w.cross(h) - p.angular_damping_nms * w) / i
 }
 
 impl Model for RigidBody {
@@ -197,12 +201,14 @@ impl Model for RigidBody {
 
         let mut force_body = DVec3::ZERO;
         let mut torque_body = DVec3::ZERO;
+        let mut rotor_momentum = DVec3::ZERO;
         for (k, m) in self.p.mounts.iter().enumerate() {
             let f = DVec3::new(0.0, 0.0, -bus.get(self.thrust[k]));
             force_body += f;
             torque_body += m.position_frd_m.cross(f);
             let rotor_torque = bus.get(self.torque[k]) + self.p.rotor_inertia_kgm2[k] * bus.get(self.omega_dot[k]);
             torque_body.z -= m.spin * rotor_torque;
+            rotor_momentum.z += m.spin * self.p.rotor_inertia_kgm2[k] * bus.get(self.omega[k]);
         }
         let v_body = to_body * s.vel_ned_mps;
         force_body -= 0.5 * AIR_DENSITY_KGPM3 * self.p.cda_m2 * v_body.abs() * v_body;
@@ -216,8 +222,8 @@ impl Model for RigidBody {
         let pos = s.pos_ned_m + vel * dt;
 
         // Rotation: midpoint (RK2) with torque held over the step.
-        let k1 = angular_accel(&self.p, s.rate_frd_radps, torque_body);
-        let k2 = angular_accel(&self.p, s.rate_frd_radps + k1 * (0.5 * dt), torque_body);
+        let k1 = angular_accel(&self.p, s.rate_frd_radps, torque_body, rotor_momentum);
+        let k2 = angular_accel(&self.p, s.rate_frd_radps + k1 * (0.5 * dt), torque_body, rotor_momentum);
         let rate = s.rate_frd_radps + k2 * dt;
         let w_avg = 0.5 * (s.rate_frd_radps + rate);
         let att = (s.att * DQuat::from_scaled_axis(w_avg * dt)).normalize();

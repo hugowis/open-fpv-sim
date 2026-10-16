@@ -8,13 +8,12 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ## Known limitations of v1
 
 ### Physics (`docs/research/collision.md`)
-- No rotor gyroscopic coupling; friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
+- Friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
   includes gravity); a motor's published `omega_dot` is the derivative before clamping.
 - Two contact mechanisms, one per job: hits get impulses, resting weight gets the spring-dampers, so a hard
   touchdown both bounces and compresses the legs. Position correction moves only the deepest contact out.
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
-- Vibration is rigid-body and below resonance; on an open-loop build with mixed motor pole pairs the rate
-  disturbance ignores gyroscopic coupling.
+- Vibration is rigid-body and below resonance.
 
 ### Electrical
 - The battery is one Thevenin pack: a weak cell is an offset on it, with no per-cell model and no capacity fade.
