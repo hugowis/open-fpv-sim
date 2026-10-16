@@ -1652,6 +1652,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_cell_index_is_invalid_argument() {
+        // The weak-cell fault now lands on a real cell of the series string: a cell the pack lacks must be refused,
+        // not silently applied to nothing.
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let err = vehicle.set_fault(Fault::WeakCell { cell: 6, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap_err();
+        assert!(err.to_string().contains("cell 6"), "{err}");
+        assert!(err.to_string().contains("does not exist"), "{err}");
+        assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+        vehicle.set_fault(Fault::WeakCell { cell: 5, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).expect("the last cell exists");
+    }
+
+    #[test]
     fn a_non_finite_or_non_positive_burst_window_is_invalid_argument() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
         for (on_s, off_s) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (1.0, 0.0)] {
