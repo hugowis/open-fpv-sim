@@ -5,13 +5,45 @@ use ofs_core::{names, rng::model_rng, Bus, Model, Signal, SimError, StepCtx};
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Normal};
 
+use crate::mount::{MountResponse, SecondOrder};
+
 /// Per-motor rotating imbalance, rigid-body transmitted (Ruling 8): the motor positions give the force's
-/// azimuth and lever arm, the airframe mass and inertia give the specific force and rate amplitudes.
+/// azimuth and lever arm, the airframe mass and inertia give the specific force and rate amplitudes. With a
+/// `mount`, the disturbance then passes through the flight controller's mount (M6a); without one the IMU rides the
+/// airframe rigidly, as before.
 #[derive(Debug, Clone)]
 pub struct VibrationParams {
     pub positions_frd: Vec<DVec3>,
     pub mass_kg: f64,
     pub inertia_kgm2: DVec3,
+    pub mount: Option<MountResponse>,
+}
+
+/// The mount's transmissibility on each axis of the vibration disturbance: gyro roll and pitch, accel x and y
+/// (the prop plane's force has no z component).
+struct MountFilter {
+    gyro_x: SecondOrder,
+    gyro_y: SecondOrder,
+    accel_x: SecondOrder,
+    accel_y: SecondOrder,
+}
+
+impl MountFilter {
+    fn new(m: MountResponse, dt_s: f64) -> Self {
+        let f = SecondOrder::transmissibility(m, dt_s);
+        Self { gyro_x: f.clone(), gyro_y: f.clone(), accel_x: f.clone(), accel_y: f }
+    }
+
+    fn step(&mut self, rate: DVec3, force: DVec3) -> (DVec3, DVec3) {
+        (
+            DVec3::new(self.gyro_x.step(rate.x), self.gyro_y.step(rate.y), 0.0),
+            DVec3::new(self.accel_x.step(force.x), self.accel_y.step(force.y), 0.0),
+        )
+    }
+
+    fn is_idle(&self) -> bool {
+        self.gyro_x.is_idle() && self.gyro_y.is_idle() && self.accel_x.is_idle() && self.accel_y.is_idle()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +70,8 @@ pub struct Imu {
     imbalance: Vec<Signal<f64>>,
     theta: Vec<Signal<f64>>,
     omega: Vec<Signal<f64>>,
+    /// Built on the first step, when the sample time is known.
+    mount: Option<MountFilter>,
 }
 
 impl Imu {
@@ -64,6 +98,7 @@ impl Imu {
             imbalance,
             theta,
             omega,
+            mount: None,
             p,
         }
     }
@@ -82,7 +117,7 @@ impl Model for Imu {
         1
     }
 
-    fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
+    fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
         let gravity = DVec3::new(0.0, 0.0, GRAVITY_MPS2);
         let specific_force = bus.get(self.att).inverse() * (bus.get(self.accel_ned) - gravity);
         let mut gyro = bus.get(self.rate) + self.p.gyro_bias_radps + bus.get(self.fault_bias)
@@ -121,7 +156,16 @@ impl Model for Imu {
             }
             // Gated on a motor actually contributing so an all-quiet IMU stays bit-identical to the
             // no-vibration path (adding a zero vector could still flip -0.0 sign bits).
-            if disturbed {
+            if let Some(response) = v.mount {
+                // The mount sees every tick (a zero input too, so it rings down after the motors stop) and its
+                // output is added while anything is disturbing it or still ringing.
+                let filter = self.mount.get_or_insert_with(|| MountFilter::new(response, ctx.dt_s));
+                let (rate_out, force_out) = filter.step(rate_disturb, force_frd);
+                if disturbed || !filter.is_idle() {
+                    gyro += rate_out;
+                    accel += force_out * (1.0 / v.mass_kg);
+                }
+            } else if disturbed {
                 gyro += rate_disturb;
                 accel += force_frd * (1.0 / v.mass_kg);
             }

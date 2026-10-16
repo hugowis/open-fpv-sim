@@ -8,18 +8,15 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ## Known limitations of v1
 
 ### Physics (`docs/research/collision.md`)
-- No rotor gyroscopic coupling; friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
+- Friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
   includes gravity); a motor's published `omega_dot` is the derivative before clamping.
 - Two contact mechanisms, one per job: hits get impulses, resting weight gets the spring-dampers, so a hard
   touchdown both bounces and compresses the legs. Position correction moves only the deepest contact out.
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
-- Vibration is rigid-body and below resonance; on an open-loop build with mixed motor pole pairs the rate
-  disturbance ignores gyroscopic coupling.
 
 ### Electrical
 - The battery is one Thevenin pack: a weak cell is an offset on it, with no per-cell model and no capacity fade.
 - ESC and VTX temperatures are a constant 25 °C (the KISS telemetry frames, Tramp's status).
-- A dead motor freewheels through its prop's drag only.
 
 ### Radio (`docs/research/elrs-link.md`)
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
@@ -94,6 +91,10 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 
 ## Post-v1 backlog
 
+M6 (accuracy and validation) is in progress: M6a (rotor gyroscopic coupling, windmilling, the flight controller's mount
+response; `docs/research/rotor-dynamics.md`) is done; M6b (per-cell battery, thermal model, receiver thresholds as
+world data) and M6c (validation harness, repro bundle) are next.
+
 ### Fidelity (parent spec §1.5, §2)
 - Level 2: AM32 and ExpressLRS as host-compiled firmware in the loop. Level 3 (MCU emulation) stays out of scope,
   but the interfaces must not preclude it.
@@ -107,7 +108,7 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   changes every seeded 50 Hz run).
 
 ### Modelling
-- A thermal model (ESCs, motors, VTX); windmilling drag on a dead motor; a per-cell battery with capacity fade;
+- A thermal model (ESCs, motors, VTX); a per-cell battery with capacity fade;
   vibration transmissibility (a structural model); `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.

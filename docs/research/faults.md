@@ -63,7 +63,8 @@ torque while current-limited — the transient where the failure is visible:
 
 The published `motor.{i}.current_a` and `esc.{i}.bus_current_a` (`duty·I`) carry the scaled value, so Betaflight's
 ESC telemetry reads the failure too. A dead motor (`scale = 0`) draws no current and coasts down through prop drag
-— the load torque — instead of stopping dead; there is no windmilling model (carried debt). The rotor phase
+— the load torque — instead of stopping dead; in a fast enough descent the air through the disc keeps it turning
+(windmilling, `docs/research/rotor-dynamics.md`). The rotor phase
 `motor.{i}.theta_rad` integrates whatever ω remains (`θ += ω·dt`, wrapped to [0, 2π)) and freezes when the rotor
 stops, which is the physically right input to the vibration model.
 
@@ -96,10 +97,12 @@ component; the moment leads the force by a quarter turn (M ⊥ F). Both disturba
 frequency. The model is deterministic (phase-integrated, no RNG), contributes exactly zero when every imbalance is
 zero (gated, so the all-quiet path stays bit-identical), and a stopped motor contributes exactly zero (no 0/0).
 
-This is **rigid-body transmission, below-resonance amplitude only**: the airframe responds as a rigid body, no
-structural model, no transmissibility — the m3b/m3c debt phrasing applies verbatim: **every constant is an
-estimate; none is measured** (the mass and inertia come from the frame part, whose provenance ledger records
-them as estimates). Real props fail with a spectrum, not a pure tone; the input `imbalance_kgm` is a scenario
+By default this is **rigid-body transmission, below-resonance amplitude only**: the IMU rides the airframe as if
+bolted to it. A frame part may add an `[frame.fc_mount]` (a natural frequency and a damping ratio), which passes
+these disturbances through a second-order transmissibility first, so a soft-mounted flight controller sees the motors'
+buzz cut above its resonance (`docs/research/rotor-dynamics.md`, "Frame response"). The m3b/m3c debt phrasing applies
+verbatim: **every constant is an estimate; none is measured** (the mass and inertia come from the frame part, whose
+provenance ledger records them as estimates). Real props fail with a spectrum, not a pure tone; the input `imbalance_kgm` is a scenario
 figure, and community measurement is the validation path recorded in the M4 spec.
 
 | Constant | Value | Provenance |

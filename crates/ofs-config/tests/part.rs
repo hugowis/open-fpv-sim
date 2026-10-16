@@ -101,6 +101,27 @@ fn unknown_provenance_path_is_rejected() {
     assert!(err.to_string().contains("frame.does_not_exist"), "{err}");
 }
 
+const MOUNT: &str = "\n[frame.fc_mount]\nnatural_hz = 120.0\ndamping_ratio = 0.15\n";
+const MOUNT_PROVENANCE: &str = "[provenance.\"frame.fc_mount.natural_hz\"]\nsource = \"estimated\"\n\
+                                [provenance.\"frame.fc_mount.damping_ratio\"]\nsource = \"estimated\"\n";
+
+#[test]
+fn a_frame_part_may_carry_an_fc_mount() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = format!("{FRAME}{MOUNT}{MOUNT_PROVENANCE}");
+    let part = load_frame(&write(dir.path(), "f.toml", &text)).unwrap();
+    let mount = part.frame.fc_mount.expect("the mount is read");
+    assert_eq!((mount.natural_hz, mount.damping_ratio), (120.0, 0.15));
+    assert_eq!(part.provenance["frame.fc_mount.natural_hz"].source, ProvenanceSource::Estimated);
+}
+
+#[test]
+fn an_fc_mount_without_provenance_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_frame(&write(dir.path(), "f.toml", &format!("{FRAME}{MOUNT}"))).unwrap_err();
+    assert!(err.to_string().contains("frame.fc_mount.natural_hz"), "{err}");
+}
+
 #[test]
 fn a_bad_source_is_a_parse_error() {
     let dir = tempfile::tempdir().unwrap();

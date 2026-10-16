@@ -3,6 +3,22 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M6a: rotor and frame physics
+### Added
+- Rotor gyroscopic coupling: the spinning rotors' angular momentum now pushes back on a turning airframe
+  (`docs/research/rotor-dynamics.md`).
+- Windmilling: a propeller's torque now depends on the air coming up through its disc, so an unpowered rotor in a fast
+  descent keeps turning. The prop part's new optional `windmill_j0` sets it (0 = off), and recordings gain the
+  `prop.{i}.inflow_mps` channel.
+- A flight-controller mount: an optional `[frame.fc_mount]` (`natural_hz`, `damping_ratio`) in a frame part passes the
+  motors' vibration through a second-order transmissibility before the IMU feels it, and the library part
+  `opendrone-5f-softmount` is a soft-mounted example. A frame without it is rigid, as before.
+### Changed
+- Flights where the clockwise and counter-clockwise rotors do not stay balanced (a yaw input, a failed or damaged
+  motor) differ from 0.1.0; balanced flights, such as the radio goldens' roll and pitch steps, are bit-identical.
+- Recordings carry one more channel per motor (`prop.{i}.inflow_mps`), so the radio goldens' digests were regenerated.
+  A descent now lowers a prop's torque by the advance-ratio correction (`prop.windmill_j0` on the shipped prop).
+
 ## Unreleased — M5: swappable radio components
 M5 was specified as a real radio over USB serial; the capture found no CRSF stream on the TX15's port
 (`docs/research/serial-radio.md`), so the joystick stays the input and the milestone became the radio's structure and

@@ -8,6 +8,7 @@ inertia_kgm2 = 6.0e-6
 ct_table = [[0.0, 0.11], [30000.0, 0.11]]
 cp_table = [[0.0, 0.045], [30000.0, 0.045]]
 imbalance_kgm = 0.0
+windmill_j0 = 1.0
 
 [provenance."prop.diameter_m"]
 source = "estimated"
@@ -24,3 +25,6 @@ note = "M1 flat-table estimate"
 [provenance."prop.imbalance_kgm"]
 source = "estimated"
 note = "no measurement; 0 until the M4b vibration model lands"
+[provenance."prop.windmill_j0"]
+source = "estimated"
+note = "zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured"

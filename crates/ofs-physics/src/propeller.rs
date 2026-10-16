@@ -11,10 +11,19 @@ pub struct PropParams {
     pub ct_table: Vec<(f64, f64)>,
     /// (rpm, Cp) sorted by rpm.
     pub cp_table: Vec<(f64, f64)>,
+    /// The advance ratio `V/(nD)` at which the torque vanishes, for windmilling; 0 turns the effect off.
+    pub windmill_j0: f64,
 }
 
-/// Thrust (N) and drag torque (N·m) magnitudes for a rotor speed in rad/s.
+/// Thrust (N) and drag torque (N·m) magnitudes for a rotor speed in rad/s, in still air.
 pub fn thrust_torque(p: &PropParams, omega_radps: f64) -> (f64, f64) {
+    thrust_torque_in_flow(p, omega_radps, 0.0)
+}
+
+/// As `thrust_torque`, with `inflow_mps` of air coming up through the disc (the aircraft descending). With
+/// `windmill_j0 > 0` the torque coefficient becomes `Cp·(1 − J/j0)` for `J = inflow/(nD) > 0`, so it vanishes at
+/// `J = j0` and drives the rotor beyond it; thrust is unchanged. Climb (`inflow <= 0`) is unchanged too.
+pub fn thrust_torque_in_flow(p: &PropParams, omega_radps: f64, inflow_mps: f64) -> (f64, f64) {
     if omega_radps <= 0.0 {
         return (0.0, 0.0);
     }
@@ -24,7 +33,12 @@ pub fn thrust_torque(p: &PropParams, omega_radps: f64) -> (f64, f64) {
     let cp = interp::linear(&p.cp_table, rpm);
     let d = p.diameter_m;
     let thrust = ct * AIR_DENSITY_KGPM3 * n * n * d.powi(4);
-    let torque = cp * AIR_DENSITY_KGPM3 * n * n * d.powi(5) / (2.0 * PI);
+    let torque = if p.windmill_j0 > 0.0 && inflow_mps > 0.0 {
+        // Cp (1 − V/(n D j0)) ρ n² D⁵ / 2π, multiplied out so nothing divides by n.
+        cp * AIR_DENSITY_KGPM3 * d.powi(4) * n * (d * n - inflow_mps / p.windmill_j0) / (2.0 * PI)
+    } else {
+        cp * AIR_DENSITY_KGPM3 * n * n * d.powi(5) / (2.0 * PI)
+    };
     (thrust, torque)
 }
 
@@ -32,6 +46,7 @@ pub struct Propeller {
     name: String,
     p: PropParams,
     omega: Signal<f64>,
+    inflow: Signal<f64>,
     thrust: Signal<f64>,
     torque: Signal<f64>,
     thrust_scale: Signal<f64>,
@@ -50,6 +65,7 @@ impl Propeller {
             name: format!("prop.{index}"),
             p,
             omega: bus.signal(&names::motor_omega(index)),
+            inflow: bus.signal(&names::prop_inflow(index)),
             thrust: bus.signal(&names::prop_thrust(index)),
             torque: bus.signal(&names::prop_torque(index)),
             thrust_scale,
@@ -67,7 +83,7 @@ impl Model for Propeller {
     }
 
     fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
-        let (t, q) = thrust_torque(&self.p, bus.get(self.omega));
+        let (t, q) = thrust_torque_in_flow(&self.p, bus.get(self.omega), bus.get(self.inflow));
         let scale = bus.get(self.thrust_scale);
         bus.set(self.thrust, t * scale);
         bus.set(self.torque, q * scale);

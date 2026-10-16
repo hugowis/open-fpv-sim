@@ -137,6 +137,18 @@ pub struct FrameSection {
     pub motor_positions_frd_m: Vec<[f64; 3]>,
     pub motor_spin: Vec<i8>,
     pub contact_points_frd_m: Vec<[f64; 3]>,
+    /// How the flight controller is mounted (M6a): absent = rigid, the IMU feels the airframe's vibration as is.
+    #[serde(default)]
+    pub fc_mount: Option<FcMountSection>,
+}
+
+/// The flight controller's mount as a mass on a spring and damper: its transmissibility is 1 well below
+/// `natural_hz`, peaks at it and cuts the motors' vibration above it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FcMountSection {
+    pub natural_hz: f64,
+    pub damping_ratio: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -169,6 +181,9 @@ pub struct PropSection {
     /// Static imbalance (mass × radius) the M4b vibration model turns into IMU disturbance. 0 = none.
     #[serde(default)]
     pub imbalance_kgm: f64,
+    /// The advance ratio `V/(nD)` at which the propeller's torque vanishes (M6a windmilling); 0 = no windmilling.
+    #[serde(default)]
+    pub windmill_j0: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -884,6 +899,20 @@ impl QuadConfig {
         c.check(!f.contact_points_frd_m.is_empty(), "frame.contact_points_frd_m", "needs at least one point");
         c.finite(f.motor_positions_frd_m.iter().flatten(), "frame.motor_positions_frd_m");
         c.finite(f.contact_points_frd_m.iter().flatten(), "frame.contact_points_frd_m");
+        if let Some(m) = &f.fc_mount {
+            // The mount filter is a bilinear transform: keep the resonance well under the sample rate.
+            let limit = f64::from(self.sim.base_hz) / 10.0;
+            c.check(
+                m.natural_hz.is_finite() && m.natural_hz > 0.0 && m.natural_hz <= limit,
+                "frame.fc_mount.natural_hz",
+                format!("must be > 0 and at most sim.base_hz / 10 = {limit} (got {})", m.natural_hz),
+            );
+            c.check(
+                m.damping_ratio.is_finite() && m.damping_ratio > 0.0 && m.damping_ratio <= 5.0,
+                "frame.fc_mount.damping_ratio",
+                format!("must be in (0, 5] (got {})", m.damping_ratio),
+            );
+        }
         c.finite(&self.imu.gyro_bias_radps, "imu.gyro_bias_radps");
         c.finite(&self.imu.accel_bias_mps2, "imu.accel_bias_mps2");
         c.finite(&self.initial.position_ned_m, "initial.position_ned_m");
@@ -911,6 +940,7 @@ impl QuadConfig {
             c.table(&p.ct_table, &format!("props[{i}].ct_table"));
             c.table(&p.cp_table, &format!("props[{i}].cp_table"));
             c.non_negative(p.imbalance_kgm, &format!("props[{i}].imbalance_kgm"));
+            c.non_negative(p.windmill_j0, &format!("props[{i}].windmill_j0"));
         }
         for (i, e) in self.escs.iter().enumerate() {
             c.positive(e.response_tau_s, &format!("escs[{i}].response_tau_s"));

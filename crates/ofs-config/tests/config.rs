@@ -131,6 +131,61 @@ fn frame_part_problems_are_reported_at_once() {
 }
 
 #[test]
+fn windmill_j0_must_not_be_negative() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let part = part_text("props", "opendrone-5in-prop").replace("windmill_j0 = 1.0", "windmill_j0 = -1.0");
+    write_part(dir.path(), "props", "opendrone-5in-prop", &part);
+    let err = load(&path).unwrap_err();
+    let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+    let fields: Vec<&str> = problems.iter().map(|p| p.field.as_str()).collect();
+    assert!(fields.iter().any(|f| f.ends_with("windmill_j0")), "{fields:?}");
+}
+
+/// The shipped frame part with a `[frame.fc_mount]` table (and its provenance) appended.
+fn frame_with_mount(natural_hz: f64, damping_ratio: f64) -> String {
+    format!(
+        "{}\n[frame.fc_mount]\nnatural_hz = {natural_hz:?}\ndamping_ratio = {damping_ratio:?}\n\
+         [provenance.\"frame.fc_mount.natural_hz\"]\nsource = \"estimated\"\n\
+         [provenance.\"frame.fc_mount.damping_ratio\"]\nsource = \"estimated\"\n",
+        part_text("frames", "opendrone-5f")
+    )
+}
+
+fn load_with_mount(natural_hz: f64, damping_ratio: f64) -> Result<ofs_config::QuadConfig, ConfigError> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    write_part(dir.path(), "frames", "opendrone-5f", &frame_with_mount(natural_hz, damping_ratio));
+    load(&path)
+}
+
+#[test]
+fn fc_mount_values_are_validated() {
+    for (hz, zeta, field) in [
+        (0.0, 0.15, "natural_hz"),
+        (900.0, 0.15, "natural_hz"), // above sim.base_hz / 10 = 800 at 8 kHz
+        (120.0, 0.0, "damping_ratio"),
+        (120.0, 6.0, "damping_ratio"),
+    ] {
+        let err = load_with_mount(hz, zeta).unwrap_err();
+        let ConfigError::Invalid { problems, .. } = &err else { panic!("expected Invalid, got {err}") };
+        assert!(problems.iter().any(|p| p.field == format!("frame.fc_mount.{field}")), "{hz} {zeta}: {problems:?}");
+    }
+    let mount = load_with_mount(120.0, 0.15).unwrap().frame.fc_mount.expect("a valid mount loads");
+    assert_eq!((mount.natural_hz, mount.damping_ratio), (120.0, 0.15));
+}
+
+#[test]
+fn the_shipped_frame_is_rigid() {
+    assert!(load(Path::new(QUAD)).unwrap().frame.fc_mount.is_none());
+}
+
+#[test]
+fn the_shipped_prop_turns_windmilling_on() {
+    assert_eq!(load(Path::new(QUAD)).unwrap().props[0].windmill_j0, 1.0);
+}
+
+#[test]
 fn every_problem_is_reported_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let text = quad_text()

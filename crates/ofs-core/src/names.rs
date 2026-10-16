@@ -105,6 +105,12 @@ pub fn prop_imbalance(i: usize) -> String {
     format!("prop.{i}.imbalance_kgm")
 }
 
+/// Air coming up through the prop's disc (m/s): the mount's speed along body +Z, positive while the aircraft
+/// descends. Published by the rigid body, read by the propeller a tick later.
+pub fn prop_inflow(i: usize) -> String {
+    format!("prop.{i}.inflow_mps")
+}
+
 /// Integrated rotor phase, wrapped to [0, 2π) — the vibration model's phase input.
 pub fn motor_theta(i: usize) -> String {
     format!("motor.{i}.theta_rad")

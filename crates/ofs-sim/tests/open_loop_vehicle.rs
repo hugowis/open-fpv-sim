@@ -163,3 +163,17 @@ fn fifty_kilometres_out_at_ten_milliwatts_the_link_never_comes_up() {
     assert!(!s.radio.link_up, "no packet survives 15 dB under the sensitivity");
     assert_eq!(s.radio.lq_pct, 0.0);
 }
+
+#[test]
+fn mixed_pole_pairs_fly_finite_in_open_loop() {
+    // Only SITL quads need uniform pole pairs (Betaflight has one motor_poles); an open-loop build may mix them,
+    // and the rotors' gyroscopic coupling uses mechanical speed, so it must neither care nor go non-finite.
+    let mut cfg = load(Path::new(QUAD)).unwrap();
+    cfg.motors[1].pole_pairs = 5;
+    let mut v = vehicle_in(&cfg, WorldConfig::open_field());
+    v.set_sticks(&throttle(0.7));
+    v.run_for(1.0).unwrap();
+    let s = v.state();
+    assert!(s.pos_ned_m.is_finite() && s.rate_frd_radps.is_finite(), "{:?} {:?}", s.pos_ned_m, s.rate_frd_radps);
+    assert!(s.pos_ned_m.z < -0.5, "it climbed: {}", s.pos_ned_m.z);
+}

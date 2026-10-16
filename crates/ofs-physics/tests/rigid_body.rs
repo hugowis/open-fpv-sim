@@ -251,3 +251,88 @@ fn angular_damping_decays_a_spin_exponentially() {
     let expected = 10.0 * (-0.5 * 0.001 / 0.0045f64).exp();
     assert!(((wz - expected) / expected).abs() < 1e-4, "wz {wz} expected {expected}");
 }
+
+/// A body far above the ground with the given body rate, whose rotors (all at the origin, each of inertia
+/// `rotor_j`) spin at the given (spin sign, rad/s) pairs. The speeds are on the bus before the body is built.
+fn spinning_rotors(rotors: &[(f64, f64)], rotor_j: f64, rate: DVec3) -> Scheduler {
+    let mounts = rotors.iter().map(|(spin, _)| MotorMount { position_frd_m: DVec3::ZERO, spin: *spin }).collect();
+    let mut p = params(mounts, vec![]);
+    p.rotor_inertia_kgm2 = vec![rotor_j; rotors.len()];
+    let mut s0 = at(DVec3::new(0.0, 0.0, -1000.0));
+    s0.rate_frd_radps = rate;
+    let mut bus = Bus::new();
+    for (k, (_, omega)) in rotors.iter().enumerate() {
+        let sig = bus.signal::<f64>(&names::motor_omega(k));
+        bus.set(sig, *omega);
+    }
+    let body = RigidBody::new(p, s0, &mut bus);
+    let mut sch = Scheduler::new(8000, bus);
+    sch.add(Box::new(body));
+    sch
+}
+
+const ROLLING: DVec3 = DVec3::new(2.0, 0.0, 0.0);
+
+#[test]
+fn a_descending_body_publishes_the_inflow_at_each_mount() {
+    // A mount 8 cm out to the right of a body descending at 5 m/s and rolling right-wing-down at 10 rad/s moves down
+    // at 5 + 10 * 0.08 = 5.8 m/s: that much air comes up through its disc.
+    let mut p = params(vec![MotorMount { position_frd_m: DVec3::new(0.08, 0.08, 0.0), spin: 1.0 }], vec![]);
+    p.rotor_inertia_kgm2 = vec![0.0];
+    let mut s0 = at(DVec3::new(0.0, 0.0, -1000.0));
+    s0.vel_ned_mps = DVec3::new(0.0, 0.0, 5.0);
+    s0.rate_frd_radps = DVec3::new(10.0, 0.0, 0.0);
+    let mut s = sim(p, s0);
+    s.step().unwrap();
+    let inflow = s.bus().get(s.bus().lookup::<f64>(&names::prop_inflow(0)).unwrap());
+    assert!((inflow - 5.8).abs() < 1e-9, "inflow {inflow}");
+}
+
+#[test]
+fn a_spinning_rotor_precesses_a_rotating_body() {
+    // h = 1e-4 * 2000 = 0.2 N m s along +z, body rolling at 2 rad/s: the pitch acceleration is
+    // -(w x h)_y / I_y = w_x * h / I_y, so one tick of 1/8000 s gives 2 * 0.2 / 0.0025 / 8000 = 0.02 rad/s.
+    let mut s = spinning_rotors(&[(1.0, 2000.0)], 1.0e-4, ROLLING);
+    s.step().unwrap();
+    let expected = 2.0 * 0.2 / 0.0025 / 8000.0;
+    let rate = vec3(&s, names::BODY_RATE_FRD);
+    assert!(((rate.y - expected) / expected).abs() < 0.01, "rate.y {} expected {expected}", rate.y);
+}
+
+#[test]
+fn counter_rotating_pairs_cancel_the_gyroscopic_torque() {
+    let mut s = spinning_rotors(&[(1.0, 2000.0), (-1.0, 2000.0)], 1.0e-4, ROLLING);
+    s.run_for(0.5).unwrap();
+    assert!(vec3(&s, names::BODY_RATE_FRD).y.abs() < 1e-9);
+}
+
+#[test]
+fn an_unequal_rotor_pair_still_couples() {
+    // A slowed or dead motor: h = J * (2000 - 1000) = 0.1.
+    let mut s = spinning_rotors(&[(1.0, 2000.0), (-1.0, 1000.0)], 1.0e-4, ROLLING);
+    s.step().unwrap();
+    let expected = 2.0 * (1.0e-4 * 1000.0) / 0.0025 / 8000.0;
+    let rate = vec3(&s, names::BODY_RATE_FRD);
+    assert!(((rate.y - expected) / expected).abs() < 0.01, "rate.y {} expected {expected}", rate.y);
+}
+
+#[test]
+fn a_stopped_rotor_adds_no_gyroscopic_torque() {
+    let mut s = spinning_rotors(&[(1.0, 0.0)], 1.0e-4, ROLLING);
+    s.run_for(0.5).unwrap();
+    let rate = vec3(&s, names::BODY_RATE_FRD);
+    assert_eq!(rate.y, 0.0);
+    assert!((rate.x - 2.0).abs() < 1e-9, "a torque-free pure roll is a fixed point: {rate}");
+}
+
+#[test]
+fn the_gyroscopic_torque_does_no_work() {
+    // w . (w x h) = 0, so the body's rotation energy is conserved however large h is.
+    let i = DVec3::new(0.0025, 0.0025, 0.0045);
+    let energy = |w: DVec3| 0.5 * (i * w * w).element_sum();
+    let w0 = DVec3::new(0.3, 0.2, 5.0);
+    let mut s = spinning_rotors(&[(1.0, 1000.0)], 1.0e-4, w0);
+    s.run_for(2.0).unwrap();
+    let w = vec3(&s, names::BODY_RATE_FRD);
+    assert!(((energy(w) - energy(w0)) / energy(w0)).abs() < 1e-3, "energy drift: {} -> {}", energy(w0), energy(w));
+}
