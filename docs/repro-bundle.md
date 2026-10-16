@@ -21,11 +21,11 @@ From Python, `ofs.repro.find_bundles(sim.logs_dir)` lists the bundles, oldest fi
 | File | What |
 |---|---|
 | `bundle.toml` | Format version, the error (`reason`, `failure_kind`), the tick and time it happened at, the seed, mode (`lockstep` or `realtime`), `base_hz`, whether the flight controller was the open-loop stand-in, the quad, world and tail window, the bus digest at the failure, the journal size, and `exact` (below). |
-| `quads/` | The quad file and its Betaflight diff, as the session loaded them. |
-| `library/` | The whole component library the session used (the `OFS_LIBRARY` override at `Load` time, else the one beside the quads). |
+| `quads/` | The quad file and its Betaflight diff, as the session read them at `Load` (editing the files afterwards changes nothing in the bundle). A diff given as an absolute path or with `..` is stored by its file name and the bundled quad says so. |
+| `library/` | The whole component library the session used, as read at `Load` (the `OFS_LIBRARY` override, else the one beside the quads). |
 | `worlds/` | The world file, when the session had one. |
 | `journal.txt`, `inputs-<n>.csv` | Everything that steered the run, by tick: stick changes, transmitter on/off, faults (immediate and scheduled), `clear_faults`, and each `play_inputs` file. |
-| `tail.mcap` | The last 10 simulated seconds of the default channel table, from a recorder every session runs in memory. Opens in Foxglove or `ofs.reader`. |
+| `tail.mcap` | The last 10 simulated seconds of the default channel table, from a recorder every session runs in memory (about 15 MB for the shipped quad). Opens in Foxglove or `ofs.reader`. |
 | `firmware/` | Betaflight sessions: `eeprom.bin` and `betaflight.diff` as they were right after `Load`, and the end of `sitl.log`. |
 | `README.txt` | How to replay it. |
 

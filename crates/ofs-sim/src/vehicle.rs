@@ -1264,6 +1264,13 @@ impl Vehicle {
                 bus.set(signal, *v);
             }
             p.next += 1;
+            // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the bus's
+            // now, or the next `set_sticks` to the values from before the file would look like no change.
+            let h = &self.h;
+            let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
+            for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
+                *slot = bus.get(signal).to_bits();
+            }
         }
         if p.next == p.ticks.len() {
             self.finished_inputs = self.playback.take().map(|p| p.inputs.name);

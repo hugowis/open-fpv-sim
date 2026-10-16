@@ -21,23 +21,111 @@ const SITL_LOG_TAIL_BYTES: u64 = 64 * 1024;
 /// that produced it.
 const FIRMWARE_STATE: [&str; 2] = ["eeprom.bin", "betaflight.diff"];
 
-/// What a session knows about how it was loaded: the inputs of the replay.
+/// What a session knows about how it was loaded: the inputs of the replay. The configuration files are read when
+/// the session loads, not when it fails, so the bundle holds what the session flew even if the files were edited
+/// meanwhile.
 #[derive(Debug, Clone)]
 pub struct BundleSource {
+    /// The quad file the session loaded: it names the bundle and the quad inside it.
     pub quad_path: PathBuf,
-    /// The world file actually loaded (names already resolved); `None` is the open field.
-    pub world_path: Option<PathBuf>,
     pub seed: u64,
     pub open_loop_fc: bool,
     pub realtime: bool,
-    /// `OFS_LIBRARY` as it was when the session loaded: the library root the bundle copies.
-    pub library_env: Option<String>,
     /// Where bundles go: `<logs dir>/<quad stem>-<n>.repro`.
     pub logs_dir: PathBuf,
     /// The Betaflight session's working directory.
     pub firmware_dir: Option<PathBuf>,
     /// `FIRMWARE_STATE` files as they were right after `Load`.
     pub firmware_initial: Vec<(String, Vec<u8>)>,
+    /// The quad, its diff, the world and the library, as the session read them: path inside the bundle, bytes.
+    pub files: Vec<(PathBuf, Vec<u8>)>,
+    /// The quad's path inside the bundle (`quads/<name>.toml`).
+    pub quad_rel: String,
+    /// The world's path inside the bundle, when the session had one.
+    pub world_rel: Option<String>,
+}
+
+/// Every regular file under `root`, in sorted order, as (path relative to `root`, bytes).
+fn read_tree(root: &Path) -> std::io::Result<Vec<(PathBuf, Vec<u8>)>> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) -> std::io::Result<()> {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<_, _>>()?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let kind = e.file_type()?;
+            if kind.is_dir() {
+                walk(base, &e.path(), out)?;
+            } else if kind.is_file() {
+                let rel = e.path().strip_prefix(base).expect("under the root").to_path_buf();
+                out.push((rel, std::fs::read(e.path())?));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out)?;
+    Ok(out)
+}
+
+impl BundleSource {
+    /// Reads the configuration files of a session that loaded `cfg` (and `world_path`, if it flew in a world) now.
+    /// A Betaflight diff given as an absolute path or with `..` is stored by its file name, and the bundled quad is
+    /// rewritten to say so; the files are never copied by path, so nothing can land outside the bundle or onto itself.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        cfg: &ofs_config::QuadConfig,
+        world_path: Option<&Path>,
+        library_env: Option<&str>,
+        seed: u64,
+        open_loop_fc: bool,
+        realtime: bool,
+        logs_dir: PathBuf,
+        firmware_dir: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        let read = |p: &Path, what: &str| std::fs::read(p).map_err(|e| format!("reading the {what} {}: {e}", p.display()));
+        let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+        let quad_name = file_name(&cfg.source_path)?;
+        let mut quad_bytes = read(&cfg.source_path, "quad")?;
+        let diff_rel = cfg.fc.betaflight_diff.as_str();
+        let diff_path = cfg.resolve(diff_rel);
+        if !diff_rel.is_empty() && diff_path.is_file() {
+            let plain = Path::new(diff_rel).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+            let stored = if plain { diff_rel.to_string() } else { file_name(&diff_path)? };
+            if !plain {
+                let text = String::from_utf8(quad_bytes).map_err(|e| format!("the quad file is not UTF-8: {e}"))?;
+                let mut table: toml::Table = toml::from_str(&text).map_err(|e| format!("parsing the quad file: {e}"))?;
+                if let Some(fc) = table.get_mut("fc").and_then(toml::Value::as_table_mut) {
+                    fc.insert("betaflight_diff".into(), toml::Value::String(stored.clone()));
+                }
+                quad_bytes = toml::to_string(&table).map_err(|e| format!("rewriting the quad file: {e}"))?.into_bytes();
+            }
+            files.push((Path::new("quads").join(&stored), read(&diff_path, "Betaflight diff")?));
+        }
+        files.push((Path::new("quads").join(&quad_name), quad_bytes));
+        let world_rel = match world_path {
+            Some(p) => {
+                let name = file_name(p)?;
+                files.push((Path::new("worlds").join(&name), read(p, "world")?));
+                Some(format!("worlds/{name}"))
+            }
+            None => None,
+        };
+        let library = ofs_config::library_root(library_env, cfg.source_dir());
+        for (rel, bytes) in read_tree(&library).map_err(|e| format!("reading the library {}: {e}", library.display()))? {
+            files.push((Path::new("library").join(rel), bytes));
+        }
+        Ok(Self {
+            quad_path: cfg.source_path.clone(),
+            seed,
+            open_loop_fc,
+            realtime,
+            logs_dir,
+            firmware_dir,
+            firmware_initial: Vec::new(),
+            files,
+            quad_rel: format!("quads/{quad_name}"),
+            world_rel,
+        })
+    }
 }
 
 /// The firmware state files `dir` holds now (none when absent).
@@ -54,23 +142,6 @@ fn kind_of(e: &SimError) -> &'static str {
     }
 }
 
-/// Copies a directory tree (regular files only), in sorted order.
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    let mut entries: Vec<_> = std::fs::read_dir(from)?.collect::<Result<_, _>>()?;
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let target = to.join(e.file_name());
-        let kind = e.file_type()?;
-        if kind.is_dir() {
-            copy_tree(&e.path(), &target)?;
-        } else if kind.is_file() {
-            std::fs::copy(e.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
 fn file_name(p: &Path) -> Result<String, String> {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| format!("{} has no file name", p.display()))
 }
@@ -83,34 +154,18 @@ fn io<T>(what: &str, r: std::io::Result<T>) -> Result<T, String> {
 /// fails (it carries no `bundle.toml`, which is written last).
 pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> Result<PathBuf, String> {
     use toml::Value;
-    let cfg = ofs_config::load_with_library_env(&src.quad_path, src.library_env.as_deref()).map_err(|e| format!("reading the quad: {e}"))?;
-    let quad_name = file_name(&src.quad_path)?;
     let stem = src.quad_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
     let dir = io("creating the logs directory", next_numbered_path(&src.logs_dir, &stem, "repro"))?;
     io(&format!("creating {}", dir.display()), std::fs::create_dir(&dir))?;
 
-    // The quad, its diff, the library it resolved against and the world.
-    io("copying the quad", std::fs::create_dir_all(dir.join("quads")))?;
-    io("copying the quad", std::fs::copy(&src.quad_path, dir.join("quads").join(&quad_name)))?;
-    let diff = cfg.resolve(&cfg.fc.betaflight_diff);
-    if !cfg.fc.betaflight_diff.is_empty() && diff.is_file() {
-        let target = dir.join("quads").join(&cfg.fc.betaflight_diff);
+    // The quad, its diff, the library it resolved against and the world: as the session read them at Load.
+    for (rel, bytes) in &src.files {
+        let target = dir.join(rel);
         if let Some(parent) = target.parent() {
-            io("copying the diff", std::fs::create_dir_all(parent))?;
+            io(&format!("creating {}", parent.display()), std::fs::create_dir_all(parent))?;
         }
-        io("copying the diff", std::fs::copy(&diff, target))?;
+        io(&format!("writing {}", rel.display()), std::fs::write(&target, bytes))?;
     }
-    let library = ofs_config::library_root(src.library_env.as_deref(), cfg.source_dir());
-    io("copying the library", copy_tree(&library, &dir.join("library")))?;
-    let world_name = match &src.world_path {
-        Some(p) => {
-            let name = file_name(p)?;
-            io("copying the world", std::fs::create_dir_all(dir.join("worlds")))?;
-            io("copying the world", std::fs::copy(p, dir.join("worlds").join(&name)))?;
-            Some(name)
-        }
-        None => None,
-    };
 
     io("writing the journal", vehicle.journal().write(&dir))?;
     let tail_error = match vehicle.snapshot_tail(&dir.join("tail.mcap")) {
@@ -146,9 +201,9 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
     put("mode", Value::String(if src.realtime { "realtime" } else { "lockstep" }.into()));
     put("base_hz", Value::Integer(i64::from(vehicle.base_hz())));
     put("open_loop_fc", Value::Boolean(src.open_loop_fc));
-    put("quad", Value::String(format!("quads/{quad_name}")));
-    if let Some(w) = &world_name {
-        put("world", Value::String(format!("worlds/{w}")));
+    put("quad", Value::String(src.quad_rel.clone()));
+    if let Some(w) = &src.world_rel {
+        put("world", Value::String(w.clone()));
     }
     put("window_s", Value::Float(DEFAULT_WINDOW_S));
     put("digest", Value::String(format!("{:016x}", vehicle.digest())));
@@ -183,6 +238,13 @@ pub struct ReplayOutcome {
     pub expected_failure: String,
     pub digest: u64,
     pub expected_digest: u64,
+}
+
+/// Runs `f`; a panic becomes `SimError::Other("internal panic: ...")`, the text the server records for one, so a
+/// bundle written for a panic replays to a verdict instead of taking the replayer down.
+fn guarded<T>(f: impl FnOnce() -> Result<T, SimError>) -> Result<T, SimError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .unwrap_or_else(|p| Err(SimError::Other(format!("internal panic: {}", crate::session::panic_message(p.as_ref())))))
 }
 
 fn text_of<'a>(t: &'a toml::Table, key: &str) -> Result<&'a str, String> {
@@ -241,22 +303,19 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
         if entry.tick < vehicle.tick() {
             return Err(format!("journal.txt: an entry at tick {} comes after tick {}", entry.tick, vehicle.tick()));
         }
-        if let Err(e) = vehicle.step_ticks(entry.tick - vehicle.tick()) {
+        let behind = entry.tick - vehicle.tick();
+        if let Err(e) = guarded(|| vehicle.step_ticks(behind)) {
             failure = Some(e);
             break 'entries;
         }
-        if let Err(e) = vehicle.replay_action(&entry.action) {
+        if let Err(e) = guarded(|| vehicle.replay_action(&entry.action)) {
             return Err(format!("replaying the journal entry at tick {}: {e}", entry.tick));
         }
     }
     if failure.is_none() {
-        let result = if vehicle.tick() < expected_tick {
-            vehicle.step_ticks(expected_tick - vehicle.tick())
-        } else {
-            Ok(())
-        };
         // The failing step starts at `expected_tick`: one more tick is where the original stopped.
-        failure = result.and_then(|()| vehicle.step_ticks(1)).err();
+        let to_go = expected_tick.saturating_sub(vehicle.tick());
+        failure = guarded(|| vehicle.step_ticks(to_go)).and_then(|()| guarded(|| vehicle.step_ticks(1))).err();
     }
     let digest = vehicle.digest();
     let reached_tick = vehicle.tick();
@@ -269,17 +328,15 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
 #[cfg(test)]
 pub(crate) fn test_source(logs_dir: &Path) -> BundleSource {
     let quad = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"));
-    BundleSource {
-        quad_path: std::path::absolute(quad).unwrap(),
-        world_path: None,
-        seed: 1,
-        open_loop_fc: true,
-        realtime: false,
-        library_env: None,
-        logs_dir: logs_dir.to_path_buf(),
-        firmware_dir: None,
-        firmware_initial: Vec::new(),
-    }
+    test_source_for(logs_dir, quad, None, None)
+}
+
+/// As `test_source`, for any quad, with an optional world and `OFS_LIBRARY` override (read now, as `Load` reads them).
+#[cfg(test)]
+pub(crate) fn test_source_for(logs_dir: &Path, quad: &Path, world: Option<&Path>, library_env: Option<&str>) -> BundleSource {
+    let quad = std::path::absolute(quad).unwrap();
+    let cfg = ofs_config::load_with_library_env(&quad, library_env).unwrap();
+    BundleSource::new(&cfg, world, library_env, 1, true, false, logs_dir.to_path_buf(), None).unwrap()
 }
 
 #[cfg(test)]
@@ -388,13 +445,21 @@ mod tests {
     #[test]
     fn a_world_is_copied_and_named() {
         let logs = tempfile::tempdir().unwrap();
-        let mut src = test_source(logs.path());
-        src.world_path = Some(repo("worlds/flat.toml"));
+        let quad = repo("quads/opendrone-5f-freestyle.toml");
+        let src = test_source_for(logs.path(), &quad, Some(&repo("worlds/flat.toml")), None);
         let mut v = vehicle_from(&ofs_config::load(&src.quad_path).unwrap());
         let error = fail(&mut v);
         let dir = write_bundle(&src, &v, &error).unwrap();
         assert!(dir.join("worlds/flat.toml").is_file());
         assert_eq!(bundle_toml(&dir)["world"].as_str(), Some("worlds/flat.toml"));
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        for (rel, bytes) in read_tree(from).unwrap() {
+            let target = to.join(rel);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, bytes).unwrap();
+        }
     }
 
     /// A copy of `quads/` (the shipped quad and its diff) and `library/` under `root`, the library's motor part
@@ -404,7 +469,7 @@ mod tests {
         for name in ["opendrone-5f-freestyle.toml", "opendrone-5f-freestyle.betaflight.diff"] {
             std::fs::copy(repo("quads").join(name), root.join("quads").join(name)).unwrap();
         }
-        copy_tree(&repo("library"), &root.join("library")).unwrap();
+        copy_dir(&repo("library"), &root.join("library"));
         let motor = root.join("library/motors/opendrone-openmotor-2207.toml");
         let text = std::fs::read_to_string(&motor).unwrap().replace("kv_rpm_per_v = 1950.0", "kv_rpm_per_v = 2100.0");
         std::fs::write(&motor, text).unwrap();
@@ -416,14 +481,13 @@ mod tests {
         let work = tempfile::tempdir().unwrap();
         let logs = tempfile::tempdir().unwrap();
         let quad = private_tree(&work.path().join("my tree")); // a path with a space
-        let mut src = test_source(logs.path());
-        src.quad_path = quad.clone();
         // As OFS_LIBRARY would say: a library that is not the one beside the quads.
         let elsewhere = work.path().join("elsewhere");
-        copy_tree(&work.path().join("my tree/library"), &elsewhere).unwrap();
+        copy_dir(&work.path().join("my tree/library"), &elsewhere);
         std::fs::remove_dir_all(work.path().join("my tree/library")).unwrap();
-        src.library_env = Some(elsewhere.to_string_lossy().into_owned());
-        let cfg = ofs_config::load_with_library_env(&quad, src.library_env.as_deref()).unwrap();
+        let library_env = elsewhere.to_string_lossy().into_owned();
+        let src = test_source_for(logs.path(), &quad, None, Some(&library_env));
+        let cfg = ofs_config::load_with_library_env(&quad, Some(&library_env)).unwrap();
         assert_eq!(cfg.motors[0].kv_rpm_per_v, 2100.0, "the private library is in effect");
         let mut v = vehicle_from(&cfg);
         let error = fail(&mut v);
@@ -465,6 +529,67 @@ mod tests {
         assert!(std::fs::read_to_string(dir.join("journal.txt")).unwrap().lines().any(|l| l == "# truncated"));
         let outcome = replay(&dir, &logs.path().join("data")).unwrap();
         assert!(!outcome.exact, "{outcome:?}");
+    }
+
+    #[test]
+    fn the_bundle_holds_the_files_as_the_session_loaded_them_not_as_they_are_when_it_fails() {
+        let work = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let quad = private_tree(work.path()); // the motor part says 2100 KV
+        let src = test_source_for(logs.path(), &quad, None, None);
+        let mut v = vehicle_from(&ofs_config::load(&quad).unwrap());
+        // The user tunes the files while the server is up.
+        let motor = work.path().join("library/motors/opendrone-openmotor-2207.toml");
+        std::fs::write(&motor, std::fs::read_to_string(&motor).unwrap().replace("2100.0", "1500.0")).unwrap();
+        std::fs::write(&quad, "this is no longer a quad file").unwrap();
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+        let copied = std::fs::read_to_string(dir.join("library/motors/opendrone-openmotor-2207.toml")).unwrap();
+        assert!(copied.contains("2100.0") && !copied.contains("1500.0"), "the part as loaded");
+        assert!(std::fs::read_to_string(dir.join("quads/opendrone-5f-freestyle.toml")).unwrap().contains("schema_version"));
+        let outcome = replay(&dir, &work.path().join("data")).unwrap();
+        assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
+    }
+
+    #[test]
+    fn a_diff_given_by_an_absolute_path_or_with_dots_is_stored_by_name() {
+        let diff_name = "opendrone-5f-freestyle.betaflight.diff";
+        for form in ["absolute", "dots"] {
+            let work = tempfile::tempdir().unwrap();
+            let logs = tempfile::tempdir().unwrap();
+            let quad = private_tree(work.path());
+            let elsewhere = work.path().join("elsewhere");
+            std::fs::create_dir_all(&elsewhere).unwrap();
+            let original = std::fs::read(work.path().join("quads").join(diff_name)).unwrap();
+            std::fs::rename(work.path().join("quads").join(diff_name), elsewhere.join(diff_name)).unwrap();
+            let written = match form {
+                "absolute" => format!("'{}'", elsewhere.join(diff_name).display()),
+                _ => format!("\"../elsewhere/{diff_name}\""),
+            };
+            let before = std::fs::read_to_string(&quad).unwrap();
+            let after = before.replace(&format!("betaflight_diff = \"{diff_name}\""), &format!("betaflight_diff = {written}"));
+            assert_ne!(before, after, "{form}: the quad names its diff");
+            std::fs::write(&quad, after).unwrap();
+
+            let src = test_source_for(logs.path(), &quad, None, None);
+            let mut v = vehicle_from(&ofs_config::load(&quad).unwrap());
+            let error = fail(&mut v);
+            let dir = write_bundle(&src, &v, &error).unwrap_or_else(|e| panic!("{form}: {e}"));
+            assert_eq!(std::fs::read(dir.join("quads").join(diff_name)).unwrap(), original, "{form}: the diff, by name");
+            assert_eq!(std::fs::read(elsewhere.join(diff_name)).unwrap(), original, "{form}: the user's file is untouched");
+            let bundled = ofs_config::load_with_library_env(&dir.join("quads/opendrone-5f-freestyle.toml"), None).unwrap();
+            assert_eq!(bundled.fc.betaflight_diff, diff_name, "{form}");
+            let outcome = replay(&dir, &work.path().join("data")).unwrap();
+            assert!(outcome.reproduced, "{form}: {outcome:?}");
+        }
+    }
+
+    #[test]
+    fn a_panic_during_a_replay_is_a_failure_with_the_servers_text_not_a_crash() {
+        let r: Result<(), SimError> = guarded(|| panic!("boom"));
+        assert_eq!(r, Err(SimError::Other("internal panic: boom".into())));
+        assert_eq!(guarded(|| Ok(3)), Ok(3));
+        assert_eq!(guarded::<()>(|| Err(SimError::Firmware("x".into()))), Err(SimError::Firmware("x".into())));
     }
 
     #[test]

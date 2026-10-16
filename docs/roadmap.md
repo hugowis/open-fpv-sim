@@ -176,7 +176,7 @@ These explain behaviour that would otherwise look like a bug.
 - **MCAP message indexes stay on**: Foxglove's reader needs them, though they are most of a file's size.
 - **A repro bundle replays what steers a run, not Betaflight's timing**: a lockstep session with an intact journal is
   exact; a real-time session or one whose journal outgrew its cap replays approximately and says so
-  (`exact = false`). The 10 s tail costs about 1.3 ms of wall time per simulated second.
+  (`exact = false`). The 10 s tail costs about 15 MB per session and about 6 % of the open-loop real-time factor.
 - **The thermal and cell constants stay estimates** until a validation submission replaces them (`docs/validation.md`).
 - **A record is stamped with the time after its tick**, `(tick + 1) / base_hz`: what `GetState` reports then.
 - **Scheduled faults and inputs apply right after the step that reaches their time**.

@@ -124,17 +124,9 @@ fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
     let data_dir = rig._dir.path().to_path_buf();
     let quad = std::path::absolute(QUAD).unwrap();
     let firmware = ofs_sim::vehicle::firmware_dir(&data_dir, &quad);
-    let source = BundleSource {
-        quad_path: quad,
-        world_path: None,
-        seed: 1,
-        open_loop_fc: false,
-        realtime: false,
-        library_env: None,
-        logs_dir: data_dir.join("logs"),
-        firmware_dir: Some(firmware.clone()),
-        firmware_initial: snapshot_firmware(&firmware),
-    };
+    let cfg = load(&quad).unwrap();
+    let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    source.firmware_initial = snapshot_firmware(&firmware);
     assert!(source.firmware_initial.iter().any(|(n, _)| n == "eeprom.bin"), "the first boot saved an EEPROM");
     rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
     rig.v.run_for(2.0).unwrap();

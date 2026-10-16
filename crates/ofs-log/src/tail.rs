@@ -69,7 +69,7 @@ impl TailHandle {
         self.lock().as_ref().map_or(0, |s| s.ring.capacity())
     }
 
-    fn record(&self, tick: u64, base_hz: u32, bus: &Bus, divisors: &[u64]) {
+    fn record(&self, tick: u64, base_hz: u32, bus: &Bus, groups: &[(u64, Vec<usize>)]) {
         let mut guard = self.lock();
         let Some(state) = guard.as_mut() else { return };
         let end = tick + 1;
@@ -78,9 +78,12 @@ impl TailHandle {
         while state.ring.front().is_some_and(|m| m.time_ns < oldest) {
             state.ring.pop_front();
         }
-        for (i, divisor) in divisors.iter().enumerate() {
+        // A handful of distinct divisors for a hundred channels: one test per divisor, not per channel.
+        for (divisor, channels) in groups {
             if end % divisor == 0 {
-                state.ring.push_back(Message { channel: i, time_ns: now, value: state.sources[i].read(bus) });
+                for &i in channels {
+                    state.ring.push_back(Message { channel: i, time_ns: now, value: state.sources[i].read(bus) });
+                }
             }
         }
     }
@@ -90,7 +93,8 @@ impl TailHandle {
 pub struct TailRecorder {
     handle: TailHandle,
     base_hz: u32,
-    divisors: Vec<u64>,
+    /// The channels recorded on ticks divisible by each distinct divisor, in divisor order.
+    groups: Vec<(u64, Vec<usize>)>,
 }
 
 impl TailRecorder {
@@ -102,9 +106,16 @@ impl TailRecorder {
         let signals: Vec<(String, SignalKind)> = bus.signals().map(|(n, k)| (n.to_string(), k)).collect();
         let channels = resolve(&[], &signals, base_hz).map_err(RecordError::Spec)?;
         let sources = channels.iter().map(|c| Source::of(bus, c)).collect();
-        let divisors = channels.iter().map(|c| c.divisor).collect();
+        let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
+        for (i, c) in channels.iter().enumerate() {
+            match groups.iter_mut().find(|(d, _)| *d == c.divisor) {
+                Some((_, members)) => members.push(i),
+                None => groups.push((c.divisor, vec![i])),
+            }
+        }
+        groups.sort_by_key(|(d, _)| *d);
         *handle.lock() = Some(State { channels, sources, window_ns: (window_s * 1e9) as u64, ring: VecDeque::new() });
-        Ok(Self { handle, base_hz, divisors })
+        Ok(Self { handle, base_hz, groups })
     }
 }
 
@@ -118,7 +129,7 @@ impl Model for TailRecorder {
     }
 
     fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
-        self.handle.record(ctx.tick, self.base_hz, bus, &self.divisors);
+        self.handle.record(ctx.tick, self.base_hz, bus, &self.groups);
         Ok(())
     }
 }

@@ -8,8 +8,9 @@ repository). The format follows Keep a Changelog.
 - A failed session writes a **repro bundle**: a folder under the logs directory (`<quad>-<n>.repro`) with the quad,
   the library and world it used, the seed, a journal of everything that steered the run, the firmware's state from
   `Load` and the last 10 seconds of its channels. `ofs-sim --replay <folder>` and `ofs.repro.replay_bundle` run it again
-  and say whether the failure came back (`docs/repro-bundle.md`). Every session now keeps that 10 s tail in memory (a
-  few MB; about 1.3 ms of wall time per simulated second) and a journal of its steering calls.
+  and say whether the failure came back (`docs/repro-bundle.md`). Every session now keeps that 10 s tail in memory (about 15 MB
+  for the shipped quad; it costs about 6 % of the open-loop real-time factor, 275x to 257x) and a journal of its
+  steering calls.
 - `ofs-validate`, the validation harness: a documented submission format for community measurements (`thrust_stand`,
   and `blackbox_step` as a checked format), a checker that reports every problem with its file and line, and a
   thrust-stand comparator that runs the simulator's own ESC, motor and propeller to steady state at each measured row.

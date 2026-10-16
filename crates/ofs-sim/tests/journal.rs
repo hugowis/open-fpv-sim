@@ -69,6 +69,30 @@ fn a_vehicle_journals_what_steers_it() {
 }
 
 #[test]
+fn a_stick_change_after_playback_is_journaled_even_to_the_values_set_before_it() {
+    // Hover, play a file (its rows write the sticks straight to the bus), hover again: the second hover is a real
+    // change of the bus and must be in the journal, or an exact replay would end with the file's last values.
+    let hover = Sticks { throttle: 0.3, ..Sticks::default() };
+    let mut a = vehicle();
+    a.set_sticks(&hover);
+    a.step_ticks(100).unwrap();
+    a.play_inputs(climb()).unwrap();
+    a.step_ticks(400).unwrap(); // the file finishes at 0.02 s: its last row (throttle 0.9) holds
+    a.set_sticks(&hover);
+    a.step_ticks(100).unwrap();
+    let sticks_at: Vec<u64> = a.journal().entries().iter().filter(|e| matches!(e.action, Action::Sticks(_))).map(|e| e.tick).collect();
+    assert_eq!(sticks_at, [0, 500], "the second hover is a change: {:?}", a.journal().entries());
+
+    let mut b = vehicle();
+    for e in a.journal().entries() {
+        b.step_ticks(e.tick - b.tick()).unwrap();
+        b.replay_action(&e.action).unwrap();
+    }
+    b.step_ticks(a.tick() - b.tick()).unwrap();
+    assert_eq!(a.digest(), b.digest(), "the replay flew the same sticks");
+}
+
+#[test]
 fn a_refused_call_is_not_journaled() {
     let mut v = vehicle();
     assert!(v.set_fault(Fault::MotorFailure { motor: 9, scale: 0.0 }, true).is_err());
