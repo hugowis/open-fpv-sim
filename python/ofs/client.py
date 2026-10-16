@@ -565,13 +565,8 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".ofs-data",
-           timeout_s: float = 15.0) -> Sim:
-    """Starts an ofs-sim server on a free local port and connects to it. The server stops with `close()`, when the
-    returned Sim is garbage-collected, or when the script exits (a script need not close it: its session's
-    recording and Blackbox logs are finished either way)."""
-    if not headless:
-        raise NotImplementedError("the Godot pilot client arrives with M2b; only headless=True is available")
+def find_binary(binary: str | None = None) -> str:
+    """The `ofs-sim` to run: `binary`, else `OFS_SIM_BIN`, else the one on PATH."""
     binary = binary or os.environ.get("OFS_SIM_BIN") or shutil.which("ofs-sim")
     if not binary:
         raise FileNotFoundError("ofs-sim binary not found: set OFS_SIM_BIN or put ofs-sim on PATH")
@@ -579,6 +574,17 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
         # A path, not a name to look up: absolute, with native separators. Windows' CreateProcess refuses a
         # relative path written with forward slashes (`target/debug/ofs-sim`).
         binary = os.path.abspath(binary)
+    return binary
+
+
+def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".ofs-data",
+           timeout_s: float = 15.0) -> Sim:
+    """Starts an ofs-sim server on a free local port and connects to it. The server stops with `close()`, when the
+    returned Sim is garbage-collected, or when the script exits (a script need not close it: its session's
+    recording and Blackbox logs are finished either way)."""
+    if not headless:
+        raise NotImplementedError("the Godot pilot client arrives with M2b; only headless=True is available")
+    binary = find_binary(binary)
     address = f"127.0.0.1:{_free_port()}"
     proc = subprocess.Popen([binary, "--listen", address, "--data-dir", data_dir])
     deadline = time.monotonic() + timeout_s

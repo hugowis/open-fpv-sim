@@ -18,5 +18,9 @@ described in the repository's `docs/dev-setup.md`.
     sim.run(seconds=10)
     df = sim.log.to_dataframe(["imu.gyro_frd_radps", "motor.*.omega_radps", "battery.voltage_v"])
 
+If a session fails (a Betaflight crash, a non-finite value), the server writes a repro bundle, and the `sim_error`
+event names it. `ofs.repro.find_bundles(sim.logs_dir)` lists the bundles and `ofs.repro.replay_bundle(path)` runs one
+again and says whether the failure came back (`docs/repro-bundle.md` in the repository).
+
 Extras: `log` reads the session recordings (`mcap`, `pandas`; Parquet export also needs `pyarrow`), `rerun` adds the
 live view (`ofs.rerun.view(sim)`).

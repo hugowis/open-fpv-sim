@@ -15,6 +15,12 @@ limitations. Filter by `good first issue` for a gentle start, by `area:*` for yo
 - **A model change** carries a unit test against an analytic result, a provenance (`datasheet`, `measured` or
   `estimated`) for every new constant, and the matching `docs/research/` page updated. Seeded runs stay deterministic.
 
+## Reporting a crash
+If the simulator stops with an error (a Betaflight crash, a non-finite value, a panic) it has written a repro bundle
+and the `sim_error` event names it: a folder under the logs directory (`.ofs-data/logs/<quad>-<n>.repro`). Zip it and
+attach it to the issue; a maintainer replays it with `ofs-sim --replay <folder>`. What it holds and how exact the
+replay is: `docs/repro-bundle.md`.
+
 ## Tests, from fastest to slowest
 1. **Rust unit and integration tests:** `cargo test --workspace --locked`, and
    `cargo clippy --workspace --all-targets --locked -- -D warnings` (CI fails on any warning).
