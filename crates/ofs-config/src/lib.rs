@@ -281,6 +281,24 @@ pub struct FixedSection {
     pub burst_off_s: f64,
 }
 
+/// What reads the sticks (`[radio] handset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandsetKind {
+    /// The stick and switch signals the joystick, the Pilot stream or `SetSticks` drive.
+    #[default]
+    Joystick,
+}
+
+/// What turns the link's output into the flight controller's serial protocol (`[radio] receiver`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiverKind {
+    /// CRSF on a flight-controller UART.
+    #[default]
+    Crsf,
+}
+
 /// The ExpressLRS band (`kind = "elrs"`); absent means 2.4 GHz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum BandKind {
@@ -326,6 +344,12 @@ impl RadioSection {
 #[serde(deny_unknown_fields)]
 pub struct RadioSection {
     pub kind: RadioKind,
+    /// The handset part; the only one today is `"joystick"`.
+    #[serde(default)]
+    pub handset: HandsetKind,
+    /// The receiver part; the only one today is `"crsf"`.
+    #[serde(default)]
+    pub receiver: ReceiverKind,
     /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second
     /// (`kind = "fixed"`: any rate that divides the base rate).
     pub packet_rate_hz: u32,

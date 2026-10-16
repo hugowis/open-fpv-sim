@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::world::{self as world_cfg, WorldConfig};
-use ofs_config::{BandKind, FcKind, FixedSection, QuadConfig, RadioKind, VtxSection};
+use ofs_config::{BandKind, FcKind, FixedSection, HandsetKind, QuadConfig, RadioKind, ReceiverKind, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
@@ -28,7 +28,7 @@ use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_radio::fixed::{FixedLink, FixedParams};
 use ofs_radio::joystick::JoystickHandset;
-use ofs_radio::parts::{Link, RfFrontEnd};
+use ofs_radio::parts::{Handset, Link, Receiver, RfFrontEnd};
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
 use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
@@ -608,7 +608,9 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
         fading: true,
         ground_bounce: true,
     };
-    let handset = JoystickHandset::new(front_end, bus);
+    let handset: Box<dyn Handset> = match r.handset {
+        HandsetKind::Joystick => Box::new(JoystickHandset::new(front_end, bus)),
+    };
     let link: Box<dyn Link> = match r.kind {
         RadioKind::Elrs => Box::new(ElrsLink::new(link_params, opts.seed, bus)),
         RadioKind::Fixed => {
@@ -626,8 +628,10 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
             ))
         }
     };
-    let receiver = CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in);
-    RadioChain::new(Box::new(handset), link, Box::new(receiver), base_hz, bus)
+    let receiver: Box<dyn Receiver> = match r.receiver {
+        ReceiverKind::Crsf => Box::new(CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in)),
+    };
+    RadioChain::new(handset, link, receiver, base_hz, bus)
 }
 
 /// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.

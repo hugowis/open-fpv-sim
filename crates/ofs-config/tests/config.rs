@@ -630,3 +630,19 @@ fn fixed_link_values_are_validated() {
     let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"").replace("packet_rate_hz = 500", "packet_rate_hz = 300")).unwrap_err();
     assert!(err.to_string().contains("radio.packet_rate_hz"), "300 does not divide 8000: {err}");
 }
+
+#[test]
+fn the_handset_and_receiver_default_to_the_joystick_and_crsf_and_can_be_named() {
+    let cfg = shipped_with(|_| {}).unwrap();
+    assert_eq!((cfg.radio.handset, cfg.radio.receiver), (ofs_config::HandsetKind::Joystick, ofs_config::ReceiverKind::Crsf));
+    let named = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nhandset = \"joystick\"\nreceiver = \"crsf\"")).unwrap();
+    assert_eq!(named.radio.handset, ofs_config::HandsetKind::Joystick);
+}
+
+#[test]
+fn an_unknown_part_name_is_an_error_that_lists_the_valid_names() {
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nhandset = \"mixer\"")).unwrap_err();
+    assert!(err.to_string().contains("unknown variant `mixer`") && err.to_string().contains("joystick"), "{err}");
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nreceiver = \"sbus\"")).unwrap_err();
+    assert!(err.to_string().contains("unknown variant `sbus`") && err.to_string().contains("crsf"), "{err}");
+}
