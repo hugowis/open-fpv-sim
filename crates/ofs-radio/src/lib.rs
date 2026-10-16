@@ -1,4 +1,5 @@
 //! Radio link models: CRSF framing, the swappable handset / link / receiver parts, and the ExpressLRS link.
+pub mod band;
 pub mod chain;
 pub mod crsf;
 pub mod elrs;

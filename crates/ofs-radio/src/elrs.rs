@@ -15,12 +15,13 @@ use ofs_rf::propagation::{mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKi
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
+use crate::band::Band;
 use crate::parts::{Channels, Delivery, FaultSignals, Link, LinkReport, LqWindow, TxFrame};
 
 pub const MODEL_NAME: &str = "radio.elrs";
 /// RSSI published while no packet is heard.
 pub const NO_SIGNAL_RSSI_DBM: f64 = -130.0;
-/// The middle of the 2.4 GHz band; frequency hopping is not modelled.
+/// The middle of the 2.4 GHz band; frequency hopping is not modelled (the 900 MHz band is in `band`).
 pub const ELRS_FREQ_MHZ: f64 = 2440.0;
 /// LoRa bandwidth 812.5 kHz, noise figure 6 dB (estimated): `-174 + 10*log10(812_500) + 6`.
 pub const NOISE_FLOOR_DBM: f64 = -108.90176630349089;
@@ -35,24 +36,12 @@ pub const TELEMETRY_SLOT_DIVISOR: u32 = 4;
 /// The RSSI at which half the packets decode, by packet rate: ExpressLRS's published sensitivities for its
 /// 2.4 GHz LoRa modes.
 pub fn sensitivity_dbm(packet_rate_hz: u32) -> Option<f64> {
-    match packet_rate_hz {
-        50 => Some(-117.0),
-        150 => Some(-112.0),
-        250 => Some(-108.0),
-        500 => Some(-105.0),
-        _ => None,
-    }
+    Band::G2_4.sensitivity_dbm(packet_rate_hz)
 }
 
 /// The CRSF rf_mode index of a packet rate (the CRSF table: 0 = 4 Hz, 1 = 50, 2 = 150, 3 = 250, 4 = 500).
 pub fn rf_mode_index(packet_rate_hz: u32) -> Option<u8> {
-    match packet_rate_hz {
-        50 => Some(1),
-        150 => Some(2),
-        250 => Some(3),
-        500 => Some(4),
-        _ => None,
-    }
+    Band::G2_4.rf_mode_index(packet_rate_hz)
 }
 
 /// The CRSF power index of a TX power in mW (the CRSF power table).
@@ -78,6 +67,8 @@ pub fn packet_error_rate(rssi_dbm: f64, sensitivity_dbm: f64) -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkParams {
     pub packet_rate_hz: u32,
+    /// The ExpressLRS band: carrier, noise floor and the packet rates and sensitivities of its modes.
+    pub band: Band,
     /// Packets between the handset sampling the sticks and the receiver outputting them.
     pub latency_packets: u32,
     /// The handset's TX power.
@@ -101,6 +92,7 @@ impl LinkParams {
         let dipole = Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization: Polarization::Linear, axis: DVec3::NEG_Z };
         Self {
             packet_rate_hz,
+            band: Band::G2_4,
             latency_packets: 1,
             tx_power_mw: 250.0,
             handset_position: DVec3::new(-2.0, 0.0, -1.7),
@@ -141,7 +133,13 @@ pub struct ElrsLink {
 impl ElrsLink {
     pub fn new(params: LinkParams, seed: u64, bus: &mut Bus) -> Self {
         assert!(!params.quad_antennas.is_empty() && !params.handset_antennas.is_empty(), "both ends need at least one antenna");
-        assert!(sensitivity_dbm(params.packet_rate_hz).is_some(), "packet_rate_hz must be one of 50, 150, 250, 500");
+        assert!(
+            params.band.sensitivity_dbm(params.packet_rate_hz).is_some(),
+            "packet_rate_hz {} is not a {} mode: use one of {:?}",
+            params.packet_rate_hz,
+            params.band.name(),
+            params.band.packet_rates()
+        );
         let mut rng = model_rng(seed, MODEL_NAME);
         let fault_rng = model_rng(seed, "elrs-faults");
         let mut quad_faders = vec![Fader::default(); params.quad_antennas.len()];
@@ -194,12 +192,14 @@ impl Link for ElrsLink {
         let att = if att.length_squared() > 0.0 { att.normalize() } else { DQuat::IDENTITY };
         let moved = self.last_pos.map_or(0.0, |p| p.distance(pos));
         self.last_pos = Some(pos);
-        let sensitivity = sensitivity_dbm(self.params.packet_rate_hz).expect("checked at construction");
+        let sensitivity = self.params.band.sensitivity_dbm(self.params.packet_rate_hz).expect("checked at construction");
         let transmitting = tx.transmitting && !self.faults.link_cut(bus);
+        let freq = self.params.band.freq_mhz();
+        let noise = self.params.band.noise_floor_dbm();
 
         // Draw order is fixed: every packet draws the same count of numbers whatever the inputs — the uplink
         // fades (two normals per quad antenna), the uplink loss draw, the downlink fades, the downlink draw.
-        let rho = (-moved / (wavelength_m(ELRS_FREQ_MHZ) * 0.5)).exp();
+        let rho = (-moved / (wavelength_m(freq) * 0.5)).exp();
         let shadow = body_shadow_db(att, pos, self.params.handset_position);
         // The handset transmits on its active antenna: invariant across the quad's antennas.
         let tx_ant = self.params.handset_antennas[self.handset_diversity.active().min(self.params.handset_antennas.len() - 1)];
@@ -211,7 +211,7 @@ impl Link for ElrsLink {
             let path = path_gain(
                 &Endpoint { position: self.params.handset_position, antenna: tx_ant },
                 &Endpoint { position: pos, antenna: rx_ant },
-                ELRS_FREQ_MHZ,
+                freq,
                 &self.params.obstacles,
                 self.params.ground_bounce,
             );
@@ -242,7 +242,7 @@ impl Link for ElrsLink {
             let path = path_gain(
                 &Endpoint { position: pos, antenna: tx_ant },
                 &Endpoint { position: self.params.handset_position, antenna: *rx_ant },
-                ELRS_FREQ_MHZ,
+                freq,
                 &self.params.obstacles,
                 self.params.ground_bounce,
             );
@@ -268,7 +268,7 @@ impl Link for ElrsLink {
         let lq = self.history.push(received);
         let downlink_lq = self.downlink_history.push(downlink_received);
         let link_up = lq > 0.0;
-        let snr = rssi[active] - NOISE_FLOOR_DBM;
+        let snr = rssi[active] - noise;
 
         Delivery {
             channels: received.then_some(channels),
@@ -277,14 +277,14 @@ impl Link for ElrsLink {
                 link_up,
                 lq_pct: lq,
                 rssi_dbm: if link_up { rssi[active] } else { NO_SIGNAL_RSSI_DBM },
-                snr_db: if link_up { snr } else { NO_SIGNAL_RSSI_DBM - NOISE_FLOOR_DBM },
+                snr_db: if link_up { snr } else { NO_SIGNAL_RSSI_DBM - noise },
                 antenna: active,
                 downlink_lq_pct: downlink_lq,
                 uplink_rssi_dbm: [rssi[0], rssi.get(1).copied().unwrap_or(rssi[0])],
                 uplink_snr_db: snr,
                 downlink_rssi_dbm: downlink[downlink_active],
-                downlink_snr_db: downlink[downlink_active] - NOISE_FLOOR_DBM,
-                rf_mode: rf_mode_index(self.params.packet_rate_hz).unwrap_or(0),
+                downlink_snr_db: downlink[downlink_active] - noise,
+                rf_mode: self.params.band.rf_mode_index(self.params.packet_rate_hz).unwrap_or(0),
                 tx_power_index: tx_power_index_mw(self.params.tx_power_mw as u32),
             },
         }

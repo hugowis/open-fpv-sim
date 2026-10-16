@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::world::{self as world_cfg, WorldConfig};
-use ofs_config::{FcKind, QuadConfig, VtxSection};
+use ofs_config::{BandKind, FcKind, QuadConfig, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
@@ -23,6 +23,7 @@ use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
+use ofs_radio::band::Band;
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_radio::joystick::JoystickHandset;
@@ -583,6 +584,10 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
         tx_power_mw: f64::from(r.tx_power_mw),
     };
     let link = LinkParams {
+        band: match r.band_or_default() {
+            BandKind::G2_4 => Band::G2_4,
+            BandKind::Mhz900 => Band::Mhz900,
+        },
         packet_rate_hz: r.packet_rate_hz,
         latency_packets: r.latency_packets,
         tx_power_mw: front_end.tx_power_mw,

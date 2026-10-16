@@ -265,15 +265,58 @@ pub enum RadioKind {
     Elrs,
 }
 
+/// The ExpressLRS band (`kind = "elrs"`); absent means 2.4 GHz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum BandKind {
+    #[serde(rename = "2g4")]
+    G2_4,
+    #[serde(rename = "900")]
+    Mhz900,
+}
+
+impl BandKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            BandKind::G2_4 => "2g4",
+            BandKind::Mhz900 => "900",
+        }
+    }
+
+    /// The packet rates the band's LoRa modes offer. `ofs-radio`'s `Band` is the model's own copy; a test in
+    /// `ofs-sim` keeps the two equal.
+    pub fn packet_rates(self) -> &'static [u32] {
+        match self {
+            BandKind::G2_4 => &[50, 150, 250, 500],
+            BandKind::Mhz900 => &[25, 50, 100, 200, 250],
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            BandKind::G2_4 => "2.4 GHz",
+            BandKind::Mhz900 => "900 MHz",
+        }
+    }
+}
+
+impl RadioSection {
+    pub fn band_or_default(&self) -> BandKind {
+        self.band.unwrap_or(BandKind::G2_4)
+    }
+}
+
 /// The pilot's radio link. The receiver's CRSF output is wired to a Betaflight UART.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RadioSection {
     pub kind: RadioKind,
-    /// The ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 packets per second.
+    /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second.
     pub packet_rate_hz: u32,
     /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
     pub uart: u8,
+    /// `kind = "elrs"` only: the ExpressLRS band, `"2g4"` (default) or `"900"`; it fixes which packet rates are valid.
+    #[serde(default)]
+    pub band: Option<BandKind>,
     #[serde(default = "default_latency_packets")]
     pub latency_packets: u32,
     /// The handset's TX power in mW: one of 10, 25, 50, 100, 250, 500, 1000.
@@ -856,10 +899,16 @@ impl QuadConfig {
             c.check(ms > 0, field, "must be > 0");
         }
         let r = &self.radio;
+        let band = r.band_or_default();
+        let rates = band.packet_rates();
+        let listed = match rates.split_last() {
+            Some((last, rest)) => format!("{} or {last}", rest.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")),
+            None => String::new(),
+        };
         c.check(
-            matches!(r.packet_rate_hz, 50 | 150 | 250 | 500),
+            rates.contains(&r.packet_rate_hz),
             "radio.packet_rate_hz",
-            format!("must be one of the ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 (got {})", r.packet_rate_hz),
+            format!("must be one of the ExpressLRS {} LoRa modes: {listed} (got {})", band.label(), r.packet_rate_hz),
         );
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
         c.check(
