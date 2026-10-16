@@ -567,6 +567,8 @@ pub enum Command {
     Reload,
     /// Cuts (true) or restores (false) the radio link: the failsafe test.
     SetRadioLoss(bool),
+    /// Starts (true) or stops (false) recording the sticks to a replayable CSV the server names.
+    SetInputsRecording(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -326,6 +326,16 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
                         shared.error(status_error(status));
                     }
                 }
+                Some(Command::SetInputsRecording(on)) => {
+                    let result = if on {
+                        client.start_inputs_recording(pb::Empty {}).await.map(|_| ())
+                    } else {
+                        client.stop_inputs_recording(pb::Empty {}).await.map(|_| ())
+                    };
+                    if let Err(status) = result {
+                        shared.error(status_error(status));
+                    }
+                }
             },
             ended = &mut link.receiver => {
                 break Fly::Failed(match ended {

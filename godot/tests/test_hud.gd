@@ -61,6 +61,17 @@ func test_each_problem_has_its_banner() -> void:
 	hud.queue_free()
 
 
+func test_the_status_line_shows_when_the_sticks_are_being_recorded() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	ok(not hud.sim_text().contains("REC"), "not recording: %s" % hud.sim_text())
+	hud.update_view(_view({"recording_inputs": true}))
+	ok(hud.sim_text().contains("REC STICKS"), "the indicator: %s" % hud.sim_text())
+	hud.update_view(_view({"telemetry": {}, "recording_inputs": true}))
+	ok(hud.sim_text().contains("REC STICKS"), "and before the first state: %s" % hud.sim_text())
+	hud.queue_free()
+
+
 func test_a_fatal_message_stays() -> void:
 	var hud := await _hud()
 	hud.show_fatal("The OfsClient extension is not loaded.")

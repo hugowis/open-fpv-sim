@@ -38,6 +38,7 @@ var settings := {}
 ## Tests set this (a Dictionary like `Controls.read` returns) to fly without a controller.
 var sticks_override = null
 var radio_cut := false
+var inputs_recording := false
 var chase_view := false
 var last_sticks := {}
 var phase_kind := ""
@@ -156,6 +157,7 @@ func _process(delta: float) -> void:
 		"phase": client.get_phase(), "detail": detail, "telemetry": telemetry, "sticks": last_sticks,
 		"controls_status": last_sticks.get("status", ""), "configurator": client.get_configurator_address(),
 		"quad": client.get_quad_name(), "camera": "Chase" if chase_view else "FPV", "radio_cut": radio_cut,
+		"recording_inputs": inputs_recording,
 	})
 
 
@@ -175,6 +177,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_toggle_dvr()
 		KEY_K:
 			set_radio_cut(not radio_cut)
+		KEY_I:
+			_toggle_inputs_recording()
 		KEY_H:
 			hud.toggle_hud()
 		KEY_F1:
@@ -241,6 +245,13 @@ func set_radio_cut(cut: bool) -> void:
 		client.set_radio_loss(cut)
 
 
+func _toggle_inputs_recording() -> void:
+	if client == null:
+		return
+	# The state flips when the server's event arrives, so the indicator is never ahead of the file.
+	client.set_inputs_recording(not inputs_recording)
+
+
 func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	phase_kind = kind
 	if phase == "loading":
@@ -280,6 +291,12 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast("Session ended: %s" % message, "warn")
 		"pilot_connected", "pilot_disconnected":
 			hud.add_toast(message)
+		"inputs_recording_started":
+			inputs_recording = true
+			hud.add_toast("Recording the sticks to %s" % message.get_file())
+		"inputs_recording_stopped":
+			inputs_recording = false
+			hud.add_toast("Sticks recording stopped: %s" % message.get_file())
 		"vtx_changed":
 			hud.add_toast("VTX: %s" % message)
 		"collision":

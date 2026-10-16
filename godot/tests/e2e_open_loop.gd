@@ -96,6 +96,29 @@ func _run() -> void:
 	var restored: bool = await _wait_for(func(): return " ".join(app.hud.toast_texts()).contains("restored"), 15.0)
 	_check(restored, "and the HUD says so")
 
+	var logs := data_dir.path_join("logs")
+	for stale in DirAccess.get_files_at(logs):  # the data directory outlives runs: start from none
+		if stale.contains("-inputs-") and stale.ends_with(".csv"):
+			DirAccess.remove_absolute(logs.path_join(stale))
+	_press(app, KEY_I)
+	var recording: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording, "I starts recording the sticks")
+	await _wait_for(func(): return app.hud.sim_text().contains("REC STICKS"), 2.0)  # the HUD refreshes on the next frame
+	_check(app.hud.sim_text().contains("REC STICKS"), "and the status line says so: %s" % app.hud.sim_text())
+	await _wait_for(func(): return false, 0.3)
+	_press(app, KEY_I)
+	var recorded: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
+	_check(recorded, "I again stops it")
+	var csv_files: Array = []
+	for f in DirAccess.get_files_at(logs):
+		if f.contains("-inputs-") and f.ends_with(".csv"):
+			csv_files.append(f)
+	_check(csv_files.size() == 1, "one inputs CSV in the logs directory: %s" % str(csv_files))
+	if csv_files.size() == 1:
+		var text := FileAccess.get_file_as_string(logs.path_join(csv_files[0]))
+		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n"), "it has the play_inputs header: %s" % text.left(80))
+		_check(text.split("\n", false).size() >= 2, "and at least the first row")
+
 	_press(app, KEY_P)
 	var paused: bool = await _wait_for(func(): return app.client.get_phase() == "paused" and not app.client.get_telemetry()["running"], 5.0)
 	_check(paused, "P pauses the simulation")

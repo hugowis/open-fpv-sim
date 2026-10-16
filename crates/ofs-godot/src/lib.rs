@@ -142,6 +142,13 @@ impl OfsClient {
         self.send(Command::SetRadioLoss(on));
     }
 
+    /// Starts (true) or stops (false) recording the sticks to a replayable CSV the server names; the
+    /// `inputs_recording_started` / `inputs_recording_stopped` events say where it went.
+    #[func]
+    fn set_inputs_recording(&self, on: bool) {
+        self.send(Command::SetInputsRecording(on));
+    }
+
     /// The current phase (see `phase_changed`).
     #[func]
     fn get_phase(&self) -> GString {
