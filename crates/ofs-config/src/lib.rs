@@ -688,6 +688,12 @@ fn format_problems(problems: &[Problem]) -> String {
 }
 
 pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
+    load_with_library_env(path, std::env::var("OFS_LIBRARY").ok().as_deref())
+}
+
+/// `load` with the `OFS_LIBRARY` override given instead of read from the environment: `None` is the library beside
+/// the quads. A repro bundle replays with `None`, so the replayer's own `OFS_LIBRARY` never reaches it.
+pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<QuadConfig, ConfigError> {
     let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io { path: path.to_path_buf(), source })?;
     let parse_err = |message: String| ConfigError::Parse { path: path.to_path_buf(), message };
     let raw: toml::Value = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
@@ -712,7 +718,7 @@ pub fn load(path: &Path) -> Result<QuadConfig, ConfigError> {
         None => return Err(parse_err("missing integer schema_version".into())),
     }
     let file: QuadFile = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
-    let root = library_root(std::env::var("OFS_LIBRARY").ok().as_deref(), path.parent().unwrap_or(Path::new(".")));
+    let root = library_root(library_env, path.parent().unwrap_or(Path::new(".")));
     let mut problems = Vec::new();
     let resolve = |kind: &str, id: &str, field: &str, problems: &mut Vec<Problem>| -> Option<PathBuf> {
         let dir = root.join(kind);

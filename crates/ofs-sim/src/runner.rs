@@ -43,14 +43,14 @@ pub fn pace_once(shared: &Shared) -> Duration {
             Ok(Ok(())) => events.extend(s.changes()),
             Ok(Err(e)) => {
                 tracing::error!("real-time session stopped: {e}");
-                events.push(event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string()));
+                events.push(event(s.vehicle.time_s(), pb::EventKind::SimError, s.failure_text(&e)));
                 events.extend(s.changes());
             }
             Err(payload) => {
                 let e = SimError::Other(format!("internal panic: {}", panic_message(payload.as_ref())));
                 tracing::error!("real-time session stopped: {e}");
-                events.push(event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string()));
-                s.poison(e);
+                s.poison(e.clone());
+                events.push(event(s.vehicle.time_s(), pb::EventKind::SimError, s.failure_text(&e)));
             }
         }
     }

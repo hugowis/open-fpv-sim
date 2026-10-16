@@ -17,6 +17,7 @@ use crate::blackbox::BlackboxCopy;
 use crate::inputs;
 use crate::pacer::OverrunPolicy;
 use crate::pb::{self, sim_server::Sim, sim_server::SimServer};
+use crate::repro::{snapshot_firmware, BundleSource};
 use crate::runner;
 use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
@@ -248,15 +249,31 @@ impl Sim for SimService {
         let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world };
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
-        let blackbox = (opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl)
-            .then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
+        let sitl = opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl;
+        let blackbox = sitl.then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
+        // What a repro bundle needs to run this session again.
+        let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+        let mut repro = BundleSource {
+            quad_path: absolute(Path::new(&req.quad_path)),
+            world_path: (!req.world_path.is_empty()).then(|| absolute(&ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path)))),
+            seed: req.seed,
+            open_loop_fc: opts.fc_override == Some(FcKind::OpenLoop),
+            realtime: mode == RunMode::Realtime,
+            library_env: std::env::var("OFS_LIBRARY").ok(),
+            logs_dir: self.logs_dir(),
+            firmware_dir: sitl.then(|| vehicle::firmware_dir(&self.data_dir, &cfg.source_path)),
+            firmware_initial: Vec::new(),
+        };
         self.blocking(move |shared, slot| {
             *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
+            // The firmware's state as the session starts: after the first boot's diff apply, before any flight.
+            repro.firmware_initial = repro.firmware_dir.as_deref().map(snapshot_firmware).unwrap_or_default();
             let configurator_address = vehicle.configurator_address().unwrap_or_default();
             let mut session = Session::new(vehicle, mode, policy, keep_alive);
             session.watched = shared.watchers.load(Ordering::Acquire) > 0;
             session.quad_stem = quad_stem;
+            session.repro = Some(repro);
             session.blackbox = blackbox;
             *slot = Some(session);
             Ok(pb::LoadReply { quad_name: cfg.name.clone(), base_hz: cfg.sim.base_hz, configurator_address })
@@ -319,7 +336,7 @@ impl Sim for SimService {
                     shared.publish(s.changes());
                     if let Err(e) = result {
                         if s.failure.is_some() {
-                            shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string())]);
+                            shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, s.failure_text(&e))]);
                         }
                         return Err(sim_error(&e));
                     }
