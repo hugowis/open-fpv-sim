@@ -1,12 +1,23 @@
 """Scripted inputs, scheduled faults and world names (spec §5, §6.2), open loop: no Betaflight needed."""
+import time
+
 import pytest
 
 import ofs
 from conftest import QUAD
 
 
-def _events(sim, kinds):
-    return [(e.kind, e.message) for e in sim.events() if e.kind in kinds]
+def _events(sim, kinds, count=1, timeout_s=5.0):
+    """The (kind, message) of the events of these kinds, waiting up to `timeout_s` for `count` of them: the client
+    receives events on a background thread, so one can still be in flight when `run` returns (a race that failed CI
+    once). The wait ends as soon as enough have arrived, so a test that expects none passes `count=0`."""
+    found = []
+    deadline = time.monotonic() + timeout_s
+    while True:
+        found += [(e.kind, e.message) for e in sim.events() if e.kind in kinds]
+        if len(found) >= count or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.01)
 
 
 def test_an_inputs_file_plays_from_now_and_refuses_set_sticks(sim, tmp_path):
@@ -21,7 +32,7 @@ def test_an_inputs_file_plays_from_now_and_refuses_set_sticks(sim, tmp_path):
     assert sim.run(0.02).motor_cmd == (1.0,) * 4, "the 0.5 s row applied at 0.7 s"
     sim.set_sticks(throttle=0.0)  # the file finished
     sim.run(0.05)
-    assert _events(sim, {"inputs_started", "inputs_ended"}) == [
+    assert _events(sim, {"inputs_started", "inputs_ended"}, count=2) == [
         ("inputs_started", "climb.csv: 2 rows over 0.5 s"), ("inputs_ended", "climb.csv: finished")]
 
 
