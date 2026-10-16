@@ -1,0 +1,20 @@
+[package]
+name = "ofs-validate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Validation harness: checks community data submissions and compares them with the simulator"
+
+[dependencies]
+ofs-core.workspace = true
+ofs-config.workspace = true
+ofs-electrical.workspace = true
+ofs-physics.workspace = true
+ofs-sim.workspace = true
+toml.workspace = true
+serde.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

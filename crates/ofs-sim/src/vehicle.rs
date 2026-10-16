@@ -794,6 +794,36 @@ pub fn receiver_thresholds(v: &world_cfg::VideoSection) -> ReceiverThresholds {
     }
 }
 
+/// One motor's drivetrain as the models take it: the propeller, the motor, its ESC and the propeller's inertia.
+/// `build` and the validation harness's thrust stand both read it from here, so they cannot drift apart.
+#[derive(Debug, Clone)]
+pub struct Drivetrain {
+    pub prop: PropParams,
+    pub motor: MotorParams,
+    pub esc: EscParams,
+    pub prop_inertia_kgm2: f64,
+}
+
+/// Motor `i`'s drivetrain parameters from the quad config.
+pub fn drivetrain_params(cfg: &QuadConfig, i: usize) -> Drivetrain {
+    Drivetrain {
+        prop: PropParams {
+            diameter_m: cfg.props[i].diameter_m,
+            ct_table: pairs(&cfg.props[i].ct_table),
+            cp_table: pairs(&cfg.props[i].cp_table),
+            windmill_j0: cfg.props[i].windmill_j0,
+        },
+        motor: MotorParams {
+            kv_rpm_per_v: cfg.motors[i].kv_rpm_per_v,
+            resistance_ohm: cfg.motors[i].resistance_ohm,
+            no_load_current_a: cfg.motors[i].no_load_current_a,
+            rotor_inertia_kgm2: cfg.motors[i].rotor_inertia_kgm2,
+        },
+        esc: EscParams { response_tau_s: cfg.escs[i].response_tau_s, current_limit_a: cfg.escs[i].current_limit_a },
+        prop_inertia_kgm2: cfg.props[i].inertia_kgm2,
+    }
+}
+
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
     let mut bus = Bus::new();
     let n = cfg.frame.motor_positions_frd_m.len();
@@ -801,23 +831,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let mut models: Vec<Box<dyn Model>> = Vec::new();
 
     for i in 0..n {
-        let prop = PropParams {
-            diameter_m: cfg.props[i].diameter_m,
-            ct_table: pairs(&cfg.props[i].ct_table),
-            cp_table: pairs(&cfg.props[i].cp_table),
-            windmill_j0: cfg.props[i].windmill_j0,
-        };
-        models.push(Box::new(Propeller::new(i, prop, &mut bus)));
+        models.push(Box::new(Propeller::new(i, drivetrain_params(cfg, i).prop, &mut bus)));
     }
     for i in 0..n {
-        let motor = MotorParams {
-            kv_rpm_per_v: cfg.motors[i].kv_rpm_per_v,
-            resistance_ohm: cfg.motors[i].resistance_ohm,
-            no_load_current_a: cfg.motors[i].no_load_current_a,
-            rotor_inertia_kgm2: cfg.motors[i].rotor_inertia_kgm2,
-        };
-        let esc = EscParams { response_tau_s: cfg.escs[i].response_tau_s, current_limit_a: cfg.escs[i].current_limit_a };
-        models.push(Box::new(EscMotor::new(i, esc, motor, cfg.props[i].inertia_kgm2, &mut bus)));
+        let d = drivetrain_params(cfg, i);
+        models.push(Box::new(EscMotor::new(i, d.esc, d.motor, d.prop_inertia_kgm2, &mut bus)));
     }
 
     let battery = BatteryParams {
