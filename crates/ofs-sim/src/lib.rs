@@ -4,6 +4,7 @@
 #![allow(clippy::result_large_err)]
 pub mod blackbox;
 pub mod inputs;
+pub mod inputs_recorder;
 pub mod listen;
 pub mod pacer;
 pub mod runner;

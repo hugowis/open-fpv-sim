@@ -14,6 +14,7 @@ use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
+use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -458,6 +459,8 @@ pub struct Vehicle {
     playback: Option<Playback>,
     /// An inputs file that finished on its own, until the session raises its event.
     finished_inputs: Option<String>,
+    /// The sticks recording running now (a row whenever `set_sticks` changes a value).
+    inputs_recorder: Option<InputsRecorder>,
 }
 
 /// An inputs file being played: its rows' due ticks and the next row to apply.
@@ -905,6 +908,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         pending_faults: Vec::new(),
         playback: None,
         finished_inputs: None,
+        inputs_recorder: None,
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
@@ -923,6 +927,9 @@ impl Vehicle {
         bus.set(h.throttle, s.throttle);
         for (sig, v) in h.aux.iter().zip(s.aux) {
             bus.set(*sig, v);
+        }
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(self.scheduler.tick(), s);
         }
     }
 
@@ -1294,6 +1301,43 @@ impl Vehicle {
 
     pub fn is_recording(&self) -> bool {
         self.recorder.is_recording()
+    }
+
+    /// The sticks as the bus holds them now.
+    fn sticks_now(&self) -> Sticks {
+        let (h, bus) = (&self.h, self.scheduler.bus());
+        let mut aux = [0.0; names::RC_AUX_COUNT];
+        for (a, s) in aux.iter_mut().zip(&h.aux) {
+            *a = bus.get(*s);
+        }
+        Sticks { roll: bus.get(h.roll), pitch: bus.get(h.pitch), yaw: bus.get(h.yaw), throttle: bus.get(h.throttle), aux }
+    }
+
+    /// Starts recording the sticks to a new CSV at `path` (the server names it): a row whenever they change, in
+    /// `play_inputs`' format. One at a time; an existing file is never truncated.
+    pub fn start_inputs_recording(&mut self, path: &Path) -> Result<(), RecordError> {
+        if self.inputs_recorder.is_some() {
+            return Err(RecordError::AlreadyRecording);
+        }
+        let now = self.sticks_now();
+        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &now)?);
+        Ok(())
+    }
+
+    /// Finishes the running inputs recording's file.
+    pub fn stop_inputs_recording(&mut self) -> Result<InputsRecordingSummary, RecordError> {
+        self.inputs_recorder.take().ok_or(RecordError::NotRecording)?.finish()
+    }
+
+    pub fn is_recording_inputs(&self) -> bool {
+        self.inputs_recorder.is_some()
+    }
+
+    /// Why the inputs recording died on its own (a write failed), reported once; the recording is over.
+    pub fn take_inputs_recording_failure(&mut self) -> Option<String> {
+        let message = self.inputs_recorder.as_ref()?.failure()?.to_owned();
+        self.inputs_recorder = None;
+        Some(message)
     }
 
     /// Why the last recording stopped on its own (a write failed), reported once.

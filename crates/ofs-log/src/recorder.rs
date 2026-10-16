@@ -79,16 +79,23 @@ pub struct RecorderHandle(Arc<Mutex<State>>);
 /// `<dir>/<stem>-<n>.mcap` with `n` one more than the largest already there (1 in an empty directory). Creates
 /// `dir` as needed.
 pub fn next_log_path(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
+    next_numbered_path(dir, stem, "mcap")
+}
+
+/// `<dir>/<stem>-<n>.<ext>`, with `n` one past the largest number any `<stem>-<n>.<ext>` in `dir` has (the
+/// directory is created if missing).
+pub fn next_numbered_path(dir: &Path, stem: &str, ext: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let prefix = format!("{stem}-");
+    let suffix = format!(".{ext}");
     let mut largest = 0u64;
     for entry in std::fs::read_dir(dir)? {
         let name = entry?.file_name().to_string_lossy().into_owned();
-        if let Some(n) = name.strip_prefix(&prefix).and_then(|rest| rest.strip_suffix(".mcap")).and_then(|n| n.parse::<u64>().ok()) {
+        if let Some(n) = name.strip_prefix(&prefix).and_then(|rest| rest.strip_suffix(&suffix)).and_then(|n| n.parse::<u64>().ok()) {
             largest = largest.max(n);
         }
     }
-    Ok(dir.join(format!("{stem}-{}.mcap", largest + 1)))
+    Ok(dir.join(format!("{stem}-{}{suffix}", largest + 1)))
 }
 
 fn time_ns(tick_end: u64, base_hz: u32) -> u64 {
