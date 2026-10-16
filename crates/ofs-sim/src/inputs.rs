@@ -35,6 +35,17 @@ impl Stick {
         })
     }
 
+    /// The column name in an inputs file (`aux1` for `Aux(0)`).
+    pub fn column(self) -> String {
+        match self {
+            Stick::Roll => "roll".into(),
+            Stick::Pitch => "pitch".into(),
+            Stick::Yaw => "yaw".into(),
+            Stick::Throttle => "throttle".into(),
+            Stick::Aux(i) => format!("aux{}", i + 1),
+        }
+    }
+
     /// The documented range: throttle [0, 1], every other stick and switch [-1, 1].
     fn range(self) -> (f64, f64) {
         match self {
@@ -57,6 +68,26 @@ impl Inputs {
     /// When the last row applies, s after playback starts.
     pub fn duration_s(&self) -> f64 {
         self.rows.last().map_or(0.0, |r| r.0)
+    }
+
+    /// The file this was parsed from, written back: `parse` reads it into an equal value (floats in their
+    /// shortest round-trip form).
+    pub fn to_csv(&self) -> String {
+        let mut out = String::from("t_s");
+        for c in &self.columns {
+            out.push(',');
+            out.push_str(&c.column());
+        }
+        out.push('\n');
+        for (t, values) in &self.rows {
+            out.push_str(&t.to_string());
+            for v in values {
+                out.push(',');
+                out.push_str(&v.to_string());
+            }
+            out.push('\n');
+        }
+        out
     }
 }
 
