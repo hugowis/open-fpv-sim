@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::world::{self as world_cfg, WorldConfig};
-use ofs_config::{BandKind, FcKind, QuadConfig, VtxSection};
+use ofs_config::{BandKind, FcKind, FixedSection, QuadConfig, RadioKind, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
@@ -26,8 +26,9 @@ use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMoun
 use ofs_radio::band::Band;
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{ElrsLink, LinkParams};
+use ofs_radio::fixed::{FixedLink, FixedParams};
 use ofs_radio::joystick::JoystickHandset;
-use ofs_radio::parts::RfFrontEnd;
+use ofs_radio::parts::{Link, RfFrontEnd};
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
 use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
@@ -563,7 +564,7 @@ pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
 }
 
 /// The quad file's radio, wired to the flight controller's UART: the joystick handset (at the world's `[handset]`),
-/// the ELRS link and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
+/// the link the quad file names (ELRS or fixed) and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
 /// the FC's own CRSF telemetry back.
 fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> RadioChain {
     let r = &cfg.radio;
@@ -583,7 +584,7 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
             .collect(),
         tx_power_mw: f64::from(r.tx_power_mw),
     };
-    let link = LinkParams {
+    let link_params = LinkParams {
         band: match r.band_or_default() {
             BandKind::G2_4 => Band::G2_4,
             BandKind::Mhz900 => Band::Mhz900,
@@ -608,9 +609,25 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
         ground_bounce: true,
     };
     let handset = JoystickHandset::new(front_end, bus);
-    let link = ElrsLink::new(link, opts.seed, bus);
+    let link: Box<dyn Link> = match r.kind {
+        RadioKind::Elrs => Box::new(ElrsLink::new(link_params, opts.seed, bus)),
+        RadioKind::Fixed => {
+            let f = r.fixed.unwrap_or(FixedSection { loss_fraction: 0.0, burst_on_s: 0.0, burst_off_s: 0.0 });
+            Box::new(FixedLink::new(
+                FixedParams {
+                    packet_rate_hz: r.packet_rate_hz,
+                    latency_packets: r.latency_packets,
+                    loss_fraction: f.loss_fraction,
+                    burst_on_s: f.burst_on_s,
+                    burst_off_s: f.burst_off_s,
+                },
+                opts.seed,
+                bus,
+            ))
+        }
+    };
     let receiver = CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in);
-    RadioChain::new(Box::new(handset), Box::new(link), Box::new(receiver), base_hz, bus)
+    RadioChain::new(Box::new(handset), link, Box::new(receiver), base_hz, bus)
 }
 
 /// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.

@@ -596,3 +596,37 @@ fn an_unknown_band_is_a_parse_error_listing_the_names() {
     let err = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", "band = \"5g8\"\npacket_rate_hz = 500")).unwrap_err();
     assert!(err.to_string().contains("unknown variant `5g8`") && err.to_string().contains("900"), "{err}");
 }
+
+#[test]
+fn a_fixed_link_takes_its_own_table_and_any_dividing_rate() {
+    let cfg = shipped_with(|t| {
+        *t = t
+            .replace("kind = \"elrs\"", "kind = \"fixed\"")
+            .replace("packet_rate_hz = 500", "packet_rate_hz = 400")
+            .replace("tx_power_mw = 250", "tx_power_mw = 250\n\n[radio.fixed]\nloss_fraction = 0.1\nburst_on_s = 0.05\nburst_off_s = 0.2");
+    })
+    .unwrap();
+    assert_eq!(cfg.radio.kind, RadioKind::Fixed);
+    let f = cfg.radio.fixed.unwrap();
+    assert_eq!((f.loss_fraction, f.burst_on_s, f.burst_off_s), (0.1, 0.05, 0.2));
+}
+
+#[test]
+fn keys_that_belong_to_the_other_link_are_errors_not_ignored() {
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"\nband = \"900\"")).unwrap_err();
+    assert!(err.to_string().contains("radio.band"), "{err}");
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 250\n\n[radio.fixed]\nloss_fraction = 0.1")).unwrap_err();
+    assert!(err.to_string().contains("radio.fixed"), "{err}");
+}
+
+#[test]
+fn fixed_link_values_are_validated() {
+    let with = |fixed: &str| shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"").replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n\n[radio.fixed]\n{fixed}")));
+    assert!(with("loss_fraction = 1.5").unwrap_err().to_string().contains("radio.fixed.loss_fraction"));
+    assert!(with("loss_fraction = -0.1").unwrap_err().to_string().contains("radio.fixed.loss_fraction"));
+    assert!(with("burst_on_s = 0.1").unwrap_err().to_string().contains("radio.fixed.burst_off_s"));
+    assert!(with("burst_on_s = -1.0").unwrap_err().to_string().contains("radio.fixed.burst_on_s"));
+    assert!(with("loss_fraction = 0.0").is_ok());
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"").replace("packet_rate_hz = 500", "packet_rate_hz = 300")).unwrap_err();
+    assert!(err.to_string().contains("radio.packet_rate_hz"), "300 does not divide 8000: {err}");
+}
