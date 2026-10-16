@@ -67,6 +67,23 @@ fn a_stiff_mount_passes_the_vibration() {
 }
 
 #[test]
+fn a_driven_filter_goes_idle_again_once_the_input_stops() {
+    // With no input the state decays towards zero, but in floating point it can end in an endless tiny oscillation
+    // among subnormal numbers instead of reaching it; the filter must flush that to exactly zero.
+    for m in [soft(), MountResponse { natural_hz: 120.0, damping_ratio: 0.15 }, MountResponse { natural_hz: 5.0, damping_ratio: 0.05 }] {
+        let mut filter = SecondOrder::transmissibility(m, DT);
+        for k in 0..1600 {
+            filter.step((2.0 * PI * 60.0 * k as f64 * DT).sin());
+        }
+        assert!(!filter.is_idle());
+        for _ in 0..(60.0 / DT) as usize {
+            filter.step(0.0);
+        }
+        assert!(filter.is_idle(), "{m:?} still holds state a minute after the drive stopped");
+    }
+}
+
+#[test]
 fn a_fresh_filter_is_idle_and_a_driven_one_is_not() {
     let mut filter = SecondOrder::transmissibility(soft(), DT);
     assert!(filter.is_idle());

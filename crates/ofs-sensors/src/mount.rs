@@ -2,6 +2,9 @@
 //! `T(s) = (1 + 2ζ s/ωn) / (1 + 2ζ s/ωn + s²/ωn²)` is 1 at DC, peaks at `√(1+4ζ²)/(2ζ)` at `ωn` and rolls off at
 //! 40 dB/decade above `√2·ωn`: a stiff mount passes the motors' vibration, a soft one cuts it.
 
+/// Filter state below this magnitude is flushed to zero (the vibration terms are of order 1e-3 and up).
+const STATE_FLOOR: f64 = 1e-30;
+
 /// A mount's natural frequency and damping ratio (part data, `[frame.fc_mount]`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MountResponse {
@@ -45,6 +48,12 @@ impl SecondOrder {
         let y = self.b0 * x + self.z1;
         self.z1 = self.b1 * x - self.a1 * y + self.z2;
         self.z2 = self.b2 * x - self.a2 * y;
+        // With no input the state would decay into an endless tiny oscillation among subnormal numbers rather than
+        // reach zero; far below anything the IMU can resolve, flush it so `is_idle` can come true again.
+        if self.z1.abs() < STATE_FLOOR && self.z2.abs() < STATE_FLOOR {
+            self.z1 = 0.0;
+            self.z2 = 0.0;
+        }
         y
     }
 
