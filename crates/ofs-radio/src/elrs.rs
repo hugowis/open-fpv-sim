@@ -1,10 +1,14 @@
-//! ExpressLRS 2.4 GHz on the shared propagation model. Every packet the handset samples the sticks; the
-//! packet's RSSI comes from the geometry — antenna patterns, range, obstruction, polarization, ground bounce,
-//! fading, body shadow — and a logistic curve around the mode's sensitivity decides loss. The receiver writes
-//! one CRSF RC frame per packet it receives (and LINK_STATISTICS every N received packets) to the flight
-//! controller's UART; when packets stop it goes silent, as ExpressLRS does by default, and Betaflight's own
-//! failsafe takes over. Deterministic: every packet draws the same count of numbers from the model's own
-//! seeded stream, whatever the inputs.
+//! The ExpressLRS link: the air between the handset and the receiver, on the shared propagation model. Every packet
+//! slot it takes the handset's [`TxFrame`] and works out what the air does to it: the RF budget of both
+//! directions (antenna patterns, range, obstruction, polarization, ground bounce, fading, body shadow) in the
+//! band's profile (2.4 GHz or 900 MHz, `band`), a logistic packet-error curve around the packet rate's
+//! sensitivity that decides loss, the latency pipeline that delays the channels by whole packets, link quality
+//! (the share received of the last 100 packets, per direction) and the downlink telemetry slots. It returns a
+//! [`Delivery`]: the channels after latency (or none when the packet was lost) and the quality figures the
+//! receiver reports and the bus publishes. The CRSF bytes are the receiver's work (`receiver.rs`), the sticks the
+//! handset's (`joystick.rs`). When packets stop the receiver goes silent, as ExpressLRS does by default, and
+//! Betaflight's own failsafe takes over. Deterministic: every packet draws the same count of numbers from the
+//! model's own seeded stream, whatever the inputs.
 use std::collections::VecDeque;
 
 use glam::{DQuat, DVec3};

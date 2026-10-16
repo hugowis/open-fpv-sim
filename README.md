@@ -34,12 +34,16 @@ What is in it:
   catalog (M4b), and sessions are recordable and replayable — the signal bus to MCAP (two identical lockstep runs
   write byte-identical files, Betaflight included), pandas/CSV/Parquet export, a live Rerun view, scripted stick
   inputs, faults at a simulated time, and Betaflight's own Blackbox logs (M4c, `docs/research/mcap-determinism.md`).
+- The radio is three swappable parts — a handset, a link and a receiver — so other links can be tried: ExpressLRS on
+  2.4 GHz or 900 MHz, or a geometry-free `fixed` link, flown through the same chain; and a live flight's sticks record
+  to a CSV that `play_inputs` replays in lockstep (M5, `docs/writing-a-radio-model.md`).
 
 Documentation:
 - `docs/dev-setup.md` — building, running and testing on Windows and Linux (and the performance numbers).
 - `docs/architecture.md` — how the crates, the server and the clients fit together, and how to add a part, a model,
   a fault or a recorded signal.
 - `docs/roadmap.md` — v1's known limitations and what comes next.
+- `docs/writing-a-radio-model.md` — the radio's three parts and how to write a link.
 - `CONTRIBUTING.md` — the test tiers, CI and the release steps. `CHANGELOG.md` — what changed, by release.
 - `docs/research/` — the models' equations and every constant's provenance; `docs/superpowers/specs/` — the designs.
 
@@ -82,7 +86,7 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
     godot --path godot                             # Godot 4.7; see docs/dev-setup.md for the binary
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** record the
-FPV view (DVR), **K** cut the radio link (failsafe test), **H** show/hide the HUD, **F1** help, **F2** controls
+FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks to a replayable CSV, **H** show/hide the HUD, **F1** help, **F2** controls
 setup, **F11** fullscreen, **Esc** closes the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
@@ -108,6 +112,10 @@ Overrides:
 With `OFS_SITL_LAUNCH` set (see "With real Betaflight" above), the game starts Betaflight and arms it through the
 simulated radio link.
 
+The radio between the handset and Betaflight is three swappable parts (a handset, a link, a receiver): the quad file's
+`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Press **I** to record
+the sticks of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them.
+
 ## Component library
 
 The quad file is schema 5: it references parts and keeps only its own wiring, and the hardware lives in
@@ -129,8 +137,9 @@ of a part must carry a `[provenance]` entry or the part is refused at load:
 Every shipped value is an estimate recorded in the open — the ledger is
 `docs/research/component-library.md`, and `library/README.md` describes adding a part. Schema-4 quad files
 (which carried the `[frame]`, `[ground]`, `[motor]`, `[prop]`, `[esc]`, `[battery]` and `[vtx]` hardware
-inline) are refused at load with a message naming the move; the three shipped quads
-(`quads/opendrone-5f-freestyle.toml`, `quads/opendrone-5f-tramp.toml`, `quads/opendrone-5f-weak-link.toml`)
+inline) are refused at load with a message naming the move; the shipped quads
+(`quads/opendrone-5f-freestyle.toml`, `quads/opendrone-5f-tramp.toml`, `quads/opendrone-5f-weak-link.toml`,
+`quads/opendrone-5f-900mhz.toml`, `quads/opendrone-5f-fixed-link.toml`)
 are the worked example of the migration.
 
 ## The fault catalog

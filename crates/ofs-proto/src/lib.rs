@@ -1,4 +1,4 @@
-//! Protocol 9 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
+//! Protocol 10 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
 //! (`ofs-sim`) and every Rust client (`ofs-client`, the Godot extension) build against this one crate.
 // tonic's `Status` is the error type of every gRPC call (the generated traits fix it); boxing it would only move
 // the size elsewhere.

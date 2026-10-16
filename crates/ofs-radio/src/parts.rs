@@ -22,7 +22,8 @@ pub const LQ_WINDOW: usize = 100;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TxFrame {
     pub channels: Channels,
-    /// The transmitter is switched on (the pilot is connected, the radio is not cut).
+    /// The transmitter's switch is on (`radio.tx_enabled`: a pilot or script is connected and the radio was not
+    /// switched off). The link-loss fault's cut is not applied here: each link applies it (`FaultSignals::link_cut`).
     pub transmitting: bool,
 }
 

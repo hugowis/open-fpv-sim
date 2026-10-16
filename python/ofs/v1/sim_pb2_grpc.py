@@ -26,8 +26,9 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -151,8 +152,9 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -431,8 +433,9 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
