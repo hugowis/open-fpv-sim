@@ -32,6 +32,11 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - The radio is three swappable parts (`docs/writing-a-radio-model.md`), but only one handset (`joystick`), one
   receiver (`crsf`) and two links (`elrs`, `fixed`) ship; a new one is a Rust module, a match arm and a config enum
   variant, in-tree.
+- The burst-loss window test `time_s % (on + off) < on` can land a few ulps below an edge, so at some window edges
+  the packet that starts an off window is still lost (one packet per edge at most; seen with on = off = 0.05 s at
+  packet 75). `FaultSignals::survives` and `FixedLink` share it, and the ELRS goldens freeze it: a fix (such as
+  snapping the phase by about 1 ns) changes the golden digests, so it needs a deliberate regeneration from the
+  pre-split commit 1d9f204 on both OSes, in its own commit.
 
 ### Inputs recording (`docs/superpowers/specs/2026-10-15-m5-radio-components-design.md` §6)
 - A replay is not the real-time flight: real-time timing, the SITL schedule and the link's seeded draws differ. The
