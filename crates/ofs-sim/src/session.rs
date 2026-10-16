@@ -249,6 +249,9 @@ impl Session {
         if let Some(message) = self.vehicle.take_recording_failure() {
             out.push(event(s.time_s, pb::EventKind::RecordingStopped, format!("recording failed: {message}")));
         }
+        if let Some(message) = self.vehicle.take_inputs_recording_failure() {
+            out.push(event(s.time_s, pb::EventKind::InputsRecordingStopped, format!("inputs recording failed: {message}")));
+        }
         out
     }
 

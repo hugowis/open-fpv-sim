@@ -48,6 +48,8 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_INPUTS_ENDED: _ClassVar[EventKind]
     EVENT_KIND_RECORDING_STARTED: _ClassVar[EventKind]
     EVENT_KIND_RECORDING_STOPPED: _ClassVar[EventKind]
+    EVENT_KIND_INPUTS_RECORDING_STARTED: _ClassVar[EventKind]
+    EVENT_KIND_INPUTS_RECORDING_STOPPED: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
@@ -78,6 +80,8 @@ EVENT_KIND_INPUTS_STARTED: EventKind
 EVENT_KIND_INPUTS_ENDED: EventKind
 EVENT_KIND_RECORDING_STARTED: EventKind
 EVENT_KIND_RECORDING_STOPPED: EventKind
+EVENT_KIND_INPUTS_RECORDING_STARTED: EventKind
+EVENT_KIND_INPUTS_RECORDING_STOPPED: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -468,6 +472,22 @@ class InputsFile(_message.Message):
     name: str
     csv: str
     def __init__(self, name: _Optional[str] = ..., csv: _Optional[str] = ...) -> None: ...
+
+class InputsRecordingStarted(_message.Message):
+    __slots__ = ("path",)
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    def __init__(self, path: _Optional[str] = ...) -> None: ...
+
+class InputsRecordingSummary(_message.Message):
+    __slots__ = ("path", "rows", "duration_s")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    ROWS_FIELD_NUMBER: _ClassVar[int]
+    DURATION_S_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    rows: int
+    duration_s: float
+    def __init__(self, path: _Optional[str] = ..., rows: _Optional[int] = ..., duration_s: _Optional[float] = ...) -> None: ...
 
 class ReceiverAntenna(_message.Message):
     __slots__ = ("name", "kind", "gain_dbi", "beamwidth_deg", "polarization", "aim_az_deg", "aim_el_deg")

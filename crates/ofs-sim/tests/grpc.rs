@@ -462,6 +462,63 @@ async fn the_server_names_recordings_and_reports_them_as_events() {
 }
 
 #[tokio::test]
+async fn the_server_records_a_sessions_sticks_names_the_file_and_reports_it() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    assert_eq!(kind(&c.stop_inputs_recording(Empty {}).await.unwrap_err()), "invalid_state", "none running");
+    let started = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    assert_eq!(std::path::PathBuf::from(&started.path), service.logs_dir().join("opendrone-5f-freestyle-inputs-1.csv"));
+    assert_eq!(kind(&c.start_inputs_recording(Empty {}).await.unwrap_err()), "invalid_state", "one at a time");
+    c.set_sticks(Sticks { throttle: 0.5, ..Default::default() }).await.unwrap();
+    c.run(RunRequest { seconds: 0.5 }).await.unwrap();
+    c.set_sticks(Sticks { throttle: 0.8, roll: 0.25, ..Default::default() }).await.unwrap();
+    c.run(RunRequest { seconds: 0.5 }).await.unwrap();
+    let summary = c.stop_inputs_recording(Empty {}).await.unwrap().into_inner();
+    assert_eq!((summary.path.as_str(), summary.rows, summary.duration_s), (started.path.as_str(), 2, 0.5));
+    let text = std::fs::read_to_string(&started.path).unwrap();
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4", "0,0,0,0,0.5,-1,-1,-1,-1", "0.5,0.25,0,0,0.8,-1,-1,-1,-1"]
+    );
+    let next = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    assert!(next.path.ends_with("opendrone-5f-freestyle-inputs-2.csv"), "{}", next.path);
+    let got = drain(&mut events, &[EventKind::InputsRecordingStarted, EventKind::InputsRecordingStopped]);
+    assert_eq!(
+        got,
+        [
+            (EventKind::InputsRecordingStarted, started.path.clone()),
+            (EventKind::InputsRecordingStopped, format!("{}: 2 rows over 0.5 s", started.path)),
+            (EventKind::InputsRecordingStarted, next.path.clone()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_inputs_recording_is_refused_while_a_file_plays_and_without_a_session() {
+    let mut c = start().await;
+    assert_eq!(kind(&c.start_inputs_recording(Empty {}).await.unwrap_err()), "not_loaded");
+    load_open_loop(&mut c).await;
+    c.play_inputs(InputsFile { name: "climb.csv".into(), csv: "t_s,throttle\n0,0.3\n30,1\n".into() }).await.unwrap();
+    let err = c.start_inputs_recording(Empty {}).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_state");
+    assert!(err.message().contains("climb.csv is playing"), "{}", err.message());
+}
+
+#[tokio::test]
+async fn unloading_mid_recording_leaves_a_complete_file() {
+    let (mut c, service) = start_with_service().await;
+    load_open_loop(&mut c).await;
+    let started = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    c.set_sticks(Sticks { throttle: 0.3, ..Default::default() }).await.unwrap();
+    c.run(RunRequest { seconds: 0.1 }).await.unwrap();
+    c.unload(Empty {}).await.unwrap();
+    let text = std::fs::read_to_string(&started.path).unwrap();
+    assert_eq!(text.lines().collect::<Vec<_>>(), ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4", "0,0,0,0,0.3,-1,-1,-1,-1"]);
+    let _ = service;
+}
+
+#[tokio::test]
 async fn a_recording_pattern_matching_nothing_is_refused_with_its_near_misses() {
     let mut c = start().await;
     load_open_loop(&mut c).await;

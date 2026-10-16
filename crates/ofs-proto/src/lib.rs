@@ -9,7 +9,7 @@ pub mod pb {
 }
 
 /// The protocol version this build speaks; the `Handshake` RPC compares it on both sides.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The unit vector (north, east, down) a heading and an elevation point along: how the server builds an antenna's
 /// aim and how clients draw it (`ReceiverAntenna.aim_az_deg` is added to the pilot's facing to give the heading).
