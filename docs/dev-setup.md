@@ -264,6 +264,13 @@ M5 manual check (needs a controller; the maintainer's TX15 in USB joystick mode 
    `sim.run(20)`, and watch the replay in Rerun (`ofs.rerun.view(sim)`) or the MCAP in Foxglove.
 3. Press **I**, then **R** (reload): `REC STICKS` clears and the next **I** starts a new file.
 
+Checked by hand, 2026-10-16 (joystick, real Betaflight in WSL): steps 1 and 3 behave as written. A 20.6 s flight recorded
+3,580 rows. Step 2 in a lockstep session with real Betaflight needs the boot first: `sim.run(6)`, then `play_inputs`,
+then `run(<the file's last t_s>)`; the flight replays (a climb to about 47 m, motors idling at the end, link up). Replays
+of one file are byte-identical in MCAP when they start from a saved EEPROM; the first replay in a fresh data directory
+differs, because that first Betaflight boot flashes the EEPROM and applies the diff. Close the game before replaying
+with Betaflight: the lockstep session's SITL cleanup kills the game's Betaflight.
+
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
 - **Symptom:** SITL looks silent and runs fail with "no motor output within 5000 ms" or a first-exchange timeout.
