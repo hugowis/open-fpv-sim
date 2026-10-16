@@ -43,6 +43,8 @@ Documentation:
 - `docs/architecture.md` — how the crates, the server and the clients fit together, and how to add a part, a model,
   a fault or a recorded signal.
 - `docs/roadmap.md` — v1's known limitations and what comes next.
+- `docs/validation.md` — how real measurements are submitted and compared with the models; `docs/repro-bundle.md` —
+  the folder a failed session writes and how to replay it.
 - `docs/writing-a-radio-model.md` — the radio's three parts and how to write a link.
 - `CONTRIBUTING.md` — the test tiers, CI and the release steps. `CHANGELOG.md` — what changed, by release.
 - `docs/research/` — the models' equations and every constant's provenance; `docs/superpowers/specs/` — the designs.

@@ -1,0 +1,9 @@
+# Synthetic, illustrative figures for a 2207 1950 KV motor with a 5-inch tri-blade propeller on 6S. Not a measurement.
+# command: the ESC command (0-1). voltage_v: the pack voltage under load. current_a: battery-side. A blank cell was not recorded.
+command,voltage_v,rpm,thrust_n,current_a
+0.20,24.0,14000,2.2,3.0
+0.30,23.9,18000,3.6,
+0.40,23.8,21500,5.1,11.0
+0.60,23.4,27000,8.0,24.0
+0.80,22.9,31000,10.6,38.0
+1.00,22.4,34000,12.7,52.0

@@ -29,6 +29,9 @@ jobs:
       - run: cargo build -p ofs-sim --locked
       - run: python -m pip install -e "python[dev]"
       - run: python -m pytest python/tests -v
+      # Parent spec §8.5, tracked, not gating: the worked validation report in the job summary. It fails only when
+      # the shipped submission is invalid; the model's error against it never fails the build (docs/validation.md).
+      - run: cargo run -p ofs-validate --locked -- validation/thrust-stand/example-2207-5in --summary
 
   msrv:
     runs-on: ubuntu-24.04
