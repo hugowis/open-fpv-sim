@@ -39,6 +39,10 @@ report runs in CI; the repro bundle exists.
 
 ## 3. M5 — the real-radio bridge
 
+> **Amended 2026-10-15.** M5 became "swappable radio components" with joystick input kept and live-flight recording; the serial
+> radio below did not survive its capture (the TX15's USB port streams no CRSF). See `2026-10-15-m5-radio-components-design.md`.
+> The text below is the original intent, kept for history.
+
 ELRS TX firmware (including RadioMaster internal modules) has a USB mode that speaks CRSF over serial — the same
 path commercial simulators use for real radios. The bridge adds a serial input source beside the joystick adapter:
 

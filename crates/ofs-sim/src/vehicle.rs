@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::world::{self as world_cfg, WorldConfig};
-use ofs_config::{FcKind, QuadConfig, VtxSection};
+use ofs_config::{BandKind, FcKind, FixedSection, HandsetKind, QuadConfig, RadioKind, ReceiverKind, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
 use ofs_electrical::battery::{Battery, BatteryParams};
@@ -14,6 +14,7 @@ use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_fc::open_loop::OpenLoopFc;
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
+use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -23,7 +24,14 @@ use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
-use ofs_radio::elrs::{ElrsLink, FcTelemetry, FcTelemetryHandle, LinkParams};
+use ofs_radio::band::Band;
+use ofs_radio::chain::RadioChain;
+use ofs_radio::elrs::{ElrsLink, LinkParams};
+use ofs_radio::fixed::{FixedLink, FixedParams};
+use ofs_radio::joystick::JoystickHandset;
+use ofs_radio::parts::{Handset, Link, Receiver, RfFrontEnd};
+use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
+use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_video::link::{Emitter, LinkParams as VideoLinkParams, LinkWorld, ReceiverAntenna, VideoLink, VideoSync, VtxInterferenceHandle, FIELD_RATE_HZ};
@@ -451,6 +459,8 @@ pub struct Vehicle {
     playback: Option<Playback>,
     /// An inputs file that finished on its own, until the session raises its event.
     finished_inputs: Option<String>,
+    /// The sticks recording running now (a row whenever `set_sticks` changes a value).
+    inputs_recorder: Option<InputsRecorder>,
 }
 
 /// An inputs file being played: its rows' due ticks and the next row to apply.
@@ -554,6 +564,77 @@ pub fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
 /// The world's objects as collidable shapes, exactly as the file gives them (not rooted).
 pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
     world.objects.iter().map(|o| WorldObject { name: o.name.clone(), shape: object_shape(o) }).collect()
+}
+
+/// The quad file's radio, wired to the flight controller's UART: the joystick handset (at the world's `[handset]`),
+/// the link the quad file names (ELRS or fixed) and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
+/// the FC's own CRSF telemetry back.
+fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> RadioChain {
+    let r = &cfg.radio;
+    let facing = opts.world.pilot.facing_deg;
+    let handset = &opts.world.handset;
+    let front_end = RfFrontEnd {
+        position: v3(handset.position(&opts.world.pilot)),
+        antennas: handset
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, a.beamwidth_deg),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
+            })
+            .collect(),
+        tx_power_mw: f64::from(r.tx_power_mw),
+    };
+    let link_params = LinkParams {
+        band: match r.band_or_default() {
+            BandKind::G2_4 => Band::G2_4,
+            BandKind::Mhz900 => Band::Mhz900,
+        },
+        packet_rate_hz: r.packet_rate_hz,
+        latency_packets: r.latency_packets,
+        tx_power_mw: front_end.tx_power_mw,
+        handset_position: front_end.position,
+        handset_antennas: front_end.antennas.clone(),
+        quad_antennas: r
+            .antennas
+            .iter()
+            .map(|a| Antenna {
+                kind: antenna_kind(a.kind, None),
+                gain_dbi: a.gain_dbi,
+                polarization: polarization(a.polarization),
+                axis: v3(a.mount_frd).normalize(),
+            })
+            .collect(),
+        obstacles: world_obstacles(&opts.world),
+        fading: true,
+        ground_bounce: true,
+    };
+    let handset: Box<dyn Handset> = match r.handset {
+        HandsetKind::Joystick => Box::new(JoystickHandset::new(front_end, bus)),
+    };
+    let link: Box<dyn Link> = match r.kind {
+        RadioKind::Elrs => Box::new(ElrsLink::new(link_params, opts.seed, bus)),
+        RadioKind::Fixed => {
+            let f = r.fixed.unwrap_or(FixedSection { loss_fraction: 0.0, burst_on_s: 0.0, burst_off_s: 0.0 });
+            Box::new(FixedLink::new(
+                FixedParams {
+                    packet_rate_hz: r.packet_rate_hz,
+                    latency_packets: r.latency_packets,
+                    loss_fraction: f.loss_fraction,
+                    burst_on_s: f.burst_on_s,
+                    burst_off_s: f.burst_off_s,
+                },
+                opts.seed,
+                bus,
+            ))
+        }
+    };
+    let receiver: Box<dyn Receiver> = match r.receiver {
+        ReceiverKind::Crsf => Box::new(CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in)),
+    };
+    RadioChain::new(handset, link, receiver, base_hz, bus)
 }
 
 /// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.
@@ -730,44 +811,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
 
     let r = &cfg.radio;
-    let facing = opts.world.pilot.facing_deg;
-    let handset = &opts.world.handset;
-    let link = LinkParams {
-        packet_rate_hz: r.packet_rate_hz,
-        latency_packets: r.latency_packets,
-        tx_power_mw: f64::from(r.tx_power_mw),
-        link_stats_interval_packets: r.link_stats_interval_packets,
-        handset_position: v3(handset.position(&opts.world.pilot)),
-        handset_antennas: handset
-            .antennas
-            .iter()
-            .map(|a| Antenna {
-                kind: antenna_kind(a.kind, a.beamwidth_deg),
-                gain_dbi: a.gain_dbi,
-                polarization: polarization(a.polarization),
-                axis: aim_ned(facing + a.aim_az_deg, a.aim_el()),
-            })
-            .collect(),
-        quad_antennas: r
-            .antennas
-            .iter()
-            .map(|a| Antenna {
-                kind: antenna_kind(a.kind, None),
-                gain_dbi: a.gain_dbi,
-                polarization: polarization(a.polarization),
-                axis: v3(a.mount_frd).normalize(),
-            })
-            .collect(),
-        obstacles: world_obstacles(&opts.world),
-        fading: true,
-        ground_bounce: true,
-    };
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     let radio_tap = Wire::new(VIDEO_TAP_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    let elrs = ElrsLink::new(link, base_hz / r.packet_rate_hz, opts.seed, receiver_uart.clone(), radio_tap.clone(), &mut bus);
-    let fc_telemetry = elrs.fc_telemetry_handle();
-    models.push(Box::new(elrs));
+    let chain = radio_chain(cfg, opts, base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
+    let fc_telemetry = chain.fc_telemetry_handle();
+    models.push(Box::new(chain));
 
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
@@ -859,6 +908,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         pending_faults: Vec::new(),
         playback: None,
         finished_inputs: None,
+        inputs_recorder: None,
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
@@ -877,6 +927,9 @@ impl Vehicle {
         bus.set(h.throttle, s.throttle);
         for (sig, v) in h.aux.iter().zip(s.aux) {
             bus.set(*sig, v);
+        }
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(self.scheduler.tick(), s);
         }
     }
 
@@ -1248,6 +1301,49 @@ impl Vehicle {
 
     pub fn is_recording(&self) -> bool {
         self.recorder.is_recording()
+    }
+
+    /// The sticks as the bus holds them now.
+    fn sticks_now(&self) -> Sticks {
+        let (h, bus) = (&self.h, self.scheduler.bus());
+        let mut aux = [0.0; names::RC_AUX_COUNT];
+        for (a, s) in aux.iter_mut().zip(&h.aux) {
+            *a = bus.get(*s);
+        }
+        Sticks { roll: bus.get(h.roll), pitch: bus.get(h.pitch), yaw: bus.get(h.yaw), throttle: bus.get(h.throttle), aux }
+    }
+
+    /// Starts recording the sticks to a new CSV at `path` (the server names it): a row whenever they change, in
+    /// `play_inputs`' format. One at a time; an existing file is never truncated.
+    pub fn start_inputs_recording(&mut self, path: &Path) -> Result<(), RecordError> {
+        if self.inputs_recorder.is_some() {
+            return Err(RecordError::AlreadyRecording);
+        }
+        let now = self.sticks_now();
+        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &now)?);
+        Ok(())
+    }
+
+    /// Finishes the running inputs recording's file.
+    pub fn stop_inputs_recording(&mut self) -> Result<InputsRecordingSummary, RecordError> {
+        self.inputs_recorder.take().ok_or(RecordError::NotRecording)?.finish()
+    }
+
+    pub fn is_recording_inputs(&self) -> bool {
+        self.inputs_recorder.is_some()
+    }
+
+    /// Tests: runs `recorder` (over an injected writer) as the inputs recording.
+    #[cfg(test)]
+    pub(crate) fn set_inputs_recorder(&mut self, recorder: InputsRecorder) {
+        self.inputs_recorder = Some(recorder);
+    }
+
+    /// Why the inputs recording died on its own (a write failed), reported once; the recording is over.
+    pub fn take_inputs_recording_failure(&mut self) -> Option<String> {
+        let message = self.inputs_recorder.as_ref()?.failure()?.to_owned();
+        self.inputs_recorder = None;
+        Some(message)
     }
 
     /// Why the last recording stopped on its own (a write failed), reported once.

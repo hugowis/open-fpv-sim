@@ -27,7 +27,30 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - Telemetry slots are a fixed 1:4 ratio of the downlink (`TELEMETRY_SLOT_DIVISOR`), and the shared RC/telemetry
   UART has no contention model.
 - The `RadioLoss` fault acts on the uplink only.
-- Every constant is an estimate or a published figure; none is measured.
+- Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
+  noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).
+- The radio is three swappable parts (`docs/writing-a-radio-model.md`), but only one handset (`joystick`), one
+  receiver (`crsf`) and two links (`elrs`, `fixed`) ship; a new one is a Rust module, a match arm and a config enum
+  variant, in-tree.
+- The burst-loss window test `time_s % (on + off) < on` can land a few ulps below an edge, so at some window edges
+  the packet that starts an off window is still lost (one packet per edge at most; seen with on = off = 0.05 s at
+  packet 75). `FaultSignals::survives` and `FixedLink` share it, and the ELRS goldens freeze it: a fix (such as
+  snapping the phase by about 1 ns) changes the golden digests, so it needs a deliberate regeneration from the
+  pre-split commit 1d9f204 on both OSes, in its own commit.
+
+### Inputs recording (`docs/superpowers/specs/2026-10-15-m5-radio-components-design.md` §6)
+- A replay is not the real-time flight: real-time timing, the SITL schedule and the link's seeded draws differ. The
+  CSV has no transmitter column, so a link cut (**K**) is not captured.
+- `Load` and `Unload` drop a running inputs recording without publishing `inputs_recording_stopped`: a client that
+  tracks the recording state must reset it on a new session, as the Godot game does.
+- `PlayInputs` is refused while an inputs recording runs (playback writes the bus directly, so a scripted segment
+  would be missing from the file): stop the recording first.
+- `Vehicle::set_sticks` accepts non-finite values (the gRPC server rejects them, `server.rs`); a direct library
+  caller can put a NaN on the bus, which aborts the next run.
+- A stick outside [-1, 1] is clamped in the file but reaches the bus unclamped (every consumer clamps, the CRSF tick
+  conversion and the open-loop FC, so the flight is the same; only the raw `rc.*` channels in an MCAP differ), a stick
+  change reverted within one tick still writes a redundant row, and a non-finite stick on the bus when a recording
+  starts gives no first row.
 
 ### Video (`docs/research/video-link.md`)
 - One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
@@ -74,13 +97,20 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ### Fidelity (parent spec §1.5, §2)
 - Level 2: AM32 and ExpressLRS as host-compiled firmware in the loop. Level 3 (MCU emulation) stays out of scope,
   but the interfaces must not preclude it.
-- Real radio input over CRSF serial, and telemetry back to a real radio.
+- A real radio over serial: the TX15's USB-VCP does not stream CRSF (`docs/research/serial-radio.md`); the untested
+  routes are the external module bay with a USB-UART adapter, and a Lua script over `serialWrite`. **Blocked on a
+  verified route.**
+- Crossfire and Tracer links: a profile or a `Link` each now that the seams exist; they need sourced figures.
+- Non-CRSF receivers (SBUS, iBUS, FrSky, DSMX): a `Receiver` each, with the matching Betaflight config.
+- Plugin loading for radio models from outside the tree.
+- The 2.4 GHz 50 Hz sensitivity is -117 dBm in the model; ExpressLRS's table now lists -115 dBm (changing it
+  changes every seeded 50 Hz run).
 
 ### Modelling
 - A thermal model (ESCs, motors, VTX); windmilling drag on a dead motor; a per-cell battery with capacity fade;
   vibration transmissibility (a structural model); `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
-- 900 MHz ExpressLRS, dynamic power and frequency hopping; 2.4 GHz interference.
+- ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
 - Configurable receiver thresholds; a configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
 - A compass, and the heading mapping it needs.
 

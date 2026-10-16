@@ -1,29 +1,31 @@
-//! ExpressLRS 2.4 GHz on the shared propagation model. Every packet the handset samples the sticks; the
-//! packet's RSSI comes from the geometry — antenna patterns, range, obstruction, polarization, ground bounce,
-//! fading, body shadow — and a logistic curve around the mode's sensitivity decides loss. The receiver writes
-//! one CRSF RC frame per packet it receives (and LINK_STATISTICS every N received packets) to the flight
-//! controller's UART; when packets stop it goes silent, as ExpressLRS does by default, and Betaflight's own
-//! failsafe takes over. Deterministic: every packet draws the same count of numbers from the model's own
-//! seeded stream, whatever the inputs.
+//! The ExpressLRS link: the air between the handset and the receiver, on the shared propagation model. Every packet
+//! slot it takes the handset's [`TxFrame`] and works out what the air does to it: the RF budget of both
+//! directions (antenna patterns, range, obstruction, polarization, ground bounce, fading, body shadow) in the
+//! band's profile (2.4 GHz or 900 MHz, `band`), a logistic packet-error curve around the packet rate's
+//! sensitivity that decides loss, the latency pipeline that delays the channels by whole packets, link quality
+//! (the share received of the last 100 packets, per direction) and the downlink telemetry slots. It returns a
+//! [`Delivery`]: the channels after latency (or none when the packet was lost) and the quality figures the
+//! receiver reports and the bus publishes. The CRSF bytes are the receiver's work (`receiver.rs`), the sticks the
+//! handset's (`joystick.rs`). When packets stop the receiver goes silent, as ExpressLRS does by default, and
+//! Betaflight's own failsafe takes over. Deterministic: every packet draws the same count of numbers from the
+//! model's own seeded stream, whatever the inputs.
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 
 use glam::{DQuat, DVec3};
 use ofs_core::rng::model_rng;
-use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
+use ofs_core::{names, Bus, Signal, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
 use ofs_rf::propagation::{mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKind, Endpoint, Obstacle, Polarization};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::crsf::{self, Decoder, Frame, LinkStatistics, CHANNEL_COUNT};
+use crate::band::Band;
+use crate::parts::{Channels, Delivery, FaultSignals, Link, LinkReport, LqWindow, TxFrame};
 
 pub const MODEL_NAME: &str = "radio.elrs";
-/// ExpressLRS reports link quality as the share of the last 100 packets received.
-pub const LQ_WINDOW: usize = 100;
 /// RSSI published while no packet is heard.
 pub const NO_SIGNAL_RSSI_DBM: f64 = -130.0;
-/// The middle of the 2.4 GHz band; frequency hopping is not modelled.
+/// The middle of the 2.4 GHz band; frequency hopping is not modelled (the 900 MHz band is in `band`).
 pub const ELRS_FREQ_MHZ: f64 = 2440.0;
 /// LoRa bandwidth 812.5 kHz, noise figure 6 dB (estimated): `-174 + 10*log10(812_500) + 6`.
 pub const NOISE_FLOOR_DBM: f64 = -108.90176630349089;
@@ -34,31 +36,16 @@ pub const PER_SLOPE_DB: f64 = 1.0;
 /// Every this-many downlink packets carries one telemetry frame (an ExpressLRS telemetry-ratio
 /// estimate: 125 slots/s at the 500 Hz packet rate).
 pub const TELEMETRY_SLOT_DIVISOR: u32 = 4;
-/// How many offered telemetry frames wait for a slot at most; the oldest is dropped when full
-/// (stale data yields to fresh, like a radio that cannot retransmit).
-pub const TELEMETRY_FIFO_LEN: usize = 16;
 
 /// The RSSI at which half the packets decode, by packet rate: ExpressLRS's published sensitivities for its
 /// 2.4 GHz LoRa modes.
 pub fn sensitivity_dbm(packet_rate_hz: u32) -> Option<f64> {
-    match packet_rate_hz {
-        50 => Some(-117.0),
-        150 => Some(-112.0),
-        250 => Some(-108.0),
-        500 => Some(-105.0),
-        _ => None,
-    }
+    Band::G2_4.sensitivity_dbm(packet_rate_hz)
 }
 
 /// The CRSF rf_mode index of a packet rate (the CRSF table: 0 = 4 Hz, 1 = 50, 2 = 150, 3 = 250, 4 = 500).
 pub fn rf_mode_index(packet_rate_hz: u32) -> Option<u8> {
-    match packet_rate_hz {
-        50 => Some(1),
-        150 => Some(2),
-        250 => Some(3),
-        500 => Some(4),
-        _ => None,
-    }
+    Band::G2_4.rf_mode_index(packet_rate_hz)
 }
 
 /// The CRSF power index of a TX power in mW (the CRSF power table).
@@ -84,12 +71,12 @@ pub fn packet_error_rate(rssi_dbm: f64, sensitivity_dbm: f64) -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkParams {
     pub packet_rate_hz: u32,
+    /// The ExpressLRS band: carrier, noise floor and the packet rates and sensitivities of its modes.
+    pub band: Band,
     /// Packets between the handset sampling the sticks and the receiver outputting them.
     pub latency_packets: u32,
     /// The handset's TX power.
     pub tx_power_mw: f64,
-    /// A LINK_STATISTICS frame follows every this many received packets.
-    pub link_stats_interval_packets: u32,
     /// Where the handset is (NED) and its antennas (axes already in the world frame).
     pub handset_position: DVec3,
     pub handset_antennas: Vec<Antenna>,
@@ -109,9 +96,9 @@ impl LinkParams {
         let dipole = Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization: Polarization::Linear, axis: DVec3::NEG_Z };
         Self {
             packet_rate_hz,
+            band: Band::G2_4,
             latency_packets: 1,
             tx_power_mw: 250.0,
-            link_stats_interval_packets: 50,
             handset_position: DVec3::new(-2.0, 0.0, -1.7),
             handset_antennas: vec![dipole],
             quad_antennas: vec![dipole],
@@ -122,79 +109,20 @@ impl LinkParams {
     }
 }
 
-/// What Betaflight told the handset, decoded from the CRSF telemetry frames that flew a downlink
-/// slot. Units are Betaflight's own CRSF encodings (see docs/research/elrs-link.md): the battery
-/// voltage in 0.1 V and current in 0.1 A (`getLegacyBatteryVoltage()`/`getAmperage()/10`), attitude
-/// in radians x 10 000 with yaw wrapped to ±180°, the flight mode verbatim.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct FcTelemetry {
-    pub battery_v: f64,
-    pub battery_a: f64,
-    pub battery_mah: f64,
-    pub roll_deg: f64,
-    pub pitch_deg: f64,
-    pub yaw_deg: f64,
-    pub flight_mode: String,
-    /// Simulated time of the last frame that flew a slot (0 until one arrives).
-    pub last_frame_s: f64,
-    /// Frames that flew a slot so far (a monotonic "anything arrived yet" marker).
-    pub frame_count: u64,
-}
-
-/// The latest [`FcTelemetry`], shared with the server's state snapshot (the `OsdHandle` pattern).
-#[derive(Debug, Clone, Default)]
-pub struct FcTelemetryHandle(Arc<Mutex<FcTelemetry>>);
-
-impl FcTelemetryHandle {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn latest(&self) -> FcTelemetry {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    fn store(&self, t: FcTelemetry) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = t;
-    }
-}
-
-struct Inputs {
-    roll: Signal<f64>,
-    pitch: Signal<f64>,
-    yaw: Signal<f64>,
-    throttle: Signal<f64>,
-    aux: Vec<Signal<f64>>,
-    tx_enabled: Signal<f64>,
-    fault_loss: Signal<f64>,
-}
-
-struct Outputs {
-    link_up: Signal<f64>,
-    lq: Signal<f64>,
-    rssi: Signal<f64>,
-    snr: Signal<f64>,
-    antenna: Signal<f64>,
-    downlink_lq: Signal<f64>,
-}
-
+/// The ExpressLRS link: the RF budget of both directions on the shared propagation model, a logistic packet-loss
+/// curve around the mode's sensitivity, the handset-to-receiver latency pipeline, link quality, and the downlink
+/// telemetry slots. Deterministic: every packet draws the same count of numbers from the model's own seeded
+/// stream, whatever the inputs.
 pub struct ElrsLink {
     params: LinkParams,
-    div: u32,
     rng: ChaCha8Rng,
     fault_rng: ChaCha8Rng,
-    uart: Wire,
-    inputs: Inputs,
-    outputs: Outputs,
+    faults: FaultSignals,
     pos: Signal<DVec3>,
     att: Signal<DQuat>,
-    fault_loss_fraction: Signal<f64>,
-    fault_burst_on: Signal<f64>,
-    fault_burst_off: Signal<f64>,
-    history: VecDeque<bool>,
-    downlink_history: VecDeque<bool>,
-    pipeline: VecDeque<[u16; CHANNEL_COUNT]>,
-    since_stats: u32,
+    history: LqWindow,
+    downlink_history: LqWindow,
+    pipeline: VecDeque<Channels>,
     quad_diversity: Diversity,
     handset_diversity: Diversity,
     quad_faders: Vec<Fader>,
@@ -203,36 +131,19 @@ pub struct ElrsLink {
     rssi: Vec<f64>,
     downlink: Vec<f64>,
     last_pos: Option<DVec3>,
-    telemetry_in: Wire,
-    decoder: Decoder,
-    telemetry_fifo: VecDeque<(u8, Vec<u8>)>,
     downlink_packets: u32,
-    fc_telemetry: FcTelemetryHandle,
 }
 
 impl ElrsLink {
-    /// `uart` receives the receiver's CRSF output (the flight controller's UART RX); `telemetry_in`
-    /// carries the flight controller's own CRSF telemetry frames (its UART TX) into the downlink slots.
-    pub fn new(params: LinkParams, rate_divisor: u32, seed: u64, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> Self {
+    pub fn new(params: LinkParams, seed: u64, bus: &mut Bus) -> Self {
         assert!(!params.quad_antennas.is_empty() && !params.handset_antennas.is_empty(), "both ends need at least one antenna");
-        assert!(sensitivity_dbm(params.packet_rate_hz).is_some(), "packet_rate_hz must be one of 50, 150, 250, 500");
-        let inputs = Inputs {
-            roll: bus.signal(names::RC_ROLL),
-            pitch: bus.signal(names::RC_PITCH),
-            yaw: bus.signal(names::RC_YAW),
-            throttle: bus.signal(names::RC_THROTTLE),
-            aux: (0..names::RC_AUX_COUNT).map(|i| bus.signal(&names::rc_aux(i))).collect(),
-            tx_enabled: bus.signal(names::RADIO_TX_ENABLED),
-            fault_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
-        };
-        let outputs = Outputs {
-            link_up: bus.signal(names::RADIO_LINK_UP),
-            lq: bus.signal(names::RADIO_LQ),
-            rssi: bus.signal(names::RADIO_RSSI),
-            snr: bus.signal(names::RADIO_SNR),
-            antenna: bus.signal(names::RADIO_ANTENNA),
-            downlink_lq: bus.signal(names::RADIO_DOWNLINK_LQ),
-        };
+        assert!(
+            params.band.sensitivity_dbm(params.packet_rate_hz).is_some(),
+            "packet_rate_hz {} is not a {} mode: use one of {:?}",
+            params.packet_rate_hz,
+            params.band.name(),
+            params.band.packet_rates()
+        );
         let mut rng = model_rng(seed, MODEL_NAME);
         let fault_rng = model_rng(seed, "elrs-faults");
         let mut quad_faders = vec![Fader::default(); params.quad_antennas.len()];
@@ -243,21 +154,14 @@ impl ElrsLink {
         let (quad_antennas, handset_antennas) = (params.quad_antennas.len(), params.handset_antennas.len());
         Self {
             params,
-            div: rate_divisor,
             rng,
             fault_rng,
-            uart,
-            inputs,
-            outputs,
+            faults: FaultSignals::register(bus),
             pos: bus.signal(names::BODY_POS_NED),
             att: bus.signal(names::BODY_ATT),
-            fault_loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
-            fault_burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
-            fault_burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
-            history: VecDeque::with_capacity(LQ_WINDOW + 1),
-            downlink_history: VecDeque::with_capacity(LQ_WINDOW + 1),
+            history: LqWindow::new(),
+            downlink_history: LqWindow::new(),
             pipeline: VecDeque::new(),
-            since_stats: 0,
             quad_diversity: Diversity::default(),
             handset_diversity: Diversity::default(),
             quad_faders,
@@ -265,85 +169,26 @@ impl ElrsLink {
             rssi: vec![NO_SIGNAL_RSSI_DBM; quad_antennas],
             downlink: vec![NO_SIGNAL_RSSI_DBM; handset_antennas],
             last_pos: None,
-            telemetry_in,
-            decoder: Decoder::default(),
-            telemetry_fifo: VecDeque::new(),
             downlink_packets: 0,
-            fc_telemetry: FcTelemetryHandle::new(),
         }
-    }
-
-    /// The handset's view of Betaflight's telemetry, updated as frames fly downlink slots.
-    pub fn fc_telemetry_handle(&self) -> FcTelemetryHandle {
-        self.fc_telemetry.clone()
-    }
-
-    /// Handset: sticks to channels in Betaflight's default AETR order, then AUX1..4, the rest centred.
-    fn sample(&self, bus: &Bus) -> [u16; CHANNEL_COUNT] {
-        let i = &self.inputs;
-        let mut ch = [crsf::stick_ticks(0.0); CHANNEL_COUNT];
-        ch[0] = crsf::stick_ticks(bus.get(i.roll));
-        ch[1] = crsf::stick_ticks(bus.get(i.pitch));
-        ch[2] = crsf::throttle_ticks(bus.get(i.throttle));
-        ch[3] = crsf::stick_ticks(bus.get(i.yaw));
-        for (slot, s) in ch[4..].iter_mut().zip(&i.aux) {
-            *slot = crsf::stick_ticks(bus.get(*s));
-        }
-        ch
-    }
-
-    fn lq_of(history: &VecDeque<bool>) -> f64 {
-        if history.is_empty() {
-            return 0.0;
-        }
-        100.0 * history.iter().filter(|r| **r).count() as f64 / history.len() as f64
-    }
-
-    /// Decodes one telemetry frame that flew a downlink slot into the shared handle. Frame types we
-    /// do not expose still consume their slot (the radio forwarded them; nothing more is modelled).
-    /// A field-targeted function, not a `&mut self` method: the step's `rssi`/`downlink` borrows are
-    /// still live at the call site (the M3c hot loop holds them across the telemetry slot).
-    fn apply_telemetry_frame(fc: &FcTelemetryHandle, frame_type: u8, payload: &[u8], now_s: f64) {
-        let mut t = fc.latest();
-        match frame_type {
-            crsf::FRAMETYPE_BATTERY_SENSOR if payload.len() >= 7 => {
-                t.battery_v = f64::from(u16::from_be_bytes([payload[0], payload[1]])) / 10.0;
-                t.battery_a = f64::from(u16::from_be_bytes([payload[2], payload[3]])) / 10.0;
-                t.battery_mah = f64::from(u32::from_be_bytes([0, payload[4], payload[5], payload[6]]));
-            }
-            crsf::FRAMETYPE_ATTITUDE if payload.len() >= 6 => {
-                let deg = |raw: [u8; 2]| f64::from(i16::from_be_bytes(raw)) * 180.0 / (10_000.0 * std::f64::consts::PI);
-                t.pitch_deg = deg([payload[0], payload[1]]);
-                t.roll_deg = deg([payload[2], payload[3]]);
-                t.yaw_deg = deg([payload[4], payload[5]]);
-            }
-            crsf::FRAMETYPE_FLIGHT_MODE => {
-                t.flight_mode = String::from_utf8_lossy(payload).split('\0').next().unwrap_or("").to_owned();
-            }
-            _ => {}
-        }
-        t.frame_count += 1;
-        t.last_frame_s = now_s;
-        fc.store(t);
     }
 }
 
-impl Model for ElrsLink {
+impl Link for ElrsLink {
     fn name(&self) -> &str {
         MODEL_NAME
     }
 
-    fn rate_divisor(&self) -> u32 {
-        self.div
+    fn packet_rate_hz(&self) -> u32 {
+        self.params.packet_rate_hz
     }
 
-    fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
-        // Handset: the pipeline delays samples by `latency_packets` packets.
-        let sample = self.sample(bus);
+    fn deliver(&mut self, ctx: &StepCtx, bus: &Bus, tx: &TxFrame) -> Delivery {
+        // The pipeline delays samples by `latency_packets` packets.
         if self.pipeline.is_empty() {
-            self.pipeline.extend(std::iter::repeat_n(sample, self.params.latency_packets as usize));
+            self.pipeline.extend(std::iter::repeat_n(tx.channels, self.params.latency_packets as usize));
         }
-        self.pipeline.push_back(sample);
+        self.pipeline.push_back(tx.channels);
         let channels = self.pipeline.pop_front().expect("the pipeline holds at least this sample");
 
         let pos = bus.get(self.pos);
@@ -351,12 +196,14 @@ impl Model for ElrsLink {
         let att = if att.length_squared() > 0.0 { att.normalize() } else { DQuat::IDENTITY };
         let moved = self.last_pos.map_or(0.0, |p| p.distance(pos));
         self.last_pos = Some(pos);
-        let sensitivity = sensitivity_dbm(self.params.packet_rate_hz).expect("checked at construction");
-        let transmitting = bus.get(self.inputs.tx_enabled) > 0.5 && bus.get(self.inputs.fault_loss) < 0.5;
+        let sensitivity = self.params.band.sensitivity_dbm(self.params.packet_rate_hz).expect("checked at construction");
+        let transmitting = tx.transmitting && !self.faults.link_cut(bus);
+        let freq = self.params.band.freq_mhz();
+        let noise = self.params.band.noise_floor_dbm();
 
         // Draw order is fixed: every packet draws the same count of numbers whatever the inputs — the uplink
         // fades (two normals per quad antenna), the uplink loss draw, the downlink fades, the downlink draw.
-        let rho = (-moved / (wavelength_m(ELRS_FREQ_MHZ) * 0.5)).exp();
+        let rho = (-moved / (wavelength_m(freq) * 0.5)).exp();
         let shadow = body_shadow_db(att, pos, self.params.handset_position);
         // The handset transmits on its active antenna: invariant across the quad's antennas.
         let tx_ant = self.params.handset_antennas[self.handset_diversity.active().min(self.params.handset_antennas.len() - 1)];
@@ -368,7 +215,7 @@ impl Model for ElrsLink {
             let path = path_gain(
                 &Endpoint { position: self.params.handset_position, antenna: tx_ant },
                 &Endpoint { position: pos, antenna: rx_ant },
-                ELRS_FREQ_MHZ,
+                freq,
                 &self.params.obstacles,
                 self.params.ground_bounce,
             );
@@ -384,12 +231,9 @@ impl Model for ElrsLink {
         // Drawn every packet from its own stream, fault or not, so the model's own draws (fading, loss, downlink)
         // never shift with a fault (tests/elrs.rs: the_models_own_stream_ignores_the_fault_fraction).
         let fault_draw: f64 = self.fault_rng.gen();
-        let fraction = bus.get(self.fault_loss_fraction);
-        let burst_on = bus.get(self.fault_burst_on);
-        let burst_off = bus.get(self.fault_burst_off);
-        let in_burst = burst_on > 0.0 && ctx.time_s % (burst_on + burst_off) < burst_on;
-        let received = transmitting && draw >= packet_error_rate(rssi[active], sensitivity)
-            && fault_draw >= fraction && !in_burst;
+        let received = transmitting
+            && draw >= packet_error_rate(rssi[active], sensitivity)
+            && self.faults.survives(bus, ctx.time_s, fault_draw);
 
         // Downlink: the reversed path of the active antenna, the receiver transmitting at DOWNLINK_TX_POWER_MW,
         // received on the handset's best antenna.
@@ -402,7 +246,7 @@ impl Model for ElrsLink {
             let path = path_gain(
                 &Endpoint { position: pos, antenna: tx_ant },
                 &Endpoint { position: self.params.handset_position, antenna: *rx_ant },
-                ELRS_FREQ_MHZ,
+                freq,
                 &self.params.obstacles,
                 self.params.ground_bounce,
             );
@@ -417,67 +261,36 @@ impl Model for ElrsLink {
         let downlink_draw: f64 = self.rng.gen();
         let downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity);
 
-        // Telemetry ingress: whatever Betaflight wrote this tick joins the FIFO (oldest dropped when
-        // full). No new random draws: the queue is a pure function of the frames offered and the
-        // slots flown.
-        for frame in self.decoder.push(&self.telemetry_in.take(usize::MAX)) {
-            if let Frame::Other { frame_type, payload, .. } = frame {
-                if self.telemetry_fifo.len() >= TELEMETRY_FIFO_LEN {
-                    self.telemetry_fifo.pop_front();
-                }
-                self.telemetry_fifo.push_back((frame_type, payload));
-            }
-        }
+        // One downlink packet in TELEMETRY_SLOT_DIVISOR carries a telemetry frame, if it is heard.
+        let mut downlink_slot = false;
         if transmitting {
             self.downlink_packets += 1;
-            if downlink_received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0 {
-                if let Some((frame_type, payload)) = self.telemetry_fifo.pop_front() {
-                    Self::apply_telemetry_frame(&self.fc_telemetry, frame_type, &payload, ctx.time_s);
-                }
-            }
+            downlink_slot = downlink_received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0;
         }
 
         // Link quality over the last 100 packets, per direction; silence on loss; Betaflight fails safe.
-        self.history.push_back(received);
-        if self.history.len() > LQ_WINDOW {
-            self.history.pop_front();
-        }
-        self.downlink_history.push_back(downlink_received);
-        if self.downlink_history.len() > LQ_WINDOW {
-            self.downlink_history.pop_front();
-        }
-        let lq = Self::lq_of(&self.history);
-        let downlink_lq = Self::lq_of(&self.downlink_history);
+        let lq = self.history.push(received);
+        let downlink_lq = self.downlink_history.push(downlink_received);
         let link_up = lq > 0.0;
-        let snr = rssi[active] - NOISE_FLOOR_DBM;
+        let snr = rssi[active] - noise;
 
-        // Receiver: one RC frame per received packet, link statistics every N received packets.
-        if received {
-            self.uart.write(&crsf::rc_channels_frame(&channels));
-            self.since_stats += 1;
-            if self.since_stats >= self.params.link_stats_interval_packets {
-                self.since_stats = 0;
-                let dbm_field = |dbm: f64| (-dbm).round().clamp(0.0, 255.0) as u8;
-                self.uart.write(&crsf::link_statistics_frame(&LinkStatistics {
-                    uplink_rssi_1: dbm_field(rssi[0]),
-                    uplink_rssi_2: rssi.get(1).map_or(dbm_field(rssi[0]), |v| dbm_field(*v)),
-                    uplink_lq: lq.round().clamp(0.0, 100.0) as u8,
-                    uplink_snr: snr.round().clamp(-128.0, 127.0) as i8,
-                    active_antenna: active as u8,
-                    rf_mode: rf_mode_index(self.params.packet_rate_hz).unwrap_or(0),
-                    uplink_tx_power: tx_power_index_mw(self.params.tx_power_mw as u32),
-                    downlink_rssi: dbm_field(downlink[downlink_active]),
-                    downlink_lq: downlink_lq.round().clamp(0.0, 100.0) as u8,
-                    downlink_snr: (downlink[downlink_active] - NOISE_FLOOR_DBM).round().clamp(-128.0, 127.0) as i8,
-                }));
-            }
+        Delivery {
+            channels: received.then_some(channels),
+            downlink_slot,
+            report: LinkReport {
+                link_up,
+                lq_pct: lq,
+                rssi_dbm: if link_up { rssi[active] } else { NO_SIGNAL_RSSI_DBM },
+                snr_db: if link_up { snr } else { NO_SIGNAL_RSSI_DBM - noise },
+                antenna: active,
+                downlink_lq_pct: downlink_lq,
+                uplink_rssi_dbm: [rssi[0], rssi.get(1).copied().unwrap_or(rssi[0])],
+                uplink_snr_db: snr,
+                downlink_rssi_dbm: downlink[downlink_active],
+                downlink_snr_db: downlink[downlink_active] - noise,
+                rf_mode: self.params.band.rf_mode_index(self.params.packet_rate_hz).unwrap_or(0),
+                tx_power_index: tx_power_index_mw(self.params.tx_power_mw as u32),
+            },
         }
-        bus.set(self.outputs.link_up, if link_up { 1.0 } else { 0.0 });
-        bus.set(self.outputs.lq, lq);
-        bus.set(self.outputs.rssi, if link_up { rssi[active] } else { NO_SIGNAL_RSSI_DBM });
-        bus.set(self.outputs.snr, if link_up { snr } else { NO_SIGNAL_RSSI_DBM - NOISE_FLOOR_DBM });
-        bus.set(self.outputs.antenna, active as f64);
-        bus.set(self.outputs.downlink_lq, downlink_lq);
-        Ok(())
     }
 }

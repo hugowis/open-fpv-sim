@@ -2,29 +2,28 @@ use glam::DVec3;
 use ofs_core::shape::Shape;
 use ofs_core::{names, Bus, Scheduler, Wire};
 use ofs_radio::crsf::{stick_ticks, Decoder, Frame};
+use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{
-    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, NOISE_FLOOR_DBM,
-    NO_SIGNAL_RSSI_DBM,
+    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
 };
+use ofs_radio::receiver::ReceiverParams;
+use ofs_radio::telemetry::FcTelemetryHandle;
 use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
 
 const BASE_HZ: u32 = 8000;
 
-fn rig(params: LinkParams, seed: u64) -> (Scheduler, Wire, Wire, ElrsHandle) {
+fn rig(params: LinkParams, seed: u64) -> (Scheduler, Wire, Wire, FcTelemetryHandle) {
     let mut bus = Bus::new();
     let uart = Wire::new(1 << 20);
     let telemetry_in = Wire::new(1 << 16);
-    let div = BASE_HZ / params.packet_rate_hz;
-    let link = ElrsLink::new(params, div, seed, uart.clone(), telemetry_in.clone(), &mut bus);
-    let handle = link.fc_telemetry_handle();
+    let chain = RadioChain::elrs(params, ReceiverParams::default(), BASE_HZ, seed, uart.clone(), telemetry_in.clone(), &mut bus);
+    let handle = chain.fc_telemetry_handle();
     let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
     bus.set(tx, 1.0);
     let mut s = Scheduler::new(BASE_HZ, bus);
-    s.add(Box::new(link));
+    s.add(Box::new(chain));
     (s, uart, telemetry_in, handle)
 }
-
-type ElrsHandle = ofs_radio::elrs::FcTelemetryHandle;
 
 fn set(s: &mut Scheduler, name: &str, v: f64) {
     let sig = s.bus_mut().signal::<f64>(name);
@@ -328,7 +327,7 @@ fn sticks_become_crsf_channels_in_aetr_order() {
 mod fc_telemetry {
     use super::*;
     use ofs_radio::crsf::{FRAMETYPE_ATTITUDE, FRAMETYPE_BATTERY_SENSOR, FRAMETYPE_FLIGHT_MODE};
-    use ofs_radio::elrs::FcTelemetry;
+    use ofs_radio::telemetry::FcTelemetry;
 
     /// One CRC-valid CRSF frame: [address 0xC8][len][type][payload][crc8 poly 0xD5].
     fn frame(frame_type: u8, payload: &[u8]) -> Vec<u8> {

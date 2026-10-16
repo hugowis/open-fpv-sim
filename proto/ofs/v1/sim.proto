@@ -2,8 +2,9 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-// faults scheduled at a simulated time and world names (M4c).
+// Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+// Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+// names (M4c).
 // Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
 // VTX state, and the world with its analog video link. One session (loaded quad) per server.
 service Sim {
@@ -42,6 +43,13 @@ service Sim {
   rpc PlayInputs(InputsFile) returns (Empty);
   // Stops the playing inputs file, if any (the sticks keep their last values).
   rpc StopInputs(Empty) returns (Empty);
+  // Records the session's sticks to a stick-inputs CSV the server names (<data_dir>/logs/<quad>-inputs-<n>.csv): a row
+  // whenever a stick changes, in PlayInputs' format, so PlayInputs replays the flight's sticks in lockstep. One at a
+  // time; refused while an inputs file plays, and PlayInputs is refused while it runs (it records live sticks only).
+  // The file is finished by StopInputsRecording, Unload, a new Load or the session ending.
+  rpc StartInputsRecording(Empty) returns (InputsRecordingStarted);
+  // Finishes the running inputs recording's file.
+  rpc StopInputsRecording(Empty) returns (InputsRecordingSummary);
 }
 
 message Empty {}
@@ -229,6 +237,8 @@ enum EventKind {
   EVENT_KIND_INPUTS_ENDED = 17;    // it finished or was stopped (the message says which)
   EVENT_KIND_RECORDING_STARTED = 18;  // the message is the file's path
   EVENT_KIND_RECORDING_STOPPED = 19;  // stopped, or failed (a disk error): the message says which
+  EVENT_KIND_INPUTS_RECORDING_STARTED = 20;  // the message is the file's path
+  EVENT_KIND_INPUTS_RECORDING_STOPPED = 21;  // stopped, or failed (a disk error): the message says which
 }
 
 message Event {
@@ -316,6 +326,16 @@ message RecordingSummary {
 message InputsFile {
   string name = 1;  // shown in errors and events (the client sends the file's name)
   string csv = 2;
+}
+
+message InputsRecordingStarted {
+  string path = 1;
+}
+
+message InputsRecordingSummary {
+  string path = 1;
+  uint64 rows = 2;
+  double duration_s = 3;  // the time of the last row
 }
 
 // The world file, NED metres from home (up is negative). Strings name the kinds: antenna "omni" or "patch";

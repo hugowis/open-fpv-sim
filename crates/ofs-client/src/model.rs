@@ -442,6 +442,10 @@ pub enum EventKind {
     RecordingStarted,
     /// A recording stopped or failed.
     RecordingStopped,
+    /// An inputs recording started (the message is its path).
+    InputsRecordingStarted,
+    /// An inputs recording stopped or failed.
+    InputsRecordingStopped,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -468,6 +472,8 @@ impl EventKind {
             EventKind::InputsEnded => "inputs_ended",
             EventKind::RecordingStarted => "recording_started",
             EventKind::RecordingStopped => "recording_stopped",
+            EventKind::InputsRecordingStarted => "inputs_recording_started",
+            EventKind::InputsRecordingStopped => "inputs_recording_stopped",
             EventKind::Unknown => "unknown",
         }
     }
@@ -503,6 +509,8 @@ impl Event {
             Ok(pb::EventKind::InputsEnded) => EventKind::InputsEnded,
             Ok(pb::EventKind::RecordingStarted) => EventKind::RecordingStarted,
             Ok(pb::EventKind::RecordingStopped) => EventKind::RecordingStopped,
+            Ok(pb::EventKind::InputsRecordingStarted) => EventKind::InputsRecordingStarted,
+            Ok(pb::EventKind::InputsRecordingStopped) => EventKind::InputsRecordingStopped,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }
@@ -559,6 +567,8 @@ pub enum Command {
     Reload,
     /// Cuts (true) or restores (false) the radio link: the failsafe test.
     SetRadioLoss(bool),
+    /// Starts (true) or stops (false) recording the sticks to a replayable CSV the server names.
+    SetInputsRecording(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

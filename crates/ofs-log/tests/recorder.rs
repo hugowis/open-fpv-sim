@@ -2,7 +2,7 @@ use std::io::{Cursor, Seek, SeekFrom, Write};
 
 use glam::DVec3;
 use ofs_core::{Bus, Model, Scheduler, Signal, SimError, StepCtx};
-use ofs_log::recorder::next_log_path;
+use ofs_log::recorder::{next_log_path, next_numbered_path};
 use ofs_log::{RecordError, Recorder, RecorderHandle, SignalRate};
 
 /// Writes `t` (simulated seconds after the step) into `x` and `t·(1, 2, 3)` into `v` every tick.
@@ -142,4 +142,16 @@ fn log_paths_count_up_per_quad() {
     std::fs::write(logs.join("quad-x.mcap"), b"").unwrap();
     assert_eq!(next_log_path(&logs, "quad").unwrap(), logs.join("quad-8.mcap"));
     assert_eq!(next_log_path(&logs, "other").unwrap(), logs.join("other-10.mcap"));
+}
+
+#[test]
+fn numbered_paths_count_only_their_own_stem_and_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("logs");
+    assert_eq!(next_numbered_path(&logs, "quad-inputs", "csv").unwrap(), logs.join("quad-inputs-1.csv"));
+    for name in ["quad-inputs-3.csv", "quad-inputs-7.mcap", "quad-4.csv", "quad-inputs-x.csv"] {
+        std::fs::write(logs.join(name), "").unwrap();
+    }
+    assert_eq!(next_numbered_path(&logs, "quad-inputs", "csv").unwrap(), logs.join("quad-inputs-4.csv"));
+    assert_eq!(next_log_path(&logs, "quad-inputs").unwrap(), logs.join("quad-inputs-8.mcap"));
 }

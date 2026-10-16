@@ -21,7 +21,7 @@ use crate::runner;
 use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
-use ofs_log::recorder::next_log_path;
+use ofs_log::recorder::{next_log_path, next_numbered_path};
 use ofs_log::{RecordError, SignalRate};
 
 pub use ofs_proto::PROTOCOL_VERSION;
@@ -74,6 +74,15 @@ fn invalid_state(message: &str) -> Status {
 fn record_error(e: RecordError) -> Status {
     match e {
         RecordError::AlreadyRecording | RecordError::NotRecording => invalid_state(&e.to_string()),
+        RecordError::Spec(m) => error("invalid_argument", Code::InvalidArgument, m),
+        RecordError::Io(_) => error("internal", Code::Internal, e.to_string()),
+    }
+}
+
+fn inputs_record_error(e: RecordError) -> Status {
+    match e {
+        RecordError::AlreadyRecording => invalid_state("an inputs recording is already running; stop it first"),
+        RecordError::NotRecording => invalid_state("no inputs recording is running"),
         RecordError::Spec(m) => error("invalid_argument", Code::InvalidArgument, m),
         RecordError::Io(_) => error("internal", Code::Internal, e.to_string()),
     }
@@ -486,6 +495,11 @@ impl Sim for SimService {
             if shared.pilot.load(Ordering::Acquire) {
                 return Err(invalid_state("a pilot is connected: scripted inputs would fight the pilot's sticks"));
             }
+            if s.vehicle.is_recording_inputs() {
+                return Err(invalid_state(
+                    "an inputs recording is running: it records live sticks only; call StopInputsRecording first",
+                ));
+            }
             if let Some(playing) = s.vehicle.inputs_playing() {
                 return Err(invalid_state(&format!("{playing} is still playing; call StopInputs first")));
             }
@@ -505,6 +519,47 @@ impl Sim for SimService {
                 shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsEnded, format!("{name}: stopped"))]);
             }
             Ok(pb::Empty {})
+        })
+        .await
+    }
+
+    async fn start_inputs_recording(&self, _req: Request<pb::Empty>) -> Result<Response<pb::InputsRecordingStarted>, Status> {
+        let logs = self.logs_dir();
+        self.blocking(move |shared, slot| {
+            let s = loaded(slot)?;
+            if s.vehicle.is_recording_inputs() {
+                return Err(inputs_record_error(RecordError::AlreadyRecording));
+            }
+            if let Some(playing) = s.vehicle.inputs_playing() {
+                return Err(invalid_state(&format!("{playing} is playing scripted inputs: there are no live sticks to record")));
+            }
+            let stem = format!("{}-inputs", s.quad_stem);
+            let path = next_numbered_path(&logs, &stem, "csv")
+                .map_err(|e| inputs_record_error(RecordError::Io(format!("{}: {e}", logs.display()))))?;
+            s.vehicle.start_inputs_recording(&path).map_err(inputs_record_error)?;
+            let path = path.display().to_string();
+            shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStarted, path.clone())]);
+            Ok(pb::InputsRecordingStarted { path })
+        })
+        .await
+    }
+
+    async fn stop_inputs_recording(&self, _req: Request<pb::Empty>) -> Result<Response<pb::InputsRecordingSummary>, Status> {
+        self.blocking(|shared, slot| {
+            let s = loaded(slot)?;
+            let summary = match s.vehicle.stop_inputs_recording() {
+                Ok(summary) => summary,
+                Err(RecordError::Io(m)) => {
+                    // The recording is over either way: tell the clients that track its state, as `Session::changes` does.
+                    shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStopped, format!("inputs recording failed: {m}"))]);
+                    return Err(inputs_record_error(RecordError::Io(m)));
+                }
+                Err(e) => return Err(inputs_record_error(e)),
+            };
+            let path = summary.path.display().to_string();
+            let message = format!("{path}: {} rows over {} s", summary.rows, summary.duration_s);
+            shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStopped, message)]);
+            Ok(pb::InputsRecordingSummary { path, rows: summary.rows, duration_s: summary.duration_s })
         })
         .await
     }
@@ -537,6 +592,28 @@ mod tests {
             assert_eq!(kind_of(&err), "firmware", "seconds = {seconds}");
             assert_eq!(err.message(), "simulated failure");
         }
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_failure_at_the_end_of_an_inputs_recording_still_publishes_its_stop_event() {
+        use crate::inputs_recorder::{tests::Faulty, InputsRecorder};
+        let svc = service_with(open_loop_session(RunMode::Lockstep));
+        let mut events = svc.subscribe();
+        {
+            let mut slot = svc.shared.lock();
+            let s = slot.as_mut().unwrap();
+            // Writes reach the buffer; the flush at the end fails.
+            let out = Faulty { budget: usize::MAX, flush_fails: true };
+            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &Sticks::default()).unwrap();
+            s.vehicle.set_inputs_recorder(recorder);
+        }
+        let err = svc.stop_inputs_recording(Request::new(pb::Empty {})).await.unwrap_err();
+        assert_eq!(kind_of(&err), "internal");
+        let event = events.try_recv().expect("the failed stop is announced");
+        assert_eq!(event.kind(), pb::EventKind::InputsRecordingStopped);
+        assert!(event.message.starts_with("inputs recording failed: "), "{}", event.message);
+        assert!(!svc.shared.lock().as_ref().unwrap().vehicle.is_recording_inputs(), "the recording is over");
         svc.shutdown();
     }
 

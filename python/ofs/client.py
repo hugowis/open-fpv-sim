@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 9
+PROTOCOL_VERSION = 10
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -474,6 +474,18 @@ class Sim:
     def stop_inputs(self) -> None:
         """Stops the playing inputs file, if any (the sticks keep their last values)."""
         self._call(self._stub.StopInputs, pb.Empty())
+
+    def record_inputs(self) -> str:
+        """Starts recording this session's sticks to a CSV the server names under `logs_dir` (one row whenever a
+        stick changes, in `play_inputs`' format) and returns its path. Fly the session (the Godot game's sticks, or
+        `set_sticks` calls) and finish with `stop_inputs_recording()`; `play_inputs(path)` then replays the sticks in
+        a lockstep session. One recording at a time; refused while an inputs file plays, and `play_inputs` is refused
+        while it runs."""
+        return self._call(self._stub.StartInputsRecording, pb.Empty()).path
+
+    def stop_inputs_recording(self) -> str:
+        """Finishes the inputs recording and returns its path (the file is complete from then on)."""
+        return self._call(self._stub.StopInputsRecording, pb.Empty()).path
 
     @property
     def log(self) -> Log:

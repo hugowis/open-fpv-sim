@@ -26,8 +26,9 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -138,11 +139,22 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                 _registered_method=True)
+        self.StartInputsRecording = channel.unary_unary(
+                '/ofs.v1.Sim/StartInputsRecording',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingStarted.FromString,
+                _registered_method=True)
+        self.StopInputsRecording = channel.unary_unary(
+                '/ofs.v1.Sim/StopInputsRecording',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.FromString,
+                _registered_method=True)
 
 
 class SimServicer:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -282,6 +294,23 @@ class SimServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StartInputsRecording(self, request, context):
+        """Records the session's sticks to a stick-inputs CSV the server names (<data_dir>/logs/<quad>-inputs-<n>.csv): a row
+        whenever a stick changes, in PlayInputs' format, so PlayInputs replays the flight's sticks in lockstep. One at a
+        time; refused while an inputs file plays, and PlayInputs is refused while it runs (it records live sticks only).
+        The file is finished by StopInputsRecording, Unload, a new Load or the session ending.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopInputsRecording(self, request, context):
+        """Finishes the running inputs recording's file.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SimServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -385,6 +414,16 @@ def add_SimServicer_to_server(servicer, server):
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ),
+            'StartInputsRecording': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartInputsRecording,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingStarted.SerializeToString,
+            ),
+            'StopInputsRecording': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopInputsRecording,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'ofs.v1.Sim', rpc_method_handlers)
@@ -394,8 +433,9 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 9: protocol 8 plus recording the bus to MCAP, scripted stick inputs,
-    faults scheduled at a simulated time and world names (M4c).
+    """Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+    Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
+    names (M4c).
     Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
     VTX state, and the world with its analog video link. One session (loaded quad) per server.
     """
@@ -930,6 +970,60 @@ class Sim:
             '/ofs.v1.Sim/StopInputs',
             ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartInputsRecording(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/StartInputsRecording',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.InputsRecordingStarted.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopInputsRecording(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/StopInputsRecording',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.FromString,
             options,
             channel_credentials,
             insecure,

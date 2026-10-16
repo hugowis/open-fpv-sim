@@ -3,6 +3,31 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M5: swappable radio components
+M5 was specified as a real radio over USB serial; the capture found no CRSF stream on the TX15's port
+(`docs/research/serial-radio.md`), so the joystick stays the input and the milestone became the radio's structure and
+recording a live flight.
+### Added
+- The radio as three swappable parts, `Handset`, `Link` and `Receiver`, stepped by `RadioChain`
+  (`crates/ofs-radio`): the `joystick` handset, the `elrs` and `fixed` links and the `crsf` receiver.
+- ExpressLRS on 900 MHz: a `band` key (`"2g4"`, the default, or `"900"`) on the `elrs` link, and the quad
+  `quads/opendrone-5f-900mhz.toml`. The 900 MHz band's carrier, bandwidth, noise figure and downlink power are
+  estimates.
+- The `fixed` link (a geometry-free loss fraction, bursts and latency) and its `[radio.fixed]` table, with the quad
+  `quads/opendrone-5f-fixed-link.toml`.
+- `[radio]` keys `handset` and `receiver` (each defaults to the only variant it has), and a test that swaps a link
+  defined inside a test file into a flying chain.
+- Recording a live flight's sticks to a `play_inputs` CSV: protocol 10 (`StartInputsRecording`,
+  `StopInputsRecording` returning `{path, rows, duration_s}`, the events `inputs_recording_started` and
+  `inputs_recording_stopped`), Python `sim.record_inputs()` and `sim.stop_inputs_recording()`, and the game's **I**
+  key with a `REC STICKS` indicator. Two lockstep replays of one recording write byte-identical MCAP.
+- Golden tests that pin the ELRS link's bytes and a recorded flight's digests, one digest file per OS (the libm
+  differs between Windows and Linux).
+- `docs/writing-a-radio-model.md` and `docs/research/serial-radio.md`.
+### Changed
+- `link_stats_interval_packets` moved from the link to the receiver internally; quad files are unchanged.
+- The protocol is version 10: a client built before M5 is refused at the handshake.
+
 ## Unreleased — the v1 close-out
 ### Fixed
 - The first boot's diff apply is judged on the config run's exit and its whole output: a run that failed no longer

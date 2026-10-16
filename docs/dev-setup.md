@@ -211,8 +211,9 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 9**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`, a fault's
-optional `at_s`, world names in `LoadRequest.world_path`, and `HandshakeReply.logs_dir`.
+The client and server speak **protocol 10**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+`StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
+and `HandshakeReply.logs_dir`.
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A
@@ -236,6 +237,32 @@ optional `at_s`, world names in `LoadRequest.world_path`, and `HandshakeReply.lo
 - **Packaging:** the PyPI distribution is `open-fpv-sim` (import `ofs`), pure Python; `launch()` still needs an
   `ofs-sim` binary. The `publish` CI job runs on `v*` tags only, checks the tag equals `python/pyproject.toml`'s
   version and uploads through PyPI trusted publishing (the `pypi` environment); no token is stored.
+
+## Swappable radio parts and recording a live flight (M5)
+
+The radio is three parts (a handset, a link, a receiver) behind `RadioChain`; the quad file's `[radio]` section picks
+them (`kind = "elrs"` or `"fixed"`, `handset`, `receiver`, and `band = "2g4"` or `"900"` for ELRS). The shipped
+examples are `quads/opendrone-5f-900mhz.toml` and `quads/opendrone-5f-fixed-link.toml`; `docs/writing-a-radio-model.md`
+shows how to write a part, and `docs/research/serial-radio.md` records why M5 has no real serial radio. Quad files
+written before M5 load unchanged and fly byte-identically: the goldens (`crates/ofs-radio/tests/golden.rs`,
+`crates/ofs-sim/tests/radio_golden.rs`) pin the ELRS link's bytes, one digest file per OS
+(`tests/golden/*.windows.digests`, `*.linux.digests`: `libm` differs between them, so run the goldens on both when you
+touch the radio — the Linux ones in WSL).
+
+**Recording a live flight:** `StartInputsRecording` writes the session's sticks to
+`<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick changes, in `play_inputs`' format) and
+`StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and
+`sim.stop_inputs_recording()`. In the game: the **I** key toggles it (a toast names the file, and `REC STICKS` shows
+in the status line while it runs). A lockstep session replays the file with `sim.play_inputs(path)`; two lockstep
+replays of one file write byte-identical MCAP. A replay is not the real-time flight (timing, the SITL schedule and the
+link's seeded draws differ), and the K link cut is not in the file. Load, Unload and a session ending finish the
+file without an `inputs_recording_stopped` event.
+
+M5 manual check (needs a controller; the maintainer's TX15 in USB joystick mode is the reference):
+1. `godot --path godot`, bind the sticks in F2, fly with Betaflight, press **I**, fly 20 s, press **I**.
+2. In Python, in a lockstep session: `sim.load(quad)`, `sim.play_inputs(<the toast's file, under the logs dir>)`,
+   `sim.run(20)`, and watch the replay in Rerun (`ofs.rerun.view(sim)`) or the MCAP in Foxglove.
+3. Press **I**, then **R** (reload): `REC STICKS` clears and the next **I** starts a new file.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.

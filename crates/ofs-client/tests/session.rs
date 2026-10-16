@@ -85,6 +85,18 @@ fn cutting_the_radio_raises_link_events_and_restoring_it_clears_them() {
 }
 
 #[test]
+fn recording_the_sticks_reports_the_file_and_stops_on_request() {
+    let server = TestServer::start();
+    let mut probe = flying(&server);
+    probe.wait("the pilot link is up", SHORT, |p| p.client.telemetry().is_some_and(|t| t.tx_enabled));
+    probe.client.send(Command::SetInputsRecording(true));
+    probe.wait("inputs_recording_started", SHORT, |p| p.event_kinds().contains(&EventKind::InputsRecordingStarted));
+    probe.client.set_sticks(climb());
+    probe.client.send(Command::SetInputsRecording(false));
+    probe.wait("inputs_recording_stopped", SHORT, |p| p.event_kinds().contains(&EventKind::InputsRecordingStopped));
+}
+
+#[test]
 fn dropping_the_client_turns_the_transmitter_off() {
     let server = TestServer::start();
     let mut raw = server.raw();

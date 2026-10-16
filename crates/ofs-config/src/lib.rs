@@ -263,6 +263,80 @@ fn default_startup_timeout_ms() -> u64 {
 pub enum RadioKind {
     /// ExpressLRS, behavioural model (fidelity level 1).
     Elrs,
+    /// A geometry-free link: a fixed loss fraction, bursts and latency; no RF budget (`[radio.fixed]`).
+    Fixed,
+}
+
+/// `[radio.fixed]`: the parameters of `kind = "fixed"`.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedSection {
+    /// The share of packets lost, in [0, 1].
+    #[serde(default)]
+    pub loss_fraction: f64,
+    /// Every packet is lost for `burst_on_s`, then delivered for `burst_off_s`, repeating (0 = no bursts).
+    #[serde(default)]
+    pub burst_on_s: f64,
+    #[serde(default)]
+    pub burst_off_s: f64,
+}
+
+/// What reads the sticks (`[radio] handset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandsetKind {
+    /// The stick and switch signals the joystick, the Pilot stream or `SetSticks` drive.
+    #[default]
+    Joystick,
+}
+
+/// What turns the link's output into the flight controller's serial protocol (`[radio] receiver`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiverKind {
+    /// CRSF on a flight-controller UART.
+    #[default]
+    Crsf,
+}
+
+/// The ExpressLRS band (`kind = "elrs"`); absent means 2.4 GHz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum BandKind {
+    #[serde(rename = "2g4")]
+    G2_4,
+    #[serde(rename = "900")]
+    Mhz900,
+}
+
+impl BandKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            BandKind::G2_4 => "2g4",
+            BandKind::Mhz900 => "900",
+        }
+    }
+
+    /// The packet rates the band's LoRa modes offer. `ofs-radio`'s `Band` is the model's own copy; a test in
+    /// `ofs-sim` keeps the two equal.
+    pub fn packet_rates(self) -> &'static [u32] {
+        match self {
+            BandKind::G2_4 => &[50, 150, 250, 500],
+            BandKind::Mhz900 => &[25, 50, 100, 200, 250],
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            BandKind::G2_4 => "2.4 GHz",
+            BandKind::Mhz900 => "900 MHz",
+        }
+    }
+}
+
+impl RadioSection {
+    pub fn band_or_default(&self) -> BandKind {
+        self.band.unwrap_or(BandKind::G2_4)
+    }
 }
 
 /// The pilot's radio link. The receiver's CRSF output is wired to a Betaflight UART.
@@ -270,10 +344,23 @@ pub enum RadioKind {
 #[serde(deny_unknown_fields)]
 pub struct RadioSection {
     pub kind: RadioKind,
-    /// The ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 packets per second.
+    /// The handset part; the only one today is `"joystick"`.
+    #[serde(default)]
+    pub handset: HandsetKind,
+    /// The receiver part; the only one today is `"crsf"`.
+    #[serde(default)]
+    pub receiver: ReceiverKind,
+    /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second
+    /// (`kind = "fixed"`: any rate that divides the base rate).
     pub packet_rate_hz: u32,
     /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
     pub uart: u8,
+    /// `kind = "elrs"` only: the ExpressLRS band, `"2g4"` (default) or `"900"`; it fixes which packet rates are valid.
+    #[serde(default)]
+    pub band: Option<BandKind>,
+    /// `kind = "fixed"` only: the fixed link's loss and bursts (defaults: a perfect link).
+    #[serde(default)]
+    pub fixed: Option<FixedSection>,
     #[serde(default = "default_latency_packets")]
     pub latency_packets: u32,
     /// The handset's TX power in mW: one of 10, 25, 50, 100, 250, 500, 1000.
@@ -856,11 +943,35 @@ impl QuadConfig {
             c.check(ms > 0, field, "must be > 0");
         }
         let r = &self.radio;
-        c.check(
-            matches!(r.packet_rate_hz, 50 | 150 | 250 | 500),
-            "radio.packet_rate_hz",
-            format!("must be one of the ExpressLRS 2.4 GHz LoRa modes: 50, 150, 250 or 500 (got {})", r.packet_rate_hz),
-        );
+        match r.kind {
+            RadioKind::Elrs => {
+                let band = r.band_or_default();
+                let rates = band.packet_rates();
+                let listed = match rates.split_last() {
+                    Some((last, rest)) => format!("{} or {last}", rest.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")),
+                    None => String::new(),
+                };
+                c.check(
+                    rates.contains(&r.packet_rate_hz),
+                    "radio.packet_rate_hz",
+                    format!("must be one of the ExpressLRS {} LoRa modes: {listed} (got {})", band.label(), r.packet_rate_hz),
+                );
+                c.check(r.fixed.is_none(), "radio.fixed", "only applies to kind = \"fixed\"");
+            }
+            RadioKind::Fixed => {
+                c.check(r.band.is_none(), "radio.band", "only applies to kind = \"elrs\"");
+                if let Some(f) = &r.fixed {
+                    c.check((0.0..=1.0).contains(&f.loss_fraction), "radio.fixed.loss_fraction", format!("must be in [0, 1] (got {})", f.loss_fraction));
+                    c.check(
+                        f.burst_on_s.is_finite() && f.burst_off_s.is_finite() && f.burst_on_s >= 0.0 && f.burst_off_s >= 0.0,
+                        "radio.fixed.burst_on_s",
+                        "the burst windows must be finite and >= 0 s",
+                    );
+                    c.check(f.burst_on_s == 0.0 || f.burst_off_s > 0.0, "radio.fixed.burst_off_s", "a burst needs an off window > 0 s");
+                }
+                c.check(r.packet_rate_hz > 0, "radio.packet_rate_hz", "must be > 0");
+            }
+        }
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
         c.check(
             matches!(r.tx_power_mw, 10 | 25 | 50 | 100 | 250 | 500 | 1000),

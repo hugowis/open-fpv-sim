@@ -96,6 +96,29 @@ func _run() -> void:
 	var restored: bool = await _wait_for(func(): return " ".join(app.hud.toast_texts()).contains("restored"), 15.0)
 	_check(restored, "and the HUD says so")
 
+	var logs := data_dir.path_join("logs")
+	for stale in DirAccess.get_files_at(logs):  # the data directory outlives runs: start from none
+		if stale.contains("-inputs-") and stale.ends_with(".csv"):
+			DirAccess.remove_absolute(logs.path_join(stale))
+	_press(app, KEY_I)
+	var recording: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording, "I starts recording the sticks")
+	await _wait_for(func(): return app.hud.sim_text().contains("REC STICKS"), 2.0)  # the HUD refreshes on the next frame
+	_check(app.hud.sim_text().contains("REC STICKS"), "and the status line says so: %s" % app.hud.sim_text())
+	await _wait_for(func(): return false, 0.3)
+	_press(app, KEY_I)
+	var recorded: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
+	_check(recorded, "I again stops it")
+	var csv_files: Array = []
+	for f in DirAccess.get_files_at(logs):
+		if f.contains("-inputs-") and f.ends_with(".csv"):
+			csv_files.append(f)
+	_check(csv_files.size() == 1, "one inputs CSV in the logs directory: %s" % str(csv_files))
+	if csv_files.size() == 1:
+		var text := FileAccess.get_file_as_string(logs.path_join(csv_files[0]))
+		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n"), "it has the play_inputs header: %s" % text.left(80))
+		_check(text.split("\n", false).size() >= 2, "and at least the first row")
+
 	_press(app, KEY_P)
 	var paused: bool = await _wait_for(func(): return app.client.get_phase() == "paused" and not app.client.get_telemetry()["running"], 5.0)
 	_check(paused, "P pauses the simulation")
@@ -201,6 +224,24 @@ func _run() -> void:
 			"%d frames for %.2f simulated seconds at 50 fields a second (about %d)" % [frames.size(), t1 - t0, expected])
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")
+
+	# A reload drops the recorder without an event: the indicator must go with it (the sticks recording is last so a
+	# reload here disturbs nothing above).
+	_press(app, KEY_I)
+	var recording_again: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording_again, "I starts a recording before the reload")
+	_press(app, KEY_R)
+	var reloaded_again: bool = await _wait_for(func(): return app.client.get_phase() == "flying" and not app.inputs_recording, 30.0)
+	_check(reloaded_again, "R reloads the quad (phase: %s)" % app.client.get_phase())
+	await _wait_for(func(): return false, 0.3)
+	_check(not app.inputs_recording, "the reload clears the recording state")
+	_check(not app.hud.sim_text().contains("REC STICKS"), "and the status line no longer says REC STICKS: %s" % app.hud.sim_text())
+	_press(app, KEY_I)
+	var recording_after: bool = await _wait_for(func(): return app.inputs_recording, 10.0)
+	_check(recording_after, "one I press records again after the reload")
+	_press(app, KEY_I)
+	var stopped_after: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
+	_check(stopped_after, "and the next I press stops it")
 
 	app.queue_free()
 	await process_frame

@@ -22,6 +22,7 @@ const HELP_LINES := [
 	"C  switch between FPV and chase camera",
 	"D  record the FPV view (DVR)",
 	"K  cut / restore the radio link (failsafe test)",
+	"I  record the sticks to a CSV (replay with play_inputs)",
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",
@@ -198,8 +199,13 @@ func battery_text() -> String:
 	return _battery.text
 
 
+## The status line (for the tests).
+func sim_text() -> String:
+	return _sim.text
+
+
 ## view: {phase, detail, telemetry: Dictionary (empty before the first state), sticks: Dictionary from Controls.read,
-## controls_status, configurator, quad, camera, radio_cut}
+## controls_status, configurator, quad, camera, radio_cut, recording_inputs}
 func update_view(view: Dictionary) -> void:
 	var t: Dictionary = view.get("telemetry", {})
 	var phase: String = view.get("phase", "")
@@ -238,6 +244,8 @@ SPEED %.1f m/s
 CLIMB %+.1f m/s
 MOTORS %s" % [
 			t["altitude_m"], t["speed_mps"], t["climb_mps"], "ON" if t["motors_spinning"] else "off"]
+	if view.get("recording_inputs", false):
+		_sim.text += "   REC STICKS"
 	var sticks: Dictionary = view.get("sticks", {})
 	if not sticks.is_empty():
 		_sticks_view.sticks = sticks

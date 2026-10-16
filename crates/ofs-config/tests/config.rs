@@ -577,3 +577,72 @@ fn a_motor_part_without_pole_pairs_is_a_parse_error() {
     assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
     assert!(err.to_string().contains("pole_pairs"), "{err}");
 }
+
+#[test]
+fn the_900_mhz_band_takes_its_own_packet_rates() {
+    let ok = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", "band = \"900\"\npacket_rate_hz = 200")).unwrap();
+    assert_eq!((ok.radio.band_or_default(), ok.radio.packet_rate_hz), (ofs_config::BandKind::Mhz900, 200));
+    for rate in [500, 150, 30] {
+        let err = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", &format!("band = \"900\"\npacket_rate_hz = {rate}"))).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("radio.packet_rate_hz") && message.contains("25, 50, 100, 200 or 250"), "{rate}: {message}");
+    }
+    let err = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", "packet_rate_hz = 200")).unwrap_err();
+    assert!(err.to_string().contains("50, 150, 250 or 500"), "the default band is 2.4 GHz: {err}");
+}
+
+#[test]
+fn an_unknown_band_is_a_parse_error_listing_the_names() {
+    let err = shipped_with(|t| *t = t.replace("packet_rate_hz = 500", "band = \"5g8\"\npacket_rate_hz = 500")).unwrap_err();
+    assert!(err.to_string().contains("unknown variant `5g8`") && err.to_string().contains("900"), "{err}");
+}
+
+#[test]
+fn a_fixed_link_takes_its_own_table_and_any_dividing_rate() {
+    let cfg = shipped_with(|t| {
+        *t = t
+            .replace("kind = \"elrs\"", "kind = \"fixed\"")
+            .replace("packet_rate_hz = 500", "packet_rate_hz = 400")
+            .replace("tx_power_mw = 250", "tx_power_mw = 250\n\n[radio.fixed]\nloss_fraction = 0.1\nburst_on_s = 0.05\nburst_off_s = 0.2");
+    })
+    .unwrap();
+    assert_eq!(cfg.radio.kind, RadioKind::Fixed);
+    let f = cfg.radio.fixed.unwrap();
+    assert_eq!((f.loss_fraction, f.burst_on_s, f.burst_off_s), (0.1, 0.05, 0.2));
+}
+
+#[test]
+fn keys_that_belong_to_the_other_link_are_errors_not_ignored() {
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"\nband = \"900\"")).unwrap_err();
+    assert!(err.to_string().contains("radio.band"), "{err}");
+    let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 250\n\n[radio.fixed]\nloss_fraction = 0.1")).unwrap_err();
+    assert!(err.to_string().contains("radio.fixed"), "{err}");
+}
+
+#[test]
+fn fixed_link_values_are_validated() {
+    let with = |fixed: &str| shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"").replace("tx_power_mw = 250", &format!("tx_power_mw = 250\n\n[radio.fixed]\n{fixed}")));
+    assert!(with("loss_fraction = 1.5").unwrap_err().to_string().contains("radio.fixed.loss_fraction"));
+    assert!(with("loss_fraction = -0.1").unwrap_err().to_string().contains("radio.fixed.loss_fraction"));
+    assert!(with("burst_on_s = 0.1").unwrap_err().to_string().contains("radio.fixed.burst_off_s"));
+    assert!(with("burst_on_s = -1.0").unwrap_err().to_string().contains("radio.fixed.burst_on_s"));
+    assert!(with("loss_fraction = 0.0").is_ok());
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"").replace("packet_rate_hz = 500", "packet_rate_hz = 300")).unwrap_err();
+    assert!(err.to_string().contains("radio.packet_rate_hz"), "300 does not divide 8000: {err}");
+}
+
+#[test]
+fn the_handset_and_receiver_default_to_the_joystick_and_crsf_and_can_be_named() {
+    let cfg = shipped_with(|_| {}).unwrap();
+    assert_eq!((cfg.radio.handset, cfg.radio.receiver), (ofs_config::HandsetKind::Joystick, ofs_config::ReceiverKind::Crsf));
+    let named = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nhandset = \"joystick\"\nreceiver = \"crsf\"")).unwrap();
+    assert_eq!(named.radio.handset, ofs_config::HandsetKind::Joystick);
+}
+
+#[test]
+fn an_unknown_part_name_is_an_error_that_lists_the_valid_names() {
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nhandset = \"mixer\"")).unwrap_err();
+    assert!(err.to_string().contains("unknown variant `mixer`") && err.to_string().contains("joystick"), "{err}");
+    let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nreceiver = \"sbus\"")).unwrap_err();
+    assert!(err.to_string().contains("unknown variant `sbus`") && err.to_string().contains("crsf"), "{err}");
+}

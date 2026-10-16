@@ -17,12 +17,12 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-electrical` | Battery, ESC and brushless motor. | core |
 | `ofs-sensors` | IMU and barometer. | core |
 | `ofs-rf` | Shared RF: propagation, Rician fading, receiver diversity, body shadow. | core |
-| `ofs-radio` | CRSF framing and the ExpressLRS link. | core, rf |
+| `ofs-radio` | CRSF framing and the radio as three swappable parts (`Handset`, `Link`, `Receiver`) stepped by `RadioChain`: the `joystick` handset, the `elrs` (2.4 GHz and 900 MHz) and `fixed` links, the `crsf` receiver. | core, rf |
 | `ofs-fc` | The Betaflight SITL bridge (process, UDP exchange, UART taps), MSP, and an open-loop stand-in. | core |
 | `ofs-video` | The SmartAudio and Tramp VTX, Betaflight's OSD over MSP DisplayPort, the 5.8 GHz analog link. | core, config, fc, rf |
 | `ofs-log` | Recording the bus to MCAP (a model appended last that only reads). | core |
 | `ofs-proto` | The gRPC messages and stubs, generated from `proto/ofs/v1/sim.proto`. | — |
-| `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service. | all of the above |
+| `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service, scripted inputs and the inputs recorder (`inputs.rs`, `inputs_recorder.rs`). | all of the above |
 | `ofs-client` | The Rust client: a worker thread, the FPV composite, the DVR muxer. | core, proto |
 | `ofs-godot` | The Godot extension (`OfsClient`), a thin layer over `ofs-client`. | client |
 
@@ -35,9 +35,25 @@ Betaflight's motor outputs, so Betaflight advances exactly as far as the simulat
 pacer runs the same scheduler against the wall clock. Randomness comes from named streams derived from the seed
 (`crates/ofs-core/src/rng.rs`), so two runs with the same seed and inputs are bit-identical.
 
+## The radio
+The radio is one model, `RadioChain` (`crates/ofs-radio/src/chain.rs`), that steps three parts in order every packet
+slot (`parts.rs`): a **`Handset`** (stick and switch signals to a `TxFrame` of 16 CRSF ticks), a **`Link`** (the air:
+the RF budget, loss, latency, link quality and the downlink telemetry slots, returned as a `Delivery`) and a
+**`Receiver`** (what arrived, as CRSF bytes on the flight controller's UART, and the FC's telemetry back). Only a link
+draws random numbers, so a seeded run does not depend on the parts around it. The quad file's `[radio]` section picks
+them: `kind` names the link — `elrs` (`crates/ofs-radio/src/elrs.rs`, with a `band` of 2.4 GHz or 900 MHz) or `fixed`
+(`fixed.rs`, no geometry, the worked example) — and `handset` and `receiver` name the other two. The vehicle's
+`radio_chain` function (`crates/ofs-sim/src/vehicle.rs`) builds the chain from the config. To write a part, see
+`docs/writing-a-radio-model.md`.
+
+Live sticks have one entry point on the server, `Vehicle::set_sticks`, which the pilot stream (the game's joystick) and
+`SetSticks` both reach. The **inputs recorder** (`crates/ofs-sim/src/inputs_recorder.rs`) sits there: while it runs it
+writes a CSV row whenever a stick changes, in `PlayInputs`' format, so a live flight can be replayed in lockstep
+(`StartInputsRecording`/`StopInputsRecording`, protocol 10).
+
 ## Clients
 - **Python (`python/ofs/`):** `ofs.launch()` starts a server and connects; `Sim` wraps the RPCs (load, run, sticks,
-  faults, recording, inputs). `ofs.reader` reads recordings, `ofs.rerun` streams a live view.
+  faults, recording, inputs, inputs recording). `ofs.reader` reads recordings, `ofs.rerun` streams a live view.
 - **Godot (`godot/`):** `scripts/app.gd` drives the game; `OfsClient` (from `ofs-godot`) runs the client's worker
   and hands GDScript the pose, telemetry, OSD and the delayed FPV composite; `ui/` holds the OSD, HUD, video and DVR.
 
@@ -48,6 +64,7 @@ pacer runs the same scheduler against the wall clock. Randomness comes from name
 - **A model:** implement `ofs_core::Model` in the crate it belongs to, register its signals' names in
   `crates/ofs-core/src/names.rs`, and add it to the assembly in `crates/ofs-sim/src/vehicle.rs` (the order there
   is the run order). Unit-test it against analytic results in the crate's `tests/`.
+- **A radio part** (a link, handset or receiver): `docs/writing-a-radio-model.md`.
 - **A fault:** a `Fault` variant and its validation in `crates/ofs-sim/src/vehicle.rs`, the bus signals the model
   reads (`fault.*` in `names.rs`), the message in `proto/ofs/v1/sim.proto` (bump the protocol version) and its
   mapping in `crates/ofs-sim/src/server.rs`, and the Python class in `python/ofs/faults.py`. Document it in

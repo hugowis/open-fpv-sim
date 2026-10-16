@@ -1,0 +1,79 @@
+# OpenDrone 5" freestyle — assembled from library parts (M1 estimates live in the part files now).
+schema_version = 5
+name = "OpenDrone 5F freestyle (ELRS 900 MHz)"
+
+frame = "opendrone-5f"
+motors = ["opendrone-openmotor-2207"]
+props = ["opendrone-5in-prop"]
+escs = ["opendrone-4in1-esc"]
+
+[battery]
+part = "opendrone-6s-1300"
+initial_soc = 1.0
+rate_hz = 1000
+
+[sim]
+base_hz = 8000
+
+[imu]
+gyro_noise_std_radps = 0.002
+gyro_bias_radps = [0.0, 0.0, 0.0]
+accel_noise_std_mps2 = 0.05
+accel_bias_mps2 = [0.0, 0.0, 0.0]
+
+[baro]
+noise_std_pa = 2.0
+
+[home]
+lat_deg = 50.85
+lon_deg = 4.35
+alt_m = 30.0
+
+[initial]
+position_ned_m = [0.0, 0.0, -0.03]
+yaw_deg = 0.0
+
+[fc]
+kind = "sitl"
+exchange_hz = 1000
+# Overridden by the OFS_SITL_LAUNCH / OFS_SITL_CLEANUP environment variables (space-separated argv).
+# An empty cleanup defaults to "pkill -x betaflight_SITL" on Linux, and under WSL (launch[0] = wsl.exe)
+# to "<wsl prefix> pkill -x betaflight_SITL".
+launch = ["betaflight_SITL.elf"]
+cleanup = []
+betaflight_diff = "opendrone-5f-freestyle.betaflight.diff"
+reply_timeout_ms = 500
+first_reply_timeout_ms = 5000
+startup_timeout_ms = 15000
+
+[radio]
+# ExpressLRS 900 MHz (200 Hz LoRa). The receiver's CRSF output is wired to Betaflight's UART2; the betaflight.diff selects
+# the CRSF receiver there. RSSI, SNR and packet loss come from the geometry of the world file (M3c); the
+# default receiver antenna is a 2 dBi linear dipole leaning up and back (mount_frd = [-0.5, 0.0, -1.0]).
+kind = "elrs"
+band = "900"
+packet_rate_hz = 200
+uart = 2
+latency_packets = 1
+tx_power_mw = 250
+
+# M3a: video. Betaflight UART numbers are 1-based (as in the Configurator's Ports tab); UART1 is the MSP port.
+# The battery as Betaflight's ESC sensor (KISS telemetry frames, 4 identical frames carry a quarter of the pack
+# current and consumed charge each, see docs/superpowers/specs/2026-10-08-m3a-osd-vtx-design.md section 5).
+[esc_telemetry]
+uart = 3
+rate_hz = 100
+
+# Betaflight's OSD over MSP DisplayPort; 30x16 is the analog PAL grid (the diff sets vcd_video_system = PAL).
+[osd]
+uart = 4
+cols = 30
+rows = 16
+
+# The VTX part is the hardware (power table, antenna); the wiring below is this aircraft's.
+[vtx]
+part = "opendrone-smartaudio-1w"
+uart = 5
+default_band = "R"
+default_channel = 1
+default_power_index = 1
