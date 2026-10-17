@@ -21,7 +21,7 @@ fn dead_motor_2() -> Fault {
 /// Full throttle, motor 2 scheduled to die at 0.5 s, run for 1 s in the given chunks.
 fn chunked(chunks: &[f64]) -> Vehicle {
     let mut v = vehicle();
-    v.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() }).unwrap();
     v.schedule_fault(dead_motor_2(), 0.5).unwrap();
     for c in chunks {
         v.run_for(*c).unwrap();
@@ -35,12 +35,12 @@ fn a_scheduled_fault_lands_on_its_tick_however_the_run_is_cut() {
     let cut = chunked(&[0.3, 0.2, 0.05, 0.45]);
     assert_eq!(whole.digest(), cut.digest());
     let mut never = vehicle();
-    never.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() });
+    never.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() }).unwrap();
     never.run_for(1.0).unwrap();
     assert_ne!(whole.digest(), never.digest(), "the fault changed the flight");
 
     let mut v = vehicle();
-    v.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 1.0, ..Sticks::default() }).unwrap();
     v.schedule_fault(dead_motor_2(), 0.5).unwrap();
     v.run_for(0.499_875).unwrap(); // tick 3999
     assert!(v.active_fault_names().is_empty(), "not yet");
@@ -106,7 +106,7 @@ fn playback_is_the_same_however_the_run_is_cut_and_equals_setting_the_sticks() {
 
     let mut by_hand = vehicle();
     for (sticks, secs) in [((0.4, 0.0), 0.25), ((0.7, 0.2), 0.35), ((0.5, -0.1), 0.4)] {
-        by_hand.set_sticks(&Sticks { throttle: sticks.0, roll: sticks.1, ..Sticks::default() });
+        by_hand.set_sticks(&Sticks { throttle: sticks.0, roll: sticks.1, ..Sticks::default() }).unwrap();
         by_hand.run_for(secs).unwrap();
     }
     assert_eq!(whole.digest(), by_hand.digest(), "a file is the same as the SetSticks calls it stands for");
@@ -116,11 +116,11 @@ fn playback_is_the_same_however_the_run_is_cut_and_equals_setting_the_sticks() {
 fn columns_the_file_leaves_out_keep_their_value() {
     let armed = Sticks { aux: [1.0, 1.0, -1.0, -1.0], ..Sticks::default() };
     let mut played = vehicle();
-    played.set_sticks(&armed);
+    played.set_sticks(&armed).unwrap();
     played.play_inputs(csv("t_s,throttle\n0,0.5\n")).unwrap();
     played.run_for(0.3).unwrap();
     let mut by_hand = vehicle();
-    by_hand.set_sticks(&Sticks { throttle: 0.5, ..armed });
+    by_hand.set_sticks(&Sticks { throttle: 0.5, ..armed }).unwrap();
     by_hand.run_for(0.3).unwrap();
     assert_eq!(played.digest(), by_hand.digest());
 }

@@ -72,6 +72,30 @@ impl Default for Sticks {
     }
 }
 
+impl Sticks {
+    /// Every stick limited to the range a transmitter has: [-1, 1], and [0, 1] for the throttle.
+    pub fn clamped(&self) -> Sticks {
+        Sticks {
+            roll: self.roll.clamp(-1.0, 1.0),
+            pitch: self.pitch.clamp(-1.0, 1.0),
+            yaw: self.yaw.clamp(-1.0, 1.0),
+            throttle: self.throttle.clamp(0.0, 1.0),
+            aux: self.aux.map(|a| a.clamp(-1.0, 1.0)),
+        }
+    }
+
+    /// The name of the first non-finite field, if any.
+    fn first_non_finite(&self) -> Option<String> {
+        let named = [("roll", self.roll), ("pitch", self.pitch), ("yaw", self.yaw), ("throttle", self.throttle)];
+        named
+            .into_iter()
+            .map(|(n, v)| (n.to_string(), v))
+            .chain(self.aux.iter().enumerate().map(|(i, v)| (format!("aux{}", i + 1), *v)))
+            .find(|(_, v)| !v.is_finite())
+            .map(|(n, _)| n)
+    }
+}
+
 /// What the radio receiver reports.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadioState {
@@ -1016,7 +1040,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         journaled_sticks: [0; 8],
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
-    vehicle.set_sticks(&Sticks::default());
+    vehicle.set_sticks(&Sticks::default())?;
     vehicle.set_transmitter(true);
     vehicle.init_fault_identities(&cfg.props.iter().map(|p| p.imbalance_kgm).collect::<Vec<_>>());
     // The set-up above is what a replay's own `build` does: the journal starts from here.
@@ -1026,7 +1050,14 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
 }
 
 impl Vehicle {
-    pub fn set_sticks(&mut self, s: &Sticks) {
+    /// Puts the sticks on the bus. A non-finite value is refused (nothing is applied, recorded or journaled);
+    /// what is accepted is clamped to the transmitter's range first, so the bus, a recording and a replayed journal
+    /// all see the same numbers.
+    pub fn set_sticks(&mut self, s: &Sticks) -> Result<(), SimError> {
+        if let Some(field) = s.first_non_finite() {
+            return Err(SimError::InvalidArgument(format!("stick {field} must be finite")));
+        }
+        let s = &s.clamped();
         let h = &self.h;
         let bus = self.scheduler.bus_mut();
         bus.set(h.roll, s.roll);
@@ -1044,6 +1075,14 @@ impl Vehicle {
             self.journaled_sticks = bits;
             self.journal.push(self.scheduler.tick(), Action::Sticks(sticks_values(s)));
         }
+        Ok(())
+    }
+
+    /// Tests only: a NaN straight on the throttle signal, which `set_sticks` now refuses, to make the next step fail.
+    #[cfg(test)]
+    pub(crate) fn put_nan_on_the_throttle(&mut self) {
+        let throttle = self.h.throttle;
+        self.scheduler.bus_mut().set(throttle, f64::NAN);
     }
 
     /// Fault seams start at their identities: multiplicative faults at 1.0, the prop imbalance at its
@@ -1348,7 +1387,7 @@ impl Vehicle {
     /// Applies one journal entry through the same method the server called, so a replay is the same call sequence.
     pub fn replay_action(&mut self, action: &Action) -> Result<(), SimError> {
         match action {
-            Action::Sticks(v) => self.set_sticks(&Sticks { roll: v[0], pitch: v[1], yaw: v[2], throttle: v[3], aux: [v[4], v[5], v[6], v[7]] }),
+            Action::Sticks(v) => self.set_sticks(&Sticks { roll: v[0], pitch: v[1], yaw: v[2], throttle: v[3], aux: [v[4], v[5], v[6], v[7]] })?,
             Action::Transmitter(on) => self.set_transmitter(*on),
             Action::Fault { fault, active } => return self.set_fault(fault.clone(), *active),
             Action::ScheduleFault { fault, at_s } => return self.schedule_fault(fault.clone(), *at_s),
@@ -1664,7 +1703,7 @@ mod tests {
         cfg.motors[2] = other.clone();
         cfg.motors[3] = other;
         let mut vehicle = open_loop(&cfg, WorldConfig::open_field());
-        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() });
+        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() }).unwrap();
         vehicle.run_for(0.05).unwrap();
         let s = vehicle.state();
         // From rest the ESC current sits on its 45 A limit, where the torque is ke*I: the 1000KV motors
@@ -1880,7 +1919,7 @@ mod tests {
     #[test]
     fn motors_integrate_theta() {
         let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
-        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() });
+        vehicle.set_sticks(&Sticks { throttle: 1.0, ..Default::default() }).unwrap();
         vehicle.run_for(0.10).unwrap();
         let b = vehicle.scheduler.bus();
         let theta = b.get(vehicle.h.motor_theta[0]);

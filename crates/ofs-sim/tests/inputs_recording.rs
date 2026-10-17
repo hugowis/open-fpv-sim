@@ -31,11 +31,11 @@ fn rows_are_written_only_when_a_stick_changes_and_the_first_row_is_complete() {
     let path = dir.path().join("sticks.csv");
     let mut v = vehicle();
     v.start_inputs_recording(&path).unwrap();
-    v.set_sticks(&sticks(0.5, 0.0)); // the same tick as the start: it replaces the initial row
+    v.set_sticks(&sticks(0.5, 0.0)).unwrap(); // the same tick as the start: it replaces the initial row
     v.run_for(0.02).unwrap();
-    v.set_sticks(&sticks(0.5, 0.0)); // unchanged: no row
+    v.set_sticks(&sticks(0.5, 0.0)).unwrap(); // unchanged: no row
     v.run_for(0.02).unwrap();
-    v.set_sticks(&sticks(0.5, 0.25));
+    v.set_sticks(&sticks(0.5, 0.25)).unwrap();
     v.run_for(0.01).unwrap();
     let summary = v.stop_inputs_recording().unwrap();
     assert_eq!(
@@ -53,9 +53,9 @@ fn two_changes_in_one_tick_leave_the_later_one() {
     let mut v = vehicle();
     v.run_for(0.01).unwrap();
     v.start_inputs_recording(&path).unwrap();
-    v.set_sticks(&sticks(0.1, 0.0));
-    v.set_sticks(&sticks(0.2, 0.0));
-    v.set_sticks(&sticks(0.3, 0.0));
+    v.set_sticks(&sticks(0.1, 0.0)).unwrap();
+    v.set_sticks(&sticks(0.2, 0.0)).unwrap();
+    v.set_sticks(&sticks(0.3, 0.0)).unwrap();
     v.stop_inputs_recording().unwrap();
     assert_eq!(lines(&path), [HEADER, "0,0,0,0,0.3,-1,-1,-1,-1"], "t_s counts from the start of the recording");
 }
@@ -67,10 +67,9 @@ fn a_non_finite_stick_adds_no_row_and_an_out_of_range_one_is_clamped_so_the_file
     let mut v = vehicle();
     v.start_inputs_recording(&path).unwrap();
     v.run_for(0.01).unwrap();
-    v.set_sticks(&sticks(f64::NAN, 0.0));
-    v.set_sticks(&Sticks::default()); // the server never lets a NaN reach the bus (it would abort the run): put the sticks back
+    assert!(v.set_sticks(&sticks(f64::NAN, 0.0)).is_err(), "refused: a NaN reaches neither the bus nor the file");
     v.run_for(0.01).unwrap();
-    v.set_sticks(&Sticks { roll: 3.0, throttle: -2.0, ..Sticks::default() });
+    v.set_sticks(&Sticks { roll: 3.0, throttle: -2.0, ..Sticks::default() }).unwrap();
     v.run_for(0.01).unwrap();
     v.stop_inputs_recording().unwrap();
     assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1", "0.02,1,0,0,0,-1,-1,-1,-1"]);
@@ -97,7 +96,7 @@ fn a_vehicle_dropped_mid_recording_leaves_a_complete_file() {
         let mut v = vehicle();
         v.start_inputs_recording(&path).unwrap();
         v.run_for(0.01).unwrap();
-        v.set_sticks(&sticks(0.7, 0.0)); // the newest row is still pending when the session ends
+        v.set_sticks(&sticks(0.7, 0.0)).unwrap(); // the newest row is still pending when the session ends
     }
     assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1", "0.01,0,0,0,0.7,-1,-1,-1,-1"]);
 }
@@ -125,7 +124,7 @@ fn floats_round_trip_exactly_through_the_file() {
     let mut v = vehicle();
     v.start_inputs_recording(&path).unwrap();
     v.run_for(0.01).unwrap();
-    v.set_sticks(&sticks(1.0 / 3.0, awkward));
+    v.set_sticks(&sticks(1.0 / 3.0, awkward)).unwrap();
     v.stop_inputs_recording().unwrap();
     let parsed = inputs::parse("sticks.csv", &std::fs::read_to_string(&path).unwrap()).unwrap();
     let last = parsed.rows.last().unwrap();
@@ -140,7 +139,7 @@ fn flown(record_to: Option<&Path>) -> Vehicle {
         v.start_inputs_recording(path).unwrap();
     }
     for (throttle, roll, secs) in [(0.0, 0.0, 0.5), (0.6, 0.0, 1.0), (0.4, 0.5, 0.7)] {
-        v.set_sticks(&sticks(throttle, roll));
+        v.set_sticks(&sticks(throttle, roll)).unwrap();
         v.run_for(secs).unwrap();
     }
     if record_to.is_some() {

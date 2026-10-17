@@ -11,7 +11,7 @@ fn a_built_vehicle_has_a_tail_of_its_last_ten_seconds() {
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 3, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
     let mut v = build(&cfg, &opts).unwrap();
-    v.set_sticks(&Sticks { throttle: 0.4, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 0.4, ..Sticks::default() }).unwrap();
     v.run_for(12.0).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tail.mcap");

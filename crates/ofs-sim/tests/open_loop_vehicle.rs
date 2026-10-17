@@ -40,7 +40,7 @@ fn resting_quad_stays_put() {
 #[test]
 fn full_throttle_climbs_and_sags_the_battery() {
     let mut v = vehicle(1);
-    v.set_sticks(&throttle(1.0));
+    v.set_sticks(&throttle(1.0)).unwrap();
     v.run_for(1.0).unwrap();
     let s = v.state();
     assert!(s.pos_ned_m.z < -1.0, "altitude {}", -s.pos_ned_m.z);
@@ -52,7 +52,7 @@ fn full_throttle_climbs_and_sags_the_battery() {
 fn scripted_digest(seed: u64) -> u64 {
     let mut v = vehicle(seed);
     for (t, secs) in [(0.0, 0.5), (0.6, 1.0), (0.2, 0.5)] {
-        v.set_sticks(&throttle(t));
+        v.set_sticks(&throttle(t)).unwrap();
         v.run_for(secs).unwrap();
     }
     v.digest()
@@ -69,7 +69,7 @@ fn a_new_vehicle_starts_with_default_sticks() {
     // Aux channels left at 0.0 would reach SITL as 1500 us until the first SetSticks.
     let built = vehicle(1);
     let mut explicit = vehicle(1);
-    explicit.set_sticks(&Sticks::default());
+    explicit.set_sticks(&Sticks::default()).unwrap();
     assert_eq!(built.digest(), explicit.digest());
 }
 
@@ -173,7 +173,7 @@ fn mixed_pole_pairs_change_nothing_the_airframe_feels() {
         let mut cfg = load(Path::new(QUAD)).unwrap();
         cfg.motors[1].pole_pairs = pole_pairs_of_motor_1;
         let mut v = vehicle_in(&cfg, WorldConfig::open_field());
-        v.set_sticks(&throttle(0.7));
+        v.set_sticks(&throttle(0.7)).unwrap();
         v.run_for(1.0).unwrap();
         v.state()
     };
@@ -182,4 +182,44 @@ fn mixed_pole_pairs_change_nothing_the_airframe_feels() {
     assert!(mixed.pos_ned_m.is_finite() && mixed.rate_frd_radps.is_finite(), "{:?} {:?}", mixed.pos_ned_m, mixed.rate_frd_radps);
     assert!(mixed.pos_ned_m.z < -0.5, "it climbed: {}", mixed.pos_ned_m.z);
     assert_eq!((mixed.pos_ned_m, mixed.vel_ned_mps, mixed.rate_frd_radps), (uniform.pos_ned_m, uniform.vel_ned_mps, uniform.rate_frd_radps));
+}
+
+fn rc(v: &Vehicle, name: &str) -> f64 {
+    v.signal(name).unwrap_or_else(|| panic!("no signal {name}"))
+}
+
+#[test]
+fn set_sticks_refuses_a_non_finite_value_and_changes_nothing() {
+    use ofs_core::{names, SimError};
+    let mut v = vehicle(1);
+    v.set_sticks(&Sticks { roll: 0.25, throttle: 0.5, aux: [1.0, -1.0, 0.5, 0.0], ..Sticks::default() }).unwrap();
+    let entries = v.journal().entries().len();
+    let bad = [
+        ("roll", Sticks { roll: f64::NAN, ..Sticks::default() }),
+        ("throttle", Sticks { throttle: f64::INFINITY, ..Sticks::default() }),
+        ("aux", Sticks { aux: [0.0, f64::NEG_INFINITY, 0.0, 0.0], ..Sticks::default() }),
+    ];
+    for (field, sticks) in bad {
+        let err = v.set_sticks(&sticks).unwrap_err();
+        assert!(matches!(&err, SimError::InvalidArgument(m) if m.contains(field)), "{field}: {err:?}");
+    }
+    assert_eq!(rc(&v, names::RC_ROLL), 0.25, "the refused calls left the bus alone");
+    assert_eq!(rc(&v, names::RC_THROTTLE), 0.5);
+    assert_eq!(rc(&v, &names::rc_aux(0)), 1.0);
+    assert_eq!(v.journal().entries().len(), entries, "and the journal");
+}
+
+#[test]
+fn set_sticks_clamps_what_it_accepts() {
+    use ofs_core::names;
+    use ofs_sim::journal::Action;
+    let mut v = vehicle(1);
+    v.set_sticks(&Sticks { roll: 3.0, pitch: -3.0, yaw: 0.5, throttle: 2.0, aux: [5.0, -5.0, 0.5, 0.0] }).unwrap();
+    assert_eq!((rc(&v, names::RC_ROLL), rc(&v, names::RC_PITCH), rc(&v, names::RC_YAW), rc(&v, names::RC_THROTTLE)), (1.0, -1.0, 0.5, 1.0));
+    let aux: Vec<f64> = (0..4).map(|i| rc(&v, &names::rc_aux(i))).collect();
+    assert_eq!(aux, [1.0, -1.0, 0.5, 0.0]);
+    let last = v.journal().entries().last().unwrap();
+    assert_eq!(last.action, Action::Sticks([1.0, -1.0, 0.5, 1.0, 1.0, -1.0, 0.5, 0.0]), "the journal carries what the bus saw");
+    v.set_sticks(&Sticks { throttle: -1.0, ..Sticks::default() }).unwrap();
+    assert_eq!(rc(&v, names::RC_THROTTLE), 0.0);
 }

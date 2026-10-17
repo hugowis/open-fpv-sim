@@ -21,10 +21,10 @@ fn climb() -> inputs::Inputs {
 /// A script that touches every steering call, stepping between them.
 fn drive(v: &mut Vehicle) {
     let hover = Sticks { throttle: 0.3, ..Sticks::default() };
-    v.set_sticks(&hover);
-    v.set_sticks(&hover); // the same values again: nothing new to journal
+    v.set_sticks(&hover).unwrap();
+    v.set_sticks(&hover).unwrap(); // the same values again: nothing new to journal
     v.step_ticks(100).unwrap();
-    v.set_sticks(&Sticks { throttle: 0.6, roll: 0.2, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 0.6, roll: 0.2, ..Sticks::default() }).unwrap();
     v.set_transmitter(false);
     v.step_ticks(100).unwrap();
     v.set_transmitter(true);
@@ -74,11 +74,11 @@ fn a_stick_change_after_playback_is_journaled_even_to_the_values_set_before_it()
     // change of the bus and must be in the journal, or an exact replay would end with the file's last values.
     let hover = Sticks { throttle: 0.3, ..Sticks::default() };
     let mut a = vehicle();
-    a.set_sticks(&hover);
+    a.set_sticks(&hover).unwrap();
     a.step_ticks(100).unwrap();
     a.play_inputs(climb()).unwrap();
     a.step_ticks(400).unwrap(); // the file finishes at 0.02 s: its last row (throttle 0.9) holds
-    a.set_sticks(&hover);
+    a.set_sticks(&hover).unwrap();
     a.step_ticks(100).unwrap();
     let sticks_at: Vec<u64> = a.journal().entries().iter().filter(|e| matches!(e.action, Action::Sticks(_))).map(|e| e.tick).collect();
     assert_eq!(sticks_at, [0, 500], "the second hover is a change: {:?}", a.journal().entries());
@@ -118,4 +118,19 @@ fn replaying_a_journal_reproduces_the_run() {
     assert_eq!(a.state(), b.state());
     // And the journal a replay leaves is the one it replayed.
     assert_eq!(a.journal().entries().len(), b.journal().entries().len());
+}
+
+#[test]
+fn a_replayed_journal_sees_the_clamped_sticks() {
+    let mut a = vehicle();
+    a.set_sticks(&Sticks { throttle: 7.0, roll: 4.0, ..Sticks::default() }).unwrap();
+    a.step_ticks(4000).unwrap();
+    let mut b = vehicle();
+    for e in a.journal().entries() {
+        b.step_ticks(e.tick - b.tick()).unwrap();
+        b.replay_action(&e.action).unwrap();
+    }
+    b.step_ticks(a.tick() - b.tick()).unwrap();
+    assert_eq!(a.digest(), b.digest());
+    assert_eq!(a.state(), b.state());
 }

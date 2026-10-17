@@ -702,7 +702,7 @@ mod tests {
     fn failing_session(logs: &Path) -> Session {
         let mut session = testing::open_loop_session(RunMode::Lockstep);
         session.repro = Some(crate::repro::test_source(logs));
-        session.vehicle.set_sticks(&crate::vehicle::Sticks { throttle: f64::NAN, ..Default::default() });
+        session.vehicle.put_nan_on_the_throttle();
         session
     }
 

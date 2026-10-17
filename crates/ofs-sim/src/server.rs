@@ -296,7 +296,7 @@ impl Sim for SimService {
                 let message = format!("{playing} is playing: SetSticks would be overwritten (call StopInputs first)");
                 return Err(error("invalid_argument", Code::InvalidArgument, message));
             }
-            s.vehicle.set_sticks(&sticks);
+            s.vehicle.set_sticks(&sticks).map_err(|e| sim_error(&e))?;
             Ok(pb::Empty {})
         })
         .await
@@ -792,7 +792,7 @@ mod tests {
     #[tokio::test]
     async fn a_numerical_failure_is_published_as_a_sim_error_event() {
         let mut session = open_loop_session(RunMode::Lockstep);
-        session.vehicle.set_sticks(&crate::vehicle::Sticks { throttle: f64::NAN, ..Default::default() });
+        session.vehicle.put_nan_on_the_throttle();
         let svc = service_with(session);
         let mut events = svc.subscribe();
         let err = svc.run(Request::new(pb::RunRequest { seconds: 0.1 })).await.unwrap_err();

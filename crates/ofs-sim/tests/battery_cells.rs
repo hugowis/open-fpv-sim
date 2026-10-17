@@ -20,7 +20,7 @@ fn full_throttle() -> Sticks {
 #[test]
 fn a_clean_pack_has_six_equal_cells() {
     let mut v = vehicle(&load(Path::new(QUAD)).unwrap());
-    v.set_sticks(&full_throttle());
+    v.set_sticks(&full_throttle()).unwrap();
     v.run_for(0.5).unwrap();
     let s = v.state();
     assert_eq!(s.battery_cell_voltages.len(), 6);
@@ -38,7 +38,7 @@ fn an_aged_pack_sags_more_in_flight() {
     aged_cfg.battery.resistance_growth_per_cycle = 0.004;
     let (mut fresh, mut aged) = (vehicle(&fresh_cfg), vehicle(&aged_cfg));
     for v in [&mut fresh, &mut aged] {
-        v.set_sticks(&full_throttle());
+        v.set_sticks(&full_throttle()).unwrap();
         v.run_for(1.0).unwrap();
     }
     let (f, a) = (fresh.state(), aged.state());
@@ -54,7 +54,7 @@ fn an_aged_pack_sags_more_in_flight() {
 #[test]
 fn a_weak_cell_fault_lowers_exactly_that_cell() {
     let mut v = vehicle(&load(Path::new(QUAD)).unwrap());
-    v.set_sticks(&full_throttle());
+    v.set_sticks(&full_throttle()).unwrap();
     v.set_fault(Fault::WeakCell { cell: 3, r_offset_ohm: 0.02, v_offset_v: 0.1 }, true).unwrap();
     v.run_for(0.2).unwrap();
     let s = v.state();

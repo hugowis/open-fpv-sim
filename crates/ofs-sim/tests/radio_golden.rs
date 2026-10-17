@@ -37,7 +37,8 @@ fn flight(quad: &str, seed: u64, path: &Path) -> u64 {
             throttle,
             roll,
             ..Sticks::default()
-        });
+        })
+        .unwrap();
         v.run_for(secs).unwrap();
     }
     v.stop_recording().unwrap();

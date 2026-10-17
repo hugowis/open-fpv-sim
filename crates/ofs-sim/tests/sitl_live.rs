@@ -51,7 +51,7 @@ fn msp_reports_the_api_version_over_tcp() {
 fn crsf_sticks_reach_betaflight() {
     let mut rig = Rig::new();
     let v = &mut rig.v;
-    v.set_sticks(&Sticks { roll: 0.2, pitch: -0.2, ..Sticks::default() });
+    v.set_sticks(&Sticks { roll: 0.2, pitch: -0.2, ..Sticks::default() }).unwrap();
     v.run_for(2.0).unwrap();
     let reply = msp().request(MSP_RC, &[], 500, || v.run_for(0.01)).unwrap();
     // MSP_RC lists roll, pitch, yaw, throttle (Betaflight's internal order).
@@ -68,7 +68,7 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     let mut rig = Rig::new();
     let v = &mut rig.v;
     v.run_for(4.0).unwrap(); // boot and gyro calibration
-    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     v.run_for(1.0).unwrap();
     assert!(armed(v), "never armed: {:?}", v.state().motor_cmd);
     v.set_fault(Fault::RadioLinkLoss, true).unwrap();
@@ -88,10 +88,10 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
 
     // The link comes back: Betaflight recovers once the arm switch is off, and arms again.
     v.clear_faults();
-    v.set_sticks(&Sticks::default()); // arm switch off
+    v.set_sticks(&Sticks::default()).unwrap(); // arm switch off
     v.run_for(2.0).unwrap();
     assert!(v.state().radio.link_up, "the link is back");
-    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     v.run_for(1.0).unwrap();
     assert!(armed(v), "no re-arm after the failsafe: {:?}", v.state().motor_cmd);
 }
@@ -184,7 +184,7 @@ fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
     let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
     source.firmware_initial = snapshot_firmware(&firmware);
     assert!(source.firmware_initial.iter().any(|(n, _)| n == "eeprom.bin"), "the first boot saved an EEPROM");
-    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     rig.v.run_for(2.0).unwrap();
     let error = ofs_core::SimError::Firmware("simulated failure for the bundle test".into());
     let bundle = write_bundle(&source, &rig.v, &error).unwrap();

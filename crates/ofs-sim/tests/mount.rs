@@ -22,7 +22,7 @@ fn digest(mount: Option<FcMountSection>, imbalance_kgm: f64) -> u64 {
     if imbalance_kgm > 0.0 {
         v.set_fault(Fault::PropDamage { prop: 0, thrust_scale: 1.0, imbalance_kgm }, true).unwrap();
     }
-    v.set_sticks(&Sticks { throttle: 0.6, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 0.6, ..Sticks::default() }).unwrap();
     v.run_for(0.5).unwrap();
     v.digest()
 }
