@@ -13,9 +13,11 @@ use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_electrical::thermal::{EscThermalParams, MotorThermalParams, NodeParams, Thermal, ThermalParams, VtxThermalParams};
 use ofs_fc::open_loop::OpenLoopFc;
+use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
 use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
+use crate::journal::{Action, Journal};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -220,7 +222,7 @@ pub enum Fault {
 
 impl Fault {
     /// The fault's name, as the events and `active_fault_names` spell it.
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Fault::RadioLinkLoss => "radio_link_loss",
             Fault::RadioLoss { .. } => "radio_loss",
@@ -455,6 +457,8 @@ pub struct Vehicle {
     active_faults: Vec<String>,
     /// The recorder model's handle: StartRecording/StopRecording go through it.
     recorder: RecorderHandle,
+    /// The rolling tail of the default channel table: a failed session's bundle takes its snapshot.
+    tail: TailHandle,
     /// Faults scheduled with `at`, by due tick (ties in scheduling order).
     pending_faults: Vec<(u64, Fault)>,
     /// The inputs file playing now.
@@ -463,6 +467,10 @@ pub struct Vehicle {
     finished_inputs: Option<String>,
     /// The sticks recording running now (a row whenever `set_sticks` changes a value).
     inputs_recorder: Option<InputsRecorder>,
+    /// Everything that steers the run, by tick: what a repro bundle replays.
+    journal: Journal,
+    /// The sticks last journaled, so a repeated value adds no entry.
+    journaled_sticks: [u64; 8],
 }
 
 /// An inputs file being played: its rows' due ticks and the next row to apply.
@@ -481,6 +489,15 @@ pub fn firmware_dir(data_dir: &Path, quad_path: &Path) -> PathBuf {
     let stem = quad_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
     let hash = fnv1a64(full.to_string_lossy().as_bytes()) as u32;
     data_dir.join(format!("{stem}-{hash:08x}"))
+}
+
+/// The eight stick values of the journal, as bit patterns (so NaN compares equal to itself).
+fn sticks_bits(s: &Sticks) -> [u64; 8] {
+    sticks_values(s).map(f64::to_bits)
+}
+
+fn sticks_values(s: &Sticks) -> [f64; 8] {
+    [s.roll, s.pitch, s.yaw, s.throttle, s.aux[0], s.aux[1], s.aux[2], s.aux[3]]
 }
 
 fn v3(a: [f64; 3]) -> DVec3 {
@@ -777,6 +794,36 @@ pub fn receiver_thresholds(v: &world_cfg::VideoSection) -> ReceiverThresholds {
     }
 }
 
+/// One motor's drivetrain as the models take it: the propeller, the motor, its ESC and the propeller's inertia.
+/// `build` and the validation harness's thrust stand both read it from here, so they cannot drift apart.
+#[derive(Debug, Clone)]
+pub struct Drivetrain {
+    pub prop: PropParams,
+    pub motor: MotorParams,
+    pub esc: EscParams,
+    pub prop_inertia_kgm2: f64,
+}
+
+/// Motor `i`'s drivetrain parameters from the quad config.
+pub fn drivetrain_params(cfg: &QuadConfig, i: usize) -> Drivetrain {
+    Drivetrain {
+        prop: PropParams {
+            diameter_m: cfg.props[i].diameter_m,
+            ct_table: pairs(&cfg.props[i].ct_table),
+            cp_table: pairs(&cfg.props[i].cp_table),
+            windmill_j0: cfg.props[i].windmill_j0,
+        },
+        motor: MotorParams {
+            kv_rpm_per_v: cfg.motors[i].kv_rpm_per_v,
+            resistance_ohm: cfg.motors[i].resistance_ohm,
+            no_load_current_a: cfg.motors[i].no_load_current_a,
+            rotor_inertia_kgm2: cfg.motors[i].rotor_inertia_kgm2,
+        },
+        esc: EscParams { response_tau_s: cfg.escs[i].response_tau_s, current_limit_a: cfg.escs[i].current_limit_a },
+        prop_inertia_kgm2: cfg.props[i].inertia_kgm2,
+    }
+}
+
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
     let mut bus = Bus::new();
     let n = cfg.frame.motor_positions_frd_m.len();
@@ -784,23 +831,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let mut models: Vec<Box<dyn Model>> = Vec::new();
 
     for i in 0..n {
-        let prop = PropParams {
-            diameter_m: cfg.props[i].diameter_m,
-            ct_table: pairs(&cfg.props[i].ct_table),
-            cp_table: pairs(&cfg.props[i].cp_table),
-            windmill_j0: cfg.props[i].windmill_j0,
-        };
-        models.push(Box::new(Propeller::new(i, prop, &mut bus)));
+        models.push(Box::new(Propeller::new(i, drivetrain_params(cfg, i).prop, &mut bus)));
     }
     for i in 0..n {
-        let motor = MotorParams {
-            kv_rpm_per_v: cfg.motors[i].kv_rpm_per_v,
-            resistance_ohm: cfg.motors[i].resistance_ohm,
-            no_load_current_a: cfg.motors[i].no_load_current_a,
-            rotor_inertia_kgm2: cfg.motors[i].rotor_inertia_kgm2,
-        };
-        let esc = EscParams { response_tau_s: cfg.escs[i].response_tau_s, current_limit_a: cfg.escs[i].current_limit_a };
-        models.push(Box::new(EscMotor::new(i, esc, motor, cfg.props[i].inertia_kgm2, &mut bus)));
+        let d = drivetrain_params(cfg, i);
+        models.push(Box::new(EscMotor::new(i, d.esc, d.motor, d.prop_inertia_kgm2, &mut bus)));
     }
 
     let battery = BatteryParams {
@@ -948,6 +983,11 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
 
     let h = Handles::register(&mut bus, n, cfg.battery.cells as usize, &opts.world);
+    // After the recorder, once every signal exists: it keeps the last seconds of all of them in memory.
+    let tail = TailHandle::default();
+    models.push(Box::new(
+        TailRecorder::new(tail.clone(), &bus, base_hz, DEFAULT_WINDOW_S).map_err(|e| SimError::Other(format!("tail recorder: {e}")))?,
+    ));
     let mut scheduler = Scheduler::new(base_hz, bus);
     for m in models {
         scheduler.add(m);
@@ -967,15 +1007,21 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         has_vtx: cfg.vtx.is_some(),
         active_faults: Vec::new(),
         recorder,
+        tail,
         pending_faults: Vec::new(),
         playback: None,
         finished_inputs: None,
         inputs_recorder: None,
+        journal: Journal::new(),
+        journaled_sticks: [0; 8],
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default());
     vehicle.set_transmitter(true);
     vehicle.init_fault_identities(&cfg.props.iter().map(|p| p.imbalance_kgm).collect::<Vec<_>>());
+    // The set-up above is what a replay's own `build` does: the journal starts from here.
+    vehicle.journal = Journal::new();
+    vehicle.journaled_sticks = sticks_bits(&Sticks::default());
     Ok(vehicle)
 }
 
@@ -992,6 +1038,11 @@ impl Vehicle {
         }
         if let Some(recorder) = &mut self.inputs_recorder {
             recorder.record(self.scheduler.tick(), s);
+        }
+        let bits = sticks_bits(s);
+        if bits != self.journaled_sticks {
+            self.journaled_sticks = bits;
+            self.journal.push(self.scheduler.tick(), Action::Sticks(sticks_values(s)));
         }
     }
 
@@ -1012,6 +1063,7 @@ impl Vehicle {
     pub fn set_transmitter(&mut self, on: bool) {
         let s = self.h.tx_enabled;
         self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
+        self.journal.push(self.scheduler.tick(), Action::Transmitter(on));
     }
 
     /// Validates a fault against this quad without applying it: what `set_fault` and `schedule_fault` refuse.
@@ -1087,6 +1139,13 @@ impl Vehicle {
     /// Activates (`active = true`) or deactivates a fault. A fault that fails validation leaves nothing
     /// behind: no signal moves and it is not recorded as active.
     pub fn set_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
+        self.apply_fault(fault.clone(), active)?;
+        self.journal.push(self.scheduler.tick(), Action::Fault { fault, active });
+        Ok(())
+    }
+
+    /// `set_fault` without the journal: what a scheduled fault does when its tick comes.
+    fn apply_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
         self.check_fault(&fault)?;
         let b = self.scheduler.bus_mut();
         match &fault {
@@ -1142,8 +1201,9 @@ impl Vehicle {
         if at < now {
             return Err(SimError::InvalidArgument(format!("fault time {at_s} s has passed (the session is at {} s)", self.time_s())));
         }
+        self.journal.push(now, Action::ScheduleFault { fault: fault.clone(), at_s });
         if at == now {
-            return self.set_fault(fault, true);
+            return self.apply_fault(fault, true);
         }
         // Stable: faults due on one tick apply in the order they were scheduled.
         let index = self.pending_faults.partition_point(|(t, _)| *t <= at);
@@ -1161,6 +1221,7 @@ impl Vehicle {
         let now = self.scheduler.tick();
         let base_hz = self.base_hz();
         let ticks = inputs.rows.iter().map(|(t, _)| now + tick_at(*t, base_hz)).collect();
+        self.journal.push(now, Action::PlayInputs(inputs.clone()));
         self.playback = Some(Playback { inputs, ticks, next: 0 });
         self.apply_due(); // rows at t_s = 0 apply now
         Ok(())
@@ -1168,6 +1229,7 @@ impl Vehicle {
 
     /// Stops the playing inputs file, if any (the sticks keep their last values). Returns its name.
     pub fn stop_inputs(&mut self) -> Option<String> {
+        self.journal.push(self.scheduler.tick(), Action::StopInputs);
         self.playback.take().map(|p| p.inputs.name)
     }
 
@@ -1186,7 +1248,7 @@ impl Vehicle {
         let now = self.scheduler.tick();
         while self.pending_faults.first().is_some_and(|(t, _)| *t <= now) {
             let (_, fault) = self.pending_faults.remove(0);
-            self.set_fault(fault, true).expect("validated when scheduled");
+            self.apply_fault(fault, true).expect("validated when scheduled");
         }
         let Some(p) = self.playback.as_mut() else { return };
         let bus = self.scheduler.bus_mut();
@@ -1202,6 +1264,13 @@ impl Vehicle {
                 bus.set(signal, *v);
             }
             p.next += 1;
+            // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the bus's
+            // now, or the next `set_sticks` to the values from before the file would look like no change.
+            let h = &self.h;
+            let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
+            for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
+                *slot = bus.get(signal).to_bits();
+            }
         }
         if p.next == p.ticks.len() {
             self.finished_inputs = self.playback.take().map(|p| p.inputs.name);
@@ -1231,6 +1300,7 @@ impl Vehicle {
     /// Clears every fault: the multiplicative signals back to their identities, the additive ones to zero,
     /// the radio_link_loss signal and the runtime emitter off. Never fails.
     pub fn clear_faults(&mut self) {
+        self.journal.push(self.scheduler.tick(), Action::ClearFaults);
         let imbalance = self.prop_imbalance_baseline.clone();
         self.init_fault_identities(&imbalance);
         let h = &self.h;
@@ -1260,6 +1330,32 @@ impl Vehicle {
             self.scheduler.step()?;
             if !self.pending_faults.is_empty() || self.playback.is_some() {
                 self.apply_due();
+            }
+        }
+        Ok(())
+    }
+
+    /// The base tick the next step runs.
+    pub fn tick(&self) -> u64 {
+        self.scheduler.tick()
+    }
+
+    /// What has steered this run since `build`.
+    pub fn journal(&self) -> &Journal {
+        &self.journal
+    }
+
+    /// Applies one journal entry through the same method the server called, so a replay is the same call sequence.
+    pub fn replay_action(&mut self, action: &Action) -> Result<(), SimError> {
+        match action {
+            Action::Sticks(v) => self.set_sticks(&Sticks { roll: v[0], pitch: v[1], yaw: v[2], throttle: v[3], aux: [v[4], v[5], v[6], v[7]] }),
+            Action::Transmitter(on) => self.set_transmitter(*on),
+            Action::Fault { fault, active } => return self.set_fault(fault.clone(), *active),
+            Action::ScheduleFault { fault, at_s } => return self.schedule_fault(fault.clone(), *at_s),
+            Action::ClearFaults => self.clear_faults(),
+            Action::PlayInputs(inputs) => return self.play_inputs(inputs.clone()),
+            Action::StopInputs => {
+                self.stop_inputs();
             }
         }
         Ok(())
@@ -1359,6 +1455,11 @@ impl Vehicle {
     /// Finishes the running recording's file.
     pub fn stop_recording(&mut self) -> Result<RecordingSummary, RecordError> {
         self.recorder.stop()
+    }
+
+    /// Writes the last ten seconds of the default channel table to a new MCAP file at `path`.
+    pub fn snapshot_tail(&self, path: &Path) -> Result<RecordingSummary, RecordError> {
+        self.tail.snapshot(path)
     }
 
     pub fn is_recording(&self) -> bool {

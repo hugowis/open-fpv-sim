@@ -3,6 +3,25 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M6c: validation and the repro bundle
+### Added
+- A failed session writes a **repro bundle**: a folder under the logs directory (`<quad>-<n>.repro`) with the quad,
+  the library and world it used, the seed, a journal of everything that steered the run, the firmware's state from
+  `Load` and the last 10 seconds of its channels. `ofs-sim --replay <folder>` and `ofs.repro.replay_bundle` run it again
+  and say whether the failure came back (`docs/repro-bundle.md`). Every session now keeps that 10 s tail in memory (about 15 MB
+  for the shipped quad; it costs about 6 % of the open-loop real-time factor, 275x to 257x) and a journal of its
+  steering calls.
+- `ofs-validate`, the validation harness: a documented submission format for community measurements (`thrust_stand`,
+  and `blackbox_step` as a checked format), a checker that reports every problem with its file and line, and a
+  thrust-stand comparator that runs the simulator's own ESC, motor and propeller to steady state at each measured row.
+  A synthetic worked example and its generated report are under `validation/`; CI prints the report in the job summary
+  (tracked, not gating). See `docs/validation.md`.
+- `ofs.repro` (`find_bundles`, `replay_bundle`), and `ofs_config::load_with_library_env`.
+### Changed
+- The `sim_error` event's text now ends with `(repro bundle: <folder>)` (or why there is none).
+- `ofs-sim --data-dir` has no default shown in `--help` any more (it is still `.ofs-data`); with `--replay` it defaults
+  to a temporary directory.
+
 ## Unreleased — M6b: battery, thermal and receiver
 ### Added
 - The video receiver's thresholds are world data: an optional `[video]` table in a world file sets the SNR

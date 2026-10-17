@@ -1,5 +1,7 @@
 //! The loaded session and the state every part of the server shares: gRPC handlers, the real-time runner
 //! and the streams.
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -14,6 +16,7 @@ use tokio::sync::broadcast;
 use crate::blackbox::BlackboxCopy;
 use crate::pacer::{OverrunPolicy, Pacer};
 use crate::pb;
+use crate::repro::BundleSource;
 use crate::vehicle::{VideoInfo, Vehicle, VehicleState, VtxInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,10 @@ pub struct Session {
     pub panic_on_step: bool,
     /// The quad file's stem: recordings are `<logs dir>/<stem>-<n>.mcap`.
     pub quad_stem: String,
+    /// How the session was loaded: what a repro bundle needs. `None` (unit tests) writes no bundle.
+    pub repro: Option<BundleSource>,
+    /// The repro bundle of this session's failure: written once, when the failure is first set.
+    pub bundle: Option<Result<PathBuf, String>>,
     /// Betaflight sessions: copies SITL's Blackbox logs when the session ends. Declared last on purpose: fields
     /// drop in order, so the vehicle (and SITL) is gone before the copy runs.
     pub blackbox: Option<BlackboxCopy>,
@@ -207,14 +214,45 @@ impl Session {
             #[cfg(test)]
             panic_on_step: false,
             quad_stem: "quad".into(),
+            repro: None,
+            bundle: None,
             blackbox: None,
         }
     }
 
     /// Poisons the session after an internal failure (a panic): it stays paused until the next Load.
     pub fn poison(&mut self, e: SimError) {
-        self.failure = Some(e);
+        let first = self.failure.is_none();
+        self.failure = Some(e.clone());
         self.running = false;
+        if first {
+            self.capture_failure(&e);
+        }
+    }
+
+    /// Writes the repro bundle for the failure `e`, once. It never fails the caller: a bundle that cannot be
+    /// written is logged and kept as the reason, and the original error stands.
+    fn capture_failure(&mut self, e: &SimError) {
+        if self.bundle.is_some() {
+            return;
+        }
+        let Some(source) = &self.repro else { return };
+        let written = catch_unwind(AssertUnwindSafe(|| crate::repro::write_bundle(source, &self.vehicle, e)))
+            .unwrap_or_else(|p| Err(format!("writing the bundle panicked: {}", panic_message(p.as_ref()))));
+        match &written {
+            Ok(path) => tracing::error!("session failed ({e}); repro bundle: {}", path.display()),
+            Err(why) => tracing::error!("session failed ({e}); the repro bundle could not be written: {why}"),
+        }
+        self.bundle = Some(written);
+    }
+
+    /// `e` as the clients are told: with the repro bundle's folder (or why there is none) when the session wrote one.
+    pub fn failure_text(&self, e: &SimError) -> String {
+        match &self.bundle {
+            Some(Ok(path)) => format!("{e} (repro bundle: {})", path.display()),
+            Some(Err(why)) => format!("{e} (repro bundle failed: {why})"),
+            None => e.to_string(),
+        }
     }
 
     /// Steps `ticks` base ticks. A firmware or numerical failure poisons the session and pauses it.
@@ -230,6 +268,7 @@ impl Session {
             if matches!(e, SimError::Firmware(_) | SimError::NonFinite(_)) {
                 self.failure = Some(e.clone());
                 self.running = false;
+                self.capture_failure(&e);
             }
             return Err(e);
         }
@@ -657,5 +696,67 @@ mod tests {
         let msg = osd_frame_msg(&OsdFrame { seq: 7, time_s: 1.5, present: true, grid });
         assert_eq!((msg.seq, msg.cols, msg.rows, msg.present), (7, 2, 2, true));
         assert_eq!(msg.cells, vec![0x20, u32::from(b'A') | 1 << 8 | 1 << 10, 0x20, 0x20]);
+    }
+
+    /// An open-loop session that writes its repro bundles under `logs` and fails on its first step.
+    fn failing_session(logs: &Path) -> Session {
+        let mut session = testing::open_loop_session(RunMode::Lockstep);
+        session.repro = Some(crate::repro::test_source(logs));
+        session.vehicle.set_sticks(&crate::vehicle::Sticks { throttle: f64::NAN, ..Default::default() });
+        session
+    }
+
+    fn bundles_in(logs: &Path) -> Vec<String> {
+        let mut out: Vec<String> = std::fs::read_dir(logs)
+            .map(|d| d.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".repro")).collect())
+            .unwrap_or_default();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_failed_step_writes_one_bundle() {
+        let logs = tempfile::tempdir().unwrap();
+        let mut session = failing_session(logs.path());
+        let e = session.step(100).unwrap_err();
+        assert!(matches!(e, SimError::NonFinite(_)), "{e:?}");
+        assert_eq!(bundles_in(logs.path()), ["opendrone-5f-freestyle-1.repro"]);
+        let text = session.failure_text(&e);
+        assert!(text.starts_with(&e.to_string()) && text.contains("(repro bundle: "), "{text}");
+        assert!(text.contains("opendrone-5f-freestyle-1.repro"), "{text}");
+        // The session stays failed; asking again, or poisoning it, writes nothing more.
+        assert!(session.step(10).is_err());
+        session.poison(SimError::Other("internal panic: later".into()));
+        assert_eq!(bundles_in(logs.path()), ["opendrone-5f-freestyle-1.repro"]);
+    }
+
+    #[test]
+    fn an_unwritable_logs_dir_does_not_hide_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_directory = dir.path().join("logs");
+        std::fs::write(&not_a_directory, "a file where the logs directory should be").unwrap();
+        let mut session = failing_session(&not_a_directory);
+        let e = session.step(100).unwrap_err();
+        assert!(matches!(e, SimError::NonFinite(_)), "the original error stands: {e:?}");
+        assert!(session.failure.is_some());
+        assert!(session.failure_text(&e).contains("(repro bundle failed: "), "{}", session.failure_text(&e));
+    }
+
+    #[test]
+    fn a_panic_poison_writes_a_bundle_too() {
+        let logs = tempfile::tempdir().unwrap();
+        let mut session = testing::open_loop_session(RunMode::Lockstep);
+        session.repro = Some(crate::repro::test_source(logs.path()));
+        session.poison(SimError::Other("internal panic: boom".into()));
+        assert_eq!(bundles_in(logs.path()).len(), 1);
+        assert!(session.failure_text(&SimError::Other("x".into())).contains("repro bundle: "));
+    }
+
+    #[test]
+    fn a_session_without_load_data_writes_nothing() {
+        let mut session = testing::open_loop_session(RunMode::Lockstep);
+        session.poison(SimError::Other("boom".into()));
+        assert!(session.bundle.is_none());
+        assert_eq!(session.failure_text(&SimError::Other("boom".into())), "boom");
     }
 }

@@ -115,3 +115,32 @@ fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
     let reply = msp().request(MSP_API_VERSION, &[], 500, || v.run_for(0.01)).unwrap();
     assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
 }
+
+#[test]
+#[ignore]
+fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
+    use ofs_sim::repro::{replay, snapshot_firmware, write_bundle, BundleSource};
+    let mut rig = Rig::new();
+    let data_dir = rig._dir.path().to_path_buf();
+    let quad = std::path::absolute(QUAD).unwrap();
+    let firmware = ofs_sim::vehicle::firmware_dir(&data_dir, &quad);
+    let cfg = load(&quad).unwrap();
+    let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    source.firmware_initial = snapshot_firmware(&firmware);
+    assert!(source.firmware_initial.iter().any(|(n, _)| n == "eeprom.bin"), "the first boot saved an EEPROM");
+    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    rig.v.run_for(2.0).unwrap();
+    let error = ofs_core::SimError::Firmware("simulated failure for the bundle test".into());
+    let bundle = write_bundle(&source, &rig.v, &error).unwrap();
+    for wanted in ["firmware/eeprom.bin", "firmware/betaflight.diff", "firmware/sitl.log", "tail.mcap", "journal.txt", "bundle.toml"] {
+        assert!(bundle.join(wanted).is_file(), "{wanted} missing from the bundle");
+    }
+    drop(rig.v); // SITL must stop before the replay starts its own
+    let scratch = tempfile::tempdir().unwrap();
+    // A crash that never happened does not recur: the replay runs the journal to the failing tick and says it did
+    // not reproduce, but it must run (the bundle's EEPROM boots SITL).
+    let outcome = replay(&bundle, scratch.path()).unwrap();
+    assert!(!outcome.reproduced, "{outcome:?}");
+    assert!(outcome.failure.is_none(), "{outcome:?}");
+    assert_eq!(outcome.reached_tick, outcome.expected_tick + 1, "{outcome:?}");
+}

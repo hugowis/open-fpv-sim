@@ -17,6 +17,7 @@ use crate::blackbox::BlackboxCopy;
 use crate::inputs;
 use crate::pacer::OverrunPolicy;
 use crate::pb::{self, sim_server::Sim, sim_server::SimServer};
+use crate::repro::{snapshot_firmware, BundleSource};
 use crate::runner;
 use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
@@ -197,8 +198,12 @@ impl SimService {
                 let shared = self.shared.clone();
                 let poisoned = message.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    if let Some(s) = shared.lock().as_mut() {
-                        s.poison(SimError::Other(poisoned));
+                    let mut slot = shared.lock();
+                    if let Some(s) = slot.as_mut() {
+                        let e = SimError::Other(poisoned);
+                        s.poison(e.clone());
+                        // The clients are told, with the repro bundle the poison wrote.
+                        shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, s.failure_text(&e))]);
                     }
                 })
                 .await;
@@ -248,15 +253,34 @@ impl Sim for SimService {
         let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world };
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
-        let blackbox = (opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl)
-            .then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
+        let sitl = opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl;
+        let blackbox = sitl.then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
+        // What a repro bundle needs to run this session again.
+        let world_file = (!req.world_path.is_empty()).then(|| ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path)));
+        let mut repro = BundleSource::new(
+            &cfg,
+            world_file.as_deref(),
+            std::env::var("OFS_LIBRARY").ok().as_deref(),
+            req.seed,
+            opts.fc_override == Some(FcKind::OpenLoop),
+            mode == RunMode::Realtime,
+            self.logs_dir(),
+            sitl.then(|| vehicle::firmware_dir(&self.data_dir, &cfg.source_path)),
+        )
+        .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
+        .ok();
         self.blocking(move |shared, slot| {
             *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
+            // The firmware's state as the session starts: after the first boot's diff apply, before any flight.
+            if let Some(r) = repro.as_mut() {
+                r.firmware_initial = r.firmware_dir.as_deref().map(snapshot_firmware).unwrap_or_default();
+            }
             let configurator_address = vehicle.configurator_address().unwrap_or_default();
             let mut session = Session::new(vehicle, mode, policy, keep_alive);
             session.watched = shared.watchers.load(Ordering::Acquire) > 0;
             session.quad_stem = quad_stem;
+            session.repro = repro;
             session.blackbox = blackbox;
             *slot = Some(session);
             Ok(pb::LoadReply { quad_name: cfg.name.clone(), base_hz: cfg.sim.base_hz, configurator_address })
@@ -319,7 +343,7 @@ impl Sim for SimService {
                     shared.publish(s.changes());
                     if let Err(e) = result {
                         if s.failure.is_some() {
-                            shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, e.to_string())]);
+                            shared.publish([event(s.vehicle.time_s(), pb::EventKind::SimError, s.failure_text(&e))]);
                         }
                         return Err(sim_error(&e));
                     }
@@ -630,6 +654,26 @@ mod tests {
         assert!(err.message().contains("internal panic: boom"), "{}", err.message());
         let state = svc.get_state(Request::new(pb::Empty {})).await.unwrap().into_inner();
         assert!(!state.running);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_tells_the_clients_and_names_the_bundle() {
+        let logs = tempfile::tempdir().unwrap();
+        let mut session = open_loop_session(RunMode::Lockstep);
+        session.repro = Some(crate::repro::test_source(logs.path()));
+        let svc = service_with(session);
+        let mut events = svc.subscribe();
+        svc.blocking::<(), _>(|_, _| panic!("boom")).await.unwrap_err();
+        let mut errors = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            if e.kind() == pb::EventKind::SimError {
+                errors.push(e.message);
+            }
+        }
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("internal panic: boom"), "{}", errors[0]);
+        assert!(errors[0].contains("(repro bundle: "), "{}", errors[0]);
         svc.shutdown();
     }
 

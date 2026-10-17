@@ -1054,9 +1054,25 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "toml",
  "tonic",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ofs-validate"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ofs-config",
+ "ofs-core",
+ "ofs-electrical",
+ "ofs-physics",
+ "ofs-sim",
+ "serde",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]

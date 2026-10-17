@@ -92,9 +92,12 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 
 ## Post-v1 backlog
 
-M6 (accuracy and validation) is in progress: M6a (rotor gyroscopic coupling, windmilling, the flight controller's mount
-response; `docs/research/rotor-dynamics.md`) and M6b (per-cell battery, thermal model, receiver thresholds as world
-data; `docs/research/battery-and-thermal.md`) are done; M6c (validation harness, repro bundle) is next.
+Phase 2 (M5 swappable radio components, M6 accuracy and validation) is done. M6 delivered the rotor and frame physics
+(M6a: gyroscopic coupling, windmilling, the flight controller's mount response; `docs/research/rotor-dynamics.md`), the
+per-cell battery, the thermal model and the receiver thresholds as world data (M6b;
+`docs/research/battery-and-thermal.md`), and the validation harness and the repro bundle (M6c; `docs/validation.md`,
+`docs/repro-bundle.md`). What is left of the epic "physics, electrical and RF modelling" is the list below; replacing the
+`estimated` constants with measurements is what the validation harness is for.
 
 ### Fidelity (parent spec §1.5, §2)
 - Level 2: AM32 and ExpressLRS as host-compiled firmware in the loop. Level 3 (MCU emulation) stays out of scope,
@@ -123,7 +126,8 @@ data; `docs/research/battery-and-thermal.md`) are done; M6c (validation harness,
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
-- The repro bundle (parent spec §7): one file that replays a session.
+- The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`), and a Configurator's EEPROM
+  changes made after `Load`.
 - `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API;
   `OFS_LIBRARY` as a search path.
 
@@ -134,7 +138,10 @@ data; `docs/research/battery-and-thermal.md`) are done; M6c (validation harness,
 - `rerun-sdk` is pinned to 0.39.x by the `rerun` extra: bump it deliberately (its Python API changes between minors).
 
 ### Validation (parent spec §8.5)
-- Thrust-stand comparisons for OpenMotor/prop combinations, and simulated against real Blackbox step responses.
+- Real measurements: the harness and the submission format exist (`docs/validation.md`, with a synthetic worked example),
+  so every `estimated` constant in the library waits only for data. Thrust-stand submissions are compared today.
+- The step-response comparator: simulated against real Blackbox step responses (the `blackbox_step` format is defined and
+  checked; the comparison needs SITL and a real tune).
 - A spectral proof that the RPM filter's notches track the motors, from a Blackbox log.
 - A scripted circuit through the gates against real Betaflight.
 
@@ -167,6 +174,10 @@ These explain behaviour that would otherwise look like a bug.
 - **Records are JSON objects** (`{"v"}`, `{"x","y","z"}`, `{"w","x","y","z"}`) with a JSON schema per shape:
   Foxglove's message paths need object roots.
 - **MCAP message indexes stay on**: Foxglove's reader needs them, though they are most of a file's size.
+- **A repro bundle replays what steers a run, not Betaflight's timing**: a lockstep session with an intact journal is
+  exact; a real-time session or one whose journal outgrew its cap replays approximately and says so
+  (`exact = false`). The 10 s tail costs about 15 MB per session and about 6 % of the open-loop real-time factor.
+- **The thermal and cell constants stay estimates** until a validation submission replaces them (`docs/validation.md`).
 - **A record is stamped with the time after its tick**, `(tick + 1) / base_hz`: what `GetState` reports then.
 - **Scheduled faults and inputs apply right after the step that reaches their time**.
 - **Inputs rows are relative to the `PlayInputs` call**; columns a file leaves out hold their value; the last row

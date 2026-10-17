@@ -1,7 +1,9 @@
 # Open FPV Sim — Phase 2 design (M5–M6): real gear, trusted numbers
 
 - **Date:** 2026-10-13
-- **Status:** approved in conversation 2026-10-13; this file is the written design.
+- **Status:** approved in conversation 2026-10-13; this file is the written design. **Done 2026-10-16**: M5 was redesigned
+  as swappable radio components (the serial capture found no CRSF stream, `docs/research/serial-radio.md`); M6 landed as
+  M6a/M6b/M6c (`docs/roadmap.md`).
 - **Parent:** `2026-10-04-open-fpv-sim-design.md` (v1: M0–M4, feature-complete; close-out in flight on `v1-closeout`).
 - **Backlog source:** the "Roadmap" dispositions of `2026-10-13-v1-closeout-design.md` §3 and the parent spec's v1
   non-goals (§2). Phase 2 is a selection from that backlog, not new invention: every item below is a deferral the

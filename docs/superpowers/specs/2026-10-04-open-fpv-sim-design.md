@@ -201,7 +201,7 @@ runs as printed.)
 | Script client disconnect | End session unless `keep_alive`. |
 | API version mismatch | Handshake fails with a clear message. Python raises typed exceptions (`ConfigError`, `FirmwareCrashed`, …). |
 
-**Repro bundle:** every simulator error writes a folder with quad config, seed, recorded inputs, SITL EEPROM and the last N seconds of MCAP.
+**Repro bundle:** every simulator error writes a folder with quad config, seed, recorded inputs, SITL EEPROM and the last N seconds of MCAP. (Built in M6c: `docs/repro-bundle.md`; N is 10 s.)
 
 ## 8. Testing
 
@@ -209,7 +209,7 @@ runs as printed.)
 2. **Protocol tests** — CRSF round-trip and CRC; golden frames from the CRSF/ELRS spec and real captures; `proptest` fuzzing of every parser (malformed bytes never crash the sim). (proptest suites: `crates/ofs-radio/tests/crsf.rs`, `crates/ofs-video/tests/vtx.rs`, `crates/ofs-client/tests/frames.rs`; MSP and SITL codecs in `crates/ofs-fc/tests`)
 3. **CI integration tests (Linux, headless, real Betaflight SITL)** — arm and hover; angle mode self-levels; radio cut → failsafe within expected timing; MSP over TCP returns API version; SmartAudio channel change reaches the VTX model. (CI's sitl job: `crates/ofs-fc/tests/sitl_live.rs`, `crates/ofs-sim/tests/sitl_live.rs`, `crates/ofs-video/tests/vtx_live.rs`, `python/tests/test_sitl_*.py`, `godot/tests/e2e_betaflight.gd`)
 4. **Determinism test** — two lockstep runs with the same seed produce identical MCAP hashes. (`test_betaflight_sitl_hover_is_deterministic`; `test_two_identical_lockstep_sessions_write_identical_files`; `crates/ofs-log/tests/determinism.rs`)
-5. **Validation reports** (tracked, not gating initially) — simulated vs measured thrust-stand data for OpenMotor/prop combinations; simulated vs real Blackbox step responses for the same quad and tune. Community measurements feed these. (not built in v1: `docs/roadmap.md`, Validation)
+5. **Validation reports** (tracked, not gating initially) — simulated vs measured thrust-stand data for OpenMotor/prop combinations; simulated vs real Blackbox step responses for the same quad and tune. Community measurements feed these. (v1: not built. Built in M6c: the submission format, the checker and the thrust-stand comparator with a synthetic worked example, `docs/validation.md`; the Blackbox step-response comparator waits for real data, `docs/roadmap.md`, Validation.)
 6. **Performance benchmark** — real-time factor tracked; target ≥ 2× real-time headless on a mid-range PC. (`scripts/benchmark.py`, in CI's sitl job summary; 7.4× with Betaflight SITL on the maintainer's PC, `docs/dev-setup.md`, Performance)
 7. **Godot smoke test** — boots and renders one frame headlessly; flight feel tested manually. (`scripts/run-godot-tests.sh unit` and `e2e`, CI's godot job)
 
@@ -222,6 +222,8 @@ runs as printed.)
 | **M2** | Radio + pilot | Fly with a joystick in Godot (grey-box world, FPV camera) through the ELRS/CRSF stack; failsafe works; Configurator connects. | done — 357577e (M2a), d8b4a1f (M2b) |
 | **M3** | Video | VTX model controlled via SmartAudio; real Betaflight OSD rendered; analog degradation driven by link model. | done — c1f3292 (M3a), 40ac096 (M3b), 4b0fb8f (M3c), 1975b26 (M3d), 99443f6 (M3e) |
 | **M4** | Sandbox | OpenDrone component library with provenance; v1 fault catalog; MCAP + Rerun; installable Python package. | done — ed4a289 (M4a), 174d85a (M4b), ee2e808 (M4c) |
+| **M5** | Swappable radio components (phase 2) | The radio as `Handset`, `Link` and `Receiver` parts; 900 MHz band and a fixed link; recording a live flight's sticks. | done — b734a7f |
+| **M6** | Accuracy and validation (phase 2) | Rotor and frame physics, per-cell battery, thermal model, receiver thresholds as data; the validation harness; the repro bundle. | done — 8377a86 (M6a), 2ea9966 (M6b), M6c: see `git log` |
 
 Each milestone got its own implementation plan (`docs/superpowers/plans/`); the v1 close-out (`2026-10-13-v1-closeout.md`) followed M4.
 

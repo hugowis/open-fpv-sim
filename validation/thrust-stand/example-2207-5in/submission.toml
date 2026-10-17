@@ -1,0 +1,13 @@
+schema_version = 1
+kind = "thrust_stand"
+title = "Illustrative 2207 1950 KV motor, 5-inch propeller, 6S (synthetic)"
+# The quad the stand's motor, propeller and ESC come from: the shipped freestyle quad, three folders up.
+quad = "../../../quads/opendrone-5f-freestyle.toml"
+motor = 0
+data = "thrust.csv"
+
+[origin]
+source = "estimated"
+note = "Hand-written, datasheet-style figures that show the format and the report. NOT a measurement of any motor."
+contributor = "Open FPV Sim maintainers"
+license = "CC-BY-SA-4.0"

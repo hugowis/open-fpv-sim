@@ -5,6 +5,7 @@ pub mod glob;
 pub mod recorder;
 pub mod sink;
 pub mod spec;
+pub mod tail;
 
 pub use recorder::{RecordError, Recorder, RecorderHandle, RecordingSummary};
 pub use spec::{Channel, SignalRate, DEFAULT_RATES};

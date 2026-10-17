@@ -15,6 +15,18 @@ limitations. Filter by `good first issue` for a gentle start, by `area:*` for yo
 - **A model change** carries a unit test against an analytic result, a provenance (`datasheet`, `measured` or
   `estimated`) for every new constant, and the matching `docs/research/` page updated. Seeded runs stay deterministic.
 
+## Reporting a crash
+If the simulator stops with an error (a Betaflight crash, a non-finite value, a panic) it has written a repro bundle
+and the `sim_error` event names it: a folder under the logs directory (`.ofs-data/logs/<quad>-<n>.repro`). Zip it and
+attach it to the issue; a maintainer replays it with `ofs-sim --replay <folder>`. What it holds and how exact the
+replay is: `docs/repro-bundle.md`.
+
+## Offering measurements
+Real data is what turns an `estimated` constant into a `measured` one. A thrust-stand log (or a Blackbox step response)
+goes in a submission folder under `validation/`, in the format of `docs/validation.md`; run
+`cargo run -p ofs-validate -- <folder>` on it, and open a PR or an issue labelled `needs-data` with the folder and the
+report. Data comes under CC-BY-SA-4.0, like the component library.
+
 ## Tests, from fastest to slowest
 1. **Rust unit and integration tests:** `cargo test --workspace --locked`, and
    `cargo clippy --workspace --all-targets --locked -- -D warnings` (CI fails on any warning).
