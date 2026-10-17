@@ -64,7 +64,7 @@ fn close(actual: f64, expected: f64, eps: f64, what: &str) {
 
 #[test]
 fn the_sensitivity_table_is_elrs_published() {
-    assert_eq!(sensitivity_dbm(50), Some(-117.0));
+    assert_eq!(sensitivity_dbm(50), Some(-115.0), "ExpressLRS's table lists the 2.4 GHz 50 Hz mode at -115 dBm (#12)");
     assert_eq!(sensitivity_dbm(150), Some(-112.0));
     assert_eq!(sensitivity_dbm(250), Some(-108.0));
     assert_eq!(sensitivity_dbm(500), Some(-105.0));

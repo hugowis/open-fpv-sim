@@ -27,6 +27,14 @@ fn set_pos(s: &mut Scheduler, pos: DVec3) {
     s.bus_mut().set(sig, pos);
 }
 
+/// ExpressLRS's signal-health table (https://expresslrs.org/info/signal-health/, ELRS 3.x/4.x), 2.4 GHz LoRa modes.
+#[test]
+fn the_2g4_modes_match_expresslrs_published_table() {
+    for (rate, dbm) in [(50, -115.0), (150, -112.0), (250, -108.0), (500, -105.0)] {
+        assert_eq!(Band::G2_4.sensitivity_dbm(rate), Some(dbm), "{rate} Hz");
+    }
+}
+
 #[test]
 fn the_band_tables_are_the_published_rf_modes() {
     assert_eq!(Band::G2_4.packet_rates(), [50, 150, 250, 500]);

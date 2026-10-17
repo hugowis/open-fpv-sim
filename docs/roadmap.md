@@ -111,8 +111,6 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Crossfire and Tracer links: a profile or a `Link` each now that the seams exist; they need sourced figures.
 - Non-CRSF receivers (SBUS, iBUS, FrSky, DSMX): a `Receiver` each, with the matching Betaflight config.
 - Plugin loading for radio models from outside the tree.
-- The 2.4 GHz 50 Hz sensitivity is -117 dBm in the model; ExpressLRS's table now lists -115 dBm (changing it
-  changes every seeded 50 Hz run).
 
 ### Modelling
 - `RadioLoss` on the downlink.
