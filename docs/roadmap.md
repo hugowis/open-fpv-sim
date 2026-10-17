@@ -62,7 +62,8 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - One SITL per machine: its ports are fixed (UDP 9001–9004, TCP 5760+).
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
-- A Blackbox log of a session that ends armed is cut short: disarm first.
+- A session that ends armed spends up to 0.5 simulated seconds disarming Betaflight first, so its Blackbox log is
+  finished; those steps are not journaled, but a running MCAP recording sees them.
 - A client that closes its MSP connection right after `MSP_REBOOT` leaves Betaflight waiting to send the reply, so
   it never reboots and the session fails; keep the connection open until the relaunch
   (`docs/superpowers/history/closeout-evidence.md`) — the Configurator's own Save does not do this (checked by hand, 2026-10-14).

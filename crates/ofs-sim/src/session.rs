@@ -64,6 +64,16 @@ pub struct Session {
     pub blackbox: Option<BlackboxCopy>,
 }
 
+impl Drop for Session {
+    /// A session on Betaflight that ends armed disarms it first, so its Blackbox log is finished before SITL is
+    /// stopped (and the log copied, by the field declared last). A failed session is not stepped again.
+    fn drop(&mut self) {
+        if self.failure.is_none() {
+            self.vehicle.disarm_for_shutdown();
+        }
+    }
+}
+
 pub type Slot = Option<Session>;
 
 pub fn event(time_s: f64, kind: pb::EventKind, message: impl Into<String>) -> pb::Event {

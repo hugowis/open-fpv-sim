@@ -1078,6 +1078,25 @@ impl Vehicle {
         Ok(())
     }
 
+    /// For a session that is about to end on Betaflight: disarms it, so it closes its Blackbox log (a log of a
+    /// session that ended armed is cut short when SITL is killed). The aux switches go low and the throttle to zero
+    /// straight on the bus (not through `set_sticks`: nothing is journaled or written to an inputs recording), a
+    /// script that is still playing is dropped, and half a simulated second runs. A dead SITL makes the steps fail
+    /// at once and that is ignored. A no-op without SITL.
+    pub fn disarm_for_shutdown(&mut self) {
+        if !self.sitl {
+            return;
+        }
+        self.playback = None;
+        let h = &self.h;
+        let bus = self.scheduler.bus_mut();
+        bus.set(h.throttle, 0.0);
+        for sig in &h.aux {
+            bus.set(*sig, -1.0);
+        }
+        let _ = self.run_for(0.5);
+    }
+
     /// Tests only: a NaN straight on the throttle signal, which `set_sticks` now refuses, to make the next step fail.
     #[cfg(test)]
     pub(crate) fn put_nan_on_the_throttle(&mut self) {
@@ -1780,6 +1799,18 @@ mod tests {
         assert_eq!(b.get(vehicle.h.fault_imu_gyro_bias), DVec3::ZERO);
         assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
         assert!(vehicle.active_fault_names().is_empty());
+    }
+
+    #[test]
+    fn disarming_for_shutdown_is_a_no_op_without_sitl() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        vehicle.set_sticks(&Sticks { throttle: 0.7, ..Default::default() }).unwrap();
+        vehicle.run_for(0.1).unwrap();
+        let (time, entries, throttle) = (vehicle.time_s(), vehicle.journal().entries().len(), vehicle.signal("rc.throttle"));
+        vehicle.disarm_for_shutdown();
+        assert_eq!(vehicle.time_s(), time, "no simulated time passes");
+        assert_eq!(vehicle.journal().entries().len(), entries);
+        assert_eq!(vehicle.signal("rc.throttle"), throttle, "the sticks are left alone");
     }
 
     #[test]
