@@ -24,7 +24,7 @@ is then the lowest. Each list is empty (all 1.0) or has one positive entry per c
 
 **Ageing.** `cycles` with `capacity_fade_per_cycle` and `resistance_growth_per_cycle` (all default 0) give
 `capacity_factor = 1 − fade·cycles` (every cell's capacity) and `resistance_factor = 1 + growth·cycles` (every cell's `R0`
-only). The loader refuses a part that would leave less than 10 % of the capacity. The factors are linear in the cycle
+only). The loader refuses a part that would leave less than 10 % of the capacity, or whose `resistance_factor` exceeds 10. The factors are linear in the cycle
 count: a first approximation.
 
 **The weak-cell fault** (`docs/research/faults.md`) adds its resistance and voltage offsets to the cell it names; with no

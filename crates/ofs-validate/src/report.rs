@@ -31,6 +31,11 @@ pub fn max_error_pct(rows: &[Compared]) -> f64 {
     errors(rows).iter().flatten().fold(0.0, |m, e| f64::max(m, e.abs()))
 }
 
+/// How many rows the models did not settle for (no prediction to compare).
+pub fn unsettled(rows: &[Compared]) -> usize {
+    rows.iter().filter(|(_, predicted)| predicted.is_err()).count()
+}
+
 fn cell(value: Option<f64>, decimals: usize) -> String {
     value.map_or_else(|| "—".to_string(), |v| format!("{v:.decimals$}"))
 }

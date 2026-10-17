@@ -25,8 +25,13 @@ fn set(s: &mut Scheduler, name: &str, v: f64) {
 /// A prop + motor spun up at 60 % throttle for half a second, then killed (fault scale 0) with `inflow` m/s of air
 /// coming up through the disc.
 fn killed_in_a_descent(inflow: f64) -> Scheduler {
+    killed_in_a_descent_with(inflow, J0)
+}
+
+/// `killed_in_a_descent` with the propeller's `windmill_j0` given (0 turns windmilling off).
+fn killed_in_a_descent_with(inflow: f64, windmill_j0: f64) -> Scheduler {
     let mut bus = Bus::new();
-    let prop = PropParams { diameter_m: D, ct_table: vec![(0.0, 0.11)], cp_table: vec![(0.0, CP)], windmill_j0: J0 };
+    let prop = PropParams { diameter_m: D, ct_table: vec![(0.0, 0.11)], cp_table: vec![(0.0, CP)], windmill_j0 };
     let prop = Propeller::new(0, prop, &mut bus);
     let motor = MotorParams { kv_rpm_per_v: KV, resistance_ohm: 0.1, no_load_current_a: NO_LOAD_A, rotor_inertia_kgm2: 5e-6 };
     let esc = EscMotor::new(0, EscParams { response_tau_s: 0.002, current_limit_a: 40.0 }, motor, 5e-6, &mut bus);
@@ -81,5 +86,12 @@ fn a_dying_motor_in_a_descent_changes_speed_without_a_step() {
         worst = worst.max((now - prev).abs());
         prev = now;
     }
-    assert!(worst < 1.0, "largest single-tick change {worst} rad/s");
+    // The real worst case is 0.16 rad/s per tick; a step on the kill would be the whole rotor speed (~2000 rad/s).
+    assert!(worst < 0.4, "largest single-tick change {worst} rad/s");
+    // And the air is what keeps it turning: with windmilling off, the same kill lets the rotor spin down faster.
+    let windmilling = get(&s, &names::motor_omega(0));
+    let mut off = killed_in_a_descent_with(20.0, 0.0);
+    off.run_for(1.0).unwrap();
+    let dead = get(&off, &names::motor_omega(0));
+    assert!(windmilling > dead + 200.0,"windmilling {windmilling} rad/s vs without {dead} rad/s");
 }

@@ -47,6 +47,54 @@ fn the_gate_is_opt_in() {
     assert_eq!(run(dir.path(), &["--max-error-pct", "100000"]).status.code(), Some(0));
 }
 
+/// A copy of the shipped library whose propeller is a flywheel, so no row ever settles.
+fn flywheel_library(dir: &Path) -> std::path::PathBuf {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let library = dir.join("library");
+    copy(&Path::new(QUAD).parent().unwrap().join("../library"), &library);
+    let prop = library.join("props/opendrone-5in-prop.toml");
+    let text = std::fs::read_to_string(&prop).unwrap();
+    assert!(text.contains("inertia_kgm2 = 6.0e-6"));
+    std::fs::write(&prop, text.replace("inertia_kgm2 = 6.0e-6", "inertia_kgm2 = 1.0e3")).unwrap();
+    library
+}
+
+fn run_with_library(dir: &Path, library: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_ofs-validate")).arg(dir).args(args).env("OFS_LIBRARY", library).env_remove("GITHUB_STEP_SUMMARY").output().unwrap()
+}
+
+#[test]
+fn a_gate_fails_when_a_row_never_settles() {
+    let dir = tempfile::tempdir().unwrap();
+    submission(dir.path(), CSV);
+    let library = flywheel_library(dir.path());
+    let out = run_with_library(dir.path(), &library, &["--max-error-pct", "100000"]);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("2 row(s) did not settle"), "{stderr}");
+}
+
+#[test]
+fn no_gate_means_exit_zero_even_with_an_unsettled_row() {
+    let dir = tempfile::tempdir().unwrap();
+    submission(dir.path(), CSV);
+    let library = flywheel_library(dir.path());
+    let out = run_with_library(dir.path(), &library, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("no steady state within 10 s"));
+}
+
 #[test]
 fn an_invalid_submission_exits_two_with_one_problem_per_line() {
     let dir = tempfile::tempdir().unwrap();

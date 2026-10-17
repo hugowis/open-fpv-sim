@@ -360,6 +360,13 @@ fn the_ambient_defaults_to_25_and_is_range_checked() {
 }
 
 #[test]
+fn a_non_finite_video_threshold_names_its_field() {
+    let shown = problems(&(world_text() + "\n[video]\nsparkle_snr_db = nan\nlost_snr_db = inf\n")).join("\n");
+    assert!(shown.contains("video.sparkle_snr_db: ") && shown.contains("video.lost_snr_db: "), "{shown}");
+    assert!(!shown.contains("video: "), "the group name is not a field:\n{shown}");
+}
+
+#[test]
 fn video_threshold_problems_are_reported_together() {
     let text = world_text()
         + "\n[video]\nlost_snr_db = 7.0\nsparkle_snr_db = 0.0\ncolor_lost_snr_db = 9.0\nfield_drop_p_max = 1.5\nlost_after_fields = 0\n";

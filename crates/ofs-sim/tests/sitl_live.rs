@@ -116,6 +116,57 @@ fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
     assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
 }
 
+/// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
+/// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only: it kills SITL
+/// with `pkill`.
+#[tokio::test]
+#[ignore]
+async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
+    use ofs_sim::pb::sim_client::SimClient;
+    use ofs_sim::pb::{EventKind, LoadRequest, Mode, RunRequest, Sticks as PbSticks};
+    use ofs_sim::repro::replay;
+    use ofs_sim::server::{sim_server, SimService};
+    use tokio_stream::wrappers::TcpListenerStream;
+
+    assert!(std::env::var("OFS_SITL_LAUNCH").is_ok(), "set OFS_SITL_LAUNCH");
+    let data_dir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let service = SimService::new(data_dir.path().to_path_buf());
+    tokio::spawn(tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_incoming(TcpListenerStream::new(listener)));
+    let mut c = SimClient::connect(format!("http://{addr}")).await.unwrap();
+    let mut events = service.subscribe();
+
+    let quad = std::path::absolute(QUAD).unwrap();
+    c.load(LoadRequest { quad_path: quad.to_string_lossy().into(), seed: 1, mode: Mode::Lockstep as i32, open_loop_fc: false, ..Default::default() }).await.unwrap();
+    c.set_sticks(PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() }).await.unwrap();
+    c.run(RunRequest { seconds: 1.5 }).await.unwrap();
+
+    let killed = std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap();
+    assert!(killed.success(), "no SITL to kill");
+    let err = c.run(RunRequest { seconds: 2.0 }).await.expect_err("a run with a dead SITL must fail");
+
+    let mut message = None;
+    while let Ok(e) = events.try_recv() {
+        if e.kind() == EventKind::SimError {
+            message = Some(e.message);
+        }
+    }
+    let message = message.unwrap_or_else(|| panic!("no sim_error event after {err:?}"));
+    let folder = message.split("(repro bundle: ").nth(1).and_then(|rest| rest.strip_suffix(')')).unwrap_or_else(|| panic!("no bundle in: {message}"));
+    let folder = std::path::PathBuf::from(folder);
+    for wanted in ["bundle.toml", "journal.txt", "tail.mcap", "firmware/eeprom.bin", "firmware/sitl.log"] {
+        assert!(folder.join(wanted).is_file(), "{wanted} missing from {}", folder.display());
+    }
+
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap(); // the session's SITL must stop before the replay starts its own
+    let scratch = tempfile::tempdir().unwrap();
+    // The kill came from outside and is not in the journal, so it does not recur: the replay runs the journal to the
+    // failing tick and says so.
+    let outcome = replay(&folder, scratch.path()).unwrap();
+    assert!(!outcome.reproduced && outcome.failure.is_none(), "{outcome:?}");
+}
+
 #[test]
 #[ignore]
 fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {

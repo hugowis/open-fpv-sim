@@ -165,15 +165,21 @@ fn fifty_kilometres_out_at_ten_milliwatts_the_link_never_comes_up() {
 }
 
 #[test]
-fn mixed_pole_pairs_fly_finite_in_open_loop() {
-    // Only SITL quads need uniform pole pairs (Betaflight has one motor_poles); an open-loop build may mix them,
-    // and the rotors' gyroscopic coupling uses mechanical speed, so it must neither care nor go non-finite.
-    let mut cfg = load(Path::new(QUAD)).unwrap();
-    cfg.motors[1].pole_pairs = 5;
-    let mut v = vehicle_in(&cfg, WorldConfig::open_field());
-    v.set_sticks(&throttle(0.7));
-    v.run_for(1.0).unwrap();
-    let s = v.state();
-    assert!(s.pos_ned_m.is_finite() && s.rate_frd_radps.is_finite(), "{:?} {:?}", s.pos_ned_m, s.rate_frd_radps);
-    assert!(s.pos_ned_m.z < -0.5, "it climbed: {}", s.pos_ned_m.z);
+fn mixed_pole_pairs_change_nothing_the_airframe_feels() {
+    // Only SITL quads need uniform pole pairs (Betaflight has one motor_poles); an open-loop build may mix them.
+    // Pole pairs only turn mechanical speed into the electrical speed the firmware reads, and the rotors' gyroscopic
+    // coupling uses mechanical speed: the flight must be bit-for-bit the one with uniform pole pairs.
+    let fly = |pole_pairs_of_motor_1: u32| {
+        let mut cfg = load(Path::new(QUAD)).unwrap();
+        cfg.motors[1].pole_pairs = pole_pairs_of_motor_1;
+        let mut v = vehicle_in(&cfg, WorldConfig::open_field());
+        v.set_sticks(&throttle(0.7));
+        v.run_for(1.0).unwrap();
+        v.state()
+    };
+    let uniform = fly(load(Path::new(QUAD)).unwrap().motors[0].pole_pairs);
+    let mixed = fly(5);
+    assert!(mixed.pos_ned_m.is_finite() && mixed.rate_frd_radps.is_finite(), "{:?} {:?}", mixed.pos_ned_m, mixed.rate_frd_radps);
+    assert!(mixed.pos_ned_m.z < -0.5, "it climbed: {}", mixed.pos_ned_m.z);
+    assert_eq!((mixed.pos_ned_m, mixed.vel_ned_mps, mixed.rate_frd_radps), (uniform.pos_ned_m, uniform.vel_ned_mps, uniform.rate_frd_radps));
 }

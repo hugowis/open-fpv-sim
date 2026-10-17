@@ -871,6 +871,11 @@ fn broadcast<P: Clone>(paths: &[PathBuf], n: usize, load: impl Fn(&Path) -> Resu
     Ok(parts)
 }
 
+/// The smallest advance ratio at which a windmilling propeller's torque vanishes that the model accepts.
+const MIN_WINDMILL_J0: f64 = 0.2;
+/// How much more resistive than new an aged pack may be (a pack at 10x is long dead; beyond it the number is a typo).
+const MAX_AGED_RESISTANCE_FACTOR: f64 = 10.0;
+
 struct Checker(Vec<Problem>);
 
 impl Checker {
@@ -1004,7 +1009,13 @@ impl QuadConfig {
             c.table(&p.ct_table, &format!("props[{i}].ct_table"));
             c.table(&p.cp_table, &format!("props[{i}].cp_table"));
             c.non_negative(p.imbalance_kgm, &format!("props[{i}].imbalance_kgm"));
-            c.non_negative(p.windmill_j0, &format!("props[{i}].windmill_j0"));
+            // 0 turns windmilling off. A windmilling rotor settles at n = inflow / (j0·D), so a small j0 is a runaway:
+            // 0.2 is about half the pitch/diameter of the flattest real prop.
+            c.check(
+                p.windmill_j0 == 0.0 || (p.windmill_j0.is_finite() && p.windmill_j0 >= MIN_WINDMILL_J0),
+                &format!("props[{i}].windmill_j0"),
+                format!("must be 0 (off) or >= {MIN_WINDMILL_J0} (got {})", p.windmill_j0),
+            );
         }
         for (i, e) in self.escs.iter().enumerate() {
             c.positive(e.response_tau_s, &format!("escs[{i}].response_tau_s"));
@@ -1039,6 +1050,14 @@ impl QuadConfig {
             format!("must be in [0, 1) (got {})", b.capacity_fade_per_cycle),
         );
         c.non_negative(b.resistance_growth_per_cycle, "battery.resistance_growth_per_cycle");
+        c.check(
+            1.0 + b.resistance_growth_per_cycle * f64::from(b.cycles) <= MAX_AGED_RESISTANCE_FACTOR,
+            "battery.resistance_growth_per_cycle",
+            format!(
+                "{} cycles at {} growth per cycle make the pack more than {MAX_AGED_RESISTANCE_FACTOR} times as resistive",
+                b.cycles, b.resistance_growth_per_cycle
+            ),
+        );
         c.check(
             1.0 - b.capacity_fade_per_cycle * f64::from(b.cycles) >= 0.1,
             "battery.cycles",

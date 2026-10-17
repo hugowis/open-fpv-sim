@@ -45,7 +45,9 @@ a torque coefficient `Cp` that is a function of rotor speed only; M6a makes it d
     Cp_eff = Cp · (1 − J/j0)           for V > 0 and j0 > 0
 
 `j0` (`prop.windmill_j0`) is the advance ratio at which the torque vanishes (autorotation); beyond it the torque
-changes sign and drives the rotor. The torque is evaluated multiplied out,
+changes sign and drives the rotor. A windmilling rotor settles at `n = V / (j0·D)`, so a small `j0` is a runaway: the
+loader accepts 0 (off) or at least 0.2, about half the pitch/diameter of the flattest real propeller. The torque is
+evaluated multiplied out,
 
     Q = Cp · ρ · D⁴ · n · (D·n − V/j0) / 2π
 

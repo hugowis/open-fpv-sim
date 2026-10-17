@@ -81,7 +81,8 @@ N percent (off by default). `--summary` appends the report to `$GITHUB_STEP_SUMM
 
 For each row: the measured figure, the simulated one and the error, `(simulated − measured) / measured`, in percent.
 The summary gives the mean and the largest absolute error per quantity. The simulator holds the motor at the row's
-`command` and `voltage_v` until the rotor speed stops changing (a row that never settles is reported as such).
+`command` and `voltage_v` until the rotor speed changes by less than one part in a million per second (a row that
+never settles in 10 s is reported as such). With `--max-error-pct`, a row that never settled fails the gate.
 
 An error here is a finding about the **model**: usually a wrong constant (`kv`, resistance, `Ct`, `Cp` in the library
 parts) or a simplification (the ESC command is mapped linearly to duty; real ESCs differ). When a submission is

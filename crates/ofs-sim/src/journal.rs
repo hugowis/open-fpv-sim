@@ -105,6 +105,16 @@ impl Journal {
     pub fn read(dir: &Path) -> Result<Journal, String> {
         let path = dir.join("journal.txt");
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        match text.lines().enumerate().map(|(i, l)| (i + 1, l.trim())).find(|(_, l)| !l.is_empty()) {
+            Some((_, HEADER)) => {}
+            Some((_, found)) if found.starts_with("# ofs-journal ") => {
+                let version = found.trim_start_matches("# ofs-journal ");
+                return Err(format!("{}: written by format {version}, this build reads 1", path.display()));
+            }
+            Some((n, _)) => return Err(format!("{}: line {n}: not a journal (expected \"{HEADER}\")", path.display())),
+            None => return Err(format!("{}: not a journal (expected \"{HEADER}\")", path.display())),
+        }
         let mut journal = Journal::new();
         let mut problems = Vec::new();
         for (i, line) in text.lines().enumerate() {
@@ -356,6 +366,37 @@ mod tests {
         for needle in ["journal.txt line 2", "journal.txt line 3", "journal.txt line 4", "journal.txt line 5"] {
             assert!(message.contains(needle), "{needle} missing in:\n{message}");
         }
+    }
+
+    fn read_text(text: &str) -> Result<Journal, String> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("journal.txt"), text).unwrap();
+        Journal::read(dir.path())
+    }
+
+    #[test]
+    fn a_journal_without_the_header_is_refused() {
+        let message = read_text("1 tx 1\n").unwrap_err();
+        assert!(message.contains("journal.txt") && message.contains("ofs-journal"), "{message}");
+    }
+
+    #[test]
+    fn a_journal_of_another_version_is_refused() {
+        let message = read_text("# ofs-journal 2\n1 tx 1\n").unwrap_err();
+        assert!(message.contains('2') && message.contains("reads 1"), "{message}");
+    }
+
+    #[test]
+    fn a_header_with_a_byte_order_mark_and_crlf_reads() {
+        let journal = read_text("\u{feff}# ofs-journal 1\r\n1 tx 1\r\n").unwrap();
+        assert_eq!(journal.entries().len(), 1);
+    }
+
+    #[test]
+    fn a_truncated_journal_still_reads() {
+        let journal = read_text("# ofs-journal 1\n1 tx 1\n# truncated\n").unwrap();
+        assert!(journal.truncated());
+        assert_eq!(journal.entries().len(), 1);
     }
 
     #[test]

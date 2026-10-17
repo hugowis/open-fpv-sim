@@ -28,7 +28,8 @@ class ReplayResult:
 
 
 def find_bundles(logs_dir) -> list[pathlib.Path]:
-    """The repro bundle folders in a logs directory (`sim.logs_dir`), oldest first."""
+    """The repro bundle folders in a logs directory (`sim.logs_dir`), oldest first; a folder without `bundle.toml`
+    (still being written) is skipped."""
     root = pathlib.Path(logs_dir)
     if not root.is_dir():
         return []
@@ -37,14 +38,19 @@ def find_bundles(logs_dir) -> list[pathlib.Path]:
         stem, _, number = p.name[: -len(".repro")].rpartition("-")
         return (stem, int(number)) if number.isdigit() else (p.name, 0)
 
-    return sorted((p for p in root.iterdir() if p.is_dir() and p.name.endswith(".repro")), key=order)
+    # `bundle.toml` is written last: a folder without it is one that is still being written (or was cut short).
+    whole = (p for p in root.iterdir() if p.is_dir() and p.name.endswith(".repro") and (p / "bundle.toml").is_file())
+    return sorted(whole, key=order)
 
 
 def replay_bundle(path, binary: str | None = None) -> ReplayResult:
     """Runs a repro bundle again (`ofs-sim --replay`) and says whether the failure came back.
 
     Raises `ConfigError` when the folder cannot be run (missing files, an unknown format)."""
-    done = subprocess.run([find_binary(binary), "--replay", str(path)], capture_output=True, text=True)
+    # ofs-sim writes UTF-8; the default text mode would read it with the locale codepage on Windows.
+    done = subprocess.run(
+        [find_binary(binary), "--replay", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     if done.returncode == 2:
         raise ConfigError(done.stderr.strip() or f"{path} cannot be replayed")
     if done.returncode not in (0, 1):
