@@ -73,6 +73,10 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   `recording_stopped` event names the error.
 - Opening a recording in Foxglove while it is still being written is untested.
 
+### Race timing (`docs/race-timing.md`)
+- A gate is a trigger on the quad's centre: no margin for its size, no tilt. There is no lap limit and no reset (a
+  new `Load` starts a fresh race), and Godot does not highlight the next gate.
+
 ### Python
 - The live view follows the state stream (up to 240 Hz); the 8 kHz signals are only in the recording.
 - The reader decodes in pure Python: about 3.7 s for three patterns of a one-minute recording, 11.7 s for all of it.

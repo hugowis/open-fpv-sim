@@ -22,5 +22,9 @@ If a session fails (a Betaflight crash, a non-finite value), the server writes a
 event names it. `ofs.repro.find_bundles(sim.logs_dir)` lists the bundles and `ofs.repro.replay_bundle(path)` runs one
 again and says whether the failure came back (`docs/repro-bundle.md` in the repository).
 
+A world with `[[gates]]` has a race: `sim.get_world().gates` lists them, `sim.run(...).race` is the lap clock
+(`present`, `running`, `next_gate`, `laps`, `current_lap_s`, `last_lap_s`, `best_lap_s`) and the `gate_passed` and
+`lap_completed` events carry the splits and lap times (`docs/race-timing.md` in the repository).
+
 Extras: `log` reads the session recordings (`mcap`, `pandas`; Parquet export also needs `pyarrow`), `rerun` adds the
 live view (`ofs.rerun.view(sim)`).
