@@ -60,9 +60,22 @@ def test_replay_of_a_missing_folder_is_a_config_error(tmp_path, sim_bin):
         ofs.repro.replay_bundle(tmp_path / "nowhere.repro", binary=sim_bin)
 
 
+def test_a_replay_error_with_non_ascii_text_reads_back(tmp_path, sim_bin):
+    with pytest.raises(ofs.ConfigError, match="défaut"):
+        ofs.repro.replay_bundle(tmp_path / "défaut-1.repro", binary=sim_bin)
+
+
+def test_find_bundles_skips_a_folder_without_bundle_toml(tmp_path):
+    for name in ["a-1.repro", "a-2.repro"]:
+        (tmp_path / name).mkdir()
+    (tmp_path / "a-1.repro" / "bundle.toml").write_text("format = 1\n")
+    assert [p.name for p in ofs.repro.find_bundles(tmp_path)] == ["a-1.repro"]
+
+
 def test_find_bundles_lists_only_bundle_folders_in_order(tmp_path):
     for name in ["quad-2.repro", "quad-10.repro", "quad-1.repro"]:
         (tmp_path / name).mkdir()
+        (tmp_path / name / "bundle.toml").write_text("format = 1\n")
     (tmp_path / "quad-3.mcap").write_text("not a bundle")
     (tmp_path / "quad-4.repro").write_text("a file, not a folder")
     assert [p.name for p in ofs.repro.find_bundles(tmp_path)] == ["quad-1.repro", "quad-2.repro", "quad-10.repro"]
