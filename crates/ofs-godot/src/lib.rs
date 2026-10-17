@@ -196,7 +196,9 @@ impl OfsClient {
     /// `vtx_power_mw` and `vtx_pit_mode`, and the video link's `video_present`, `video_snr_db`,
     /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
     /// `video_sparkles`, `video_chroma`, `video_field_valid`, `video_latency_ms`, `video_antenna`
-    /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name).
+    /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name), and the lap clock's
+    /// `race_present` (the world has gates), `race_running`, `race_next_gate`, `race_gate_count`, `race_laps`,
+    /// `race_lap_s` (the current lap so far), `race_last_lap_s` and `race_best_lap_s` (both 0 until a lap completes).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -254,6 +256,15 @@ impl OfsClient {
             rssi.set(&GString::from(name.as_str()), *dbm);
         }
         d.set("video_rssi", &rssi);
+        let r = &t.race;
+        d.set("race_present", r.present);
+        d.set("race_running", r.running);
+        d.set("race_next_gate", i64::from(r.next_gate));
+        d.set("race_gate_count", i64::from(r.gate_count));
+        d.set("race_laps", i64::from(r.laps));
+        d.set("race_lap_s", r.current_lap_s);
+        d.set("race_last_lap_s", r.last_lap_s);
+        d.set("race_best_lap_s", r.best_lap_s);
         d.set("age_s", t.age_s);
         d
     }
@@ -335,7 +346,9 @@ impl OfsClient {
     /// The loaded session's world in Godot's frame, or an empty Dictionary before it arrives: `name`,
     /// `pilot_position` (Vector3), `antennas` (Array of {`name`, `kind`, `aim`: Vector3}), `objects` (Array of {`name`,
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
-    /// `color`: Color, `rf_loss_db`}) and `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}).
+    /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}) and
+    /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
+    /// clockwise from north), `width`, `height`}), in course order.
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -370,6 +383,16 @@ impl OfsClient {
             e.set("power_mw", x.power_mw);
             emitters.push(&e.to_variant());
         }
+        let mut gates = VarArray::new();
+        for g in &world.gates {
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(g.name.as_str()));
+            e.set("center", vector3(g.center.x, g.center.y, g.center.z));
+            e.set("heading_deg", g.heading_deg);
+            e.set("width", g.width_m);
+            e.set("height", g.height_m);
+            gates.push(&e.to_variant());
+        }
         let mut handset_antennas = VarArray::new();
         for a in &world.handset_antennas {
             let mut e = VarDictionary::new();
@@ -385,6 +408,7 @@ impl OfsClient {
         d.set("handset_antennas", &handset_antennas);
         d.set("objects", &objects);
         d.set("emitters", &emitters);
+        d.set("gates", &gates);
         d
     }
 

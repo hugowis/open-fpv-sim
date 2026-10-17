@@ -199,6 +199,27 @@ def test_a_session_flies_in_its_world(sim):
     assert sim.get_world().name == "open field"
 
 
+def test_the_world_lists_its_gates_and_a_state_carries_the_race(sim):
+    sim.load(QUAD, open_loop_fc=True, world=WORLD)
+    gates = sim.get_world().gates
+    assert [g.name for g in gates] == ["Gate0", "Gate1", "Gate2"]
+    assert (gates[0].center_ned_m, gates[0].heading_deg, gates[0].width_m, gates[0].height_m) == ((30.0, 0.0, -1.22), 0.0, 3.08, 2.44)
+    race = sim.run(0.1).race
+    assert (race.present, race.running, race.gate_count, race.laps, race.next_gate) == (True, False, 3, 0, 0)
+    assert (race.current_lap_s, race.last_lap_s, race.best_lap_s) == (0.0, 0.0, 0.0)
+    sim.load(QUAD, open_loop_fc=True)
+    assert sim.get_world().gates == ()
+    assert not sim.run(0.1).race.present, "a world without gates has no race"
+
+
+def test_the_race_events_have_names():
+    from ofs.client import _event
+    from ofs.v1 import sim_pb2 as pb
+
+    assert _event(pb.Event(time_s=3.0, kind=pb.EVENT_KIND_GATE_PASSED, message="Gate1 (gate 1) split 2.000 s")).kind == "gate_passed"
+    assert _event(pb.Event(time_s=9.0, kind=pb.EVENT_KIND_LAP_COMPLETED, message="lap 1: 7.000 s (best)")).kind == "lap_completed"
+
+
 def test_a_bad_world_path_is_a_config_error(sim):
     with pytest.raises(ofs.ConfigError):
         sim.load(QUAD, open_loop_fc=True, world="no/such/world.toml")

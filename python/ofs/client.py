@@ -156,8 +156,19 @@ class Handset:
 
 
 @dataclass(frozen=True)
+class Gate:
+    """A race gate: a vertical opening flown through in the direction of `heading_deg` (0 = north, clockwise)."""
+    name: str
+    center_ned_m: tuple
+    heading_deg: float
+    width_m: float
+    height_m: float
+
+
+@dataclass(frozen=True)
 class World:
-    """The field a session flies in: where the pilot stands, the goggles' antennas, the objects, other transmitters."""
+    """The field a session flies in: where the pilot stands, the goggles' antennas, the objects, other transmitters
+    and the race gates (in course order; gate 0 is the start and finish)."""
     name: str
     pilot_position_ned_m: tuple
     pilot_facing_deg: float
@@ -165,6 +176,21 @@ class World:
     objects: tuple
     emitters: tuple
     handset: Handset = field(default_factory=lambda: Handset((), ()))
+    gates: tuple = ()
+
+
+@dataclass(frozen=True)
+class Race:
+    """The lap clock. `present` is False in a world without gates (everything else is then zero). `last_lap_s` and
+    `best_lap_s` are 0 until a lap completes (`laps > 0`)."""
+    present: bool = False
+    running: bool = False  # gate 0 has started the clock
+    next_gate: int = 0  # the gate to fly through next
+    gate_count: int = 0
+    laps: int = 0  # completed
+    current_lap_s: float = 0.0  # time since the current lap started
+    last_lap_s: float = 0.0
+    best_lap_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -219,6 +245,7 @@ class State:
     video: VideoLink = field(default_factory=VideoLink)
     collision_speed_mps: float = 0.0  # the last collision's inward speed (0 until one happens)
     battery_cell_voltages: tuple = ()  # per-cell voltage (each cell's own state; the weak cell droops)
+    race: Race = field(default_factory=Race)
 
     @property
     def altitude_m(self) -> float:
@@ -270,6 +297,7 @@ def _world(m) -> World:
             antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
                                            a.aim_el_deg) for a in m.handset.antennas),
         ) if m.HasField("handset") else Handset((), ()),
+        gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m) for g in m.gates),
     )
 
 
@@ -298,6 +326,8 @@ def _state(m) -> State:
         video=_video(m.video),
         collision_speed_mps=m.collision_speed_mps,
         battery_cell_voltages=tuple(m.battery_cell_voltages),
+        race=Race(m.race.present, m.race.running, m.race.next_gate, m.race.gate_count, m.race.laps,
+                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s),
     )
 
 
