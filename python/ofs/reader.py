@@ -140,9 +140,15 @@ def _zstd_decompressor():
 
 
 def _can_read_by_index(summary) -> bool:
-    """Every chunk is zstd or uncompressed and carries message indexes (the server's recordings do)."""
+    """Every chunk is zstd or uncompressed, some carry message indexes, and the file has a statistics record to check
+    them against (the server's recordings have all of that)."""
     chunks = summary.chunk_indexes
-    return bool(chunks) and all(c.compression in ("zstd", "") for c in chunks) and any(c.message_index_offsets for c in chunks)
+    return (
+        bool(chunks)
+        and summary.statistics is not None
+        and all(c.compression in ("zstd", "") for c in chunks)
+        and any(c.message_index_offsets for c in chunks)
+    )
 
 
 def _collect_by_index(f, summary, selected):
@@ -150,6 +156,8 @@ def _collect_by_index(f, summary, selected):
     are cut out of the (decompressed) chunk and parsed. Returns None when the indexes do not account for every record
     of a selected signal (the caller then reads the file the slow way); a corrupt file raises."""
     wanted = {cid: channel.topic for cid, channel in summary.channels.items() if channel.topic in set(selected)}
+    if len(set(wanted.values())) != len(wanted):
+        return None  # two channels on one topic: only the iterator merges their records in file order
     decompress = None
     rows, columns, seen = {}, {}, {cid: 0 for cid in wanted}
     for chunk in summary.chunk_indexes:

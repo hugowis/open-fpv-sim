@@ -52,6 +52,38 @@ def test_every_variant_reads_like_the_mcap_reader(tmp_path, name, compression, i
     assert sum("c" in row for row in rows) == 58, "c is recorded every seventh instant"
 
 
+def test_two_channels_sharing_a_topic_are_read_the_slow_way(tmp_path):
+    """The iterator merges the records of both channels by time and file order; per-channel indexes cannot, so the
+    record that wins at a shared instant would differ."""
+    path = tmp_path / "shared.mcap"
+    with open(path, "wb") as f:
+        w = Writer(f, chunk_size=2000, compression=CompressionType.ZSTD, index_types=IndexType.ALL)
+        w.start()
+        schema = w.register_schema(name="record", encoding="jsonschema", data=b"{}")
+        first, second = (w.register_channel("a", "json", schema) for _ in range(2))
+        for i in range(100):
+            t = 1_000_000 * (i // 2 + 1)
+            w.add_message(first if i % 2 else second, t, json.dumps({"v": float(i)}).encode(), t)
+        w.finish()
+    assert reader.read(path) == reader._read_with_mcap(path)
+    assert reader._used_indexed_path is False
+
+
+def test_a_file_without_a_statistics_record_is_read_the_slow_way(tmp_path):
+    """Without statistics nothing proves the message indexes account for every record, so they are not trusted."""
+    path = tmp_path / "no-statistics.mcap"
+    with open(path, "wb") as f:
+        w = Writer(f, chunk_size=2000, compression=CompressionType.ZSTD, index_types=IndexType.ALL, use_statistics=False)
+        w.start()
+        schema = w.register_schema(name="record", encoding="jsonschema", data=b"{}")
+        a = w.register_channel("a", "json", schema)
+        for i in range(100):
+            w.add_message(a, 1_000_000 * (i + 1), json.dumps({"v": float(i)}).encode(), 1_000_000 * (i + 1))
+        w.finish()
+    assert reader.read(path) == reader._read_with_mcap(path)
+    assert reader._used_indexed_path is False
+
+
 def test_a_pattern_matching_nothing_still_names_the_near_misses(tmp_path):
     path = tmp_path / "file.mcap"
     _write(path, CompressionType.ZSTD, IndexType.ALL)
