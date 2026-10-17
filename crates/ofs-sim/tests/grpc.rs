@@ -465,6 +465,45 @@ async fn the_server_names_recordings_and_reports_them_as_events() {
 }
 
 #[tokio::test]
+async fn unloading_mid_recording_publishes_the_stop_event_and_finishes_the_file() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    let started = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    c.run(RunRequest { seconds: 0.05 }).await.unwrap();
+    c.set_sticks(Sticks { throttle: 0.5, ..Default::default() }).await.unwrap();
+    c.run(RunRequest { seconds: 0.05 }).await.unwrap();
+    c.unload(Empty {}).await.unwrap();
+    let got = drain(&mut events, &[EventKind::InputsRecordingStopped]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].1.starts_with(&started.path) && got[0].1.contains("rows over"), "{got:?}");
+    let text = std::fs::read_to_string(&started.path).unwrap();
+    assert!(text.lines().count() >= 3, "the header, the first row and the throttle change: {text}");
+}
+
+#[tokio::test]
+async fn loading_another_quad_mid_recording_publishes_the_stop_event() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    let started = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    load_open_loop(&mut c).await;
+    let got = drain(&mut events, &[EventKind::InputsRecordingStopped]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].1.starts_with(&started.path), "{got:?}");
+}
+
+#[tokio::test]
+async fn unloading_without_a_recording_publishes_no_stop_event() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    c.unload(Empty {}).await.unwrap();
+    load_open_loop(&mut c).await;
+    assert!(drain(&mut events, &[EventKind::InputsRecordingStopped]).is_empty());
+}
+
+#[tokio::test]
 async fn the_server_records_a_sessions_sticks_names_the_file_and_reports_it() {
     let (mut c, service) = start_with_service().await;
     let mut events = service.subscribe();
