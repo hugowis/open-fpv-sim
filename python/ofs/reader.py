@@ -60,9 +60,20 @@ def _select(patterns, topics) -> list:
     return chosen
 
 
+_MAGIC = b"\x89MCAP0\r\n"
+
+
+def _check_magic(path, f):
+    """A ValueError unless the open file starts like an MCAP file (the inputs CSV and Blackbox logs sit beside them)."""
+    head = f.read(len(_MAGIC))
+    f.seek(0)
+    if head != _MAGIC:
+        raise ValueError(f"{path}: not an MCAP file")
+
+
 def _summary(path, reader):
     """The file's summary section, or a ValueError that says the file is unfinished: a recording that stopped on a
-    write error (a full disk), or was never stopped, has no footer and no summary for indexed readers to find."""
+    write error (a full disk), or whose server was killed, has no footer and no summary for indexed readers to find."""
     try:
         summary = reader.get_summary()
     except Exception as e:  # mcap's own errors for a truncated file are about records, not about the cause
@@ -73,8 +84,13 @@ def _summary(path, reader):
 
 
 def _unfinished(path) -> str:
-    return (f"{path}: unfinished recording (it was stopped by a write error such as a full disk, or the session ended "
-            "without stopping it); the recording_stopped event names the cause")
+    return (f"{path}: unfinished recording (it was stopped by a write error such as a full disk, or the server was "
+            "killed while recording); the recording_stopped event names the cause")
+
+
+def _damaged(path) -> str:
+    return (f"{path}: damaged recording (part of it cannot be read; a write error such as a full disk can leave the "
+            "last chunk half written); the recording_stopped event names the cause")
 
 
 def read(path, patterns=None):
@@ -82,20 +98,24 @@ def read(path, patterns=None):
     signal is one column named after it; a vector or quaternion is one column per component (`<name>.x`)."""
     make_reader = _mcap_reader()
     with open(path, "rb") as f:
+        _check_magic(path, f)
         reader = make_reader(f)
         summary = _summary(path, reader)
         topics = sorted(c.topic for c in summary.channels.values())
         selected = _select(patterns, topics)
         rows, columns = {}, {}
-        for _, channel, message in reader.iter_messages(topics=selected, log_time_order=True):
-            record = json.loads(message.data)
-            names = columns.get(channel.topic)
-            if names is None:
-                names = columns[channel.topic] = [channel.topic] if list(record) == ["v"] else [
-                    f"{channel.topic}.{k}" for k in record]
-            row = rows.setdefault(message.log_time, {})
-            for name, value in zip(names, record.values()):
-                row[name] = value
+        try:
+            for _, channel, message in reader.iter_messages(topics=selected, log_time_order=True):
+                record = json.loads(message.data)
+                names = columns.get(channel.topic)
+                if names is None:
+                    names = columns[channel.topic] = [channel.topic] if list(record) == ["v"] else [
+                        f"{channel.topic}.{k}" for k in record]
+                row = rows.setdefault(message.log_time, {})
+                for name, value in zip(names, record.values()):
+                    row[name] = value
+        except Exception as e:  # mcap's and json's errors for a half-written chunk say nothing of the cause
+            raise ValueError(_damaged(path)) from e
     times = sorted(rows)
     return [c for t in selected for c in columns.get(t, [])], times, [rows[t] for t in times]
 
@@ -143,6 +163,7 @@ class Log:
         """The recorded signals' names (bus names), sorted."""
         make_reader = _mcap_reader()
         with open(self.path, "rb") as f:
+            _check_magic(self.path, f)
             return sorted(c.topic for c in _summary(self.path, make_reader(f)).channels.values())
 
     def to_dataframe(self, patterns=None):

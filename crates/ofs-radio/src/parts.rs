@@ -129,6 +129,20 @@ impl LinkOutputs {
 /// How close to a burst-window edge a packet's time must be to count as being on it, s.
 const BURST_EDGE_S: f64 = 1e-9;
 
+/// A burst-loss window (`on_s` of loss, then `off_s` of none, repeating from time 0) is active at `time_s`. A packet
+/// within [`BURST_EDGE_S`] of an edge belongs to the window that starts there: `time_s % period` can land a few ulps
+/// on the wrong side of an edge (0.3 % 0.1 is 0.0999...), which lost or kept one extra packet (#13). Shared by every
+/// link, so they all agree. `on_s <= 0` is no burst.
+pub fn burst_active(time_s: f64, on_s: f64, off_s: f64) -> bool {
+    if on_s <= 0.0 {
+        return false;
+    }
+    let period = on_s + off_s;
+    let phase = time_s % period;
+    let phase = if period - phase < BURST_EDGE_S { 0.0 } else { phase };
+    phase < on_s - BURST_EDGE_S
+}
+
 /// The radio faults every link honours (the fault catalog is link-agnostic).
 pub struct FaultSignals {
     link_loss: Signal<f64>,
@@ -160,15 +174,7 @@ impl FaultSignals {
         let fraction = bus.get(self.loss_fraction);
         let burst_on = bus.get(self.burst_on);
         let burst_off = bus.get(self.burst_off);
-        let in_burst = burst_on > 0.0 && {
-            let period = burst_on + burst_off;
-            let phase = time_s % period;
-            // A packet within BURST_EDGE_S of an edge belongs to the window that starts there: `time_s % period` can
-            // land a few ulps on the wrong side of an edge (0.3 % 0.1 is 0.0999...), which lost or kept one extra packet.
-            let phase = if period - phase < BURST_EDGE_S { 0.0 } else { phase };
-            phase < burst_on - BURST_EDGE_S
-        };
-        fault_draw >= fraction && !in_burst
+        fault_draw >= fraction && !burst_active(time_s, burst_on, burst_off)
     }
 }
 

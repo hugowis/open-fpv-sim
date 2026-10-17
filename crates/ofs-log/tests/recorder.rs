@@ -152,7 +152,10 @@ fn a_recording_that_stops_on_a_transient_write_error_still_has_a_summary() {
     assert!(failure.contains("flaky.mcap") && failure.contains("disk full"), "{failure}");
     let bytes = bytes.lock().unwrap().get_ref().clone();
     let summary = mcap::Summary::read(&bytes).expect("a readable footer");
-    assert!(summary.is_some(), "the file was finished: indexed readers can open it");
+    assert!(summary.is_some(), "the file was finished: indexed readers find its summary");
+    // Not claimed: that every message before the failure reads back. The record being written when the error hit can
+    // be left half written inside the last chunk, so a reader can still fail there (python/ofs/reader.py calls such a
+    // file "damaged" and names the recording_stopped event).
 }
 
 #[test]

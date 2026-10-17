@@ -54,6 +54,26 @@ def test_reading_an_unfinished_file_says_what_happened(sim, tmp_path):
     assert str(unfinished) in message
 
 
+def test_reading_a_damaged_file_says_so(sim, tmp_path):
+    _climb(sim)
+    bytes_ = bytearray(pathlib.Path(sim.log.path).read_bytes())
+    start, end = len(bytes_) // 4, len(bytes_) // 2
+    bytes_[start:end] = b"\xff" * (end - start)  # the footer and summary still read, the chunks under them do not
+    damaged = tmp_path / "damaged.mcap"
+    damaged.write_bytes(bytes(bytes_))
+    with pytest.raises(ValueError) as e:
+        ofs.reader.read(damaged)
+    assert "damaged" in str(e.value) and str(damaged) in str(e.value), str(e.value)
+
+
+def test_reading_a_file_that_is_not_an_mcap_says_so(tmp_path):
+    csv = tmp_path / "quad-inputs-1.csv"
+    csv.write_text("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n0,0,0,0,0,-1,-1,-1,-1\n")
+    with pytest.raises(ValueError) as e:
+        ofs.reader.read(csv)
+    assert "not an MCAP" in str(e.value) and "unfinished" not in str(e.value), str(e.value)
+
+
 def test_a_real_time_or_unrecorded_session_has_no_log(sim):
     sim.load(QUAD, open_loop_fc=True, record=False)
     assert not sim.recording.active

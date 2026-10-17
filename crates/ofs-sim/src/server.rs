@@ -119,6 +119,8 @@ fn end_session(shared: &Shared, slot: &mut Slot) {
             let time = s.vehicle.time_s();
             let message = match s.vehicle.stop_inputs_recording() {
                 Ok(summary) => format!("{}: {} rows over {} s", summary.path.display(), summary.rows, summary.duration_s),
+                // The same text `StopInputsRecording` publishes for a failed stop.
+                Err(RecordError::Io(m)) => format!("inputs recording failed: {m}"),
                 Err(e) => format!("inputs recording failed: {e}"),
             };
             shared.publish([event(time, pb::EventKind::InputsRecordingStopped, message)]);

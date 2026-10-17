@@ -255,8 +255,9 @@ touch the radio — the Linux ones in WSL).
 `sim.stop_inputs_recording()`. In the game: the **I** key toggles it (a toast names the file, and `REC STICKS` shows
 in the status line while it runs). A lockstep session replays the file with `sim.play_inputs(path)`; two lockstep
 replays of one file write byte-identical MCAP. A replay is not the real-time flight (timing, the SITL schedule and the
-link's seeded draws differ), and the K link cut is not in the file. Load, Unload and a session ending finish the
-file without an `inputs_recording_stopped` event.
+link's seeded draws differ), and the K link cut is not in the file. Load and Unload stop the recording and publish
+`inputs_recording_stopped`; a session that vanishes (its last watcher left, the server shut down) finishes the file
+without an event.
 
 M5 manual check (needs a controller; the maintainer's TX15 in USB joystick mode is the reference):
 1. `godot --path godot`, bind the sticks in F2, fly with Betaflight, press **I**, fly 20 s, press **I**.

@@ -84,13 +84,13 @@ impl Sticks {
         }
     }
 
-    /// The name of the first non-finite field, if any.
-    fn first_non_finite(&self) -> Option<String> {
+    /// The name of the first non-finite field, if any (no allocation: pilots call this at their input rate).
+    fn first_non_finite(&self) -> Option<&'static str> {
+        const AUX: [&str; names::RC_AUX_COUNT] = ["aux1", "aux2", "aux3", "aux4"];
         let named = [("roll", self.roll), ("pitch", self.pitch), ("yaw", self.yaw), ("throttle", self.throttle)];
         named
             .into_iter()
-            .map(|(n, v)| (n.to_string(), v))
-            .chain(self.aux.iter().enumerate().map(|(i, v)| (format!("aux{}", i + 1), *v)))
+            .chain(AUX.into_iter().zip(self.aux))
             .find(|(_, v)| !v.is_finite())
             .map(|(n, _)| n)
     }
