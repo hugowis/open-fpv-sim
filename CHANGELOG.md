@@ -3,6 +3,30 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M7a: hardening sweep
+### Changed
+- `Vehicle::set_sticks` returns a `Result` (Rust API): a non-finite stick is refused with an `InvalidArgument` error and
+  nothing is applied; what is accepted is clamped to the transmitter's range (sticks to [-1, 1], throttle to [0, 1])
+  before the bus, an inputs recording and the journal see it (#54). The gRPC `SetSticks` already refused non-finite
+  values; out-of-range ones are now clamped on the bus too (the `rc.*` channels of a recording show the clamped values).
+- The inputs recorder writes no row for a change that came back to the written row within the same tick, and always
+  writes a first row (#54).
+- `Load` and `Unload` stop a running inputs recording, so its file is complete, and publish `inputs_recording_stopped`
+  (#55).
+- A session on Betaflight that ends armed spends up to 0.5 simulated seconds disarming it first, so its Blackbox log is
+  finished (it used to be cut short); a running MCAP recording sees those steps, the journal and an inputs recording
+  do not (#58).
+- Reading a recording that was never finished (a full disk, or the session ended while recording) now says it is
+  unfinished and points at the `recording_stopped` event, instead of an mcap record error (#59). The writer already
+  finishes the file best-effort after a write error; a test holds that.
+- Radio: a packet exactly on a burst-loss window edge belongs to the window that starts there (#13), and the 2.4 GHz
+  50 Hz sensitivity is -115 dBm, ExpressLRS's published figure, instead of -117 (#12). Both change seeded runs and the
+  ELRS golden digests (regenerated on both OSes, in their own commits).
+### Fixed
+- The patched Betaflight SITL no longer wedges a reboot when the MSP client hangs up right after `MSP_REBOOT` (#57):
+  rebuild SITL with `scripts/build-sitl.sh`.
+- The SITL port-bind flake (#14) was fixed in the patch on 2026-10-15 (`6ccbaef`, `ac97cad`); no recurrence since.
+
 ## Unreleased — M6e: the rest of the M6 minors
 ### Changed
 - The default recording table records the ESC and motor temperatures (`esc.{i}.temp_c`, `motor.{i}.temp_c`) at 100 Hz,

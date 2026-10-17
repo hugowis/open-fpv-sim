@@ -68,13 +68,12 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
   listening for, so the reboot completes (it used to wedge, `docs/superpowers/history/closeout-evidence.md`).
 - Betaflight SITL aborted once with heap corruption while resetting (glibc `tcache` check), so a reboot failed as a
   firmware crash; not seen again in 38 reboots. Inside SITL's teardown, upstream of the simulator.
-- The port-bind flake: open, narrowed. The pre-launch cleanup now waits for its victims to exit (SIGKILL after a
-  grace, under WSL inside the VM) — and one recurrence survived that wait (run 38610663296: the previous SITL
-  cleanly reaped, four ports bound, then 5764 failed with zero sockets in any state at the failed bind). The
-  evidence points at Betaflight SITL's single-attempt serial bind (`serial_tcp.c`); a bounded retry in
-  `third_party/betaflight/ofs-sitl.patch` is the remaining candidate. A launch now also reports whether a victim
-  existed, and a failed bind names the port and anyone holding it at that moment
-  (`docs/superpowers/history/closeout-evidence.md`).
+- The port-bind flake (a SITL port failing to bind at launch) had two causes, both fixed in
+  `third_party/betaflight/ofs-sitl.patch`: a racing `dyad_update` against stream setup (`6ccbaef`) and a
+  single-attempt serial bind (`ac97cad`, now a bounded retry of 20 tries at 25 ms). The pre-launch cleanup also waits
+  for its victims to exit, and a launch reports whether one existed and who holds a port that fails to bind
+  (`docs/superpowers/history/closeout-evidence.md`). It has not recurred: the `sitl` job passed in all 12 CI runs from
+  2026-10-16 to 2026-10-17 (the one failed run failed in `core`).
 
 ### Logging (`docs/research/mcap-determinism.md`)
 - Recording rates are whole divisors of the tick: 240 Hz on an 8 kHz quad records at 242.4 Hz (the channel's
