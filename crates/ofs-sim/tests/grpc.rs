@@ -672,6 +672,11 @@ async fn a_world_can_be_named() {
     let mut c = start().await;
     c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
     assert_eq!(c.get_world(Empty {}).await.unwrap().into_inner().name, "Flat field");
+    let world = c.get_world(Empty {}).await.unwrap().into_inner();
+    let gates: Vec<&str> = world.gates.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(gates, ["Gate0", "Gate1", "Gate2"]);
+    let race = c.get_state(Empty {}).await.unwrap().into_inner().race.expect("a race message");
+    assert_eq!((race.present, race.gate_count, race.running), (true, 3, false));
     let err = c.load(LoadRequest { world_path: "nowhere".into(), ..open_loop(Mode::Lockstep) }).await.unwrap_err();
     assert_eq!(kind(&err), "config");
     assert!(err.message().contains("nowhere.toml"), "{}", err.message());

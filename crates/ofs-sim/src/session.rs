@@ -16,6 +16,7 @@ use tokio::sync::broadcast;
 use crate::blackbox::BlackboxCopy;
 use crate::pacer::{OverrunPolicy, Pacer};
 use crate::pb;
+use crate::race::{RaceEvent, RaceInfo};
 use crate::repro::BundleSource;
 use crate::vehicle::{VideoInfo, Vehicle, VehicleState, VtxInfo};
 
@@ -78,6 +79,35 @@ pub type Slot = Option<Session>;
 
 pub fn event(time_s: f64, kind: pb::EventKind, message: impl Into<String>) -> pb::Event {
     pb::Event { time_s, kind: kind as i32, message: message.into() }
+}
+
+/// A race event as the protocol carries it; the text formats are documented in `docs/race-timing.md`:
+/// "Gate0 (gate 0) start", "Gate1 (gate 1) split 8.412 s", "lap 1: 31.204 s (best)".
+pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
+    match *e {
+        RaceEvent::GatePassed { gate, time_s, split_s } => {
+            let name = gate_names.get(gate).map_or("unknown", String::as_str);
+            let message =
+                if gate == 0 && split_s == 0.0 { format!("{name} (gate {gate}) start") } else { format!("{name} (gate {gate}) split {split_s:.3} s") };
+            event(time_s, pb::EventKind::GatePassed, message)
+        }
+        RaceEvent::LapCompleted { lap, time_s, lap_s, best } => {
+            event(time_s, pb::EventKind::LapCompleted, format!("lap {lap}: {lap_s:.3} s{}", if best { " (best)" } else { "" }))
+        }
+    }
+}
+
+fn race_msg(r: &RaceInfo) -> pb::RaceState {
+    pb::RaceState {
+        present: r.present,
+        running: r.running,
+        next_gate: r.next_gate,
+        gate_count: r.gate_count,
+        laps: r.laps,
+        current_lap_s: r.current_lap_s,
+        last_lap_s: r.last_lap_s,
+        best_lap_s: r.best_lap_s,
+    }
 }
 
 fn vec3(v: glam::DVec3) -> Option<pb::Vec3> {
@@ -188,6 +218,17 @@ pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
             position_ned_m: vec3_of(w.handset.position(&w.pilot)),
             antennas: w.handset.antennas.iter().map(antenna_msg).collect(),
         }),
+        gates: w
+            .gates
+            .iter()
+            .map(|g| pb::Gate {
+                name: g.name.clone(),
+                center_ned_m: vec3_of(g.center_ned_m),
+                heading_deg: g.heading_deg,
+                width_m: g.width_m,
+                height_m: g.height_m,
+            })
+            .collect(),
     }
 }
 
@@ -292,6 +333,11 @@ impl Session {
         let faults = self.vehicle.active_fault_names();
         let s = self.vehicle.state();
         let mut out = self.events_for(&s, faults);
+        let race_events = self.vehicle.take_race_events();
+        if !race_events.is_empty() {
+            let names: Vec<String> = self.vehicle.world().gates.iter().map(|g| g.name.clone()).collect();
+            out.extend(race_events.iter().map(|e| race_event(e, &names)));
+        }
         if let Some(name) = self.vehicle.take_finished_inputs() {
             out.push(event(s.time_s, pb::EventKind::InputsEnded, format!("{name}: finished")));
         }
@@ -415,6 +461,7 @@ impl Session {
                 frame_count: s.fc_telemetry.frame_count,
                 telemetry_age_s: s.fc_telemetry.age_s,
             }),
+            race: Some(race_msg(&s.race)),
         }
     }
 
@@ -579,6 +626,46 @@ mod tests {
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].kind, pb::EventKind::VideoRestored as i32);
         assert_eq!(back[0].message, "video restored: SNR 9.0 dB on omni");
+    }
+
+    fn flat_session() -> Session {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"))).unwrap();
+        let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+        let opts = crate::vehicle::BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-session-race-test"),
+            fc_override: Some(ofs_config::FcKind::OpenLoop),
+            world,
+        };
+        Session::new(crate::vehicle::build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true)
+    }
+
+    #[test]
+    fn race_events_become_gate_passed_and_lap_completed_events_with_the_documented_text() {
+        use crate::race::RaceEvent;
+        let names: Vec<String> = ["Gate0", "Gate1", "Gate2"].map(String::from).to_vec();
+        let start = race_event(&RaceEvent::GatePassed { gate: 0, time_s: 2.5, split_s: 0.0 }, &names);
+        assert_eq!((start.kind, start.time_s, start.message.as_str()), (pb::EventKind::GatePassed as i32, 2.5, "Gate0 (gate 0) start"));
+        let split = race_event(&RaceEvent::GatePassed { gate: 1, time_s: 10.9124, split_s: 8.4123 }, &names);
+        assert_eq!((split.kind, split.message.as_str()), (pb::EventKind::GatePassed as i32, "Gate1 (gate 1) split 8.412 s"));
+        let first = race_event(&RaceEvent::LapCompleted { lap: 1, time_s: 33.0, lap_s: 31.2041, best: true }, &names);
+        assert_eq!((first.kind, first.time_s, first.message.as_str()), (pb::EventKind::LapCompleted as i32, 33.0, "lap 1: 31.204 s (best)"));
+        let slower = race_event(&RaceEvent::LapCompleted { lap: 2, time_s: 66.0, lap_s: 33.0, best: false }, &names);
+        assert_eq!(slower.message, "lap 2: 33.000 s");
+    }
+
+    #[test]
+    fn world_msg_carries_the_gates_and_state_msg_the_race() {
+        let session = flat_session();
+        let world = world_msg(session.vehicle.world());
+        assert_eq!(world.gates.len(), 3);
+        let g = &world.gates[0];
+        assert_eq!((g.name.as_str(), g.heading_deg, g.width_m, g.height_m), ("Gate0", 0.0, 3.08, 2.44));
+        assert_eq!(g.center_ned_m, Some(pb::Vec3 { x: 30.0, y: 0.0, z: -1.22 }));
+        let race = session.state_msg().race.expect("a race message");
+        assert_eq!((race.present, race.running, race.gate_count, race.laps, race.next_gate), (true, false, 3, 0, 0));
+        let bare = testing::open_loop_session(RunMode::Lockstep);
+        assert!(!bare.state_msg().race.unwrap().present);
     }
 
     #[test]

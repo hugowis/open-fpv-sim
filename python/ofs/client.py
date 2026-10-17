@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 10
+PROTOCOL_VERSION = 11
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}

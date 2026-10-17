@@ -446,6 +446,10 @@ pub enum EventKind {
     InputsRecordingStarted,
     /// An inputs recording stopped or failed.
     InputsRecordingStopped,
+    /// The quad flew through a gate (the message names it and gives the split).
+    GatePassed,
+    /// A lap completed (the message gives its time).
+    LapCompleted,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -474,6 +478,8 @@ impl EventKind {
             EventKind::RecordingStopped => "recording_stopped",
             EventKind::InputsRecordingStarted => "inputs_recording_started",
             EventKind::InputsRecordingStopped => "inputs_recording_stopped",
+            EventKind::GatePassed => "gate_passed",
+            EventKind::LapCompleted => "lap_completed",
             EventKind::Unknown => "unknown",
         }
     }
@@ -511,6 +517,8 @@ impl Event {
             Ok(pb::EventKind::RecordingStopped) => EventKind::RecordingStopped,
             Ok(pb::EventKind::InputsRecordingStarted) => EventKind::InputsRecordingStarted,
             Ok(pb::EventKind::InputsRecordingStopped) => EventKind::InputsRecordingStopped,
+            Ok(pb::EventKind::GatePassed) => EventKind::GatePassed,
+            Ok(pb::EventKind::LapCompleted) => EventKind::LapCompleted,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }
