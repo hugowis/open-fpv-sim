@@ -423,9 +423,10 @@ impl WorldConfig {
             c.check(g.heading_deg.is_finite(), &field("heading_deg"), "must be finite");
             c.check(g.width_m.is_finite() && g.width_m > 0.0, &field("width_m"), format!("must be > 0 (got {})", g.width_m));
             c.check(g.height_m.is_finite() && g.height_m > 0.0, &field("height_m"), format!("must be > 0 (got {})", g.height_m));
-            // NaN compares false on every side, so only a real overshoot is reported here (the finite checks cover NaN).
+            // A NaN is reported by the finite checks above, not here.
+            let bottom_d = g.center_ned_m[2] + g.height_m / 2.0;
             c.check(
-                !(g.center_ned_m[2] + g.height_m / 2.0 > 0.0),
+                bottom_d.is_nan() || bottom_d <= 0.0,
                 &field("center_ned_m"),
                 "the gate's opening must not reach below the ground (center d + height/2 must be <= 0)",
             );
