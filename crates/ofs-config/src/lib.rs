@@ -1051,7 +1051,9 @@ impl QuadConfig {
         );
         c.non_negative(b.resistance_growth_per_cycle, "battery.resistance_growth_per_cycle");
         c.check(
-            1.0 + b.resistance_growth_per_cycle * f64::from(b.cycles) <= MAX_AGED_RESISTANCE_FACTOR,
+            // A non-finite growth is already reported by the line above; do not say it twice.
+            !b.resistance_growth_per_cycle.is_finite()
+                || 1.0 + b.resistance_growth_per_cycle * f64::from(b.cycles) <= MAX_AGED_RESISTANCE_FACTOR,
             "battery.resistance_growth_per_cycle",
             format!(
                 "{} cycles at {} growth per cycle make the pack more than {MAX_AGED_RESISTANCE_FACTOR} times as resistive",
