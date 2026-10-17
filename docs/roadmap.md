@@ -2,8 +2,10 @@
 
 v1 — milestones M0 to M4, `open-fpv-sim` 0.1.0 on PyPI (2026-10-13) — is complete: see the parent spec
 (`docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md`) for what it set out to do and the evidence that it does.
-This file is what v1 deliberately does not do, and what comes next. It replaces the per-milestone carried-debt files
-(kept as history in `docs/superpowers/history/`); the v1 close-out's fixes are in `CHANGELOG.md`.
+Phases 2 and 3 (M5 to M8c: swappable radio, accuracy and validation, hardening, race timing and scripted flight) are
+release 0.2.0 (`CHANGELOG.md`).
+This file is what the simulator deliberately does not do, and what comes next. It replaces the per-milestone carried-debt
+files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes are in `CHANGELOG.md`.
 
 ## Known limitations of v1
 

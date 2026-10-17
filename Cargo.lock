@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ofs-core",
  "serde",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "rand 0.8.8",
@@ -945,14 +945,14 @@ dependencies = [
 
 [[package]]
 name = "ofs-electrical"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ofs-core",
 ]
 
 [[package]]
 name = "ofs-fc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-godot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "godot",
  "ofs-client",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-log"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "mcap",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-physics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-radio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -1013,7 +1013,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-rf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-sensors"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-core",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-sim"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "glam 0.29.3",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-validate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "ofs-config",
@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "ofs-video"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam 0.29.3",
  "ofs-config",
