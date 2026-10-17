@@ -54,7 +54,15 @@ One logical change per commit, written as `type(scope): what changed` (`fix(dvr)
 `docs: …`). A fix comes with the test that failed without it.
 
 ## Releasing the Python package
-1. Bump `version` in `python/pyproject.toml` and add the release to `CHANGELOG.md`.
-2. Push a matching tag: `git tag v<version> && git push origin v<version>` (the publish job checks they match).
-3. Approve the `pypi` deployment in the run (the environment requires a reviewer; it accepts `v*` tags only).
-4. If the sitl job fails on a known flake (`docs/roadmap.md`), re-run the failed jobs; publish waits for it.
+1. In one PR, bump `version` in `python/pyproject.toml` **and** `[workspace.package]` in `Cargo.toml` (the server
+   reports it), update `Cargo.lock` (`cargo build --workspace --offline`; CI builds `--locked`), and fold the
+   changelog's "Unreleased" sections under a dated `## <version> — <date>` heading with an upgrade list.
+   `python/tests/test_release.py` fails when the two versions, the lock or the changelog heading disagree.
+2. Before tagging, check the package: `python -m build python --outdir <dir>`, `twine check <dir>/*`, install the wheel
+   in a clean venv and load a quad against a freshly built `ofs-sim`, and confirm the version is not on PyPI
+   (`pip index versions open-fpv-sim`). A PyPI release cannot be replaced, only yanked.
+3. After the PR is merged, tag the merge commit on `main` and push the tag:
+   `git tag v<version> && git push origin v<version>` (the publish job checks the tag against `pyproject.toml`).
+   Pushing the tag is the maintainer's explicit step; nothing else publishes.
+4. Approve the `pypi` deployment in the run (the environment requires a reviewer; it accepts `v*` tags only).
+5. If the sitl job fails on a known flake (`docs/roadmap.md`), re-run the failed jobs; publish waits for it.
