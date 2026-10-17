@@ -13,6 +13,7 @@ use ofs_electrical::battery::{Battery, BatteryParams};
 use ofs_electrical::esc_motor::{EscMotor, EscParams, MotorParams};
 use ofs_electrical::thermal::{EscThermalParams, MotorThermalParams, NodeParams, Thermal, ThermalParams, VtxThermalParams};
 use ofs_fc::open_loop::OpenLoopFc;
+use ofs_fc::stabilizer::Stabilizer;
 use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Inputs, Stick};
@@ -954,8 +955,12 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
     let mut osd: Option<OsdHandle> = None;
     match fc_kind {
-        FcKind::OpenLoop => {
-            models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus)));
+        FcKind::OpenLoop | FcKind::OpenLoopStabilized => {
+            if fc_kind == FcKind::OpenLoopStabilized {
+                models.push(Box::new(Stabilizer::new(&cfg.frame.motor_positions_frd_m, &cfg.frame.motor_spin, fc_divisor, &mut bus)));
+            } else {
+                models.push(Box::new(OpenLoopFc::new(n, fc_divisor, &mut bus)));
+            }
             // No Betaflight to talk to, but the VTX is on the quad all the same: it transmits its power-up channel.
             if let Some(x) = &cfg.vtx {
                 models.push(Box::new(vtx_model(x, Wire::new(VIDEO_TAP_CAPACITY), Wire::new(VIDEO_TAP_CAPACITY), fc_divisor, &mut bus)?));

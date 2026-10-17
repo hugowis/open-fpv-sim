@@ -820,6 +820,12 @@ fn the_handset_and_receiver_default_to_the_joystick_and_crsf_and_can_be_named() 
 }
 
 #[test]
+fn a_quad_can_ask_for_the_open_loop_stabilizer() {
+    let cfg = shipped_with(|t| *t = t.replace("kind = \"sitl\"", "kind = \"open_loop_stabilized\"")).unwrap();
+    assert_eq!(cfg.fc.kind, ofs_config::FcKind::OpenLoopStabilized);
+}
+
+#[test]
 fn an_unknown_part_name_is_an_error_that_lists_the_valid_names() {
     let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nhandset = \"mixer\"")).unwrap_err();
     assert!(err.to_string().contains("unknown variant `mixer`") && err.to_string().contains("joystick"), "{err}");

@@ -285,7 +285,10 @@ pub struct InitialSection {
 #[serde(rename_all = "snake_case")]
 pub enum FcKind {
     Sitl,
+    /// Throttle to every motor, nothing else (a test stand-in).
     OpenLoop,
+    /// Throttle plus a built-in angle-mode stabilizer (`docs/scripted-flight.md`): a stand-in, not Betaflight.
+    OpenLoopStabilized,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -5,6 +5,7 @@
 //! The stick semantics are Betaflight's angle mode: roll `+` leans right, pitch `+` is forward (nose down), yaw `+`
 //! turns clockwise seen from above, and throttle is the collective command.
 use glam::{DQuat, DVec3};
+use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 
 /// Full roll or pitch stick leans the quad this far (Betaflight's default `angle_limit`).
 pub const MAX_ANGLE_DEG: f64 = 60.0;
@@ -14,12 +15,17 @@ pub const MAX_YAW_RATE_DPS: f64 = 200.0;
 pub const MAX_RATE_DPS: f64 = 400.0;
 /// At or below this throttle every motor command is 0: a quad on the ground stays put.
 pub const IDLE_THROTTLE: f64 = 0.05;
+/// The gains below were estimated from the shipped quad's inertia and thrust slope and tuned against
+/// `crates/ofs-sim/tests/stabilizer.rs` on that quad (a 0.3 roll stick reaches 18.5 degrees at 0.5 s and peaks at
+/// 20.6; yaw follows its stick within 15 %). They suit that airframe, not every quad.
+///
 /// Angle error (rad) to rate target (rad/s).
 pub const KP_ANGLE: f64 = 15.0;
 /// Rate error (rad/s) to motor command, roll and pitch.
 pub const KP_RATE_ROLL_PITCH: f64 = 0.035;
-/// Rate error (rad/s) to motor command, yaw.
-pub const KP_RATE_YAW: f64 = 0.03;
+/// Rate error (rad/s) to motor command, yaw (the estimate, 0.03, left the yaw rate 19 % short of the stick: a P-only
+/// loop against the rotors' drag torque).
+pub const KP_RATE_YAW: f64 = 0.06;
 
 /// How each motor's command responds to the three axis outputs, from the frame's geometry.
 #[derive(Debug, Clone)]
@@ -89,6 +95,69 @@ pub fn control(sticks: &Sticks, attitude: Attitude, rate_frd_radps: DVec3) -> (f
         KP_RATE_ROLL_PITCH * (pitch_rate_target - rate_frd_radps.y),
         KP_RATE_YAW * (yaw_rate_target - rate_frd_radps.z),
     )
+}
+
+/// The stabilizer as a scheduler model: reads the sticks and the truth attitude, writes the motor commands.
+pub struct Stabilizer {
+    div: u32,
+    mixer: Mixer,
+    roll: Signal<f64>,
+    pitch: Signal<f64>,
+    yaw: Signal<f64>,
+    throttle: Signal<f64>,
+    att: Signal<DQuat>,
+    rate: Signal<DVec3>,
+    cmds: Vec<Signal<f64>>,
+    out: Vec<f64>,
+}
+
+impl Stabilizer {
+    pub fn new(positions_frd_m: &[[f64; 3]], spin: &[i8], rate_divisor: u32, bus: &mut Bus) -> Self {
+        let motors = positions_frd_m.len();
+        Self {
+            div: rate_divisor,
+            mixer: Mixer::new(positions_frd_m, spin),
+            roll: bus.signal(names::RC_ROLL),
+            pitch: bus.signal(names::RC_PITCH),
+            yaw: bus.signal(names::RC_YAW),
+            throttle: bus.signal(names::RC_THROTTLE),
+            att: bus.signal(names::BODY_ATT),
+            rate: bus.signal(names::BODY_RATE_FRD),
+            cmds: (0..motors).map(|i| bus.signal(&names::motor_cmd(i))).collect(),
+            out: vec![0.0; motors],
+        }
+    }
+}
+
+impl Model for Stabilizer {
+    fn name(&self) -> &str {
+        "fc.stabilizer"
+    }
+
+    fn rate_divisor(&self) -> u32 {
+        self.div
+    }
+
+    fn step(&mut self, _ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
+        let throttle = bus.get(self.throttle).clamp(0.0, 1.0);
+        if throttle <= IDLE_THROTTLE {
+            self.out.fill(0.0);
+        } else {
+            let sticks = Sticks {
+                roll: bus.get(self.roll).clamp(-1.0, 1.0),
+                pitch: bus.get(self.pitch).clamp(-1.0, 1.0),
+                yaw: bus.get(self.yaw).clamp(-1.0, 1.0),
+                throttle,
+            };
+            let (roll_rad, pitch_rad, _) = euler_zyx(bus.get(self.att));
+            let (roll, pitch, yaw) = control(&sticks, Attitude { roll_rad, pitch_rad }, bus.get(self.rate));
+            self.mixer.mix(throttle, roll, pitch, yaw, &mut self.out);
+        }
+        for (signal, cmd) in self.cmds.iter().zip(&self.out) {
+            bus.set(*signal, *cmd);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
