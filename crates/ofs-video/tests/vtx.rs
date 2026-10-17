@@ -266,6 +266,13 @@ fn the_tramp_vtx_answers_r_v_s_and_applies_f_p_i() {
 }
 
 #[test]
+fn tramp_status_without_a_thermal_model_is_the_default_ambient() {
+    let mut rig = Rig::new(tramp_params(), VtxKind::Tramp);
+    let reply = rig.ask(0.0, &tramp_frame(b's', &[]));
+    assert_eq!(i16::from_le_bytes([reply[6], reply[7]]), 25, "not a 0 degrees the FC would discard");
+}
+
+#[test]
 fn tramp_status_encodes_a_negative_temperature() {
     let mut rig = Rig::new(tramp_params(), VtxKind::Tramp);
     let temperature = rig.bus.signal::<f64>(names::VTX_TEMP_C);

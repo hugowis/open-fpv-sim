@@ -61,7 +61,8 @@ impl EscTelemetry {
             current: bus.signal(names::BATTERY_CURRENT),
             consumed: bus.signal(names::BATTERY_CONSUMED),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
-            temperature: (0..motors).map(|i| bus.signal(&names::esc_temp(i))).collect(),
+            // Without a thermal model driving it, an ESC reads the ambient, not 0 °C.
+            temperature: (0..motors).map(|i| bus.signal_or(&names::esc_temp(i), ofs_core::consts::DEFAULT_AMBIENT_C)).collect(),
         }
     }
 }

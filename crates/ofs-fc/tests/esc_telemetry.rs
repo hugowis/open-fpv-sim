@@ -59,6 +59,16 @@ fn the_kiss_frames_carry_erpm_from_the_motors_pole_pairs() {
 }
 
 #[test]
+fn a_rig_without_a_thermal_model_reports_the_default_ambient_not_zero_degrees() {
+    let mut bus = Bus::new();
+    let uart = Wire::new(256);
+    let mut model = EscTelemetry::new(uart.clone(), 4, 80, 7.0, &mut bus);
+    model.step(&StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 8000.0 }, &mut bus).unwrap();
+    let temperatures: Vec<u8> = uart.take(256).chunks(FRAME_SIZE).map(|f| f[0]).collect();
+    assert_eq!(temperatures, [25, 25, 25, 25]);
+}
+
+#[test]
 fn frame_k_carries_esc_ks_temperature_clamped_to_a_byte() {
     let mut bus = Bus::new();
     for (k, t) in [30.4, 61.6, 300.0, -5.0].into_iter().enumerate() {

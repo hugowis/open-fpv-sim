@@ -95,6 +95,17 @@ impl Bus {
         Signal { index, _t: PhantomData }
     }
 
+    /// [`Bus::signal`], but a signal this call creates starts at `initial` instead of the type's default. A signal
+    /// someone registered first keeps whatever it holds, so the result does not depend on which model is built first.
+    pub fn signal_or<T: BusValue>(&mut self, name: &str, initial: T) -> Signal<T> {
+        let fresh = !self.names.contains_key(name);
+        let s = self.signal(name);
+        if fresh {
+            self.set(s, initial);
+        }
+        s
+    }
+
     pub fn lookup<T: BusValue>(&self, name: &str) -> Option<Signal<T>> {
         match self.names.get(name) {
             Some(&(kind, index)) if kind == T::kind() => Some(Signal { index, _t: PhantomData }),

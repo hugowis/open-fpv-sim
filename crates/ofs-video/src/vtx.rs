@@ -138,7 +138,8 @@ impl VtxModel {
             freq: bus.signal(names::VTX_FREQ_MHZ),
             power: bus.signal(names::VTX_POWER_MW),
             pit: bus.signal(names::VTX_PIT),
-            temperature: bus.signal(names::VTX_TEMP_C),
+            // Without a thermal model driving it, the VTX reads the ambient, not the 0 °C a Tramp FC discards.
+            temperature: bus.signal_or(names::VTX_TEMP_C, ofs_core::consts::DEFAULT_AMBIENT_C),
         }
     }
 
