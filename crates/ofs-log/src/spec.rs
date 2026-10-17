@@ -7,7 +7,8 @@ use crate::glob;
 pub const DEFAULT_RATES: &[(&str, f64)] = &[
     ("body.*", 240.0),
     ("imu.*", 1000.0),
-    // The thermal model steps at base/100, so its temperatures only change at 100 Hz.
+    // The thermal model steps at base/100, so its temperatures only change at 100 Hz (for a base rate that is a
+    // multiple of 100, as the shipped quads' 8 kHz is).
     ("motor.*.temp_c", 100.0),
     ("esc.*.temp_c", 100.0),
     ("motor.*", 240.0),

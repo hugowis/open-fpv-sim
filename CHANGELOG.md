@@ -7,7 +7,9 @@ repository). The format follows Keep a Changelog.
 ### Changed
 - The default recording table records the ESC and motor temperatures (`esc.{i}.temp_c`, `motor.{i}.temp_c`) at 100 Hz,
   the thermal model's own rate, instead of 240 Hz (they only change at 100 Hz). Recordings and the radio-flight
-  golden digests change accordingly (both OS files regenerated); the simulation itself does not.
+  golden digests change accordingly (both OS files regenerated); the simulation itself does not. A Python selection
+  such as `to_dataframe(["esc.*"])` now mixes two rates (242 Hz and 100 Hz), so its columns have gaps on the union time
+  grid: `.dropna()` a column before plotting it, as for any mixed-rate selection.
 - ESC telemetry and the VTX built without a thermal model (test rigs) read the default 25 °C ambient, not 0 °C.
   `ofs_core::Bus::signal_or` and `ofs_core::consts::DEFAULT_AMBIENT_C` are new.
 
