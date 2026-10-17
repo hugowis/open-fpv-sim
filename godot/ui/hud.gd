@@ -34,6 +34,7 @@ var _link := Label.new()
 var _battery := Label.new()
 var _vtx := Label.new()
 var _video := Label.new()
+var _race := Label.new()
 var _flight := Label.new()
 var _configurator := Label.new()
 var _banner := Label.new()
@@ -62,6 +63,7 @@ func _ready() -> void:
 	_place(root, _battery, 1.0, 0.0, 14.0, 44.0, true)
 	_place(root, _vtx, 1.0, 0.0, 14.0, 74.0, true)
 	_place(root, _video, 1.0, 0.0, 14.0, 104.0, true)
+	_place(root, _race, 1.0, 0.0, 14.0, 134.0, true)
 	_place(root, _flight, 0.0, 1.0, 14.0, 14.0, false)
 	_place(root, _configurator, 1.0, 1.0, 14.0, 14.0, true)
 	_place(root, _toasts, 1.0, 0.5, 14.0, 0.0, true)
@@ -83,7 +85,7 @@ func _ready() -> void:
 	_place(root, _help, 0.5, 0.5, 0.0, 0.0, false)
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.grow_vertical = Control.GROW_DIRECTION_BOTH
-	for label in [_status, _sim, _link, _battery, _vtx, _video, _flight, _configurator]:
+	for label in [_status, _sim, _link, _battery, _vtx, _video, _race, _flight, _configurator]:
 		_style(label, 18)
 
 
@@ -136,7 +138,7 @@ func help_visible() -> bool:
 
 func set_hud_visible(visible_now: bool) -> void:
 	_shown = visible_now
-	for node in [_status, _sim, _link, _battery, _vtx, _video, _flight, _configurator, _sticks_view, _toasts]:
+	for node in [_status, _sim, _link, _battery, _vtx, _video, _race, _flight, _configurator, _sticks_view, _toasts]:
 		node.visible = visible_now
 
 
@@ -189,6 +191,11 @@ func video_text() -> String:
 	return _video.text
 
 
+## The lap line (for the tests).
+func race_text() -> String:
+	return _race.text
+
+
 ## The radio link line (for the tests).
 func link_text() -> String:
 	return _link.text
@@ -216,6 +223,7 @@ func update_view(view: Dictionary) -> void:
 		_battery.text = ""
 		_vtx.text = ""
 		_video.text = ""
+		_race.text = ""
 		_flight.text = ""
 	else:
 		var running: bool = t["running"]
@@ -239,6 +247,7 @@ func update_view(view: Dictionary) -> void:
 		else:
 			_vtx.text = ""
 		_update_video(t)
+		_update_race(t)
 		_flight.text = "ALT   %.1f m
 SPEED %.1f m/s
 CLIMB %+.1f m/s
@@ -267,6 +276,24 @@ func _update_video(t: Dictionary) -> void:
 		roundi(t["video_snr_db"]), antenna, roundi(rssi.get(antenna, 0.0)), "  NO SYNC" if sync == "lost" else ""]
 	var clean: bool = t.get("video_noise", 0.0) <= 0.0 and sync == "locked"
 	_video.add_theme_color_override("font_color", GREEN if clean else (RED if sync == "lost" else YELLOW))
+
+
+## "LAP 2   NEXT 3   1:15.3   LAST 31.2   BEST 29.9": the lap being flown, the gate to fly through next (START once
+## every gate is passed), the time on this lap and, after the first lap, the last and best. Empty without gates.
+func _update_race(t: Dictionary) -> void:
+	if not t.get("race_present", false):
+		_race.text = ""
+		return
+	if not t.get("race_running", false):
+		_race.text = "RACE  fly through the start gate"
+		return
+	var next_gate: int = t.get("race_next_gate", 0)
+	var lap_s: float = t.get("race_lap_s", 0.0)
+	var laps: int = t.get("race_laps", 0)
+	var text := "LAP %d   NEXT %s   %d:%04.1f" % [laps + 1, "START" if next_gate == 0 else str(next_gate), int(lap_s) / 60, fmod(lap_s, 60.0)]
+	if laps > 0:
+		text += "   LAST %.1f   BEST %.1f" % [t.get("race_last_lap_s", 0.0), t.get("race_best_lap_s", 0.0)]
+	_race.text = text
 
 
 func _update_banner(view: Dictionary, t: Dictionary, phase: String) -> void:

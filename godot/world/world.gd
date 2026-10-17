@@ -10,6 +10,8 @@ const GRID_SHADER := preload("res://world/grid.gdshader")
 
 const PILOT_COLOR := Color(0.25, 0.55, 1.0)
 const EMITTER_COLOR := Color(0.85, 0.25, 0.85)
+const GATE_START_COLOR := Color(1.0, 0.85, 0.2)
+const GATE_COLOR := Color(0.3, 0.85, 1.0)
 ## Where the pilot's eyes are below the goggle position, and how tall the marker is.
 const PILOT_BODY_HEIGHT_M := 1.5
 
@@ -41,6 +43,9 @@ func build(world: Dictionary) -> void:
 		_add_handset(world["handset_position"])
 	for e in world.get("emitters", []):
 		_add_emitter(e)
+	var gates: Array = world.get("gates", [])
+	for i in gates.size():
+		_add_gate(i, gates[i])
 
 
 ## The names of the nodes the world file made (for the tests and the e2e).
@@ -158,6 +163,37 @@ func _add_handset(position: Vector3) -> void:
 	body.size = Vector3(0.07, 0.14, 0.025)
 	handset.add_child(_mesh("Body", body, Color(0.16, 0.16, 0.2), Vector3.ZERO))
 	_add_built(handset)
+
+
+## A gate's opening: a translucent rectangle across the direction of travel (the node's +Z points along it), labelled
+## START for gate 0 and with its number for the others. The posts and bar of a physical gate are ordinary objects.
+func _add_gate(index: int, g: Dictionary) -> void:
+	var gate := Node3D.new()
+	gate.name = "Gate_" + String(g["name"])
+	gate.position = g["center"]
+	# Local +Z rotated about +Y by PI - heading is (sin h, 0, -cos h): north is -Z, east is +X.
+	gate.rotation.y = PI - deg_to_rad(float(g["heading_deg"]))
+	var quad := QuadMesh.new()
+	quad.size = Vector2(float(g["width"]), float(g["height"]))
+	var color := GATE_START_COLOR if index == 0 else GATE_COLOR
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.albedo_color = Color(color.r, color.g, color.b, 0.25)
+	var opening := MeshInstance3D.new()
+	opening.name = "Opening"
+	opening.mesh = quad
+	opening.material_override = material
+	gate.add_child(opening)
+	var label := Label3D.new()
+	label.name = "Label"
+	label.text = "START" if index == 0 else str(index)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position = Vector3(0.0, float(g["height"]) * 0.5 + 0.35, 0.0)
+	label.modulate = color
+	gate.add_child(label)
+	_add_built(gate)
 
 
 ## A post up to the transmitter, labelled with its frequency.

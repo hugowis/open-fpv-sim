@@ -70,6 +70,27 @@ func test_a_new_world_replaces_the_old_one() -> void:
 	world.queue_free()
 
 
+func test_gates_are_drawn_as_openings_facing_their_direction_of_travel() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	world.build({"gates": [
+		{"name": "A", "center": Vector3(0.0, 1.22, -30.0), "heading_deg": 0.0, "width": 3.08, "height": 2.44},
+		{"name": "B", "center": Vector3(50.0, 1.5, 0.0), "heading_deg": 90.0, "width": 3.0, "height": 2.0},
+	]})
+	eq(world.built_names(), PackedStringArray(["Gate_A", "Gate_B"]), "one node per gate, in course order")
+	var a: Node3D = world.get_node("Gate_A")
+	eq(a.position, Vector3(0.0, 1.22, -30.0), "centred where the world file puts the opening")
+	eq(((a.get_node("Opening") as MeshInstance3D).mesh as QuadMesh).size, Vector2(3.08, 2.44), "the opening's size")
+	ok(a.global_transform.basis.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-5, "heading north faces -Z: %s" % str(a.global_transform.basis.z))
+	var b: Node3D = world.get_node("Gate_B")
+	ok(b.global_transform.basis.z.distance_to(Vector3(1.0, 0.0, 0.0)) < 1e-5, "heading east faces +X: %s" % str(b.global_transform.basis.z))
+	eq((a.get_node("Label") as Label3D).text, "START", "gate 0 is the start and finish")
+	eq((b.get_node("Label") as Label3D).text, "1", "the others carry their number")
+	world.build({})
+	eq(world.built_names(), PackedStringArray(), "an empty world clears the gates")
+	world.queue_free()
+
+
 func test_the_world_is_only_scenery() -> void:
 	var world := World.new()
 	await add_to_tree(world)
