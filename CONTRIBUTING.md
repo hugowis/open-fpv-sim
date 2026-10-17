@@ -66,5 +66,8 @@ One logical change per commit, written as `type(scope): what changed` (`fix(dvr)
    `git fetch origin && git tag v<version> origin/main && git push origin v<version>` (the publish job checks the tag
    against `pyproject.toml`).
    Pushing the tag is the maintainer's explicit step; nothing else publishes.
-4. Approve the `pypi` deployment in the run (the environment requires a reviewer; it accepts `v*` tags only).
+4. Approve the `pypi` deployment in the run (the environment requires a reviewer). Its deployment rule must be of
+   type **Tag** with the pattern `v*` (Settings, Environments, `pypi`): a rule of type Branch named `v*` never matches a
+   tag, and `publish` then fails with "Tag is not allowed to deploy to pypi" (this stopped 0.2.0 until the rule was
+   fixed). After fixing the rule, re-run only the failed `publish` job.
 5. If the sitl job fails on a known flake (`docs/roadmap.md`), re-run the failed jobs; publish waits for it.
