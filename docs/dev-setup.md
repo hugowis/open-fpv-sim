@@ -319,8 +319,22 @@ Persistence over MSP is covered live by `test_a_pid_saved_over_msp_persists_thro
 ## Performance
 `scripts/benchmark.py` measures the real-time factor (simulated seconds per wall second) of headless lockstep runs
 of the shipped quad: open loop and with Betaflight SITL, recording on and off. The parent spec's target (§8.6) is
-at least 2× on a mid-range PC; CI's sitl job runs it against a release build, prints the table in the job summary
-and fails only below 1× (shared runners are noisy).
+at least 2× on a mid-range PC. CI's sitl job runs it against a release build, prints the table in the job summary and
+checks two things:
+
+- **The floor:** a row below 1× real time always fails (`--floor 1`).
+- **The regression gate (#61):** each row is compared with `scripts/benchmark-baseline.json`, the median of five green
+  CI runs on GitHub's `ubuntu-24.04` runner (open loop 47.9× with recording and 131.9× without, Betaflight 10.0× and
+  11.8×; the runs agreed within 4 %). A row under 60 % of its baseline fails, so a slowdown from 12× to 7× is caught
+  while the 4 % runner noise is not. Each row is the best of two runs (`--repeat 2`), because noise only ever slows a
+  run down. A skipped row, or a row the baseline does not list, is never gated. The summary table shows the baseline
+  and the ratio of every row.
+
+To accept a slowdown on purpose, make it visible: either update the baseline in the same PR (run the benchmark in CI,
+or `python scripts/benchmark.py --repeat 2 --print-baseline` on the same kind of runner, and copy the numbers into the
+file), or set the repository variable `OFS_BENCH_ACCEPT_SLOWER` to the reason; the table then says
+`ACCEPTED: <reason>` for the regressed rows and the job passes. A developer machine is not a runner class: run the
+benchmark there without `--baseline` (the baseline is in numbers that only `ci-linux` can reproduce).
 
 Measured on an AMD Ryzen 9 9900X3D, release build, 2026-10-13. Windows, open loop (no Betaflight):
 
