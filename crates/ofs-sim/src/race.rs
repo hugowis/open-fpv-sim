@@ -10,7 +10,7 @@ use glam::DVec3;
 use ofs_config::world::GateSection;
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 
-/// A gate that was just counted counts again (a one-gate course) only after the quad has been this far from its centre.
+/// A gate that was just counted counts again (a one-gate course) only after the quad has been this far from its plane.
 pub const REARM_M: f64 = 3.0;
 
 /// One gate's geometry in NED metres.
@@ -107,7 +107,8 @@ impl RaceTracker {
             return None;
         }
         if let Some(last) = self.last_counted {
-            if (p1 - self.gates[last].center).length() > REARM_M {
+            // Measured along the direction of travel: a wide gate's far edge is farther than REARM_M from its centre.
+            if (p1 - self.gates[last].center).dot(self.gates[last].forward).abs() > REARM_M {
                 self.away = true;
             }
         }
@@ -452,6 +453,25 @@ mod tests {
         r.step(20.0, 1.0, at(25.0, 0.0, -1.5));
         r.step(21.0, 1.0, at(29.0, 0.0, -1.5));
         let Some(RaceEvent::LapCompleted { lap: 1, .. }) = r.step(22.0, 1.0, at(31.0, 0.0, -1.5)) else { panic!() };
+    }
+
+    #[test]
+    fn jitter_at_the_edge_of_a_wide_single_gate_does_not_run_up_laps() {
+        // 8 m wide: hovering 3.5 m off the centre line is inside the opening yet more than REARM_M from its centre.
+        let mut r = RaceTracker::new(vec![Gate::from_config(&GateSection {
+            name: "Wide".into(),
+            center_ned_m: [30.0, 0.0, -1.5],
+            heading_deg: 0.0,
+            width_m: 8.0,
+            height_m: 2.0,
+        })]);
+        r.step(0.0, 0.0, at(29.9, 3.5, -1.5));
+        assert!(matches!(r.step(0.0, 0.1, at(30.1, 3.5, -1.5)), Some(RaceEvent::GatePassed { gate: 0, .. })));
+        for i in 0..10 {
+            let wobble = if i % 2 == 0 { 29.9 } else { 30.1 };
+            assert_eq!(r.step(1.0 + f64::from(i), 1.0, at(wobble, 3.5, -1.5)), None, "jitter {i}");
+        }
+        assert_eq!(r.status().laps, 0);
     }
 
     #[test]

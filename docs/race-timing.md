@@ -42,8 +42,9 @@ as a translucent rectangle labelled START or with the gate's number.
 - **A lap.** Passing gate 0 again after the last gate completes a lap (`lap_completed`) and starts the next one. That
   pass raises no `gate_passed`.
 - **One gate.** With a single gate every counted pass after the start completes a lap, but only once the quad has been
-  farther than 3 m (`REARM_M`) from the gate's centre since the last one, so hovering through the plane does not run up
-  laps.
+  farther than 3 m (`REARM_M`) from the gate's plane (along the direction of travel) since the last one, so hovering
+  through the plane does not run up laps. The rule applies only to a one-gate course: a two-gate course whose gates
+  face each other through one frame can still count laps while hovering there.
 - **Not included.** No lap limit, no reset (a new `Load` starts a fresh race), no ghost or best-lap replay, no
   highlight of the next gate in Godot.
 
