@@ -54,6 +54,22 @@ fn the_shipped_world_loads() {
 }
 
 #[test]
+fn the_circuit_world_loads() {
+    let w = world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/circuit.toml"))).unwrap();
+    let gates: Vec<(&str, [f64; 3], f64)> = w.gates.iter().map(|g| (g.name.as_str(), g.center_ned_m, g.heading_deg)).collect();
+    assert_eq!(
+        gates,
+        [
+            ("Gate0", [20.0, 0.0, -2.0], 90.0),
+            ("Gate1", [40.0, 20.0, -2.0], 0.0),
+            ("Gate2", [60.0, 0.0, -2.0], 270.0),
+            ("Gate3", [40.0, -20.0, -2.0], 180.0),
+        ]
+    );
+    assert!(w.gates.iter().all(|g| g.width_m == 6.0 && g.height_m == 4.0));
+}
+
+#[test]
 fn the_open_field_has_no_gates() {
     assert!(WorldConfig::open_field().gates.is_empty());
 }
