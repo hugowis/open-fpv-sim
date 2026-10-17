@@ -42,6 +42,14 @@ def test_a_lockstep_load_records_and_sim_log_reads_it(sim):
     assert sim.log.path == log.path, "a second read returns the same finished recording"
 
 
+def test_the_fast_reader_agrees_with_the_mcap_reader_on_a_real_recording(sim):
+    _climb(sim)
+    path = sim.log.path
+    for patterns in (None, ["imu.gyro_frd_radps"], ["motor.*.omega_radps", "battery.voltage_v"]):
+        assert ofs.reader.read(path, patterns) == ofs.reader._read_with_mcap(path, patterns), patterns
+        assert ofs.reader._used_indexed_path, "the server's recordings carry message indexes, so the fast path runs"
+
+
 def test_reading_an_unfinished_file_says_what_happened(sim, tmp_path):
     _climb(sim)
     finished = pathlib.Path(sim.log.path)

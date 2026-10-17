@@ -108,10 +108,15 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/pip" install "$(ls dist/*.whl)[log]" pytest
           "$RUNNER_TEMP/wheel-venv/bin/python" -c "import ofs; assert 'site-packages' in ofs.__file__, ofs.__file__"
           OFS_SIM_BIN=target/debug/ofs-sim "$RUNNER_TEMP/wheel-venv/bin/python" -m pytest python/tests/test_sitl_sandbox.py -v
-      # Parent spec §8.6: the real-time factor of headless runs, in the job summary. Fails only below 1x real time
-      # (shared runners are noisy: the floor catches regressions, the 2x target is measured on a real PC).
+      # Parent spec §8.6: the real-time factor of headless runs, in the job summary. Two checks: the floor (below 1x
+      # real time always fails) and the regression gate (a row under 60 % of its baseline in
+      # scripts/benchmark-baseline.json fails; each row is the best of 2 runs because noise only slows a run down).
+      # To accept a slowdown on purpose, update that baseline in the PR, or set the repository variable
+      # OFS_BENCH_ACCEPT_SLOWER to the reason: the table then says ACCEPTED and the job passes.
       - run: cargo build -p ofs-sim --release --locked
-      - run: python scripts/benchmark.py --binary target/release/ofs-sim --summary --floor 1
+      - run: python scripts/benchmark.py --binary target/release/ofs-sim --summary --floor 1 --repeat 2 --baseline scripts/benchmark-baseline.json --runner ci-linux
+        env:
+          OFS_BENCH_ACCEPT_SLOWER: ${{ vars.OFS_BENCH_ACCEPT_SLOWER }}
       - uses: actions/cache@v4
         with:
           path: build/godot-dl

@@ -12,6 +12,7 @@ import fnmatch
 import json
 import os
 import re
+import struct
 
 _INSTALL = "install the log extra: pip install open-fpv-sim[log]"
 
@@ -93,31 +94,151 @@ def _damaged(path) -> str:
             "last chunk half written); the recording_stopped event names the cause")
 
 
-def read(path, patterns=None):
-    """The selected signals as (columns, times_ns, rows): `rows[i]` maps column -> value at `times_ns[i]`. A scalar
-    signal is one column named after it; a vector or quaternion is one column per component (`<name>.x`)."""
+# Test-only: whether the last `read` took the message-index path (set by `read`, never consulted by it).
+_used_indexed_path = False
+
+# MCAP records (https://mcap.dev/spec): a record is an opcode byte and a u64 length, then its body.
+_RECORD_HEAD = struct.Struct("<BQ")
+_MESSAGE_HEAD = struct.Struct("<BQHIQQ")  # opcode, length, channel, sequence, log_time, publish_time
+_OP_MESSAGE = 0x05
+_U32 = struct.Struct("<I")
+_U64 = struct.Struct("<Q")
+_INDEX_ENTRY = struct.Struct("<QQ")  # log_time, offset into the chunk's decompressed records
+
+
+def _row_of(record, topic, columns, rows, log_time):
+    names = columns.get(topic)
+    if names is None:
+        names = columns[topic] = [topic] if list(record) == ["v"] else [f"{topic}.{k}" for k in record]
+    row = rows.setdefault(log_time, {})
+    for name, value in zip(names, record.values()):
+        row[name] = value
+
+
+def _finish(selected, rows, columns):
+    times = sorted(rows)
+    return [c for t in selected for c in columns.get(t, [])], times, [rows[t] for t in times]
+
+
+def _collect_with_mcap(path, reader, selected):
+    """The selected signals' records through `mcap`'s message iterator (every record of the file is parsed)."""
+    rows, columns = {}, {}
+    try:
+        for _, channel, message in reader.iter_messages(topics=selected, log_time_order=True):
+            _row_of(json.loads(message.data), channel.topic, columns, rows, message.log_time)
+    except Exception as e:  # mcap's and json's errors for a half-written chunk say nothing of the cause
+        raise ValueError(_damaged(path)) from e
+    return rows, columns
+
+
+def _zstd_decompressor():
+    try:
+        import zstandard
+    except ImportError:
+        return None
+    return zstandard.ZstdDecompressor()
+
+
+def _can_read_by_index(summary) -> bool:
+    """Every chunk is zstd or uncompressed, some carry message indexes, and the file has a statistics record to check
+    them against (the server's recordings have all of that)."""
+    chunks = summary.chunk_indexes
+    return (
+        bool(chunks)
+        and summary.statistics is not None
+        and all(c.compression in ("zstd", "") for c in chunks)
+        and any(c.message_index_offsets for c in chunks)
+    )
+
+
+def _collect_by_index(f, summary, selected):
+    """The selected signals' records, read through each chunk's per-channel message indexes: only the wanted records
+    are cut out of the (decompressed) chunk and parsed. Returns None when the indexes do not account for every record
+    of a selected signal (the caller then reads the file the slow way); a corrupt file raises."""
+    wanted = {cid: channel.topic for cid, channel in summary.channels.items() if channel.topic in set(selected)}
+    if len(set(wanted.values())) != len(wanted):
+        return None  # two channels on one topic: only the iterator merges their records in file order
+    decompress = None
+    rows, columns, seen = {}, {}, {cid: 0 for cid in wanted}
+    for chunk in summary.chunk_indexes:
+        entries = []  # (offset into the chunk's records, channel id), in file order per channel
+        for cid, index_offset in chunk.message_index_offsets.items():
+            if cid not in wanted:
+                continue
+            f.seek(index_offset)
+            head = f.read(_RECORD_HEAD.size + 2 + _U32.size)
+            (size,) = _U32.unpack_from(head, _RECORD_HEAD.size + 2)
+            body = f.read(size)
+            if len(body) != size:
+                raise ValueError("a message index is cut short")
+            for _, offset in _INDEX_ENTRY.iter_unpack(body):
+                entries.append((offset, cid))
+            seen[cid] += size // _INDEX_ENTRY.size
+        if not entries:
+            continue
+        f.seek(chunk.chunk_start_offset + _RECORD_HEAD.size + 8 + 8 + 8 + 4)  # past start, end, size and crc
+        (name_size,) = _U32.unpack(f.read(_U32.size))
+        f.read(name_size)
+        (records_size,) = _U64.unpack(f.read(_U64.size))
+        raw = f.read(records_size)
+        if len(raw) != records_size:
+            raise ValueError("a chunk is cut short")
+        if chunk.compression == "zstd":
+            decompress = decompress or _zstd_decompressor()
+            if decompress is None:
+                return None
+            data = decompress.decompress(raw, chunk.uncompressed_size)
+        else:
+            data = raw
+        for offset, cid in entries:
+            opcode, length, channel, _, log_time, _ = _MESSAGE_HEAD.unpack_from(data, offset)
+            if opcode != _OP_MESSAGE or channel != cid:
+                raise ValueError("a message index points at something that is not its message")
+            start = offset + _MESSAGE_HEAD.size
+            _row_of(json.loads(data[start:offset + _RECORD_HEAD.size + length]), wanted[cid], columns, rows, log_time)
+    counts = summary.statistics.channel_message_counts if summary.statistics else None
+    if counts is not None and any(seen[cid] != counts.get(cid, 0) for cid in wanted):
+        return None
+    return rows, columns
+
+
+def _read_with_mcap(path, patterns=None):
+    """`read` through `mcap`'s own message iterator: the reference the fast path is tested against, and its fallback."""
     make_reader = _mcap_reader()
     with open(path, "rb") as f:
         _check_magic(path, f)
         reader = make_reader(f)
         summary = _summary(path, reader)
-        topics = sorted(c.topic for c in summary.channels.values())
-        selected = _select(patterns, topics)
-        rows, columns = {}, {}
-        try:
-            for _, channel, message in reader.iter_messages(topics=selected, log_time_order=True):
-                record = json.loads(message.data)
-                names = columns.get(channel.topic)
-                if names is None:
-                    names = columns[channel.topic] = [channel.topic] if list(record) == ["v"] else [
-                        f"{channel.topic}.{k}" for k in record]
-                row = rows.setdefault(message.log_time, {})
-                for name, value in zip(names, record.values()):
-                    row[name] = value
-        except Exception as e:  # mcap's and json's errors for a half-written chunk say nothing of the cause
-            raise ValueError(_damaged(path)) from e
-    times = sorted(rows)
-    return [c for t in selected for c in columns.get(t, [])], times, [rows[t] for t in times]
+        selected = _select(patterns, sorted(c.topic for c in summary.channels.values()))
+        rows, columns = _collect_with_mcap(path, reader, selected)
+    return _finish(selected, rows, columns)
+
+
+def read(path, patterns=None):
+    """The selected signals as (columns, times_ns, rows): `rows[i]` maps column -> value at `times_ns[i]`. A scalar
+    signal is one column named after it; a vector or quaternion is one column per component (`<name>.x`).
+
+    A recording with message indexes in zstd or uncompressed chunks (the server's own) is read by cutting only the
+    selected signals' records out of each chunk, several times faster than parsing every record; any other file is
+    read through `mcap`'s message iterator."""
+    global _used_indexed_path
+    _used_indexed_path = False
+    make_reader = _mcap_reader()
+    with open(path, "rb") as f:
+        _check_magic(path, f)
+        reader = make_reader(f)
+        summary = _summary(path, reader)
+        selected = _select(patterns, sorted(c.topic for c in summary.channels.values()))
+        collected = None
+        if _can_read_by_index(summary):
+            try:
+                collected = _collect_by_index(f, summary, selected)
+            except Exception as e:  # a half-written chunk: the same verdict as the slow path gives
+                raise ValueError(_damaged(path)) from e
+            _used_indexed_path = collected is not None
+        if collected is None:
+            collected = _collect_with_mcap(path, reader, selected)
+    return _finish(selected, *collected)
 
 
 def to_dataframe(path, patterns=None):

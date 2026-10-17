@@ -319,8 +319,22 @@ Persistence over MSP is covered live by `test_a_pid_saved_over_msp_persists_thro
 ## Performance
 `scripts/benchmark.py` measures the real-time factor (simulated seconds per wall second) of headless lockstep runs
 of the shipped quad: open loop and with Betaflight SITL, recording on and off. The parent spec's target (§8.6) is
-at least 2× on a mid-range PC; CI's sitl job runs it against a release build, prints the table in the job summary
-and fails only below 1× (shared runners are noisy).
+at least 2× on a mid-range PC. CI's sitl job runs it against a release build, prints the table in the job summary and
+checks two things:
+
+- **The floor:** a row below 1× real time always fails (`--floor 1`).
+- **The regression gate (#61):** each row is compared with `scripts/benchmark-baseline.json`, the median of five green
+  CI runs on GitHub's `ubuntu-24.04` runner (open loop 47.9× with recording and 131.9× without, Betaflight 10.0× and
+  11.8×; the runs agreed within 4 %). A row under 60 % of its baseline fails, so a slowdown from 12× to 7× is caught
+  while the 4 % runner noise is not. Each row is the best of two runs (`--repeat 2`), because noise only ever slows a
+  run down. A skipped row, or a row the baseline does not list, is never gated. The summary table shows the baseline
+  and the ratio of every row.
+
+To accept a slowdown on purpose, make it visible: either update the baseline in the same PR (run the benchmark in CI,
+or `python scripts/benchmark.py --repeat 2 --print-baseline` on the same kind of runner, and copy the numbers into the
+file), or set the repository variable `OFS_BENCH_ACCEPT_SLOWER` to the reason; the table then says
+`ACCEPTED: <reason>` for the regressed rows and the job passes. A developer machine is not a runner class: run the
+benchmark there without `--baseline` (the baseline is in numbers that only `ci-linux` can reproduce).
 
 Measured on an AMD Ryzen 9 9900X3D, release build, 2026-10-13. Windows, open loop (no Betaflight):
 
@@ -341,6 +355,14 @@ WSL 2 on the same machine, with Betaflight SITL:
 The lockstep exchange with SITL is the cost: every configuration clears the 2× target, the Betaflight ones by
 almost four times.
 On CI's shared Linux runner (native, no WSL; run 38453432260) the Betaflight rows measured 12.4× and 13.8×.
+
+### Reading recordings
+`scripts/bench_reader.py` records a minute of open-loop flight and times `ofs.reader.read` against the `mcap`-iterator
+reader it replaced (issue #45), checking that both return the same thing. On the Windows development machine with a
+debug server (27.6 MB, 148 signals): three signals 3.29 s to 0.34 s (9.6×), every signal 9.76 s to 2.24 s (4.3×); under
+WSL 2, 2.32 s to 0.29 s (8.0×) and 8.33 s to 2.08 s (4.0×). The
+fast path needs message indexes and zstd or uncompressed chunks, which every recording the server writes has; other
+files fall back to the iterator.
 
 ## Ports
 SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.

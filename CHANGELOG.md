@@ -3,6 +3,22 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M8c: a performance gate and a faster reader
+### Added
+- **A benchmark regression gate (#61).** CI's `scripts/benchmark.py` step compares every measured row with a baseline
+  recorded for its runner class in `scripts/benchmark-baseline.json` (the median of five green runs on `ubuntu-24.04`:
+  open loop 47.9× with recording and 131.9× without, Betaflight 10.0× and 11.8×) and fails a row under 60 % of it, on
+  top of the old 1× floor. Each row is the best of two runs (`--repeat 2`) so the 4 % noise between CI runs cannot
+  trip it; skipped rows and rows without a baseline are never gated. A deliberate slowdown is accepted by updating the
+  baseline in the PR or by setting the repository variable `OFS_BENCH_ACCEPT_SLOWER` to a reason (the table then says
+  `ACCEPTED: <reason>`). `--print-baseline` prints the measured rows as baseline JSON.
+- `scripts/bench_reader.py`: times the reader against the previous implementation on a fresh recording.
+### Changed
+- **`ofs.reader.read` is 4 to 10 times faster (#45)**, with the same signature, result and error messages. On a
+  one-minute open-loop recording (27.6 MB, 148 signals) three patterns take 0.34 s instead of 3.3 s and every signal
+  2.2 s instead of 9.8 s. It cuts only the selected signals' records out of each chunk using the chunk's message
+  indexes. Recordings without message indexes or with lz4 chunks (not what the server writes) are read the old way.
+
 ## Unreleased — M8b: scripted flight
 ### Added
 - **An opt-in stabilizer for open-loop sessions (#66).** `load(..., open_loop_fc=True, stabilize=True)` (Rust:
