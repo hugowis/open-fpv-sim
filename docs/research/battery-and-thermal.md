@@ -61,7 +61,9 @@ the ambient to the last bit). The model steps at 100 Hz after the motors and the
 
 The ambient is `[environment] ambient_c` in the world file (default 25 °C, allowed −40 to 60).
 
-**Published** (recorded like any signal): `esc.{i}.temp_c`, `motor.{i}.temp_c`, `vtx.temp_c`. Betaflight sees the ESC
+**Published** (recorded like any signal; the default table records the ESC and motor temperatures at the model's own
+100 Hz, `vtx.temp_c` at 50 Hz): `esc.{i}.temp_c`, `motor.{i}.temp_c`, `vtx.temp_c`. A rig that builds the ESC telemetry
+or the VTX without a thermal model reads the default ambient (25 °C), not 0 °C. Betaflight sees the ESC
 temperatures in the KISS telemetry frames (frame `k` carries ESC `k`, rounded and clamped to 0–255 °C) and the Tramp VTX
 temperature in its status reply (a rounded `i16`); with the default 25 °C ambient and no heating they equal the constant
 v1 reported.
