@@ -28,7 +28,8 @@ class ReplayResult:
 
 
 def find_bundles(logs_dir) -> list[pathlib.Path]:
-    """The repro bundle folders in a logs directory (`sim.logs_dir`), oldest first."""
+    """The repro bundle folders in a logs directory (`sim.logs_dir`), oldest first; a folder without `bundle.toml`
+    (still being written) is skipped."""
     root = pathlib.Path(logs_dir)
     if not root.is_dir():
         return []

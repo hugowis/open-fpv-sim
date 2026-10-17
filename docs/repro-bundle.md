@@ -13,7 +13,8 @@ error already says what to fix.
 
     non-finite value in signal 'imu.accel_frd_mps2' (repro bundle: <logs dir>/opendrone-5f-freestyle-1.repro)
 
-From Python, `ofs.repro.find_bundles(sim.logs_dir)` lists the bundles, oldest first. If the bundle cannot be written
+From Python, `ofs.repro.find_bundles(sim.logs_dir)` lists the bundles, oldest first (a folder with no `bundle.toml`, which is written last, is still being written and is
+skipped). If the bundle cannot be written
 (a read-only or full disk), the event says `(repro bundle failed: <why>)` and the original error is unchanged.
 
 ## What is in it

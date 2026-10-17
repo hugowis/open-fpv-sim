@@ -3,6 +3,20 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M6d: deferred minors
+### Changed
+- The loader refuses what it used to accept: a prop part with `windmill_j0` between 0 and 0.2 (0 still turns windmilling
+  off; a small value is a runaway rotor), and a battery whose `resistance_growth_per_cycle × cycles` makes the pack more
+  than ten times as resistive. A non-finite `[video]` threshold is reported on its own field.
+- `ofs-validate`: a `submission.toml` error names its line; `--max-error-pct` now fails (exit 1) when a row never
+  settled; the settle test is one part in a million per second as documented (it was four times looser), so a slow
+  rotor settles a little later and closer to its steady state. Without the flag the exit code is unchanged.
+- A repro bundle's `journal.txt` must open with its `# ofs-journal 1` header (a byte-order mark is accepted), and
+  `ofs.repro.find_bundles` skips a folder that has no `bundle.toml` yet (still being written). `replay_bundle` reads
+  `ofs-sim`'s output as UTF-8, so accented paths and Windows error texts come back readable.
+### Fixed
+- Stale comments and docs: the cell voltages are the battery model's own, not equal shares.
+
 ## Unreleased — M6c: validation and the repro bundle
 ### Added
 - A failed session writes a **repro bundle**: a folder under the logs directory (`<quad>-<n>.repro`) with the quad,
