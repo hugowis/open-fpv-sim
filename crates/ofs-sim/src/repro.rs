@@ -363,7 +363,7 @@ mod tests {
     /// Full throttle, then a finite fault that overflows the vibration model once the rotors spin: the run stops with
     /// a non-finite value at a tick that depends on when the fault lands.
     fn fail(v: &mut Vehicle) -> SimError {
-        v.set_sticks(&Sticks { throttle: 0.8, roll: 0.1, ..Sticks::default() });
+        v.set_sticks(&Sticks { throttle: 0.8, roll: 0.1, ..Sticks::default() }).unwrap();
         v.step_ticks(400).unwrap();
         v.schedule_fault(Fault::PropDamage { prop: 0, thrust_scale: 1.0, imbalance_kgm: 1e305 }, 0.1).unwrap();
         v.step_ticks(4000).expect_err("the overflowing imbalance stops the run")
@@ -519,7 +519,7 @@ mod tests {
         let mut v = vehicle_from(&ofs_config::load(&src.quad_path).unwrap());
         // Alternating sticks: every call is a new entry.
         for i in 0..=crate::journal::MAX_ENTRIES {
-            v.set_sticks(&Sticks { throttle: if i % 2 == 0 { 0.2 } else { 0.3 }, ..Sticks::default() });
+            v.set_sticks(&Sticks { throttle: if i % 2 == 0 { 0.2 } else { 0.3 }, ..Sticks::default() }).unwrap();
         }
         assert!(v.journal().truncated());
         let error = fail(&mut v);

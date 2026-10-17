@@ -37,7 +37,7 @@ fn a_quad_at_rest_heats_only_its_vtx() {
 #[test]
 fn full_throttle_heats_the_esc_and_the_motor_and_they_cool_again() {
     let mut v = vehicle_in(WorldConfig::open_field());
-    v.set_sticks(&throttle(1.0));
+    v.set_sticks(&throttle(1.0)).unwrap();
     // The pack is nearly flat after twenty seconds of this, so look at the peak on the way.
     let (mut esc, mut motor) = (0.0f64, 0.0f64);
     for _ in 0..40 {
@@ -49,7 +49,7 @@ fn full_throttle_heats_the_esc_and_the_motor_and_they_cool_again() {
     // ESC a couple: the assertions are the direction and a sane bound, not the constants.
     assert!(esc > 26.0 && esc < 255.0, "esc {esc}");
     assert!(motor > 35.0 && motor < 255.0, "motor {motor}");
-    v.set_sticks(&throttle(0.0));
+    v.set_sticks(&throttle(0.0)).unwrap();
     v.run_for(60.0).unwrap();
     assert!(temp(&v, "esc.0.temp_c") < esc - 1.0, "the ESC cools once the load is gone");
     assert!(temp(&v, "motor.0.temp_c") < motor - 1.0, "so does the motor");

@@ -81,7 +81,7 @@ impl Link for FixedLink {
         let draw: f64 = self.rng.gen();
         let fault_draw: f64 = self.fault_rng.gen();
         let p = &self.params;
-        let in_burst = p.burst_on_s > 0.0 && ctx.time_s % (p.burst_on_s + p.burst_off_s) < p.burst_on_s;
+        let in_burst = crate::parts::burst_active(ctx.time_s, p.burst_on_s, p.burst_off_s);
         let transmitting = tx.transmitting && !self.faults.link_cut(bus);
         let received = transmitting && draw >= p.loss_fraction && !in_burst && self.faults.survives(bus, ctx.time_s, fault_draw);
 

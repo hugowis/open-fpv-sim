@@ -19,7 +19,7 @@ fn recorded_flight(seed: u64, path: &Path) -> Vehicle {
     let mut v = vehicle(seed);
     v.start_recording(&[], path).unwrap();
     for (t, secs) in [(0.0, 0.5), (0.6, 1.0), (0.2, 0.5)] {
-        v.set_sticks(&Sticks { throttle: t, ..Sticks::default() });
+        v.set_sticks(&Sticks { throttle: t, ..Sticks::default() }).unwrap();
         v.run_for(secs).unwrap();
     }
     v.stop_recording().unwrap();
@@ -45,7 +45,7 @@ fn recording_leaves_the_digest_alone() {
     let recorded = recorded_flight(1, &dir.path().join("r.mcap"));
     let mut plain = vehicle(1);
     for (t, secs) in [(0.0, 0.5), (0.6, 1.0), (0.2, 0.5)] {
-        plain.set_sticks(&Sticks { throttle: t, ..Sticks::default() });
+        plain.set_sticks(&Sticks { throttle: t, ..Sticks::default() }).unwrap();
         plain.run_for(secs).unwrap();
     }
     assert_eq!(recorded.digest(), plain.digest());
@@ -69,7 +69,7 @@ fn a_record_carries_the_state_reported_at_its_time() {
     let mut v = vehicle(1);
     let names = v.start_recording(&[SignalRate { pattern: "battery.voltage_v".into(), rate_hz: Some(1000.0) }], &path).unwrap();
     assert_eq!(names, ["battery.voltage_v"]);
-    v.set_sticks(&Sticks { throttle: 0.8, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 0.8, ..Sticks::default() }).unwrap();
     v.run_for(0.25).unwrap();
     let state = v.state();
     let summary = v.stop_recording().unwrap();

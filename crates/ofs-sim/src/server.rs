@@ -111,6 +111,24 @@ pub(crate) fn parse_sticks(s: pb::Sticks) -> Result<Sticks, Status> {
     Ok(sticks)
 }
 
+/// Ends the loaded session, if any. A running inputs recording is stopped first, so its file is complete and the
+/// clients that track the recording's state hear that it ended (as they do for `StopInputsRecording`).
+fn end_session(shared: &Shared, slot: &mut Slot) {
+    if let Some(s) = slot.as_mut() {
+        if s.vehicle.is_recording_inputs() {
+            let time = s.vehicle.time_s();
+            let message = match s.vehicle.stop_inputs_recording() {
+                Ok(summary) => format!("{}: {} rows over {} s", summary.path.display(), summary.rows, summary.duration_s),
+                // The same text `StopInputsRecording` publishes for a failed stop.
+                Err(RecordError::Io(m)) => format!("inputs recording failed: {m}"),
+                Err(e) => format!("inputs recording failed: {e}"),
+            };
+            shared.publish([event(time, pb::EventKind::InputsRecordingStopped, message)]);
+        }
+    }
+    *slot = None;
+}
+
 /// Sets its flag when dropped: a call whose client went away (tonic drops its future) does not start its work.
 struct CancelOnDrop(Arc<AtomicBool>);
 
@@ -270,7 +288,7 @@ impl Sim for SimService {
         .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
         .ok();
         self.blocking(move |shared, slot| {
-            *slot = None; // stop the previous vehicle (and its SITL) before the new one binds the ports
+            end_session(shared, slot); // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
             // The firmware's state as the session starts: after the first boot's diff apply, before any flight.
             if let Some(r) = repro.as_mut() {
@@ -296,7 +314,7 @@ impl Sim for SimService {
                 let message = format!("{playing} is playing: SetSticks would be overwritten (call StopInputs first)");
                 return Err(error("invalid_argument", Code::InvalidArgument, message));
             }
-            s.vehicle.set_sticks(&sticks);
+            s.vehicle.set_sticks(&sticks).map_err(|e| sim_error(&e))?;
             Ok(pb::Empty {})
         })
         .await
@@ -401,8 +419,8 @@ impl Sim for SimService {
     }
 
     async fn unload(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
-        self.blocking_always(|_, slot| {
-            *slot = None;
+        self.blocking_always(|shared, slot| {
+            end_session(shared, slot);
             Ok(pb::Empty {})
         })
         .await
@@ -792,7 +810,7 @@ mod tests {
     #[tokio::test]
     async fn a_numerical_failure_is_published_as_a_sim_error_event() {
         let mut session = open_loop_session(RunMode::Lockstep);
-        session.vehicle.set_sticks(&crate::vehicle::Sticks { throttle: f64::NAN, ..Default::default() });
+        session.vehicle.put_nan_on_the_throttle();
         let svc = service_with(session);
         let mut events = svc.subscribe();
         let err = svc.run(Request::new(pb::RunRequest { seconds: 0.1 })).await.unwrap_err();

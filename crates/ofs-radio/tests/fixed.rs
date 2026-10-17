@@ -97,6 +97,18 @@ fn no_loss_delivers_everything_and_total_loss_goes_silent_with_the_floor_publish
 }
 
 #[test]
+fn bursts_follow_integer_packet_arithmetic_at_their_edges() {
+    // 500 Hz, on = off = 0.05 s: a 50-packet period, the first 25 lost. The edges sit on packets, where
+    // `time_s % period` can land a few ulps either side (#13).
+    for (on, off, lost_per_period, period) in [(0.05, 0.05, 25, 50), (0.03, 0.07, 15, 50)] {
+        let (mut s, uart) = rig(FixedParams { burst_on_s: on, burst_off_s: off, ..params() }, 1);
+        let seen = slots(&mut s, &uart, 1000, |_| 0.0);
+        let wrong: Vec<usize> = (0..1000).filter(|k| seen[*k].is_none() != (k % period < lost_per_period)).collect();
+        assert!(wrong.is_empty(), "on {on} off {off}: wrong side of an edge at packets {:?}", &wrong[..wrong.len().min(10)]);
+    }
+}
+
+#[test]
 fn bursts_lose_every_packet_of_their_on_window() {
     let (mut s, uart) = rig(FixedParams { burst_on_s: 0.1, burst_off_s: 0.1, ..params() }, 1);
     let seen = slots(&mut s, &uart, 100, |_| 0.0); // 0.2 s: on for the first 50 packets, off for the next 50

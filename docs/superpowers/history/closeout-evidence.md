@@ -21,6 +21,14 @@ answers: it does not — the check (2026-10-14) connected the real desktop app, 
 survived a reconnect, and the session stayed healthy throughout (radio up, zero overruns, restarts 0; the
 PID tab's Save does not reboot Betaflight at all).
 
+**Fixed in M7a (#57).** The cause was in SITL's TCP serial layer. Betaflight's MSP reboot calls
+`waitForSerialPortToFinishTransmitting` and reboots only once the port's TX buffer is empty; the patched `tcpDataOut`
+returned early when no client was connected (`conn == NULL`) without draining that buffer, so after a client had
+hung up the reply stayed in the buffer for good. The patch now drops the pending bytes when there is no connection, as
+a UART with nothing on the wire does. `a_client_that_hangs_up_right_after_msp_reboot_does_not_stop_the_reboot`
+(`crates/ofs-sim/tests/sitl_live.rs`) failed before the change (`no motor output within 500 ms`, the SITL log ending
+after `[CLS]UART1` and the EEPROM save) and passed 5 of 5 runs after it.
+
 ## Betaflight SITL can abort while it resets (found by Task 11)
 
 Once, both reboot tests of `python/tests/test_sitl_video.py` failed in the same run: after `[system]Reset!` and

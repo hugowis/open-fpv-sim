@@ -13,7 +13,7 @@ fn digest(world: WorldConfig) -> u64 {
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world };
     let mut v = build(&cfg, &opts).unwrap();
-    v.set_sticks(&Sticks { throttle: 0.4, ..Sticks::default() });
+    v.set_sticks(&Sticks { throttle: 0.4, ..Sticks::default() }).unwrap();
     v.run_for(0.3).unwrap();
     v.digest()
 }

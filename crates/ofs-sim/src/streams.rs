@@ -196,7 +196,7 @@ pub async fn pilot(
             let message = format!("{playing} is playing scripted inputs; StopInputs before piloting");
             return Err(error("invalid_state", Code::FailedPrecondition, message));
         }
-        session.vehicle.set_sticks(&first_sticks);
+        session.vehicle.set_sticks(&first_sticks).map_err(|e| crate::server::sim_error(&e))?;
         session.vehicle.set_transmitter(true);
         setup_link.session.store(session.id, Ordering::Release);
         s.publish([event(session.vehicle.time_s(), pb::EventKind::PilotConnected, "pilot connected: transmitter on")]);
@@ -223,7 +223,8 @@ pub async fn pilot(
             let s = input_shared.clone();
             let applied = tokio::task::spawn_blocking(move || match s.lock().as_mut() {
                 Some(session) if session.id == session_id => {
-                    session.vehicle.set_sticks(&sticks);
+                    // `parse_sticks` already refused anything non-finite; a malformed input is dropped.
+                    let _ = session.vehicle.set_sticks(&sticks);
                     true
                 }
                 _ => false, // the session this pilot connected to is gone

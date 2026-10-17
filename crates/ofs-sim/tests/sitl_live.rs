@@ -51,7 +51,7 @@ fn msp_reports_the_api_version_over_tcp() {
 fn crsf_sticks_reach_betaflight() {
     let mut rig = Rig::new();
     let v = &mut rig.v;
-    v.set_sticks(&Sticks { roll: 0.2, pitch: -0.2, ..Sticks::default() });
+    v.set_sticks(&Sticks { roll: 0.2, pitch: -0.2, ..Sticks::default() }).unwrap();
     v.run_for(2.0).unwrap();
     let reply = msp().request(MSP_RC, &[], 500, || v.run_for(0.01)).unwrap();
     // MSP_RC lists roll, pitch, yaw, throttle (Betaflight's internal order).
@@ -68,7 +68,7 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
     let mut rig = Rig::new();
     let v = &mut rig.v;
     v.run_for(4.0).unwrap(); // boot and gyro calibration
-    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     v.run_for(1.0).unwrap();
     assert!(armed(v), "never armed: {:?}", v.state().motor_cmd);
     v.set_fault(Fault::RadioLinkLoss, true).unwrap();
@@ -88,10 +88,10 @@ fn a_radio_cut_fails_safe_on_betaflight_timing() {
 
     // The link comes back: Betaflight recovers once the arm switch is off, and arms again.
     v.clear_faults();
-    v.set_sticks(&Sticks::default()); // arm switch off
+    v.set_sticks(&Sticks::default()).unwrap(); // arm switch off
     v.run_for(2.0).unwrap();
     assert!(v.state().radio.link_up, "the link is back");
-    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     v.run_for(1.0).unwrap();
     assert!(armed(v), "no re-arm after the failsafe: {:?}", v.state().motor_cmd);
 }
@@ -116,16 +116,33 @@ fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
     assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
 }
 
-/// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
-/// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only: it kills SITL
-/// with `pkill -x`, which takes down every Betaflight SITL on the machine, so run it alone (CI does, one test at a time).
-#[cfg(target_os = "linux")]
-#[tokio::test]
+/// #57: a client that closes its MSP connection right after MSP_REBOOT used to leave Betaflight waiting to send the
+/// reply for good: it never rebooted and the session failed. The patched SITL drops the bytes nobody is listening for.
+#[test]
 #[ignore]
-async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
+fn a_client_that_hangs_up_right_after_msp_reboot_does_not_stop_the_reboot() {
+    let mut rig = Rig::new();
+    let v = &mut rig.v;
+    v.run_for(2.0).unwrap();
+    let mut client = msp();
+    client.send(MSP_REBOOT, &[]).unwrap();
+    drop(client); // hang up at once, without reading the reply
+    let give_up = v.state().time_s + 5.0;
+    while v.state().fc_restarts == 0 && v.state().time_s < give_up {
+        v.run_for(0.01).unwrap();
+    }
+    assert_eq!(v.state().fc_restarts, 1, "Betaflight rebooted");
+    v.run_for(2.0).unwrap();
+    let reply = msp().request(MSP_API_VERSION, &[], 500, || v.run_for(0.01)).unwrap();
+    assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
+}
+
+/// A SITL session served over gRPC (lockstep, Betaflight), booted and armed: the client, the service and the data
+/// directory that holds its firmware and logs. Linux only (the tests that use it kill SITL with `pkill -x`).
+#[cfg(target_os = "linux")]
+async fn serve_an_armed_quad() -> (ofs_sim::pb::sim_client::SimClient<tonic::transport::Channel>, ofs_sim::server::SimService, tempfile::TempDir) {
     use ofs_sim::pb::sim_client::SimClient;
-    use ofs_sim::pb::{EventKind, LoadRequest, Mode, RunRequest, Sticks as PbSticks};
-    use ofs_sim::repro::replay;
+    use ofs_sim::pb::{LoadRequest, Mode, RunRequest, Sticks as PbSticks};
     use ofs_sim::server::{sim_server, SimService};
     use tokio_stream::wrappers::TcpListenerStream;
 
@@ -136,16 +153,109 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
     let service = SimService::new(data_dir.path().to_path_buf());
     tokio::spawn(tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_incoming(TcpListenerStream::new(listener)));
     let mut c = SimClient::connect(format!("http://{addr}")).await.unwrap();
-    let mut events = service.subscribe();
-
     let quad = std::path::absolute(QUAD).unwrap();
     c.load(LoadRequest { quad_path: quad.to_string_lossy().into(), seed: 1, mode: Mode::Lockstep as i32, open_loop_fc: false, ..Default::default() }).await.unwrap();
     // Betaflight refuses to arm with the switch already up at boot: let it boot and calibrate with the switch low
-    // (about 4 s), then raise it. The crash must hit an armed quad.
+    // (about 4 s), then raise it.
     c.run(RunRequest { seconds: 4.0 }).await.unwrap();
     c.set_sticks(PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() }).await.unwrap();
     let flying = c.run(RunRequest { seconds: 2.0 }).await.unwrap().into_inner();
-    assert!(flying.motor_cmd.iter().all(|m| *m > 0.0), "not armed before the kill: {:?}", flying.motor_cmd);
+    assert!(flying.motor_cmd.iter().all(|m| *m > 0.0), "not armed: {:?}", flying.motor_cmd);
+    (c, service, data_dir)
+}
+
+/// Blackbox ends a log with an "End of log" event when logging stops (on disarm); a log cut short lacks it.
+#[cfg(target_os = "linux")]
+fn finished_blackbox_logs(logs_dir: &Path) -> (usize, usize) {
+    let logs: Vec<Vec<u8>> = std::fs::read_dir(logs_dir)
+        .map(|d| d.filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".BFL")).map(|e| std::fs::read(e.path()).unwrap()).collect())
+        .unwrap_or_default();
+    let finished = logs.iter().filter(|bytes| bytes.windows(10).any(|w| w == b"End of log")).count();
+    (logs.len(), finished)
+}
+
+/// #58: a session that ends armed (the Unload comes with the quad still armed) used to leave the Blackbox log cut
+/// short; the session now disarms Betaflight first.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_that_ends_armed_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{Empty, RunRequest};
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    // An inputs recording is running when the session ends: the shutdown disarm must not write a row into it.
+    let recording = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    c.run(RunRequest { seconds: 0.2 }).await.unwrap();
+    c.unload(Empty {}).await.unwrap();
+    let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
+    assert_eq!(logs, 1, "the session wrote one Blackbox log into {}", service.logs_dir().display());
+    assert_eq!(finished, 1, "and it ends with Blackbox's End of log event");
+    let csv = std::fs::read_to_string(&recording.path).unwrap();
+    let last = csv.lines().last().unwrap();
+    assert_eq!(csv.lines().count(), 2, "the header and the one row of the stick state at the start: {csv}");
+    assert!(last.contains(",1,1,-1,-1"), "that row still says armed (aux1 high); the disarm is not in the file: {last}");
+}
+
+/// The pilot's link is cut when the session ends (a `RadioLinkLoss` fault, or out of range): Betaflight is in failsafe
+/// stage 1 and holds its last aux values, so the shutdown must restore the link before the disarm can reach it.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_that_ends_with_its_link_cut_still_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{fault, Fault, RadioLinkLoss, RunRequest};
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    c.inject_fault(Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})), at_s: None }).await.unwrap();
+    c.run(RunRequest { seconds: 0.3 }).await.unwrap();
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
+    assert_eq!((logs, finished), (1, 1), "one log, finished, though the link was cut when the session ended");
+}
+
+/// The Godot client's quit order: the pilot's stream ends first (the transmitter goes off), then Unload.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_whose_pilot_left_first_still_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{PilotInput, Sticks as PbSticks};
+    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::StreamExt;
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let armed = PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() };
+    tx.send(PilotInput { sticks: Some(armed), state_rate_hz: 50 }).await.unwrap();
+    let mut states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    assert!(states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
+    drop(tx);
+    drop(states); // the pilot is gone: the server switches the transmitter off
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
+    assert_eq!((logs, finished), (1, 1), "one log, finished, though the transmitter was off when the session ended");
+}
+
+/// A session whose SITL died is not made to wait for a disarm that cannot happen.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_whose_sitl_died_still_ends_promptly() {
+    let (mut c, _service, _data_dir) = serve_an_armed_quad().await;
+    assert!(std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap().success());
+    let started = std::time::Instant::now();
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5), "unload took {:?}", started.elapsed());
+}
+
+/// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
+/// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only: it kills SITL
+/// with `pkill -x`, which takes down every Betaflight SITL on the machine, so run it alone (CI does, one test at a time).
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
+    use ofs_sim::pb::{EventKind, RunRequest};
+    use ofs_sim::repro::replay;
+
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let mut events = service.subscribe();
 
     let killed = std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap();
     assert!(killed.success(), "no SITL to kill");
@@ -184,7 +294,7 @@ fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
     let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
     source.firmware_initial = snapshot_firmware(&firmware);
     assert!(source.firmware_initial.iter().any(|(n, _)| n == "eeprom.bin"), "the first boot saved an EEPROM");
-    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() });
+    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     rig.v.run_for(2.0).unwrap();
     let error = ofs_core::SimError::Firmware("simulated failure for the bundle test".into());
     let bundle = write_bundle(&source, &rig.v, &error).unwrap();

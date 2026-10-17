@@ -232,7 +232,10 @@ impl RecorderHandle {
             }
         }
         if let Some(message) = failed {
-            state.active = None; // dropping the sink tries to finish the file; the error is already reported
+            // Dropping the sink makes the mcap writer finish the file on a best-effort basis (the summary is written if
+            // the disk takes it again; `a_recording_that_stops_on_a_transient_write_error_still_has_a_summary` pins
+            // it). The last chunk can still be half written; the error is already reported.
+            state.active = None;
             state.failure = Some(message.clone());
             state.stopped_by = Some(message);
         }

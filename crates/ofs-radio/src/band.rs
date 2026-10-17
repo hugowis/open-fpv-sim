@@ -16,9 +16,9 @@ pub enum Band {
     Mhz900,
 }
 
-/// (packet rate in Hz, sensitivity in dBm), ascending by rate. ExpressLRS's table lists the 2.4 GHz 50 Hz mode at
-/// -115 dBm; this model has used -117 since M3c and changing it would change every seeded 50 Hz run (a roadmap row).
-const G2_4_MODES: [(u32, f64); 4] = [(50, -117.0), (150, -112.0), (250, -108.0), (500, -105.0)];
+/// (packet rate in Hz, sensitivity in dBm), ascending by rate: ExpressLRS's published table (the 2.4 GHz 50 Hz mode
+/// is -115 dBm; the model had -117 until M7a, #12).
+const G2_4_MODES: [(u32, f64); 4] = [(50, -115.0), (150, -112.0), (250, -108.0), (500, -105.0)];
 const MHZ_900_MODES: [(u32, f64); 5] = [(25, -123.0), (50, -120.0), (100, -117.0), (200, -112.0), (250, -111.0)];
 
 impl Band {

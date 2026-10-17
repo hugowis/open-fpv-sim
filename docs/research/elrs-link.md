@@ -60,7 +60,7 @@ Notes:
 | LoRa bandwidth | 812.5 kHz | ExpressLRS published |
 | Noise figure | 6 dB | estimated |
 | Noise floor | `-174 + 10·log10(812 500) + 6 = -108.9 dBm` (the code keeps all the digits: -108.90176630349089) | computed from the two above |
-| Sensitivity at 50 Hz | -117 dBm | ExpressLRS published |
+| Sensitivity at 50 Hz | -115 dBm | ExpressLRS published (signal-health table, ELRS 3.x/4.x, https://expresslrs.org/info/signal-health/, checked 2026-10-17; the model had -117 until M7a) |
 | Sensitivity at 150 Hz | -112 dBm | ExpressLRS published |
 | Sensitivity at 250 Hz | -108 dBm | ExpressLRS published |
 | Sensitivity at 500 Hz | -105 dBm | ExpressLRS published |
