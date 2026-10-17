@@ -89,6 +89,21 @@ fn an_unknown_kind_and_an_unknown_key_are_refused() {
 }
 
 #[test]
+fn a_toml_type_error_names_its_line() {
+    let dir = fixture("schema_version = 1\nkind = \"thrust_stand\"\nmotor = \"zero\"\n", GOOD_CSV);
+    let problems = load(dir.path()).unwrap_err();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].starts_with("submission.toml line 3:"), "{problems:?}");
+}
+
+#[test]
+fn an_unknown_key_names_its_line() {
+    let dir = fixture("schema_version = 1\nkind = \"thrust_stand\"\n\ncolour = 1\n", GOOD_CSV);
+    let problems = load(dir.path()).unwrap_err();
+    assert!(problems[0].starts_with("submission.toml line 4:"), "{problems:?}");
+}
+
+#[test]
 fn problems_in_the_csv_are_reported_with_file_and_line() {
     let csv = "command,voltage_v,rpm,torque\n1.5,24,20000,1\n0.5,0,20000,1\n0.5,24,fast,1\n0.5,24,,\n0.5,24,100\n";
     let dir = fixture(&thrust_toml(&[]), csv);

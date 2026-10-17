@@ -121,11 +121,22 @@ fn present<'a>(value: &'a Option<String>, key: &str, problems: &mut Vec<String>)
     }
 }
 
+/// A TOML error as one problem line, naming the line it is on when the parser says where.
+fn toml_error(text: &str, e: &toml::de::Error) -> String {
+    match e.span() {
+        Some(span) => {
+            let line = text.as_bytes()[..span.start.min(text.len())].iter().filter(|b| **b == b'\n').count() + 1;
+            format!("submission.toml line {line}: {}", e.message())
+        }
+        None => format!("submission.toml: {}", e.message()),
+    }
+}
+
 /// Loads and checks the submission in `dir`. Every problem found is returned together.
 pub fn load(dir: &Path) -> Result<Submission, Vec<String>> {
     let toml_path = dir.join("submission.toml");
     let text = std::fs::read_to_string(&toml_path).map_err(|e| vec![format!("submission.toml: {}: {e}", toml_path.display())])?;
-    let raw: Raw = toml::from_str(&text).map_err(|e| vec![format!("submission.toml: {}", e.message())])?;
+    let raw: Raw = toml::from_str(&text).map_err(|e| vec![toml_error(&text, &e)])?;
     let mut problems = Vec::new();
 
     match raw.schema_version {
