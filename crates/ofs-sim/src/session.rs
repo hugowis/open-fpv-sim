@@ -632,6 +632,7 @@ mod tests {
             collision_speed_mps: 7.2,
             collision_object: building_a,
             collision_event_count: 1,
+            race: Default::default(),
         };
         let events = session.events_for(&state, session.vehicle.active_fault_names());
         assert_eq!(events.len(), 1, "{events:?}");

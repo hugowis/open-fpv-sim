@@ -4,8 +4,11 @@
 //! [`RaceTracker`] applies the course rules to the stream of poses: gate 0 starts the clock, the gates must then be
 //! passed in order, and gate 0 again completes a lap. Everything here is pure (no bus, no clock): the scheduler model
 //! that feeds it is added around it.
+use std::sync::{Arc, Mutex};
+
 use glam::DVec3;
 use ofs_config::world::GateSection;
+use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 
 /// A gate that was just counted counts again (a one-gate course) only after the quad has been this far from its centre.
 pub const REARM_M: f64 = 3.0;
@@ -137,6 +140,121 @@ impl RaceTracker {
         }
         s.next_gate = (next + 1) % self.gates.len();
         Some(RaceEvent::GatePassed { gate: next, time_s, split_s: time_s - s.lap_start_s })
+    }
+}
+
+/// The race as a client sees it. All zero/false when the world has no gates.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RaceInfo {
+    /// The world has gates.
+    pub present: bool,
+    pub running: bool,
+    pub next_gate: u32,
+    pub gate_count: u32,
+    pub laps: u32,
+    /// Time since the current lap started (0 until the clock runs).
+    pub current_lap_s: f64,
+    pub last_lap_s: f64,
+    pub best_lap_s: f64,
+}
+
+/// The `race.*` bus signals.
+#[derive(Debug, Clone, Copy)]
+pub struct RaceSignals {
+    running: Signal<f64>,
+    next_gate: Signal<f64>,
+    laps: Signal<f64>,
+    lap_start_s: Signal<f64>,
+    last_lap_s: Signal<f64>,
+    best_lap_s: Signal<f64>,
+}
+
+impl RaceSignals {
+    /// Creates (or finds) the signals; call it only for a world with gates, so other recordings never see them.
+    pub fn register(bus: &mut Bus) -> Self {
+        Self {
+            running: bus.signal(names::RACE_RUNNING),
+            next_gate: bus.signal(names::RACE_NEXT_GATE),
+            laps: bus.signal(names::RACE_LAPS),
+            lap_start_s: bus.signal(names::RACE_LAP_START_S),
+            last_lap_s: bus.signal(names::RACE_LAST_LAP_S),
+            best_lap_s: bus.signal(names::RACE_BEST_LAP_S),
+        }
+    }
+
+    fn write(&self, bus: &mut Bus, s: &RaceStatus) {
+        bus.set(self.running, f64::from(u8::from(s.running)));
+        bus.set(self.next_gate, s.next_gate as f64);
+        bus.set(self.laps, f64::from(s.laps));
+        bus.set(self.lap_start_s, s.lap_start_s);
+        bus.set(self.last_lap_s, s.last_lap_s);
+        bus.set(self.best_lap_s, s.best_lap_s);
+    }
+
+    /// The race as of simulated time `time_s`, with `gate_count` gates in the course.
+    pub fn info(&self, bus: &Bus, time_s: f64, gate_count: usize) -> RaceInfo {
+        let running = bus.get(self.running) > 0.5;
+        RaceInfo {
+            present: true,
+            running,
+            next_gate: bus.get(self.next_gate) as u32,
+            gate_count: gate_count as u32,
+            laps: bus.get(self.laps) as u32,
+            current_lap_s: if running { time_s - bus.get(self.lap_start_s) } else { 0.0 },
+            last_lap_s: bus.get(self.last_lap_s),
+            best_lap_s: bus.get(self.best_lap_s),
+        }
+    }
+}
+
+/// The events the model has raised and nobody has taken yet; clones share one queue.
+#[derive(Debug, Clone, Default)]
+pub struct RaceHandle(Arc<Mutex<Vec<RaceEvent>>>);
+
+impl RaceHandle {
+    pub fn take_events(&self) -> Vec<RaceEvent> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn push(&self, event: RaceEvent) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+    }
+}
+
+/// Reads the pose the physics wrote this tick and feeds the [`RaceTracker`]; register it after the physics.
+pub struct GateTimer {
+    tracker: RaceTracker,
+    pos: Signal<DVec3>,
+    signals: RaceSignals,
+    handle: RaceHandle,
+}
+
+impl GateTimer {
+    pub fn new(gates: &[GateSection], bus: &mut Bus) -> (GateTimer, RaceHandle) {
+        let handle = RaceHandle::default();
+        let signals = RaceSignals::register(bus);
+        let tracker = RaceTracker::new(gates.iter().map(Gate::from_config).collect());
+        signals.write(bus, &tracker.status());
+        let timer = GateTimer { tracker, pos: bus.signal(names::BODY_POS_NED), signals, handle: handle.clone() };
+        (timer, handle)
+    }
+}
+
+impl Model for GateTimer {
+    fn name(&self) -> &str {
+        "race.gates"
+    }
+
+    fn rate_divisor(&self) -> u32 {
+        1
+    }
+
+    fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
+        if let Some(event) = self.tracker.step(ctx.time_s, ctx.dt_s, bus.get(self.pos)) {
+            self.handle.push(event);
+            self.signals.write(bus, &self.tracker.status());
+        }
+        Ok(())
     }
 }
 
