@@ -218,7 +218,7 @@ class State:
     serial_dropped_bytes: int = 0
     video: VideoLink = field(default_factory=VideoLink)
     collision_speed_mps: float = 0.0  # the last collision's inward speed (0 until one happens)
-    battery_cell_voltages: tuple = ()  # per-cell voltage (equal shares; the weak cell droops)
+    battery_cell_voltages: tuple = ()  # per-cell voltage (each cell's own state; the weak cell droops)
 
     @property
     def altitude_m(self) -> float:

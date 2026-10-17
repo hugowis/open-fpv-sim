@@ -213,7 +213,7 @@ message State {
   VideoLink video = 16;
   double collision_speed_mps = 17;   // the last collision's inward speed (0 until one happens)
   FcTelemetry fc_telemetry = 18;
-  repeated double battery_cell_voltages = 19;  // per-cell voltage (equal shares; the weak cell droops)
+  repeated double battery_cell_voltages = 19;  // per-cell voltage (each cell's own state; the weak cell droops)
 }
 
 enum EventKind {

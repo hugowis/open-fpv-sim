@@ -10,6 +10,8 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ### Physics (`docs/research/collision.md`)
 - Friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
   includes gravity); a motor's published `omega_dot` is the derivative before clamping.
+- The IMU's analytic vibration rate term (the gyro disturbance from prop imbalance) still ignores rotor gyroscopic
+  coupling, which M6a added to the rigid-body dynamics only.
 - Two contact mechanisms, one per job: hits get impulses, resting weight gets the spring-dampers, so a hard
   touchdown both bounces and compresses the legs. Position correction moves only the deepest contact out.
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.

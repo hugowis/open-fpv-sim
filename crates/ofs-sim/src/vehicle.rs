@@ -254,7 +254,7 @@ pub struct VehicleState {
     pub rate_frd_radps: DVec3,
     pub battery_voltage_v: f64,
     pub battery_current_a: f64,
-    /// Per-cell voltage: equal shares of the pack, the weak cell carrying the fault's droop.
+    /// Per-cell voltage: each cell's own state in the per-cell battery model, the weak cell carrying the fault's droop.
     pub battery_cell_voltages: Vec<f64>,
     pub motor_rpm: Vec<f64>,
     pub motor_cmd: Vec<f64>,
@@ -1379,13 +1379,13 @@ impl Vehicle {
         self.osd.as_ref().map(OsdHandle::latest)
     }
 
-    /// The world the vehicle flies in (the open field when the session named none).
     /// The current value of a scalar bus signal by name (`None` if no model registered it), for tests and tools.
     pub fn signal(&self, name: &str) -> Option<f64> {
         let bus = self.scheduler.bus();
         bus.lookup::<f64>(name).map(|s| bus.get(s))
     }
 
+    /// The world the vehicle flies in (the open field when the session named none).
     pub fn world(&self) -> &WorldConfig {
         &self.world
     }
