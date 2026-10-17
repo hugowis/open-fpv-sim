@@ -42,6 +42,18 @@ def test_a_lockstep_load_records_and_sim_log_reads_it(sim):
     assert sim.log.path == log.path, "a second read returns the same finished recording"
 
 
+def test_reading_an_unfinished_file_says_what_happened(sim, tmp_path):
+    _climb(sim)
+    finished = pathlib.Path(sim.log.path)
+    unfinished = tmp_path / "unfinished.mcap"
+    unfinished.write_bytes(finished.read_bytes()[:-200])  # no summary section, as after a full disk
+    with pytest.raises(ValueError) as e:
+        ofs.reader.read(unfinished)
+    message = str(e.value)
+    assert "unfinished" in message and "recording_stopped" in message, message
+    assert str(unfinished) in message
+
+
 def test_a_real_time_or_unrecorded_session_has_no_log(sim):
     sim.load(QUAD, open_loop_fc=True, record=False)
     assert not sim.recording.active

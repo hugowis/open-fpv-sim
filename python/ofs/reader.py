@@ -60,15 +60,30 @@ def _select(patterns, topics) -> list:
     return chosen
 
 
+def _summary(path, reader):
+    """The file's summary section, or a ValueError that says the file is unfinished: a recording that stopped on a
+    write error (a full disk), or was never stopped, has no footer and no summary for indexed readers to find."""
+    try:
+        summary = reader.get_summary()
+    except Exception as e:  # mcap's own errors for a truncated file are about records, not about the cause
+        raise ValueError(_unfinished(path)) from e
+    if summary is None:
+        raise ValueError(_unfinished(path))
+    return summary
+
+
+def _unfinished(path) -> str:
+    return (f"{path}: unfinished recording (it was stopped by a write error such as a full disk, or the session ended "
+            "without stopping it); the recording_stopped event names the cause")
+
+
 def read(path, patterns=None):
     """The selected signals as (columns, times_ns, rows): `rows[i]` maps column -> value at `times_ns[i]`. A scalar
     signal is one column named after it; a vector or quaternion is one column per component (`<name>.x`)."""
     make_reader = _mcap_reader()
     with open(path, "rb") as f:
         reader = make_reader(f)
-        summary = reader.get_summary()
-        if summary is None:
-            raise ValueError(f"{path}: not a finished recording (stop the recording first)")
+        summary = _summary(path, reader)
         topics = sorted(c.topic for c in summary.channels.values())
         selected = _select(patterns, topics)
         rows, columns = {}, {}
@@ -128,7 +143,7 @@ class Log:
         """The recorded signals' names (bus names), sorted."""
         make_reader = _mcap_reader()
         with open(self.path, "rb") as f:
-            return sorted(c.topic for c in make_reader(f).get_summary().channels.values())
+            return sorted(c.topic for c in _summary(self.path, make_reader(f)).channels.values())
 
     def to_dataframe(self, patterns=None):
         return to_dataframe(self.path, patterns)

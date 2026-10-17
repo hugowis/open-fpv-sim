@@ -113,6 +113,48 @@ impl Seek for Failing {
     }
 }
 
+/// A file in memory that refuses exactly one write once `after` bytes are in (a transient "disk full"), then works again.
+#[derive(Clone)]
+struct Flaky {
+    inner: std::sync::Arc<std::sync::Mutex<Cursor<Vec<u8>>>>,
+    after: usize,
+    failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Write for Flaky {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.get_ref().len() >= self.after && !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err(std::io::Error::other("disk full"));
+        }
+        inner.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Seek for Flaky {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.lock().unwrap().seek(pos)
+    }
+}
+
+#[test]
+fn a_recording_that_stops_on_a_transient_write_error_still_has_a_summary() {
+    let (mut s, h) = rig();
+    let file = Flaky { inner: Default::default(), after: 1000, failed: Default::default() };
+    let bytes = file.inner.clone();
+    h.start_with(s.bus(), 8000, &[req("clock.*", Some(8000.0))], Box::new(file), std::path::Path::new("flaky.mcap")).unwrap();
+    s.run_for(5.0).unwrap();
+    assert!(!h.is_recording(), "the recording stopped itself");
+    let failure = h.take_failure().expect("the failure is kept for the session");
+    assert!(failure.contains("flaky.mcap") && failure.contains("disk full"), "{failure}");
+    let bytes = bytes.lock().unwrap().get_ref().clone();
+    let summary = mcap::Summary::read(&bytes).expect("a readable footer");
+    assert!(summary.is_some(), "the file was finished: indexed readers can open it");
+}
+
 #[test]
 fn a_failed_write_stops_the_recording_once_and_the_run_flies_on() {
     let (mut s, h) = rig();
