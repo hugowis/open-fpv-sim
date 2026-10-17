@@ -293,8 +293,15 @@ fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> std::process::Chil
 fn a_victim_that_ignores_sigterm_is_sigkilled() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let mut victim = spawn_fake_sitl(dir.path(), "trap \"\" TERM; sleep 30; sleep 30");
+    let ready = dir.path().join("ready");
+    let mut victim = spawn_fake_sitl(dir.path(), &format!("trap \"\" TERM; : > '{}'; sleep 30; sleep 30", ready.display()));
     let pid = victim.id();
+    // TERM before the trap is installed kills the shell outright (the race that made this test fail 2 runs in 5).
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(std::time::Instant::now() < deadline, "the victim never installed its trap");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     std::process::Command::new("kill").arg(pid.to_string()).status().unwrap();
     std::thread::sleep(Duration::from_millis(50)); // let the signal land
     let outcome = ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);

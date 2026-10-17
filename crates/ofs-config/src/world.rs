@@ -137,7 +137,7 @@ pub struct EnvironmentSection {
 
 impl Default for EnvironmentSection {
     fn default() -> Self {
-        Self { ambient_c: 25.0 }
+        Self { ambient_c: ofs_core::consts::DEFAULT_AMBIENT_C }
     }
 }
 

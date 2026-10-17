@@ -93,5 +93,5 @@ fn a_dying_motor_in_a_descent_changes_speed_without_a_step() {
     let mut off = killed_in_a_descent_with(20.0, 0.0);
     off.run_for(1.0).unwrap();
     let dead = get(&off, &names::motor_omega(0));
-    assert!(windmilling > dead + 200.0,"windmilling {windmilling} rad/s vs without {dead} rad/s");
+    assert!(windmilling > dead + 200.0, "windmilling {windmilling} rad/s vs without {dead} rad/s");
 }

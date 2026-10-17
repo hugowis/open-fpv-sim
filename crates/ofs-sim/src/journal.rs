@@ -9,6 +9,8 @@ use crate::vehicle::Fault;
 /// Entries kept: about an hour of 50 Hz stick changes. Past it the journal stops growing and says so.
 pub const MAX_ENTRIES: usize = 250_000;
 
+/// The journal format this build writes and reads; `HEADER` must say the same number (a test holds them together).
+const FORMAT_VERSION: u32 = 1;
 /// The first line of `journal.txt`.
 const HEADER: &str = "# ofs-journal 1";
 const TRUNCATED: &str = "# truncated";
@@ -110,10 +112,10 @@ impl Journal {
             Some((_, HEADER)) => {}
             Some((_, found)) if found.starts_with("# ofs-journal ") => {
                 let version = found.trim_start_matches("# ofs-journal ");
-                return Err(format!("{}: written by format {version}, this build reads 1", path.display()));
+                return Err(format!("journal.txt: written by format {version}, this build reads format {FORMAT_VERSION}"));
             }
-            Some((n, _)) => return Err(format!("{}: line {n}: not a journal (expected \"{HEADER}\")", path.display())),
-            None => return Err(format!("{}: not a journal (expected \"{HEADER}\")", path.display())),
+            Some((n, _)) => return Err(format!("journal.txt line {n}: not a journal (expected \"{HEADER}\")")),
+            None => return Err(format!("journal.txt: not a journal (expected \"{HEADER}\")")),
         }
         let mut journal = Journal::new();
         let mut problems = Vec::new();
@@ -377,13 +379,19 @@ mod tests {
     #[test]
     fn a_journal_without_the_header_is_refused() {
         let message = read_text("1 tx 1\n").unwrap_err();
-        assert!(message.contains("journal.txt") && message.contains("ofs-journal"), "{message}");
+        assert!(message.starts_with("journal.txt line 1: not a journal"), "{message}");
+        assert!(message.contains(HEADER), "the message names the header it wants: {message}");
     }
 
     #[test]
     fn a_journal_of_another_version_is_refused() {
         let message = read_text("# ofs-journal 2\n1 tx 1\n").unwrap_err();
-        assert!(message.contains('2') && message.contains("reads 1"), "{message}");
+        assert_eq!(message, "journal.txt: written by format 2, this build reads format 1");
+    }
+
+    #[test]
+    fn the_header_is_the_version_constant() {
+        assert_eq!(HEADER, format!("# ofs-journal {FORMAT_VERSION}"));
     }
 
     #[test]

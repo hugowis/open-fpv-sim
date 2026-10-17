@@ -87,6 +87,6 @@ fn a_recorded_vehicle_flight_reproduces_its_digests() {
     assert_eq!(
         text,
         expected.replace("\r\n", "\n"),
-        "the vehicle's recording changed; the radio chain must be byte-identical (or this OS's libm changed: regenerate only from the pre-split commit 1d9f204)"
+        "the vehicle's recording changed; the radio chain must be byte-identical. If the change is deliberate (a new channel, a rate-table row), regenerate both OS files with OFS_GOLDEN_WRITE=1 and say why in the commit; if it is the radio, regenerate only from the pre-split commit 1d9f204"
     );
 }

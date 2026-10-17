@@ -29,6 +29,20 @@ fn same_name_returns_same_signal() {
 }
 
 #[test]
+fn signal_or_sets_the_initial_value_only_for_a_new_signal() {
+    let mut bus = Bus::new();
+    let fresh = bus.signal_or::<f64>("a.temp_c", 25.0);
+    assert_eq!(bus.get(fresh), 25.0);
+    // Someone else registered and set it first: the initial value must not overwrite theirs.
+    let theirs = bus.signal::<f64>("b.temp_c");
+    bus.set(theirs, 31.5);
+    let again = bus.signal_or::<f64>("b.temp_c", 25.0);
+    assert_eq!(bus.get(again), 31.5);
+    // And a later plain registration sees the initial value.
+    assert_eq!(bus.get(bus.lookup::<f64>("a.temp_c").unwrap()), 25.0);
+}
+
+#[test]
 #[should_panic(expected = "already registered")]
 fn same_name_different_type_panics() {
     let mut bus = Bus::new();

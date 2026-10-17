@@ -7,6 +7,10 @@ use crate::glob;
 pub const DEFAULT_RATES: &[(&str, f64)] = &[
     ("body.*", 240.0),
     ("imu.*", 1000.0),
+    // The thermal model steps at base/100, so its temperatures only change at 100 Hz (for a base rate that is a
+    // multiple of 100, as the shipped quads' 8 kHz is).
+    ("motor.*.temp_c", 100.0),
+    ("esc.*.temp_c", 100.0),
     ("motor.*", 240.0),
     ("esc.*", 240.0),
     ("prop.*", 240.0),
@@ -95,6 +99,19 @@ pub fn resolve(requests: &[SignalRate], signals: &[(String, SignalKind)], base_h
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperatures_are_recorded_at_the_thermal_models_own_100_hz() {
+        // The thermal model steps at base/100: faster than that only repeats the same value.
+        for name in ["esc.0.temp_c", "esc.3.temp_c", "motor.0.temp_c", "motor.2.temp_c"] {
+            assert_eq!(default_rate(name), 100.0, "{name}");
+        }
+        assert_eq!(default_rate("vtx.temp_c"), 50.0, "the VTX stays in the catch-all row");
+        // The rest of those classes keep the 240 Hz they had.
+        for name in ["esc.0.bus_current_a", "motor.0.omega_radps", "motor.1.current_a"] {
+            assert_eq!(default_rate(name), 240.0, "{name}");
+        }
+    }
 
     fn bus_names() -> Vec<(String, SignalKind)> {
         [

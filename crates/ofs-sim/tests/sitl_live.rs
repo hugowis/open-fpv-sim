@@ -118,7 +118,8 @@ fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
 
 /// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
 /// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only: it kills SITL
-/// with `pkill`.
+/// with `pkill -x`, which takes down every Betaflight SITL on the machine, so run it alone (CI does, one test at a time).
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore]
 async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
@@ -139,8 +140,12 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
 
     let quad = std::path::absolute(QUAD).unwrap();
     c.load(LoadRequest { quad_path: quad.to_string_lossy().into(), seed: 1, mode: Mode::Lockstep as i32, open_loop_fc: false, ..Default::default() }).await.unwrap();
+    // Betaflight refuses to arm with the switch already up at boot: let it boot and calibrate with the switch low
+    // (about 4 s), then raise it. The crash must hit an armed quad.
+    c.run(RunRequest { seconds: 4.0 }).await.unwrap();
     c.set_sticks(PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() }).await.unwrap();
-    c.run(RunRequest { seconds: 1.5 }).await.unwrap();
+    let flying = c.run(RunRequest { seconds: 2.0 }).await.unwrap().into_inner();
+    assert!(flying.motor_cmd.iter().all(|m| *m > 0.0), "not armed before the kill: {:?}", flying.motor_cmd);
 
     let killed = std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap();
     assert!(killed.success(), "no SITL to kill");

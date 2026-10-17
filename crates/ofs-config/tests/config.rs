@@ -166,6 +166,17 @@ fn windmill_j0_must_not_be_tiny() {
 }
 
 #[test]
+fn a_non_finite_resistance_growth_is_one_problem_not_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    write_part(dir.path(), "batteries", "opendrone-6s-1300", &battery_part_with(&[("cycles", "100"), ("resistance_growth_per_cycle", "nan")]));
+    let ConfigError::Invalid { problems, .. } = load(&path).unwrap_err() else { panic!("expected Invalid") };
+    let growth: Vec<_> = problems.iter().filter(|p| p.field == "battery.resistance_growth_per_cycle").collect();
+    assert_eq!(growth.len(), 1, "{growth:?}");
+    assert!(growth[0].message.contains(">= 0"), "the finite check speaks, not the cap: {growth:?}");
+}
+
+#[test]
 fn an_aged_pack_may_not_exceed_ten_times_the_resistance() {
     let load_aged = |growth: &str| {
         let dir = tempfile::tempdir().unwrap();

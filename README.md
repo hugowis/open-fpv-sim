@@ -181,7 +181,7 @@ The spec's sandbox example (`python/examples/sandbox.py`): run it from the repos
     df = sim.log.to_dataframe(["imu.gyro_frd_radps", "motor.*.omega_radps", "battery.voltage_v"])
 
 - **Recording.** A lockstep `load` records the whole signal bus at the default rates (body 240 Hz, IMU 1 kHz,
-  motors/ESCs/props 240 Hz, battery 10 Hz, everything else 50 Hz) into `<data_dir>/logs/<quad>-<n>.mcap`;
+  motors/ESCs/props 240 Hz except their temperatures at 100 Hz, battery 10 Hz, everything else 50 Hz) into `<data_dir>/logs/<quad>-<n>.mcap`;
   `load(record=False)` does not, and real-time sessions record only when asked. `sim.recording.start(["imu.*",
   ("motor.*.omega_radps", 1000)])` picks signals and rates, `sim.recording.stop()` finishes the file. Recordings
   open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files.
