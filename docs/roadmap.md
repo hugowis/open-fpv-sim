@@ -80,7 +80,9 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 ### Python
 - The live view follows the state stream (up to 240 Hz); the 8 kHz signals are only in the recording.
 - The reader decodes in pure Python: about 3.7 s for three patterns of a one-minute recording, 11.7 s for all of it.
-- Open-loop sessions have no stabilizer, so they cannot fly a scripted path; that needs Betaflight.
+- Open-loop sessions fly a scripted path only with the opt-in stabilizer (`stabilize=True`, `docs/scripted-flight.md`), a
+  test stand-in: angle mode on the simulator's truth, no filters, arming, rates or I-term, gains tuned for the shipped
+  quad. Real tuning needs Betaflight SITL, which also needs WSL on Windows.
 
 ### Performance
 - Headless lockstep runs at 7.4× real time with Betaflight SITL (WSL 2) and 84–296× open loop, on an AMD Ryzen 9
@@ -137,7 +139,6 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - The step-response comparator: simulated against real Blackbox step responses (the `blackbox_step` format is defined and
   checked; the comparison needs SITL and a real tune).
 - A spectral proof that the RPM filter's notches track the motors, from a Blackbox log.
-- A scripted circuit through the gates against real Betaflight.
 
 ## Rulings worth remembering
 These explain behaviour that would otherwise look like a bug.

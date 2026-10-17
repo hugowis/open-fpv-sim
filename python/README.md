@@ -26,5 +26,9 @@ A world with `[[gates]]` has a race: `sim.get_world().gates` lists them, `sim.ru
 (`present`, `running`, `next_gate`, `laps`, `current_lap_s`, `last_lap_s`, `best_lap_s`) and the `gate_passed` and
 `lap_completed` events carry the splits and lap times (`docs/race-timing.md` in the repository).
 
+To fly a path from a script without Betaflight, load with `open_loop_fc=True, stabilize=True`: a minimal angle-mode
+stabilizer (a test stand-in, not Betaflight) so the sticks set the lean and the turn rate. `python/examples/circuit.py`
+flies a lap through four gates this way, and on Betaflight SITL too (`docs/scripted-flight.md` in the repository).
+
 Extras: `log` reads the session recordings (`mcap`, `pandas`; Parquet export also needs `pyarrow`), `rerun` adds the
 live view (`ofs.rerun.view(sim)`).
