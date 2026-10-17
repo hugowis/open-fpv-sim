@@ -59,6 +59,19 @@ fn the_stand_matches_the_analytic_steady_state() {
     }
 }
 
+/// "Settled" is a fraction of the speed per second (1e-6), so the stand stops close to the steady state even for a
+/// slow rotor; a per-block reading of the same number stops four times further away.
+#[test]
+fn a_slow_rotor_settles_close_to_its_steady_state() {
+    let mut cfg = quad();
+    cfg.props[0].inertia_kgm2 *= 20.0; // a time constant of about a second: settles near the 10 s cap
+    let sim = simulate(&cfg, 0, &row(0.6, 23.4)).unwrap();
+    let (rpm, _, _) = analytic(&cfg, 0.6, 23.4);
+    let error = (sim.rpm - rpm).abs() / rpm;
+    // Per block (the old reading) it stopped 6.8e-7 short; per second it stops a quarter of that.
+    assert!(error <= 3e-7, "stopped {error:e} short of the steady state after {} s", sim.settle_s);
+}
+
 #[test]
 fn a_zero_command_gives_zero_everything() {
     let sim = simulate(&quad(), 0, &row(0.0, 24.0)).unwrap();

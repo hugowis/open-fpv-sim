@@ -13,8 +13,8 @@ const BASE_HZ: u32 = 8000;
 const BLOCK_S: f64 = 0.25;
 /// Give up on a row that has not settled by then.
 const MAX_SETTLE_S: f64 = 10.0;
-/// Settled: the rotor speed moved by less than this fraction of itself in one block.
-const SETTLED: f64 = 1e-6;
+/// Settled: the rotor speed moved by less than this fraction of itself per second (over one block, scaled to it).
+const SETTLED_PER_S: f64 = 1e-6;
 
 /// What the models settle at for one row.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,7 +54,7 @@ pub fn simulate(cfg: &ofs_config::QuadConfig, motor: usize, row: &ThrustRow) -> 
         stand.run_for(BLOCK_S).map_err(|e| e.to_string())?;
         elapsed += BLOCK_S;
         let w: f64 = stand.bus().get(omega);
-        if (w - previous).abs() <= SETTLED * w.max(1.0) {
+        if (w - previous).abs() <= SETTLED_PER_S * BLOCK_S * w.max(1.0) {
             let n = w / (2.0 * std::f64::consts::PI);
             return Ok(Predicted {
                 rpm: n * 60.0,

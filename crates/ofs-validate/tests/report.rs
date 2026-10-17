@@ -1,5 +1,5 @@
 //! The report: what it prints for the awkward rows, and that it prints the same everywhere.
-use ofs_validate::report::{max_error_pct, render, render_not_compared};
+use ofs_validate::report::{max_error_pct, render, render_not_compared, unsettled};
 use ofs_validate::submission::{Kind, Origin, Source, Submission, ThrustRow};
 use ofs_validate::thrust::Predicted;
 
@@ -61,6 +61,14 @@ fn a_measured_zero_does_not_divide_and_an_unsettled_row_keeps_the_table_intact()
     assert!(text.contains("| rpm | 0 | — | — |"), "no comparable row: {text}");
     assert_eq!(max_error_pct(&rows), 0.0);
     assert!(!text.contains("NaN") && !text.contains("inf"), "{text}");
+}
+
+#[test]
+fn unsettled_counts_the_rows_with_an_error() {
+    let row = ThrustRow { command: 1.0, voltage_v: 24.0, rpm: Some(30000.0), thrust_n: None, current_a: None };
+    let rows = vec![(row.clone(), Ok(predicted(30000.0, 5.0, 10.0))), (row.clone(), Err("no steady state within 10 s".to_string())), (row, Err("x".to_string()))];
+    assert_eq!(unsettled(&rows), 2);
+    assert_eq!(unsettled(&[]), 0);
 }
 
 #[test]

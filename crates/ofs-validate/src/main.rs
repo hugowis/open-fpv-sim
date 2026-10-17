@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
-use ofs_validate::report::{max_error_pct, render, render_not_compared};
+use ofs_validate::report::{max_error_pct, render, render_not_compared, unsettled};
 use ofs_validate::submission::{load, Kind};
 use ofs_validate::thrust::simulate;
 
@@ -35,7 +35,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let (report, worst) = match sub.kind {
+    let (report, worst, unsettled) = match sub.kind {
         Kind::ThrustStand => {
             let cfg = match ofs_config::load(&sub.quad_path()) {
                 Ok(cfg) => cfg,
@@ -45,9 +45,9 @@ fn main() {
                 }
             };
             let rows: Vec<_> = sub.rows.iter().map(|r| (r.clone(), simulate(&cfg, sub.motor, r))).collect();
-            (render(&sub, &rows), max_error_pct(&rows))
+            (render(&sub, &rows), max_error_pct(&rows), unsettled(&rows))
         }
-        Kind::BlackboxStep => (render_not_compared(&sub), 0.0),
+        Kind::BlackboxStep => (render_not_compared(&sub), 0.0, 0),
     };
     print!("{report}");
     if let Some(out) = &args.out {
@@ -64,8 +64,14 @@ fn main() {
             }
         }
     }
-    if args.max_error_pct.is_some_and(|limit| worst > limit) {
-        eprintln!("ofs-validate: the largest error is {worst:.1} %, over the {:.1} % gate", args.max_error_pct.unwrap_or(0.0));
-        std::process::exit(1);
+    if let Some(limit) = args.max_error_pct {
+        if unsettled > 0 {
+            eprintln!("ofs-validate: {unsettled} row(s) did not settle, so the {limit:.1} % gate cannot pass");
+            std::process::exit(1);
+        }
+        if worst > limit {
+            eprintln!("ofs-validate: the largest error is {worst:.1} %, over the {limit:.1} % gate");
+            std::process::exit(1);
+        }
     }
 }
