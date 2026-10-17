@@ -1,8 +1,8 @@
-ideal-500 f40477aeadc43128
-latency-0-250 adba1fc11fba933d
-latency-5-500 3cdfa9d3be96647e
-fading-bounce-500 3010c281887aa5bc
+ideal-500 5c88197946038eb4
+latency-0-250 7e965a9a3e2486fc
+latency-5-500 a02e7330d14bb9e8
+fading-bounce-500 a3cb478a5282e8da
 two-antennas-fading 4261d55773963ee6
-obstacle-50hz 2922d9e47ed3d928
-weak-10mw 72532bb55551342b
-crossed-dipole 8b4eaf682435d9e4
+obstacle-50hz 30d416ebcc7ce9a6
+weak-10mw ba21b215534d95e2
+crossed-dipole 058deb94e53d4f7e
