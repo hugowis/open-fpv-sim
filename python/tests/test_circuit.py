@@ -17,7 +17,9 @@ def _circuit_module():
 
 
 def _load(sim):
-    sim.load(QUAD, seed=1, open_loop_fc=True, stabilize=True, world=CIRCUIT)
+    # record=False: a recording's `recording_started` event reaches the client on a background thread and can land
+    # in a flight's events, with a different file name on every load.
+    sim.load(QUAD, seed=1, open_loop_fc=True, stabilize=True, world=CIRCUIT, record=False)
 
 
 def _race_events(result):
@@ -61,5 +63,6 @@ def test_the_circuit_is_deterministic(sim):
     for _ in range(2):
         _load(sim)
         result = circuit.fly_circuit(sim)
-        runs.append((result["events"], result["final"]))
+        # Only what the flight itself raised: session events (a recording, a link) arrive asynchronously.
+        runs.append(([e for e in result["events"] if e[0] in ("gate_passed", "lap_completed", "collision")], result["final"]))
     assert runs[0] == runs[1]
