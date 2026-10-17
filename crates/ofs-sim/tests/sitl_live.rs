@@ -116,6 +116,27 @@ fn a_betaflight_reboot_is_a_firmware_restart_not_a_crash() {
     assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
 }
 
+/// #57: a client that closes its MSP connection right after MSP_REBOOT used to leave Betaflight waiting to send the
+/// reply for good: it never rebooted and the session failed. The patched SITL drops the bytes nobody is listening for.
+#[test]
+#[ignore]
+fn a_client_that_hangs_up_right_after_msp_reboot_does_not_stop_the_reboot() {
+    let mut rig = Rig::new();
+    let v = &mut rig.v;
+    v.run_for(2.0).unwrap();
+    let mut client = msp();
+    client.send(MSP_REBOOT, &[]).unwrap();
+    drop(client); // hang up at once, without reading the reply
+    let give_up = v.state().time_s + 5.0;
+    while v.state().fc_restarts == 0 && v.state().time_s < give_up {
+        v.run_for(0.01).unwrap();
+    }
+    assert_eq!(v.state().fc_restarts, 1, "Betaflight rebooted");
+    v.run_for(2.0).unwrap();
+    let reply = msp().request(MSP_API_VERSION, &[], 500, || v.run_for(0.01)).unwrap();
+    assert_eq!(api_version(&reply).map(|(_, major, _)| major), Some(1));
+}
+
 /// A SITL session served over gRPC (lockstep, Betaflight), booted and armed: the client, the service and the data
 /// directory that holds its firmware and logs. Linux only (the tests that use it kill SITL with `pkill -x`).
 #[cfg(target_os = "linux")]

@@ -23,7 +23,7 @@ index 236ebf9..fefc234 100644
  extern uint8_t atomic_BASEPRI;
  
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
-index a922cc7..8ffe64d 100644
+index a922cc7..eec9b2f 100644
 --- a/src/main/drivers/serial_tcp.c
 +++ b/src/main/drivers/serial_tcp.c
 @@ -35,6 +35,11 @@
@@ -125,7 +125,7 @@ index a922cc7..8ffe64d 100644
      }
      return s;
  }
-@@ -232,9 +294,76 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
+@@ -232,10 +294,85 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
      tcpDataOut(s);
  }
  
@@ -193,16 +193,26 @@ index a922cc7..8ffe64d 100644
  void tcpDataOut(tcpPort_t *instance)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
+-    if (s->conn == NULL) return;
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
 +    if (s->id != 0) {
 +        tcpCaptureTx(s);
 +        return;
 +    }
 +#endif
-     if (s->conn == NULL) return;
++    if (s->conn == NULL) {
++        // Nobody is listening (the client hung up): drop what is waiting, as a UART with nothing on the wire does.
++        // Left in the buffer it keeps isTcpTransmitBufferEmpty() false, and MSP_REBOOT waits for exactly that to
++        // turn true before it reboots, so a client that hung up right after the command wedged the reboot for good.
++        pthread_mutex_lock(&s->txLock);
++        s->port.txBufferTail = s->port.txBufferHead;
++        pthread_mutex_unlock(&s->txLock);
++        return;
++    }
      pthread_mutex_lock(&s->txLock);
  
-@@ -255,6 +384,15 @@ void tcpDataOut(tcpPort_t *instance)
+     if (s->port.txBufferHead < s->port.txBufferTail) {
+@@ -255,6 +392,15 @@ void tcpDataOut(tcpPort_t *instance)
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
@@ -218,7 +228,7 @@ index a922cc7..8ffe64d 100644
      pthread_mutex_lock(&s->rxLock);
  
      while (size--) {
-@@ -270,17 +408,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+@@ -270,17 +416,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  //    printf("\n");
  }
  

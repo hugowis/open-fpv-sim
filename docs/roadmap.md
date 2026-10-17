@@ -64,9 +64,8 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
 - A session that ends armed spends up to 0.5 simulated seconds disarming Betaflight first, so its Blackbox log is
   finished; those steps are not journaled, but a running MCAP recording sees them.
-- A client that closes its MSP connection right after `MSP_REBOOT` leaves Betaflight waiting to send the reply, so
-  it never reboots and the session fails; keep the connection open until the relaunch
-  (`docs/superpowers/history/closeout-evidence.md`) — the Configurator's own Save does not do this (checked by hand, 2026-10-14).
+- A client may close its MSP connection right after `MSP_REBOOT`: the patched SITL drops the reply nobody is
+  listening for, so the reboot completes (it used to wedge, `docs/superpowers/history/closeout-evidence.md`).
 - Betaflight SITL aborted once with heap corruption while resetting (glibc `tcache` check), so a reboot failed as a
   firmware crash; not seen again in 38 reboots. Inside SITL's teardown, upstream of the simulator.
 - The port-bind flake: open, narrowed. The pre-launch cleanup now waits for its victims to exit (SIGKILL after a
