@@ -27,13 +27,14 @@ DT = 0.02
 G = 9.81
 
 # Per backend: horizontal speed cap (m/s), lean cap (m/s^2 of horizontal acceleration), and the throttle that hovers.
+# "lean" is the lean in degrees one full stick gives: the stabilizer's MAX_ANGLE_DEG is 60; the shipped Betaflight tune
+# measured about 24 (a 0.3 stick leans 7 degrees, `angle_probe` in the M8b ledger), so the same stick asks for less.
 TUNING = {
-    "stabilizer": {"speed": 5.0, "accel": 3.0, "hover": 0.35},
-    "betaflight": {"speed": 5.0, "accel": 3.0, "hover": 0.35},
+    "stabilizer": {"speed": 5.0, "accel": 3.0, "hover": 0.35, "lean": 60.0},
+    "betaflight": {"speed": 5.0, "accel": 3.0, "hover": 0.35, "lean": 24.0},
 }
 KP_POSITION = 0.8  # 1/s: distance to speed
 KP_VELOCITY = 2.0  # 1/s: speed error to acceleration
-MAX_ANGLE_DEG = 60.0  # a full stick leans this far in the stabilizer and in Betaflight's default angle mode
 
 
 def _clamp(x, low, high):
@@ -51,8 +52,8 @@ def _sticks(state, target, tuning, altitude, yaw_deg_target=0.0):
     an = _clamp(KP_VELOCITY * (want_vn - vn), -tuning["accel"], tuning["accel"])
     ae = _clamp(KP_VELOCITY * (want_ve - ve), -tuning["accel"], tuning["accel"])
     # Heading north, a forward lean (pitch +) accelerates north and a right lean (roll +) accelerates east.
-    pitch = math.degrees(math.atan2(an, G)) / MAX_ANGLE_DEG
-    roll = math.degrees(math.atan2(ae, G)) / MAX_ANGLE_DEG
+    pitch = math.degrees(math.atan2(an, G)) / tuning["lean"]
+    roll = math.degrees(math.atan2(ae, G)) / tuning["lean"]
     _, _, yaw = state.euler_deg()
     yaw_error = (yaw_deg_target - yaw + 180.0) % 360.0 - 180.0
     yaw_stick = _clamp(0.02 * yaw_error, -1.0, 1.0)
@@ -92,6 +93,8 @@ def fly_circuit(sim, waypoints=None, betaflight=False, max_seconds=120.0, per_wa
     if betaflight:
         sim.set_sticks(throttle=0.0, aux=DISARMED)
         sim.run(4.0)  # boot and gyro calibration, perfectly still
+        sim.set_sticks(throttle=0.0, aux=ARM_AND_ANGLE)  # arm with the throttle down: Betaflight refuses otherwise
+        sim.run(1.0)
     altitude = _Altitude(ALTITUDE_M)
     state = sim.state()
     t_start = state.time_s
