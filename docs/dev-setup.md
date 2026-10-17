@@ -356,5 +356,13 @@ The lockstep exchange with SITL is the cost: every configuration clears the 2× 
 almost four times.
 On CI's shared Linux runner (native, no WSL; run 38453432260) the Betaflight rows measured 12.4× and 13.8×.
 
+### Reading recordings
+`scripts/bench_reader.py` records a minute of open-loop flight and times `ofs.reader.read` against the `mcap`-iterator
+reader it replaced (issue #45), checking that both return the same thing. On the Windows development machine with a
+debug server (27.6 MB, 148 signals): three signals 3.29 s to 0.34 s (9.6×), every signal 9.76 s to 2.24 s (4.3×); under
+WSL 2, 2.32 s to 0.29 s (8.0×) and 8.33 s to 2.08 s (4.0×). The
+fast path needs message indexes and zstd or uncompressed chunks, which every recording the server writes has; other
+files fall back to the iterator.
+
 ## Ports
 SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.

@@ -79,14 +79,18 @@ This file is what v1 deliberately does not do, and what comes next. It replaces 
 
 ### Python
 - The live view follows the state stream (up to 240 Hz); the 8 kHz signals are only in the recording.
-- The reader decodes in pure Python: about 3.7 s for three patterns of a one-minute recording, 11.7 s for all of it.
+- The reader is pure Python. On a one-minute open-loop recording (27.6 MB, 148 signals) it takes 0.34 s for three
+  patterns and 2.2 s for every signal; the `mcap` iterator it replaced took 3.3 s and 9.8 s
+  (`scripts/bench_reader.py`). The fast path needs message indexes (the server's recordings have them) and zstd or
+  uncompressed chunks; any other file is read the slow way.
 - Open-loop sessions fly a scripted path only with the opt-in stabilizer (`stabilize=True`, `docs/scripted-flight.md`), a
   test stand-in: angle mode on the simulator's truth, no filters, arming, rates or I-term, gains tuned for the shipped
   quad. Real tuning needs Betaflight SITL, which also needs WSL on Windows.
 
 ### Performance
 - Headless lockstep runs at 7.4× real time with Betaflight SITL (WSL 2) and 84–296× open loop, on an AMD Ryzen 9
-  9900X3D (`docs/dev-setup.md`, Performance), 12.4× on CI's Linux runner: above the 2× target. CI fails only below 1×.
+  9900X3D (`docs/dev-setup.md`, Performance), 12.4× on CI's Linux runner: above the 2× target. CI fails below 1×, and when a row falls under 60 % of the
+  baseline recorded for CI's runner (`scripts/benchmark-baseline.json`).
 
 ## Post-v1 backlog
 
@@ -128,7 +132,6 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
   `OFS_LIBRARY` as a search path.
 
 ### Tooling
-- A faster reader (a columnar decode, or the Rust reader behind a binding).
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries
   foxglove/mcap#1838 once it ships, and re-run `crates/ofs-log/tests/determinism.rs`.
 - `rerun-sdk` is pinned to 0.39.x by the `rerun` extra: bump it deliberately (its Python API changes between minors).

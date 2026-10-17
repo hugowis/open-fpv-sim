@@ -70,8 +70,12 @@ only through each chunk's message index records and refuses a chunk that has non
 message indexes and non-zero start and end times"; checked with `@mcap/core` against a sandbox recording, and seen in
 app.foxglove.dev). Since the spec requires the files to open in Foxglove unchanged, `ofs-log` keeps the crate's
 default, and `crates/ofs-log/tests/determinism.rs` pins that every chunk indexes its channels. The sandbox flight
-(Betaflight, 106 signals) records about 4.8 MB per 10 simulated seconds. Reading back costs about 3.7 s for three
-patterns of a one-minute recording in pure Python (`ofs.reader`), 11.7 s for every signal.
+(Betaflight, 106 signals) records about 4.8 MB per 10 simulated seconds. Reading back with `ofs.reader` (pure Python)
+used to cost about 3.7 s for three patterns of a one-minute recording and 11.7 s for every signal, because `mcap`'s
+iterator parses and merges every record of the file. Message indexes make that avoidable: `ofs.reader` cuts only the
+selected signals' records out of each decompressed chunk (open-loop minute, 148 signals: 0.34 s for three patterns and
+2.2 s for every signal, against 3.3 s and 9.8 s; `scripts/bench_reader.py`). Files without message indexes, or with
+lz4 chunks, are still read through the iterator.
 
 ## Test data must avoid platform libm
 
