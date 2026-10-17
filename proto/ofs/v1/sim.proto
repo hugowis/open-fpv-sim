@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 10: protocol 9 plus recording a live flight's sticks to a replayable CSV (M5).
+// Simulator control, protocol version 11: protocol 10 plus gates, lap timing and the race state (M8a).
+// Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
 // Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
 // names (M4c).
 // Still: lockstep and real-time sessions, state and event streams, the pilot link, the v1 fault catalog, OSD and
@@ -214,6 +215,20 @@ message State {
   double collision_speed_mps = 17;   // the last collision's inward speed (0 until one happens)
   FcTelemetry fc_telemetry = 18;
   repeated double battery_cell_voltages = 19;  // per-cell voltage (each cell's own state; the weak cell droops)
+  RaceState race = 20;
+}
+
+// The lap clock. present is false in a world without gates (every other field is then zero). last_lap_s and
+// best_lap_s are 0 until a lap completes (laps > 0 says they are real).
+message RaceState {
+  bool present = 1;
+  bool running = 2;           // gate 0 has started the clock
+  uint32 next_gate = 3;       // the gate to fly through next (0 before the start and after the last gate)
+  uint32 gate_count = 4;
+  uint32 laps = 5;            // completed
+  double current_lap_s = 6;   // time since the current lap started
+  double last_lap_s = 7;
+  double best_lap_s = 8;
 }
 
 enum EventKind {
@@ -239,6 +254,10 @@ enum EventKind {
   EVENT_KIND_RECORDING_STOPPED = 19;  // stopped, or failed (a disk error): the message says which
   EVENT_KIND_INPUTS_RECORDING_STARTED = 20;  // the message is the file's path
   EVENT_KIND_INPUTS_RECORDING_STOPPED = 21;  // stopped, or failed (a disk error): the message says which
+  // The message is "<name> (gate <i>) start" or "<name> (gate <i>) split <s> s"; the event's time is the crossing's.
+  EVENT_KIND_GATE_PASSED = 22;
+  // The message is "lap <n>: <s> s", with " (best)" appended when it is the fastest lap so far (the first is).
+  EVENT_KIND_LAP_COMPLETED = 23;
 }
 
 message Event {
@@ -361,6 +380,16 @@ message WorldObject {
   double rf_loss_db = 8;
 }
 
+// A gate: a vertical opening flown through in the direction of heading_deg (0 = north, clockwise). Gate 0 is the
+// start and finish; the gates are listed in course order.
+message Gate {
+  string name = 1;
+  Vec3 center_ned_m = 2;
+  double heading_deg = 3;
+  double width_m = 4;
+  double height_m = 5;
+}
+
 message Emitter {
   string name = 1;
   Vec3 position_ned_m = 2;
@@ -382,4 +411,5 @@ message World {
   repeated WorldObject objects = 5;
   repeated Emitter emitters = 6;
   Handset handset = 7;
+  repeated Gate gates = 8;
 }

@@ -206,6 +206,46 @@ pub struct WorldEmitter {
     pub power_mw: f64,
 }
 
+/// A gate's opening, with its centre in Godot's frame. `heading_deg` is the direction of travel through it, as in the
+/// world file: degrees clockwise from north.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldGate {
+    pub name: String,
+    pub center: DVec3,
+    pub heading_deg: f64,
+    pub width_m: f64,
+    pub height_m: f64,
+}
+
+/// The lap clock (all zero/false when the world has no gates).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RaceInfo {
+    pub present: bool,
+    pub running: bool,
+    pub next_gate: u32,
+    pub gate_count: u32,
+    pub laps: u32,
+    pub current_lap_s: f64,
+    /// 0 until a lap completes.
+    pub last_lap_s: f64,
+    pub best_lap_s: f64,
+}
+
+impl RaceInfo {
+    fn from_pb(r: &pb::RaceState) -> RaceInfo {
+        RaceInfo {
+            present: r.present,
+            running: r.running,
+            next_gate: r.next_gate,
+            gate_count: r.gate_count,
+            laps: r.laps,
+            current_lap_s: r.current_lap_s,
+            last_lap_s: r.last_lap_s,
+            best_lap_s: r.best_lap_s,
+        }
+    }
+}
+
 /// The world the session flies in, converted to Godot's frame (+Y up, north is -Z).
 #[derive(Debug, Clone, PartialEq)]
 pub struct World {
@@ -218,6 +258,8 @@ pub struct World {
     pub handset_antennas: Vec<WorldAntenna>,
     pub objects: Vec<WorldObject>,
     pub emitters: Vec<WorldEmitter>,
+    /// The race course, in order (gate 0 is the start and finish).
+    pub gates: Vec<WorldGate>,
 }
 
 fn ned(v: Option<pb::Vec3>) -> DVec3 {
@@ -274,6 +316,17 @@ impl World {
                 .emitters
                 .into_iter()
                 .map(|e| WorldEmitter { name: e.name, position: vec_to_godot(ned(e.position_ned_m)), freq_mhz: e.freq_mhz, power_mw: e.power_mw })
+                .collect(),
+            gates: w
+                .gates
+                .into_iter()
+                .map(|g| WorldGate {
+                    name: g.name,
+                    center: vec_to_godot(ned(g.center_ned_m)),
+                    heading_deg: g.heading_deg,
+                    width_m: g.width_m,
+                    height_m: g.height_m,
+                })
                 .collect(),
         }
     }
@@ -378,6 +431,7 @@ pub struct Telemetry {
     pub fc_restarts: u32,
     pub vtx: VtxInfo,
     pub video: VideoInfo,
+    pub race: RaceInfo,
     /// Seconds since this state message arrived (filled in when the telemetry is read).
     pub age_s: f64,
 }
@@ -410,6 +464,7 @@ impl Telemetry {
             fc_restarts: s.fc_restarts,
             vtx: s.vtx.as_ref().map(VtxInfo::from_pb).unwrap_or_default(),
             video: s.video.as_ref().map(VideoInfo::from_pb).unwrap_or_default(),
+            race: s.race.as_ref().map(RaceInfo::from_pb).unwrap_or_default(),
             age_s: 0.0,
         }
     }
@@ -446,6 +501,10 @@ pub enum EventKind {
     InputsRecordingStarted,
     /// An inputs recording stopped or failed.
     InputsRecordingStopped,
+    /// The quad flew through a gate (the message names it and gives the split).
+    GatePassed,
+    /// A lap completed (the message gives its time).
+    LapCompleted,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -474,6 +533,8 @@ impl EventKind {
             EventKind::RecordingStopped => "recording_stopped",
             EventKind::InputsRecordingStarted => "inputs_recording_started",
             EventKind::InputsRecordingStopped => "inputs_recording_stopped",
+            EventKind::GatePassed => "gate_passed",
+            EventKind::LapCompleted => "lap_completed",
             EventKind::Unknown => "unknown",
         }
     }
@@ -511,6 +572,8 @@ impl Event {
             Ok(pb::EventKind::RecordingStopped) => EventKind::RecordingStopped,
             Ok(pb::EventKind::InputsRecordingStarted) => EventKind::InputsRecordingStarted,
             Ok(pb::EventKind::InputsRecordingStopped) => EventKind::InputsRecordingStopped,
+            Ok(pb::EventKind::GatePassed) => EventKind::GatePassed,
+            Ok(pb::EventKind::LapCompleted) => EventKind::LapCompleted,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

@@ -45,6 +45,62 @@ fn the_shipped_world_loads() {
     assert_eq!(w.emitters.len(), 1);
     assert_eq!((w.emitters[0].band.as_deref(), w.emitters[0].channel), (Some("R"), Some(2)));
     assert_eq!(w.emitters[0].polarization, Polarization::Rhcp);
+    assert_eq!(w.gates.len(), 3);
+    for (gate, north) in w.gates.iter().zip([30.0, 60.0, 90.0]) {
+        assert_eq!(gate.center_ned_m, [north, 0.0, -1.22]);
+        assert_eq!((gate.heading_deg, gate.width_m, gate.height_m), (0.0, 3.08, 2.44));
+    }
+    assert_eq!(w.gates[0].name, "Gate0");
+}
+
+#[test]
+fn the_open_field_has_no_gates() {
+    assert!(WorldConfig::open_field().gates.is_empty());
+}
+
+fn gate_block(name: &str, center: &str, heading: &str, width: &str, height: &str) -> String {
+    format!("\n[[gates]]\nname = \"{name}\"\ncenter_ned_m = {center}\nheading_deg = {heading}\nwidth_m = {width}\nheight_m = {height}\n")
+}
+
+#[test]
+fn every_gate_problem_is_reported_at_once() {
+    // The shipped world has gates 0 to 2: these are 3 to 7.
+    let text = world_text()
+        + &gate_block("Wide", "[10.0, 0.0, -1.0]", "0.0", "0.0", "2.0")
+        + &gate_block("Tall", "[10.0, 0.0, -1.0]", "0.0", "3.0", "nan")
+        + &gate_block("Turn", "[10.0, 0.0, -1.0]", "inf", "3.0", "2.0")
+        + &gate_block("Buried", "[10.0, 0.0, -0.5]", "0.0", "3.0", "2.0")
+        + &gate_block("Gate0", "[10.0, 0.0, -1.0]", "0.0", "3.0", "2.0");
+    let found = problems(&text);
+    for expected in [
+        "gates[3].width_m",
+        "gates[4].height_m",
+        "gates[5].heading_deg",
+        "gates[6].center_ned_m: the gate's opening must not reach below the ground",
+        "gates[7].name: \"Gate0\" is used twice",
+    ] {
+        assert!(found.iter().any(|p| p.starts_with(expected)), "{expected} missing from {found:#?}");
+    }
+}
+
+#[test]
+fn a_world_has_at_most_64_gates() {
+    let mut text = world_text();
+    for i in 0..61 {
+        text += &gate_block(&format!("Extra{i}"), "[10.0, 0.0, -1.0]", "0.0", "3.0", "2.0");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    assert!(world::load(&write(dir.path(), &text)).is_ok(), "3 + 61 = 64 gates is allowed");
+    let text = text + &gate_block("OneTooMany", "[10.0, 0.0, -1.0]", "0.0", "3.0", "2.0");
+    assert!(problems(&text).iter().any(|p| p.starts_with("gates: at most 64 gates")), "65 gates");
+}
+
+#[test]
+fn a_gate_missing_a_field_is_refused() {
+    let text = world_text() + "\n[[gates]]\nname = \"Half\"\ncenter_ned_m = [1.0, 0.0, -1.0]\n";
+    let dir = tempfile::tempdir().unwrap();
+    let err = world::load(&write(dir.path(), &text)).unwrap_err();
+    assert!(matches!(err, ConfigError::Parse { .. }) && err.to_string().contains("heading_deg"), "{err}");
 }
 
 #[test]

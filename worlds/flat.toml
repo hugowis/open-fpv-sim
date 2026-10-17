@@ -1,6 +1,7 @@
 # The grey-box field: a launch pad, two rows of pylons, three gates and four buildings on flat ground.
-# The simulator uses it for the video link (line of sight, diffraction around the buildings, interference); the Godot
-# client draws the objects from it. Nothing here collides with the drone: the simulator's ground is the plane d = 0.
+# The simulator uses it for the video link (line of sight, diffraction around the buildings, interference) and for
+# collisions with the objects, and times a lap through the three [[gates]]; the Godot client draws the objects and the
+# gate openings from it. The ground is the plane d = 0.
 #
 # Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
 # All values are estimates.
@@ -272,3 +273,27 @@ center_ned_m = [30.0, -80.0, -9.0]
 size_m = [12.0, 12.0, 18.0]
 color = [0.589, 0.608, 0.627]
 rf_loss_db = 25.0
+
+# The course: the three gates above, flown north in this order. Each opening is what the posts and the bar leave
+# free: 3.08 m between the posts (their centres are 3.2 m apart, each 0.12 m wide) and 2.44 m under the bar. Gate0 is
+# the start and finish. Flying a lap means going through all three and then through Gate0 again.
+[[gates]]
+name = "Gate0"
+center_ned_m = [30.0, 0.0, -1.22]
+heading_deg = 0.0
+width_m = 3.08
+height_m = 2.44
+
+[[gates]]
+name = "Gate1"
+center_ned_m = [60.0, 0.0, -1.22]
+heading_deg = 0.0
+width_m = 3.08
+height_m = 2.44
+
+[[gates]]
+name = "Gate2"
+center_ned_m = [90.0, 0.0, -1.22]
+heading_deg = 0.0
+width_m = 3.08
+height_m = 2.44

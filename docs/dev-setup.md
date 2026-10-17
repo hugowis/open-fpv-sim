@@ -211,9 +211,9 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 10**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 11**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
-and `HandshakeReply.logs_dir`.
+`HandshakeReply.logs_dir`, and gates with lap timing (`World.gates`, `State.race`, M8a).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

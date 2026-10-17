@@ -3,6 +3,21 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M8a: gates and lap timing
+### Added
+- **Race timing (#71).** A world file declares an ordered course with `[[gates]]` (`name`, `center_ned_m`, `heading_deg`,
+  `width_m`, `height_m`; at most 64; gate 0 is the start and finish). The simulator counts the gates the quad flies
+  through in order, interpolating each crossing inside the tick, and times the splits and laps (`docs/race-timing.md`).
+  `worlds/flat.toml` has three gates.
+- Events `gate_passed` and `lap_completed` (messages such as `Gate1 (gate 1) split 8.412 s` and `lap 1: 31.204 s (best)`),
+  `State.race` (`present`, `running`, `next_gate`, `gate_count`, `laps`, `current_lap_s`, `last_lap_s`, `best_lap_s`),
+  `World.gates`, and `race.*` signals in a recording. A world without gates has none of them.
+- The Godot client draws each opening as a translucent rectangle labelled START or with its number, shows a lap line on
+  the HUD and toasts the events. Python: `ofs.Gate`, `ofs.Race`, `World.gates`, `State.race`.
+### Changed
+- **Breaking (protocol):** the protocol is version 11, so a client of protocol 10 is refused by the handshake. The
+  Rust and Python clients in this repository speak it.
+
 ## Unreleased — M7a: hardening sweep
 ### Changed
 - **Breaking (Rust API):** `Vehicle::set_sticks` returns a `Result`: a non-finite stick is refused with an `InvalidArgument` error and

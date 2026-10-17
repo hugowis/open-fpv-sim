@@ -14,6 +14,18 @@ pub const BODY_COLLISION_OBJECT: &str = "body.collision_object";
 /// Collision events raised so far; the server detects the event's edge on this counter.
 pub const BODY_COLLISION_COUNT: &str = "body.collision_count";
 
+/// The race (only in worlds with gates): 1 once gate 0 has started the clock.
+pub const RACE_RUNNING: &str = "race.running";
+/// The gate to fly through next (0 before the start and again once every gate is passed).
+pub const RACE_NEXT_GATE: &str = "race.next_gate";
+/// Laps completed.
+pub const RACE_LAPS: &str = "race.laps";
+/// Simulated time the current lap started.
+pub const RACE_LAP_START_S: &str = "race.lap_start_s";
+/// The last completed lap's time, and the fastest; both 0 until a lap completes.
+pub const RACE_LAST_LAP_S: &str = "race.last_lap_s";
+pub const RACE_BEST_LAP_S: &str = "race.best_lap_s";
+
 pub const BATTERY_VOLTAGE: &str = "battery.voltage_v";
 pub const BATTERY_CURRENT: &str = "battery.current_a";
 pub const BATTERY_SOC: &str = "battery.soc";

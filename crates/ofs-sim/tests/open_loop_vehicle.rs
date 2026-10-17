@@ -184,6 +184,42 @@ fn mixed_pole_pairs_change_nothing_the_airframe_feels() {
     assert_eq!((mixed.pos_ned_m, mixed.vel_ned_mps, mixed.rate_frd_radps), (uniform.pos_ned_m, uniform.vel_ned_mps, uniform.rate_frd_radps));
 }
 
+#[test]
+fn a_world_with_gates_has_a_race_that_has_not_started() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let mut v = vehicle_in(&cfg, flat_world());
+    v.run_for(0.1).unwrap();
+    let race = v.state().race;
+    assert_eq!(
+        race,
+        ofs_sim::race::RaceInfo { present: true, gate_count: 3, ..ofs_sim::race::RaceInfo::default() },
+        "present, three gates, not running, no laps"
+    );
+    assert_eq!(v.signal("race.laps"), Some(0.0));
+    assert!(v.take_race_events().is_empty());
+}
+
+#[test]
+fn a_world_without_gates_has_no_race_and_no_race_signals() {
+    let mut v = vehicle(1);
+    v.run_for(0.1).unwrap();
+    assert_eq!(v.state().race, ofs_sim::race::RaceInfo::default());
+    assert!(!v.state().race.present);
+    assert_eq!(v.signal("race.laps"), None);
+    assert!(v.take_race_events().is_empty());
+}
+
+#[test]
+fn two_vehicles_from_one_world_share_no_race_state() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let mut a = vehicle_in(&cfg, flat_world());
+    let mut b = vehicle_in(&cfg, flat_world());
+    a.run_for(0.1).unwrap();
+    b.run_for(0.1).unwrap();
+    assert_eq!(a.state().race, b.state().race);
+    assert!(a.take_race_events().is_empty() && b.take_race_events().is_empty());
+}
+
 fn rc(v: &Vehicle, name: &str) -> f64 {
     v.signal(name).unwrap_or_else(|| panic!("no signal {name}"))
 }

@@ -18,6 +18,7 @@ use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRat
 use crate::inputs::{tick_at, Inputs, Stick};
 use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use crate::journal::{Action, Journal};
+use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::MSP_TCP_PORT;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
@@ -296,6 +297,14 @@ pub struct VehicleState {
     pub collision_object: i32,
     /// Collision events raised so far (the server detects the event's edge on this).
     pub collision_event_count: u64,
+    /// The lap clock (all zero when the world has no gates).
+    pub race: RaceInfo,
+}
+
+/// A world with gates: the `race.*` signals and the model's event queue.
+struct RaceLink {
+    signals: RaceSignals,
+    handle: RaceHandle,
 }
 
 struct VideoHandles {
@@ -495,6 +504,8 @@ pub struct Vehicle {
     journal: Journal,
     /// The sticks last journaled, so a repeated value adds no entry.
     journaled_sticks: [u64; 8],
+    /// The lap clock, in a world with gates.
+    race: Option<RaceLink>,
 }
 
 /// An inputs file being played: its rows' due ticks and the next row to apply.
@@ -1002,6 +1013,14 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, vtx_interference.clone(), &mut bus)));
     }
 
+    // After the physics, which wrote this tick's pose; a world without gates adds neither the model nor its signals.
+    let mut race = None;
+    if !opts.world.gates.is_empty() {
+        let (timer, handle) = GateTimer::new(&opts.world.gates, &mut bus);
+        race = Some(RaceLink { signals: RaceSignals::register(&mut bus), handle });
+        models.push(Box::new(timer));
+    }
+
     // Last of all: the recorder reads the tick's final values and writes nothing to the bus.
     let recorder = RecorderHandle::default();
     models.push(Box::new(Recorder::new(recorder.clone(), base_hz)));
@@ -1038,6 +1057,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         inputs_recorder: None,
         journal: Journal::new(),
         journaled_sticks: [0; 8],
+        race,
     };
     // The bus starts every signal at zero; aux 0.0 would reach Betaflight as 1500 us until the first SetSticks.
     vehicle.set_sticks(&Sticks::default())?;
@@ -1514,7 +1534,16 @@ impl Vehicle {
             collision_speed_mps: b.get(h.collision_speed),
             collision_object: b.get(h.collision_object) as i32,
             collision_event_count: b.get(h.collision_count) as u64,
+            race: self
+                .race
+                .as_ref()
+                .map_or_else(RaceInfo::default, |r| r.signals.info(b, self.scheduler.time_s(), self.world.gates.len())),
         }
+    }
+
+    /// The gate and lap events raised since the last call.
+    pub fn take_race_events(&mut self) -> Vec<RaceEvent> {
+        self.race.as_ref().map(|r| r.handle.take_events()).unwrap_or_default()
     }
 
     pub fn digest(&self) -> u64 {

@@ -72,6 +72,25 @@ func test_the_status_line_shows_when_the_sticks_are_being_recorded() -> void:
 	hud.queue_free()
 
 
+func test_the_lap_line_shows_the_race() -> void:
+	var hud := await _hud()
+	hud.update_view(_view())
+	eq(hud.race_text(), "", "a world without gates: no line")
+	var waiting := _telemetry({"race_present": true, "race_running": false, "race_gate_count": 3})
+	hud.update_view(_view({"telemetry": waiting}))
+	eq(hud.race_text(), "RACE  fly through the start gate", "before the clock starts")
+	var racing := _telemetry({"race_present": true, "race_running": true, "race_gate_count": 5, "race_next_gate": 3, "race_laps": 0, "race_lap_s": 12.4})
+	hud.update_view(_view({"telemetry": racing}))
+	eq(hud.race_text(), "LAP 1   NEXT 3   0:12.4", "no LAST or BEST before a lap completes")
+	var second := _telemetry({"race_present": true, "race_running": true, "race_gate_count": 5, "race_next_gate": 0, "race_laps": 1,
+		"race_lap_s": 75.3, "race_last_lap_s": 31.2, "race_best_lap_s": 29.9})
+	hud.update_view(_view({"telemetry": second}))
+	eq(hud.race_text(), "LAP 2   NEXT START   1:15.3   LAST 31.2   BEST 29.9", "the start gate is next once all are passed")
+	hud.update_view(_view({"telemetry": {}}))
+	eq(hud.race_text(), "", "no state, no line")
+	hud.queue_free()
+
+
 func test_a_fatal_message_stays() -> void:
 	var hud := await _hud()
 	hud.show_fatal("The OfsClient extension is not loaded.")
