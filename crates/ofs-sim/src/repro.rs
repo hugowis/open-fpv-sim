@@ -30,6 +30,8 @@ pub struct BundleSource {
     pub quad_path: PathBuf,
     pub seed: u64,
     pub open_loop_fc: bool,
+    /// With `open_loop_fc`: the built-in stabilizer was on (`Load`'s `stabilize`).
+    pub stabilize: bool,
     pub realtime: bool,
     /// Where bundles go: `<logs dir>/<quad stem>-<n>.repro`.
     pub logs_dir: PathBuf,
@@ -117,6 +119,7 @@ impl BundleSource {
             quad_path: cfg.source_path.clone(),
             seed,
             open_loop_fc,
+            stabilize: false,
             realtime,
             logs_dir,
             firmware_dir,
@@ -201,6 +204,7 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
     put("mode", Value::String(if src.realtime { "realtime" } else { "lockstep" }.into()));
     put("base_hz", Value::Integer(i64::from(vehicle.base_hz())));
     put("open_loop_fc", Value::Boolean(src.open_loop_fc));
+    put("stabilize", Value::Boolean(src.stabilize));
     put("quad", Value::String(src.quad_rel.clone()));
     if let Some(w) = &src.world_rel {
         put("world", Value::String(w.clone()));
@@ -270,6 +274,8 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
     }
     let seed: u64 = text_of(&t, "seed")?.parse().map_err(|_| "bundle.toml: seed is not a number".to_string())?;
     let open_loop = flag_of(&t, "open_loop_fc")?;
+    // Bundles written before protocol 12 have no key: they were never stabilized.
+    let stabilize = t.get("stabilize").and_then(toml::Value::as_bool).unwrap_or(false);
     let expected_tick = int_of(&t, "failed_tick")? as u64;
     let expected_failure = text_of(&t, "reason")?.to_string();
     let expected_digest =
@@ -285,7 +291,8 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
     };
     let journal = Journal::read(bundle)?;
 
-    let opts = BuildOptions { seed, data_dir: data_dir.to_path_buf(), fc_override: open_loop.then_some(FcKind::OpenLoop), world };
+    let fc_override = open_loop.then_some(if stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
+    let opts = BuildOptions { seed, data_dir: data_dir.to_path_buf(), fc_override, world };
     if !open_loop && cfg.fc.kind == FcKind::Sitl {
         let fw = firmware_dir(data_dir, &cfg.source_path);
         std::fs::create_dir_all(&fw).map_err(|e| format!("{}: {e}", fw.display()))?;

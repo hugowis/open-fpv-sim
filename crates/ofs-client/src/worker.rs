@@ -277,6 +277,7 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
         overrun_policy: policy as i32,
         keep_alive: false,
         world_path: settings.world_path.clone(),
+        stabilize: settings.stabilize,
     };
     let reply = match client.load(load).await {
         Ok(reply) => reply.into_inner(),

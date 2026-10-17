@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 11: protocol 10 plus gates, lap timing and the race state (M8a).
+// Simulator control, protocol version 12: protocol 11 plus the open-loop stabilizer on Load (M8b).
+// Protocol 11 added gates, lap timing and the race state (M8a).
 // Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
 // Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
 // names (M4c).
@@ -85,6 +86,9 @@ message LoadRequest {
   // A world file (worlds/flat.toml), or a world name (flat: worlds/flat.toml beside the quad's directory, as
   // parts resolve against library/); empty: the built-in open field.
   string world_path = 7;
+  // With open_loop_fc: also run the built-in angle-mode stabilizer (a test stand-in, not Betaflight), so sticks
+  // command attitude and a script can fly a path. Refused without open_loop_fc.
+  bool stabilize = 8;
 }
 message LoadReply {
   string quad_name = 1;

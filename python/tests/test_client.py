@@ -181,6 +181,22 @@ def test_without_firmware_the_osd_is_absent_but_the_vtx_transmits(sim):
     assert list(state.video.rssi) == ["omni"], "the open field's single antenna"
 
 
+def test_a_stabilized_open_loop_session_obeys_a_roll_stick(sim):
+    sim.load(QUAD, open_loop_fc=True, stabilize=True)
+    sim.set_sticks(roll=0.2, throttle=0.4)
+    state = sim.run(1.5)
+    roll, pitch, _ = state.euler_deg()
+    assert 9.0 < roll < 15.0 and abs(pitch) < 2.0, (roll, pitch)
+    sim.load(QUAD, open_loop_fc=True)
+    sim.set_sticks(roll=0.2, throttle=0.4)
+    assert abs(sim.run(1.5).euler_deg()[0]) < 1.0, "without stabilize the roll stick does nothing"
+
+
+def test_stabilize_needs_open_loop_fc(sim):
+    with pytest.raises(ofs.InvalidArgument, match="stabilize needs open_loop_fc"):
+        sim.load(QUAD, stabilize=True)
+
+
 def test_a_session_flies_in_its_world(sim):
     sim.load(QUAD, open_loop_fc=True, world=WORLD)
     world = sim.get_world()
