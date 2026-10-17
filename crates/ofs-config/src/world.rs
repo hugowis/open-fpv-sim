@@ -55,8 +55,30 @@ pub struct WorldConfig {
     pub objects: Vec<ObjectSection>,
     #[serde(default)]
     pub emitters: Vec<EmitterSection>,
+    /// The race course, in order: gate 0 is the start and finish (docs/race-timing.md).
+    #[serde(default)]
+    pub gates: Vec<GateSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
+}
+
+/// The most gates a world may declare.
+pub const MAX_GATES: usize = 64;
+
+/// A gate: a vertical opening the quad flies through, in the direction of `heading_deg`. A trigger only: it does not
+/// collide with the quad and blocks no signal (a frame made of posts is a set of `[[objects]]`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GateSection {
+    /// Letters, digits, `_` and `-`, unique among the gates.
+    pub name: String,
+    /// The middle of the opening.
+    pub center_ned_m: [f64; 3],
+    /// The direction of travel through the gate: 0 = north, 90 = east, clockwise.
+    pub heading_deg: f64,
+    /// The opening's size across the direction of travel, and its height.
+    pub width_m: f64,
+    pub height_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -298,6 +320,7 @@ impl WorldConfig {
             environment: EnvironmentSection::default(),
             objects: Vec::new(),
             emitters: Vec::new(),
+            gates: Vec::new(),
             source_path: PathBuf::new(),
         }
     }
@@ -390,6 +413,22 @@ impl WorldConfig {
                     c.check(o.size_m.is_none(), &field("shape"), "size_m is for a box");
                 }
             }
+        }
+        c.check(self.gates.len() <= MAX_GATES, "gates", format!("at most {MAX_GATES} gates (got {})", self.gates.len()));
+        let mut names = HashSet::new();
+        for (i, g) in self.gates.iter().enumerate() {
+            let field = |f: &str| format!("gates[{i}].{f}");
+            check_name(&mut c, &g.name, &field("name"), &mut names);
+            c.check(finite(&g.center_ned_m), &field("center_ned_m"), "values must be finite");
+            c.check(g.heading_deg.is_finite(), &field("heading_deg"), "must be finite");
+            c.check(g.width_m.is_finite() && g.width_m > 0.0, &field("width_m"), format!("must be > 0 (got {})", g.width_m));
+            c.check(g.height_m.is_finite() && g.height_m > 0.0, &field("height_m"), format!("must be > 0 (got {})", g.height_m));
+            // NaN compares false on every side, so only a real overshoot is reported here (the finite checks cover NaN).
+            c.check(
+                !(g.center_ned_m[2] + g.height_m / 2.0 > 0.0),
+                &field("center_ned_m"),
+                "the gate's opening must not reach below the ground (center d + height/2 must be <= 0)",
+            );
         }
         let mut names = HashSet::new();
         for (i, e) in self.emitters.iter().enumerate() {
