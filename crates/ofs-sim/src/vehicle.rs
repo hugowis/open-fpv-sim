@@ -1078,13 +1078,22 @@ impl Vehicle {
         Ok(())
     }
 
-    /// For a session that is about to end on Betaflight: disarms it, so it closes its Blackbox log (a log of a
-    /// session that ended armed is cut short when SITL is killed). The aux switches go low and the throttle to zero
-    /// straight on the bus (not through `set_sticks`: nothing is journaled or written to an inputs recording), a
-    /// script that is still playing is dropped, and half a simulated second runs. A dead SITL makes the steps fail
-    /// at once and that is ignored. A no-op without SITL.
+    /// Betaflight is armed: every motor is held above zero (an armed quad idles; a disarmed one outputs nothing).
+    fn firmware_armed(&self) -> bool {
+        let b = self.scheduler.bus();
+        !self.h.cmd.is_empty() && self.h.cmd.iter().all(|s| b.get(*s) > 0.0)
+    }
+
+    /// For a session that is about to end on Betaflight while the quad is armed: disarms it, so it closes its
+    /// Blackbox log (a log of a session that ended armed is cut short when SITL is killed). Everything goes straight
+    /// on the bus, not through `set_sticks` or `set_transmitter`, so nothing is journaled or written to an inputs
+    /// recording: the aux switches go low and the throttle to zero, the transmitter comes back on and the radio
+    /// faults are cleared (a pilot who left first, or a cut link, would otherwise leave Betaflight in failsafe stage
+    /// 1, holding its last aux values), and a script that is still playing is dropped. It steps in 0.1 s chunks until
+    /// the motors read disarmed, at most 3 simulated seconds. A dead SITL makes the steps fail at once and that is
+    /// ignored. A no-op without SITL, and for a quad that is not armed.
     pub fn disarm_for_shutdown(&mut self) {
-        if !self.sitl {
+        if !self.sitl || !self.firmware_armed() {
             return;
         }
         self.playback = None;
@@ -1094,7 +1103,15 @@ impl Vehicle {
         for sig in &h.aux {
             bus.set(*sig, -1.0);
         }
-        let _ = self.run_for(0.5);
+        bus.set(h.tx_enabled, 1.0);
+        bus.set(h.fault_radio_loss, 0.0);
+        bus.set(h.fault_radio_loss_fraction, 0.0);
+        bus.set(h.fault_burst_on, 0.0);
+        for _ in 0..30 {
+            if self.run_for(0.1).is_err() || !self.firmware_armed() {
+                break;
+            }
+        }
     }
 
     /// Tests only: a NaN straight on the throttle signal, which `set_sticks` now refuses, to make the next step fail.

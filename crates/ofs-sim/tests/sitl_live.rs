@@ -180,11 +180,56 @@ fn finished_blackbox_logs(logs_dir: &Path) -> (usize, usize) {
 #[tokio::test]
 #[ignore]
 async fn a_session_that_ends_armed_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{Empty, RunRequest};
     let (mut c, service, _data_dir) = serve_an_armed_quad().await;
-    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    // An inputs recording is running when the session ends: the shutdown disarm must not write a row into it.
+    let recording = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
+    c.run(RunRequest { seconds: 0.2 }).await.unwrap();
+    c.unload(Empty {}).await.unwrap();
     let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
     assert_eq!(logs, 1, "the session wrote one Blackbox log into {}", service.logs_dir().display());
     assert_eq!(finished, 1, "and it ends with Blackbox's End of log event");
+    let csv = std::fs::read_to_string(&recording.path).unwrap();
+    let last = csv.lines().last().unwrap();
+    assert_eq!(csv.lines().count(), 2, "the header and the one row of the stick state at the start: {csv}");
+    assert!(last.contains(",1,1,-1,-1"), "that row still says armed (aux1 high); the disarm is not in the file: {last}");
+}
+
+/// The pilot's link is cut when the session ends (a `RadioLinkLoss` fault, or out of range): Betaflight is in failsafe
+/// stage 1 and holds its last aux values, so the shutdown must restore the link before the disarm can reach it.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_that_ends_with_its_link_cut_still_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{fault, Fault, RadioLinkLoss, RunRequest};
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    c.inject_fault(Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})), at_s: None }).await.unwrap();
+    c.run(RunRequest { seconds: 0.3 }).await.unwrap();
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
+    assert_eq!((logs, finished), (1, 1), "one log, finished, though the link was cut when the session ended");
+}
+
+/// The Godot client's quit order: the pilot's stream ends first (the transmitter goes off), then Unload.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_session_whose_pilot_left_first_still_leaves_a_finished_blackbox_log() {
+    use ofs_sim::pb::{PilotInput, Sticks as PbSticks};
+    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::StreamExt;
+    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let armed = PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() };
+    tx.send(PilotInput { sticks: Some(armed), state_rate_hz: 50 }).await.unwrap();
+    let mut states = c.pilot(ReceiverStream::new(rx)).await.unwrap().into_inner();
+    assert!(states.next().await.unwrap().unwrap().radio.unwrap().tx_enabled);
+    drop(tx);
+    drop(states); // the pilot is gone: the server switches the transmitter off
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+    let (logs, finished) = finished_blackbox_logs(&service.logs_dir());
+    assert_eq!((logs, finished), (1, 1), "one log, finished, though the transmitter was off when the session ended");
 }
 
 /// A session whose SITL died is not made to wait for a disarm that cannot happen.
@@ -196,7 +241,7 @@ async fn a_session_whose_sitl_died_still_ends_promptly() {
     assert!(std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap().success());
     let started = std::time::Instant::now();
     c.unload(ofs_sim::pb::Empty {}).await.unwrap();
-    assert!(started.elapsed() < Duration::from_secs(10), "unload took {:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_secs(5), "unload took {:?}", started.elapsed());
 }
 
 /// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
