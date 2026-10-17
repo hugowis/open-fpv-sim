@@ -1,0 +1,52 @@
+# A closed race circuit for scripted flight (M8b): four big gates on a 40 m square, flown clockwise seen from above.
+# Home is at the origin, 20 m south of Gate0. python/examples/circuit.py flies it, in open loop on the built-in
+# stabilizer and against Betaflight SITL; docs/scripted-flight.md describes the course and the pilot.
+#
+# Positions are NED metres from home (north, east, down: up is negative). Gate0 is the start and finish: it is flown
+# eastwards, then Gate1 northwards, Gate2 westwards and Gate3 southwards, back to Gate0. Each opening is 6 m wide and
+# 4 m tall, from the ground up, so a pilot who is 2 m off the line still counts.
+schema_version = 1
+name = "Circuit"
+
+[pilot]
+# Beside the launch spot, goggles 1.7 m up, looking north.
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = true
+
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+[[gates]]
+name = "Gate0"
+center_ned_m = [20.0, 0.0, -2.0]
+heading_deg = 90.0
+width_m = 6.0
+height_m = 4.0
+
+[[gates]]
+name = "Gate1"
+center_ned_m = [40.0, 20.0, -2.0]
+heading_deg = 0.0
+width_m = 6.0
+height_m = 4.0
+
+[[gates]]
+name = "Gate2"
+center_ned_m = [60.0, 0.0, -2.0]
+heading_deg = 270.0
+width_m = 6.0
+height_m = 4.0
+
+[[gates]]
+name = "Gate3"
+center_ned_m = [40.0, -20.0, -2.0]
+heading_deg = 180.0
+width_m = 6.0
+height_m = 4.0

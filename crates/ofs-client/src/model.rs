@@ -667,6 +667,8 @@ pub struct Settings {
     pub seed: u64,
     /// Fly without Betaflight: motor commands follow the throttle stick (a testing aid).
     pub open_loop_fc: bool,
+    /// With `open_loop_fc`: the server's built-in angle-mode stabilizer (a test stand-in, not Betaflight).
+    pub stabilize: bool,
     pub overrun_policy: OverrunPolicy,
     /// Vehicle state messages per second, 1..=240.
     pub state_rate_hz: u32,
@@ -685,6 +687,7 @@ impl Settings {
             world_path: String::new(),
             seed: 1,
             open_loop_fc: false,
+            stabilize: false,
             overrun_policy: OverrunPolicy::Warn,
             state_rate_hz: 240,
             stick_rate_hz: 250,

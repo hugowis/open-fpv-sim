@@ -2,3 +2,4 @@
 pub mod msp;
 pub mod open_loop;
 pub mod sitl;
+pub mod stabilizer;

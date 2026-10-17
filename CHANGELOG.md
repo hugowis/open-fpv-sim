@@ -3,6 +3,23 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased — M8b: scripted flight
+### Added
+- **An opt-in stabilizer for open-loop sessions (#66).** `load(..., open_loop_fc=True, stabilize=True)` (Rust:
+  `FcKind::OpenLoopStabilized`, or `[fc] kind = "open_loop_stabilized"` in a quad file) adds a minimal angle-mode
+  controller, so the roll and pitch sticks set the lean (up to 60 degrees), the yaw stick the turn rate (up to 200 degrees
+  per second) and a script can fly a path without Betaflight. It is a test stand-in, not Betaflight: it reads the
+  simulator's truth and has no arming, rates, I-term or filters, and real tuning needs SITL. `open_loop_fc` alone is
+  unchanged (throttle to every motor). `docs/scripted-flight.md`.
+- **A scripted circuit (#53).** `worlds/circuit.toml` (four gates on a 40 m square) and `python/examples/circuit.py`, a
+  pilot that steers with the sticks from the quad's state and flies a lap through the gates. `python/tests/test_circuit.py`
+  asserts the lap on the stabilizer in every CI run; `python/tests/test_sitl_circuit.py` asserts it on real Betaflight in
+  the `sitl` job.
+### Changed
+- **Breaking (protocol):** the protocol is version 12 (`LoadRequest.stabilize`), so a client of protocol 11 is refused by
+  the handshake. `stabilize` without `open_loop_fc` is refused with `invalid_argument`. A repro bundle records
+  `stabilize` (a bundle without the key was never stabilized).
+
 ## Unreleased — M8a: gates and lap timing
 ### Added
 - **Race timing (#71).** A world file declares an ordered course with `[[gates]]` (`name`, `center_ned_m`, `heading_deg`,

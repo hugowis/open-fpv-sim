@@ -31,9 +31,13 @@ fn fault_at(kind: fault::Kind, at_s: f64) -> Fault {
 /// Flies open loop with stick changes and a scheduled motor fault, then a scheduled finite fault that overflows the
 /// vibration model at 0.5 s: the run stops with a numerical error. Returns the bundle folder named in the error event.
 async fn fail_a_session(mode: Mode) -> (PathBuf, String, SimService) {
+    fail_a_session_with(mode, false).await
+}
+
+async fn fail_a_session_with(mode: Mode, stabilize: bool) -> (PathBuf, String, SimService) {
     let (mut c, service) = start().await;
     let mut events = service.subscribe();
-    c.load(LoadRequest { quad_path: QUAD.into(), seed: 9, mode: mode as i32, open_loop_fc: true, ..Default::default() }).await.unwrap();
+    c.load(LoadRequest { quad_path: QUAD.into(), seed: 9, mode: mode as i32, open_loop_fc: true, stabilize, ..Default::default() }).await.unwrap();
     c.set_sticks(Sticks { throttle: 0.6, aux: vec![-1.0; 4], ..Default::default() }).await.unwrap();
     c.run(RunRequest { seconds: 0.1 }).await.unwrap();
     c.set_sticks(Sticks { throttle: 0.9, roll: 0.1, aux: vec![-1.0; 4], ..Default::default() }).await.unwrap();
@@ -70,6 +74,31 @@ async fn replaying_a_failed_run_reproduces_it() {
     assert_eq!(outcome.digest, outcome.expected_digest);
     assert_eq!(outcome.failure.as_deref(), Some(outcome.expected_failure.as_str()));
     assert_eq!(outcome.expected_tick, 4000, "the scheduled fault lands at 0.5 s and the next step overflows");
+}
+
+#[tokio::test]
+async fn a_stabilized_session_replays_to_the_same_digest() {
+    let (bundle, _, _) = fail_a_session_with(Mode::Lockstep, true).await;
+    let text = std::fs::read_to_string(bundle.join("bundle.toml")).unwrap();
+    assert!(text.contains("stabilize = true"), "{text}");
+    let outcome = replay(&bundle, &scratch("stab")).unwrap();
+    assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
+    assert_eq!(outcome.digest, outcome.expected_digest);
+    let (plain, _, _) = fail_a_session_with(Mode::Lockstep, false).await;
+    let plain_outcome = replay(&plain, &scratch("plain")).unwrap();
+    assert_ne!(outcome.expected_digest, plain_outcome.expected_digest, "the stabilizer steered the run, so the digests differ");
+}
+
+#[tokio::test]
+async fn a_bundle_without_the_stabilize_key_replays_as_before() {
+    let (bundle, _, _) = fail_a_session(Mode::Lockstep).await;
+    let path = bundle.join("bundle.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let old: String = text.lines().filter(|l| !l.starts_with("stabilize")).map(|l| format!("{l}\n")).collect();
+    assert!(old.len() < text.len(), "the key was there to remove");
+    std::fs::write(&path, old).unwrap();
+    let outcome = replay(&bundle, &scratch("old")).unwrap();
+    assert!(outcome.reproduced, "{outcome:?}");
 }
 
 #[tokio::test]

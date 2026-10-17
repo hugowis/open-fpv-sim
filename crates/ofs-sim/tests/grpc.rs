@@ -668,6 +668,36 @@ async fn a_fault_can_wait_for_its_time_but_not_for_a_passed_one() {
 }
 
 #[tokio::test]
+async fn a_stabilize_load_without_open_loop_fc_is_refused_and_keeps_the_old_session() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    c.run(RunRequest { seconds: 0.1 }).await.unwrap();
+    let err = c.load(LoadRequest { open_loop_fc: false, stabilize: true, ..open_loop(Mode::Lockstep) }).await.unwrap_err();
+    assert_eq!(kind(&err), "invalid_argument");
+    assert!(err.message().contains("stabilize needs open_loop_fc"), "{}", err.message());
+    assert!((time_s(&mut c).await - 0.1).abs() < 1e-9, "the previous session is still loaded");
+}
+
+/// The roll angle in degrees of a state's attitude (FRD to NED, aerospace Z-Y-X).
+fn roll_deg(q: &ofs_sim::pb::Quat) -> f64 {
+    (2.0 * (q.w * q.x + q.y * q.z)).atan2(1.0 - 2.0 * (q.x * q.x + q.y * q.y)).to_degrees()
+}
+
+#[tokio::test]
+async fn a_stabilized_session_obeys_a_roll_stick_and_a_plain_open_loop_one_ignores_it() {
+    let mut roll_after = Vec::new();
+    for stabilize in [true, false] {
+        let mut c = start().await;
+        c.load(LoadRequest { stabilize, ..open_loop(Mode::Lockstep) }).await.unwrap();
+        c.set_sticks(Sticks { roll: 0.2, throttle: 0.4, aux: vec![-1.0; 4], ..Default::default() }).await.unwrap();
+        let state = c.run(RunRequest { seconds: 1.5 }).await.unwrap().into_inner();
+        roll_after.push(roll_deg(&state.attitude.unwrap()));
+    }
+    assert!((roll_after[0] - 12.0).abs() < 3.0, "a 0.2 stick leans a stabilized quad to about 12 degrees: {}", roll_after[0]);
+    assert!(roll_after[1].abs() < 1.0, "a throttle-only quad stays level: {}", roll_after[1]);
+}
+
+#[tokio::test]
 async fn a_world_can_be_named() {
     let mut c = start().await;
     c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();

@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 11
+PROTOCOL_VERSION = 12
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -408,13 +408,16 @@ class Sim:
 
     def load(self, quad_path: str, seed: int = 0, mode: str = "lockstep", open_loop_fc: bool = False,
              overrun_policy: str = "warn", keep_alive: bool = False, world: str | None = None,
-             record: bool | None = None) -> str:
+             record: bool | None = None, stabilize: bool = False) -> str:
         """Loads a quad. `mode` is "lockstep" (advance with `run`) or "realtime" (loads paused; `start` paces it
         to the wall clock). `world` is a world file (e.g. "worlds/flat.toml") or a world name ("flat":
         worlds/flat.toml beside the quad's directory); without one the quad flies in the open field. `record`
         starts a recording of every signal at the default rates (`sim.log` reads it); it defaults to on for
-        lockstep sessions and off for real-time ones. Returns the quad's name; `configurator_address` is set when
-        it runs Betaflight."""
+        lockstep sessions and off for real-time ones. `open_loop_fc` replaces Betaflight with a stand-in that sends
+        the throttle to every motor; adding `stabilize=True` makes it a minimal angle-mode stabilizer, so the roll
+        and pitch sticks set the lean, the yaw stick the turn rate, and a script can fly a path (it is not
+        Betaflight: real tuning needs SITL; `docs/scripted-flight.md`). Returns the quad's name;
+        `configurator_address` is set when it runs Betaflight."""
         if mode not in _MODES:
             raise ValueError(f"mode must be one of {sorted(_MODES)}")
         if overrun_policy not in _POLICIES:
@@ -422,7 +425,8 @@ class Sim:
         self._ensure_watch()
         reply = self._call(self._stub.Load, pb.LoadRequest(
             quad_path=str(quad_path), seed=seed, mode=_MODES[mode], open_loop_fc=open_loop_fc,
-            overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or "")))
+            overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or ""),
+            stabilize=stabilize))
         self.configurator_address = reply.configurator_address
         self.recording._session_ended()
         if (mode == "lockstep") if record is None else record:

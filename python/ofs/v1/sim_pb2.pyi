@@ -108,7 +108,7 @@ class HandshakeReply(_message.Message):
     def __init__(self, protocol_version: _Optional[int] = ..., server_version: _Optional[str] = ..., logs_dir: _Optional[str] = ...) -> None: ...
 
 class LoadRequest(_message.Message):
-    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive", "world_path")
+    __slots__ = ("quad_path", "seed", "mode", "open_loop_fc", "overrun_policy", "keep_alive", "world_path", "stabilize")
     QUAD_PATH_FIELD_NUMBER: _ClassVar[int]
     SEED_FIELD_NUMBER: _ClassVar[int]
     MODE_FIELD_NUMBER: _ClassVar[int]
@@ -116,6 +116,7 @@ class LoadRequest(_message.Message):
     OVERRUN_POLICY_FIELD_NUMBER: _ClassVar[int]
     KEEP_ALIVE_FIELD_NUMBER: _ClassVar[int]
     WORLD_PATH_FIELD_NUMBER: _ClassVar[int]
+    STABILIZE_FIELD_NUMBER: _ClassVar[int]
     quad_path: str
     seed: int
     mode: Mode
@@ -123,7 +124,8 @@ class LoadRequest(_message.Message):
     overrun_policy: OverrunPolicy
     keep_alive: bool
     world_path: str
-    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ..., world_path: _Optional[str] = ...) -> None: ...
+    stabilize: bool
+    def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ..., world_path: _Optional[str] = ..., stabilize: _Optional[bool] = ...) -> None: ...
 
 class LoadReply(_message.Message):
     __slots__ = ("quad_name", "base_hz", "configurator_address")

@@ -89,5 +89,6 @@ for event in sim.events():
         print(event.time_s, event.message)
 ```
 
-Flying the course needs a pilot or a script that can steer: under Betaflight, or with the open-loop stabilizer when
-that lands. An open-loop session without a stabilizer cannot hold a path.
+Flying the course needs a pilot or a script that can steer: under Betaflight, or on the open-loop stabilizer
+(`load(..., open_loop_fc=True, stabilize=True)`). A plain open-loop session cannot hold a path.
+`docs/scripted-flight.md` describes a scripted pilot that flies a closed circuit through four gates this way.

@@ -25,6 +25,9 @@ What is in it:
   fails safe on a real RX loss (M3c, `docs/research/collision.md` and `docs/research/elrs-link.md`).
 - A world can declare a race course: `[[gates]]` in the world file, with split and lap timing as events, a `race` block
   in the state and a lap line on the HUD (M8a, `docs/race-timing.md`; `worlds/flat.toml` has three gates).
+- A Python script can fly a path: an opt-in angle-mode stabilizer for open-loop sessions (a test stand-in, not
+  Betaflight) and a scripted pilot that flies a lap through the four gates of `worlds/circuit.toml` on it and on real
+  Betaflight (M8b, `docs/scripted-flight.md`).
 - The FC's own telemetry rides the simulated link home: the HUD's battery line shows Betaflight's own voltage,
   current and flight mode (and dashes out at link loss), and the simulator's per-motor eRPMs feed Betaflight's
   RPM filter (M3d, `docs/research/elrs-link.md`).

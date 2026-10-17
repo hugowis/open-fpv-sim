@@ -268,7 +268,11 @@ impl Sim for SimService {
             let path = ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path));
             ofs_config::world::load(&path).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
         };
-        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override: req.open_loop_fc.then_some(FcKind::OpenLoop), world };
+        if req.stabilize && !req.open_loop_fc {
+            return Err(error("invalid_argument", Code::InvalidArgument, "stabilize needs open_loop_fc"));
+        }
+        let fc_override = req.open_loop_fc.then_some(if req.stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
+        let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override, world };
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
         let sitl = opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl;
@@ -280,13 +284,16 @@ impl Sim for SimService {
             world_file.as_deref(),
             std::env::var("OFS_LIBRARY").ok().as_deref(),
             req.seed,
-            opts.fc_override == Some(FcKind::OpenLoop),
+            req.open_loop_fc,
             mode == RunMode::Realtime,
             self.logs_dir(),
             sitl.then(|| vehicle::firmware_dir(&self.data_dir, &cfg.source_path)),
         )
         .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
         .ok();
+        if let Some(r) = repro.as_mut() {
+            r.stabilize = req.stabilize;
+        }
         self.blocking(move |shared, slot| {
             end_session(shared, slot); // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
