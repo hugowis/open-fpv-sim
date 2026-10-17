@@ -143,6 +143,41 @@ fn windmill_j0_must_not_be_negative() {
 }
 
 /// The shipped frame part with a `[frame.fc_mount]` table (and its provenance) appended.
+#[test]
+fn windmill_j0_must_not_be_tiny() {
+    let fields_for = |value: &str| -> Option<Vec<String>> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_quad(dir.path(), &quad_text());
+        write_part(dir.path(), "props", "opendrone-5in-prop", &part_text("props", "opendrone-5in-prop").replace("windmill_j0 = 1.0", &format!("windmill_j0 = {value}")));
+        match load(&path) {
+            Ok(_) => None,
+            Err(ConfigError::Invalid { problems, .. }) => Some(problems.into_iter().map(|p| p.field).collect()),
+            Err(e) => panic!("{e}"),
+        }
+    };
+    // A windmilling rotor settles at n = inflow / (j0 D): a small j0 is a runaway rotor.
+    for tiny in ["0.01", "0.15"] {
+        let fields = fields_for(tiny).unwrap_or_else(|| panic!("{tiny} is a runaway rotor and must be refused"));
+        assert!(fields.iter().any(|f| f.ends_with("windmill_j0")), "{fields:?}");
+    }
+    assert!(fields_for("0.2").is_none(), "about half the pitch/diameter of the flattest real prop is the floor");
+    assert!(fields_for("0.0").is_none(), "0 turns windmilling off");
+    assert!(fields_for("1.0").is_none(), "the shipped value");
+}
+
+#[test]
+fn an_aged_pack_may_not_exceed_ten_times_the_resistance() {
+    let load_aged = |growth: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_quad(dir.path(), &quad_text());
+        write_part(dir.path(), "batteries", "opendrone-6s-1300", &battery_part_with(&[("cycles", "100"), ("resistance_growth_per_cycle", growth)]));
+        load(&path)
+    };
+    let ConfigError::Invalid { problems, .. } = load_aged("0.1").unwrap_err() else { panic!("expected Invalid") };
+    assert!(problems.iter().any(|p| p.field == "battery.resistance_growth_per_cycle"), "{problems:?}");
+    assert!(load_aged("0.05").is_ok(), "a factor of 6 is a very tired pack, not an error");
+}
+
 fn frame_with_mount(natural_hz: f64, damping_ratio: f64) -> String {
     format!(
         "{}\n[frame.fc_mount]\nnatural_hz = {natural_hz:?}\ndamping_ratio = {damping_ratio:?}\n\

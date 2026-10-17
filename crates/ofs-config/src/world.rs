@@ -329,18 +329,19 @@ impl WorldConfig {
         );
         let v = &self.video;
         let snrs = [
-            v.clean_snr_db,
-            v.sparkle_snr_db,
-            v.sparkle_full_snr_db,
-            v.color_fade_snr_db,
-            v.color_lost_snr_db,
-            v.unstable_snr_db,
-            v.lost_snr_db,
-            v.field_drop_p_max,
+            ("clean_snr_db", v.clean_snr_db),
+            ("sparkle_snr_db", v.sparkle_snr_db),
+            ("sparkle_full_snr_db", v.sparkle_full_snr_db),
+            ("color_fade_snr_db", v.color_fade_snr_db),
+            ("color_lost_snr_db", v.color_lost_snr_db),
+            ("unstable_snr_db", v.unstable_snr_db),
+            ("lost_snr_db", v.lost_snr_db),
+            ("field_drop_p_max", v.field_drop_p_max),
         ];
-        if !finite(&snrs) {
-            c.check(false, "video", "every threshold must be finite");
-        } else {
+        for (name, value) in snrs {
+            c.check(value.is_finite(), &format!("video.{name}"), format!("must be finite (got {value})"));
+        }
+        if snrs.iter().all(|(_, value)| value.is_finite()) {
             c.check(v.sparkle_snr_db > 0.0, "video.sparkle_snr_db", "must be > 0 (grain's second ramp runs from here down to 0 dB)");
             c.check(v.clean_snr_db > v.sparkle_snr_db, "video.clean_snr_db", "must be greater than sparkle_snr_db");
             c.check(v.sparkle_snr_db > v.sparkle_full_snr_db, "video.sparkle_snr_db", "must be greater than sparkle_full_snr_db");
