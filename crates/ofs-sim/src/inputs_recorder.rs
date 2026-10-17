@@ -31,21 +31,28 @@ pub struct InputsRecorder {
     pending: Option<(u64, [f64; 8])>,
     /// The last values seen (written or pending): setting the sticks to the same values adds no row.
     last: Option<[f64; 8]>,
+    /// The values of the newest row actually written: a same-tick change that returns to them leaves no row at all.
+    committed: Option<[f64; 8]>,
     rows: u64,
     last_row_ticks: u64,
     failure: Option<String>,
 }
 
 /// The eight values of a row (roll, pitch, yaw, throttle, aux1..4), clamped to the ranges `play_inputs` accepts
-/// (throttle [0, 1], every other stick [-1, 1]); `None` when any is not finite (such a value never reaches the file).
-fn values_of(s: &Sticks) -> Option<[f64; 8]> {
-    let raw = [s.roll, s.pitch, s.yaw, s.throttle, s.aux[0], s.aux[1], s.aux[2], s.aux[3]];
-    if raw.iter().any(|v| !v.is_finite()) {
-        return None;
+/// (throttle [0, 1], every other stick [-1, 1]). A value that is not finite (`Vehicle::set_sticks` refuses those, so
+/// none normally gets here) is written as that field's neutral value, so a recording always has its first row.
+fn values_of(s: &Sticks) -> [f64; 8] {
+    let neutral = Sticks::default();
+    let pick = |v: f64, n: f64| if v.is_finite() { v } else { n };
+    let clean = Sticks {
+        roll: pick(s.roll, neutral.roll),
+        pitch: pick(s.pitch, neutral.pitch),
+        yaw: pick(s.yaw, neutral.yaw),
+        throttle: pick(s.throttle, neutral.throttle),
+        aux: [0, 1, 2, 3].map(|i| pick(s.aux[i], neutral.aux[i])),
     }
-    let mut v = raw.map(|x| x.clamp(-1.0, 1.0));
-    v[3] = raw[3].clamp(0.0, 1.0);
-    Some(v)
+    .clamped();
+    [clean.roll, clean.pitch, clean.yaw, clean.throttle, clean.aux[0], clean.aux[1], clean.aux[2], clean.aux[3]]
 }
 
 impl InputsRecorder {
@@ -67,21 +74,27 @@ impl InputsRecorder {
     ) -> Result<Self, RecordError> {
         writeln!(out, "{HEADER}").map_err(|e| RecordError::Io(format!("{}: {e}", path.display())))?;
         let mut recorder =
-            Self { out, path: path.to_owned(), base_hz, start_tick: tick, pending: None, last: None, rows: 0, last_row_ticks: 0, failure: None };
+            Self { out, path: path.to_owned(), base_hz, start_tick: tick, pending: None, last: None, committed: None, rows: 0, last_row_ticks: 0, failure: None };
         recorder.record(tick, sticks);
         Ok(recorder)
     }
 
     /// Notes the sticks as set at `tick`: a new row when they differ from the last values seen.
     pub fn record(&mut self, tick: u64, sticks: &Sticks) {
-        let Some(values) = values_of(sticks) else { return };
+        let values = values_of(sticks);
         if self.last == Some(values) {
             return;
         }
         self.last = Some(values);
         let since_start = tick.saturating_sub(self.start_tick);
         match &mut self.pending {
-            Some((t, v)) if *t == since_start => *v = values,
+            Some((t, v)) if *t == since_start => {
+                *v = values;
+                // A change that came back to the row already written within the same tick says nothing new.
+                if self.committed == Some(values) {
+                    self.pending = None;
+                }
+            }
             _ => {
                 self.write_pending();
                 self.pending = Some((since_start, values));
@@ -100,6 +113,7 @@ impl InputsRecorder {
             Ok(()) => {
                 self.rows += 1;
                 self.last_row_ticks = ticks;
+                self.committed = Some(values);
             }
             Err(e) => self.failure = Some(format!("{}: {e}", self.path.display())),
         }
@@ -173,6 +187,32 @@ pub(crate) mod tests {
     fn recorder_dying_after_the_header() -> InputsRecorder {
         let out = Faulty { budget: HEADER.len() + 1, flush_fails: true };
         InputsRecorder::over(Box::new(out), 0, 500, 0, &sticks(0.1)).unwrap()
+    }
+
+    fn rows(path: &Path) -> Vec<String> {
+        std::fs::read_to_string(path).unwrap().lines().skip(1).map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_change_reverted_in_the_same_tick_writes_no_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.csv");
+        let mut r = InputsRecorder::start(&path, 500, 0, &sticks(0.1)).unwrap();
+        r.record(10, &sticks(0.5));
+        r.record(10, &sticks(0.1)); // back to what was last written, in the same tick
+        r.record(20, &sticks(0.2));
+        let summary = r.finish().unwrap();
+        assert_eq!(summary.rows, 2, "{:?}", rows(&path));
+        assert_eq!(rows(&path), ["0,0,0,0,0.1,-1,-1,-1,-1", "0.04,0,0,0,0.2,-1,-1,-1,-1"]);
+    }
+
+    #[test]
+    fn a_recording_started_on_a_non_finite_stick_still_has_its_first_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.csv");
+        let r = InputsRecorder::start(&path, 500, 0, &Sticks { throttle: f64::NAN, ..Sticks::default() }).unwrap();
+        r.finish().unwrap();
+        assert_eq!(rows(&path), ["0,0,0,0,0,-1,-1,-1,-1"], "the neutral value stands in for the stick that is not a number");
     }
 
     #[test]
