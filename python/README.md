@@ -7,7 +7,9 @@ that runs **real Betaflight** (SITL) against physics, electrical, sensor, radio 
 
 The package is the client (`import ofs`). It drives an `ofs-sim` server, which you build from the repository
 (`cargo build -p ofs-sim`) and point at with `OFS_SIM_BIN`; flying real Betaflight also needs the SITL build
-described in the repository's `docs/dev-setup.md`.
+described in the repository's `docs/dev-setup.md`. Build the server from the tag that matches this package version
+(`git checkout v<version>`, the version `pip show open-fpv-sim` prints): a client and a server of different releases
+speak different protocols and are refused at the handshake.
 
     import ofs
 

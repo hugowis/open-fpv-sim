@@ -1,8 +1,10 @@
 """The release's version lives in three places and its notes in one: they must not drift apart (the publish job only
 checks the tag against pyproject.toml, so a stale Cargo.toml would ship a server that says another version)."""
-import tomllib
+import pytest
 
 from conftest import REPO
+
+tomllib = pytest.importorskip("tomllib", reason="tomllib is in the standard library from Python 3.11")
 
 
 def _workspace_version():

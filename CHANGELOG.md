@@ -31,15 +31,31 @@ race timing and made flights scriptable.
 
 **Upgrading from 0.1.0**
 - The gRPC protocol is version 12 (0.1.0 spoke 9): a 0.1.0 client or server is refused at the handshake, so install the
-  Python package and build `ofs-sim` from the same release.
-- Rebuild Betaflight SITL with `scripts/build-sitl.sh`: the patch changed (a reboot no longer waits on a reply nobody
-  reads).
-- Rust API: `Vehicle::set_sticks` returns a `Result` (a non-finite stick is refused; the rest is clamped).
-- Recordings differ from 0.1.0: new channels (`prop.{i}.inflow_mps`, `battery.cell.{k}.*`, `esc.{i}.temp_c`,
-  `motor.{i}.temp_c`, `vtx.temp_c`, and `race.*` in a world with gates), the pattern `battery.*` matches 16 signals on
-  the 6S pack instead of 4, and the temperatures are recorded at 100 Hz. Flights whose clockwise and counter-clockwise
-  rotors are unbalanced (a yaw input, a failed motor) differ from 0.1.0 because of gyroscopic coupling; balanced
-  flights are bit-identical. Scripts that count channels or compare recordings byte for byte need a look.
+  Python package and build `ofs-sim` from the same release (the tag `v0.2.0`).
+- Rebuild Betaflight SITL with `scripts/build-sitl.sh`: the patch changed (a client that hangs up after `MSP_REBOOT` no
+  longer wedges the reboot, and the SITL's ports bind reliably). A custom quad whose Betaflight diff failed silently
+  on first boot in 0.1.0 now fails loudly: the diff apply is judged on the config run's exit and its whole output.
+- Sticks are validated and clamped for everyone: a non-finite stick is refused, an out-of-range one is clamped to the
+  transmitter's range (sticks to [-1, 1], throttle to [0, 1]) before the bus sees it, so the `rc.*` channels of a
+  recording show the clamped values. In the Rust API `Vehicle::set_sticks` returns a `Result`, and `ofs-radio` was
+  restructured into handset, link and receiver parts (M5): code that builds a link by hand needs porting.
+- Flights differ from 0.1.0 wherever the new models act: unbalanced rotors (a yaw input, a failed motor) through
+  gyroscopic coupling, any descent through windmilling on the shipped prop, out-of-range sticks (now clamped), and
+  seeded radio runs with burst loss or ELRS 2.4 GHz at 50 Hz (a window edge and the sensitivity were fixed).
+  Recordings are not byte-identical to 0.1.0's, and the golden digests in the repository were regenerated along the way.
+  Do not expect to compare a 0.2.0 run against a stored 0.1.0 one.
+- Recordings carry new channels: `prop.{i}.inflow_mps`, `battery.cell.{k}.voltage_v` and `.soc`, the temperatures
+  `esc.{i}.temp_c`, `motor.{i}.temp_c` (100 Hz) and `vtx.temp_c`. The pattern `battery.*` now matches 16 signals on the
+  6S pack instead of 4, and `motor.*` and `esc.*` now include a 100 Hz temperature next to the 242 Hz channels, so a
+  `to_dataframe` selection that mixes them has gaps on the union time grid: `.dropna()` a column before plotting it.
+  Scripts that count channels or compare recordings byte for byte need a look.
+- The shipped `flat` world now has three gates, so a session in it (the README's `world="flat"`) has a race: `race.*`
+  channels, `State.race.present`, and `gate_passed` and `lap_completed` events once the quad flies through them. The
+  Godot game draws the gates and shows a lap line.
+- New opt-in `stabilize=True` on `load(..., open_loop_fc=True)` (a test stand-in for scripted flight, not Betaflight);
+  without it open loop is unchanged.
+- A Betaflight session that ends armed steps up to 3 more simulated seconds to disarm, so its Blackbox log is finished;
+  a running recording sees those steps.
 - The loader refuses a prop part with `windmill_j0` between 0 and 0.2 and a battery whose resistance grows more than
   tenfold.
 - Every session now keeps a 10 s tail and a journal in memory for the repro bundle (about 15 MB for the shipped quad,
