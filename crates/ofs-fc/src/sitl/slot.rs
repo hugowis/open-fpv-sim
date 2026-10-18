@@ -78,8 +78,8 @@ mod tests {
 
     const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
-    /// A port space of its own per test (the tests run in threads of one process): locks at 47_000 + 100 n and
-    /// motor ports 9_002 + 200 n + 10 slot.
+    /// A port space of its own per test (the tests run in threads of one process): locks at `LOCK_PORT_BASE + 100 n`
+    /// and motor ports 9_002 + 200 n + 10 slot.
     fn space(n: u16) -> (u16, u16) {
         (LOCK_PORT_BASE + 100 * n, 200 * n)
     }
