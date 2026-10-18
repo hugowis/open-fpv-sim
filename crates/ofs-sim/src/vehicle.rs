@@ -21,7 +21,8 @@ use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
-use ofs_fc::sitl::codec::MSP_TCP_PORT;
+use ofs_fc::sitl::codec::PortMap;
+use ofs_fc::sitl::slot::SitlSlot;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
@@ -474,6 +475,10 @@ pub struct Vehicle {
     scheduler: Scheduler,
     h: Handles,
     sitl: bool,
+    /// The SITL's ports (the stock ones unless the session took another slot).
+    ports: PortMap,
+    /// The SITL's working directory (its EEPROM, logs and Blackbox files); `None` without Betaflight.
+    firmware_dir: Option<PathBuf>,
     osd: Option<OsdHandle>,
     fc_telemetry: FcTelemetryHandle,
     world: WorldConfig,
@@ -525,6 +530,17 @@ pub fn firmware_dir(data_dir: &Path, quad_path: &Path) -> PathBuf {
     let stem = quad_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
     let hash = fnv1a64(full.to_string_lossy().as_bytes()) as u32;
     data_dir.join(format!("{stem}-{hash:08x}"))
+}
+
+/// The firmware directory of slot `slot` (see `ofs_fc::sitl::slot`): slot 0, the first simulator on the machine, uses
+/// `base` as always; slot n > 0 uses the sibling `<name>-s<n>`, so two live SITLs never share an EEPROM, log or
+/// Blackbox file. The sibling starts empty: its first boot applies the quad's diff like any new directory.
+pub fn slot_firmware_dir(base: &Path, slot: u16) -> PathBuf {
+    if slot == 0 {
+        return base.to_path_buf();
+    }
+    let name = base.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "quad".into());
+    base.with_file_name(format!("{name}-s{slot}"))
 }
 
 /// The eight stick values of the journal, as bit patterns (so NaN compares equal to itself).
@@ -861,6 +877,13 @@ pub fn drivetrain_params(cfg: &QuadConfig, i: usize) -> Drivetrain {
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
+    build_seeded(cfg, opts, None)
+}
+
+/// As [`build`]; with `seed_firmware` (a repro bundle's `firmware` folder), a SITL quad's firmware state files
+/// ([`crate::repro::FIRMWARE_STATE`]) are copied into the directory of the slot the session takes before SITL
+/// boots, so a replay starts from the bundle's EEPROM whichever slot is free.
+pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option<&Path>) -> Result<Vehicle, SimError> {
     let mut bus = Bus::new();
     let n = cfg.frame.motor_positions_frd_m.len();
     let base_hz = cfg.sim.base_hz;
@@ -954,6 +977,8 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
     let mut osd: Option<OsdHandle> = None;
+    let mut ports = PortMap::default();
+    let mut sitl_firmware_dir: Option<PathBuf> = None;
     match fc_kind {
         FcKind::OpenLoop | FcKind::OpenLoopStabilized => {
             if fc_kind == FcKind::OpenLoopStabilized {
@@ -968,26 +993,43 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         }
         FcKind::Sitl => {
             let video = video_devices(cfg, n, fc_divisor, &mut bus)?;
-            let launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
-            let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
-            if cleanup.is_empty() {
-                cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6)
-            }
+            let mut launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
             let sitl_net = net::resolve(&launch_argv, env_ip("OFS_SITL_HOST")?, env_ip("OFS_SITL_REPLY_IP")?)
                 .map_err(|e| SimError::Firmware(e.to_string()))?;
+            // The first free slot of the machine: its ports, its firmware directory, its cleanup (several simulators
+            // can run side by side; the first one gets the stock ports and directory).
+            let slot = SitlSlot::acquire(sitl_net.bind_ip).map_err(|e| SimError::Firmware(e.to_string()))?;
+            ports = slot.ports;
+            launch_argv = net::with_port_offset(&launch_argv, ports.offset); // whatever the user wrote is the slot's to set
+            let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
+            if cleanup.is_empty() {
+                cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6); only this slot's SITL
+            }
+            let workdir = slot_firmware_dir(&firmware_dir(&opts.data_dir, &cfg.source_path), slot.index);
+            sitl_firmware_dir = Some(workdir.clone());
+            if let Some(from) = seed_firmware {
+                std::fs::create_dir_all(&workdir).map_err(|e| SimError::Firmware(format!("{}: {e}", workdir.display())))?;
+                for name in crate::repro::FIRMWARE_STATE {
+                    let file = from.join(name);
+                    if file.is_file() {
+                        std::fs::copy(&file, workdir.join(name)).map_err(|e| SimError::Firmware(format!("copying {}: {e}", file.display())))?;
+                    }
+                }
+            }
             let launch = LaunchConfig {
                 launch: launch_argv,
                 cleanup,
-                workdir: firmware_dir(&opts.data_dir, &cfg.source_path),
+                workdir,
                 diff_file: cfg.resolve(&cfg.fc.betaflight_diff),
                 startup_timeout: Duration::from_millis(cfg.fc.startup_timeout_ms),
             };
             let mut serial = vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }];
             serial.extend(video.serial);
-            let bridge = SitlBridge::start(
+            let bridge = SitlBridge::start_in_slot(
                 BridgeConfig {
                     launch,
                     net: sitl_net,
+                    ports,
                     rate_divisor: fc_divisor,
                     first_reply_timeout: Duration::from_millis(cfg.fc.first_reply_timeout_ms),
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
@@ -1002,6 +1044,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                         taps
                     },
                 },
+                slot,
                 &mut bus,
             )
             .map_err(|e| SimError::Firmware(e.to_string()))?;
@@ -1045,6 +1088,8 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         scheduler,
         h,
         sitl: fc_kind == FcKind::Sitl,
+        ports,
+        firmware_dir: sitl_firmware_dir,
         osd,
         fc_telemetry,
         world: opts.world.clone(),
@@ -1471,7 +1516,12 @@ impl Vehicle {
 
     /// Where Betaflight Configurator can connect (SITL's MSP UART), when this vehicle runs Betaflight SITL.
     pub fn configurator_address(&self) -> Option<String> {
-        self.sitl.then(|| format!("tcp://127.0.0.1:{MSP_TCP_PORT}"))
+        self.sitl.then(|| self.ports.configurator_address())
+    }
+
+    /// The directory Betaflight SITL runs in (EEPROM, `sitl.log`, Blackbox logs) when this vehicle runs Betaflight.
+    pub fn firmware_dir(&self) -> Option<PathBuf> {
+        self.firmware_dir.clone()
     }
 
     /// The latest OSD frame, when the quad has an `[osd]` section and runs Betaflight.

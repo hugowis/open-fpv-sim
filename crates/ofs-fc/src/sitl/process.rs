@@ -452,7 +452,7 @@ pub fn port_holders(_port: u16) -> Vec<String> {
     Vec::new()
 }
 
-pub(crate) fn run_cleanup(argv: &[String]) {
+pub fn run_cleanup(argv: &[String]) {
     if let Some((program, args)) = argv.split_first() {
         let _ = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
@@ -479,23 +479,30 @@ const CLEANUP_TERM_GRACE: Duration = Duration::from_millis(300);
 #[cfg(target_os = "linux")]
 const CLEANUP_KILL_GRACE: Duration = Duration::from_secs(1);
 
-/// The victims' view from inside the WSL VM, where the Windows host cannot read /proc: wait for the last
-/// `betaflight_SITL` to be gone — a zombie holds no ports, but `pgrep` matches it, so init's reap ends the wait —
-/// escalating to SIGKILL after [`CLEANUP_TERM_GRACE`], then report what was seen as `seen=<n> escalated=<0|1>
-/// ms=<t>` for [`await_cleanup`] to parse.
-const WSL_WAIT_SCRIPT: &str = "\
-pkill -0 -x betaflight_SITL 2>/dev/null || { echo 'seen=0 escalated=0 ms=0'; exit 0; }
+/// The victims' view from inside the WSL VM, where the Windows host cannot read /proc: wait for the last victim to be
+/// gone — a zombie holds no ports, but `pgrep` matches it, so init's reap ends the wait — escalating to SIGKILL
+/// after [`CLEANUP_TERM_GRACE`], then report what was seen as `seen=<n> escalated=<0|1> ms=<t>` for
+/// [`await_cleanup`] to parse. The victims are chosen by the script's arguments (never spliced into its text):
+/// `$1` is `x` for every process named `betaflight_SITL`, or `s` for the processes of the slot whose
+/// `--port-offset` is `$2` (see [`net::slot_pids_sh`]).
+pub const WSL_WAIT_SCRIPT: &str = concat!(
+    net::slot_pids_sh!(),
+    "\
+live() { if [ \"$1\" = s ]; then [ -n \"$(slot_pids \"$2\")\" ]; else pkill -0 -x betaflight_SITL 2>/dev/null; fi; }
+slay() { if [ \"$1\" = s ]; then pids=$(slot_pids \"$2\"); [ -z \"$pids\" ] || kill -9 $pids 2>/dev/null; else pkill -9 -x betaflight_SITL 2>/dev/null; fi; }
+live \"$@\" || { echo 'seen=0 escalated=0 ms=0'; exit 0; }
 t0=$(date +%s%N)
-i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
+i=0; while live \"$@\" && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
 esc=0
-if pkill -0 -x betaflight_SITL 2>/dev/null; then
-  pkill -9 -x betaflight_SITL 2>/dev/null
+if live \"$@\"; then
+  slay \"$@\"
   esc=1
-  i=0; while pkill -0 -x betaflight_SITL 2>/dev/null && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
+  i=0; while live \"$@\" && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
 fi
 t1=$(date +%s%N)
 echo \"seen=1 escalated=$esc ms=$(( (t1-t0)/1000000 ))\"
-exit 0";
+exit 0"
+);
 
 /// Waits for the cleanup's victims to actually die before a new SITL binds. The `pkill` in the cleanup only
 /// *signals* them, and their sockets close one by one during teardown, so a launch that immediately follows can
@@ -506,16 +513,24 @@ exit 0";
 /// wait runs there too; on plain Windows there is nothing to wait for. Returns what was seen, so a recurrence
 /// of the flake says whether a victim existed at launch at all.
 pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
+    let scope = net::port_offset_in(launch);
     if let Some(prefix) = net::wsl_prefix(launch) {
         let mut argv = prefix;
-        argv.extend(["sh", "-c", WSL_WAIT_SCRIPT].map(String::from));
+        argv.extend(["sh", "-c", WSL_WAIT_SCRIPT, "sh"].map(String::from));
+        match scope {
+            Some(offset) => argv.extend(["s".to_string(), offset.to_string()]),
+            None => argv.push("x".to_string()),
+        }
         let output = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output();
         return parse_wait_output(output.ok().map(|o| o.stdout).unwrap_or_default());
     }
     #[cfg(target_os = "linux")]
-    return await_cleanup_native();
+    return await_cleanup_native(scope);
     #[cfg(not(target_os = "linux"))]
-    AwaitCleanup::NONE
+    {
+        let _ = scope;
+        AwaitCleanup::NONE
+    }
 }
 
 /// Reads the WSL wait script's `seen=<n> escalated=<0|1> ms=<t>` line; anything unreadable is the no-victim case
@@ -534,17 +549,19 @@ fn parse_wait_output(stdout: Vec<u8>) -> AwaitCleanup {
     AwaitCleanup { victims_seen: seen, escalated, waited_ms: ms }
 }
 
-/// The native-Linux half of [`await_cleanup`]: poll /proc for live `betaflight_SITL` processes.
+/// The native-Linux half of [`await_cleanup`]: poll /proc for live victims: every `betaflight_SITL` process, or
+/// with a `scope` (a slot's `--port-offset`) only that slot's.
 #[cfg(target_os = "linux")]
-fn await_cleanup_native() -> AwaitCleanup {
-    let first = live_victims_count();
+fn await_cleanup_native(scope: Option<u16>) -> AwaitCleanup {
+    let first = live_victims(scope).len() as u32;
     if first == 0 {
         return AwaitCleanup::NONE;
     }
     let started = Instant::now();
     let mut escalated = false;
     loop {
-        if live_victims_count() == 0 {
+        let alive = live_victims(scope);
+        if alive.is_empty() {
             return AwaitCleanup {
                 victims_seen: first,
                 escalated,
@@ -552,7 +569,7 @@ fn await_cleanup_native() -> AwaitCleanup {
             };
         }
         if !escalated && started.elapsed() >= CLEANUP_TERM_GRACE {
-            let _ = Command::new("pkill").args(["-9", "-x", net::SITL_PROCESS_NAME]).status();
+            let _ = Command::new("kill").arg("-9").args(alive.iter().map(u32::to_string)).stdin(Stdio::null()).stderr(Stdio::null()).status();
             escalated = true;
         }
         if started.elapsed() >= CLEANUP_TERM_GRACE + CLEANUP_KILL_GRACE {
@@ -566,24 +583,33 @@ fn await_cleanup_native() -> AwaitCleanup {
     }
 }
 
-/// The number of live `betaflight_SITL` processes (a zombie holds no ports and does not count).
+/// The pids of the live victims: processes named `betaflight_SITL`, with a `scope` only those of that slot
+/// ([`net::is_victim`]; a zombie holds no ports and does not count).
 #[cfg(target_os = "linux")]
-fn live_victims_count() -> u32 {
-    let mut count = 0u32;
+fn live_victims(scope: Option<u16>) -> Vec<u32> {
+    let mut pids = Vec::new();
     for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Some(_) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
         let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else { continue };
         if comm.trim() != net::SITL_PROCESS_NAME {
             continue;
+        }
+        if let Some(offset) = scope {
+            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else { continue };
+            let text = String::from_utf8_lossy(&cmdline);
+            let args: Vec<&str> = text.split('\0').filter(|a| !a.is_empty()).collect();
+            if !net::is_victim(&args, offset) {
+                continue;
+            }
         }
         let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
         let Some((_, rest)) = stat.rsplit_once(')') else { continue };
         if rest.trim_start().starts_with('Z') {
             continue;
         }
-        count += 1;
+        pids.push(pid);
     }
-    count
+    pids
 }
 
 #[cfg(all(test, target_os = "linux"))]

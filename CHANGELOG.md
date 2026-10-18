@@ -5,7 +5,27 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
-Nothing yet.
+### M9a: parallel SITL sessions
+#### Added
+- **Several Betaflight sessions on one machine (#15).** Each simulator process takes the first free *slot*, a block of
+  ten ports: the first session has the stock ports and the Configurator address `tcp://127.0.0.1:5761`, the next
+  `5771` (UDP 9011 to 9014), and so on up to 16. The patched SITL takes `--port-offset N` (0 to 1000), the simulator
+  claims a slot by holding sockets the OS releases on any exit, and a session in slot n > 0 uses its own firmware
+  directory (`<quad>-<hash>-s<n>`). `LoadReply.configurator_address` says which address a session got.
+- `PortMap` and `SitlSlot` in `ofs-fc`, `Vehicle::firmware_dir()` and `slot_firmware_dir` in `ofs-sim`, and the tests
+  `python/tests/test_sitl_parallel.py` (two `ofs.launch()` sessions flying Betaflight at once, one closing while the
+  other flies) and, in `ofs-sim`, `a_second_session_gets_its_own_slot_and_both_fly`.
+#### Changed
+- **The stray-SITL cleanup is scoped to the session's slot.** The default cleanup, the wait for its victims and the
+  SIGKILL escalation used to match every `betaflight_SITL` on the machine by name, so a second session would have killed
+  the first; they now match only processes named `betaflight_SITL` launched with the slot's `--port-offset` (slot 0
+  also takes one launched without the option, as 0.2.0 did). A `--port-offset` in `OFS_SITL_LAUNCH` or `fc.launch` is
+  replaced by the slot's. A launch argv without the option (a hand-made `OFS_SITL_LAUNCH` in a test) and an explicit
+  `OFS_SITL_CLEANUP` keep the by-name behaviour.
+- A replay (`ofs-sim --replay`) seeds the bundle's firmware into the slot it takes, so it replays exactly while another
+  session is running.
+- **Rebuild SITL** with `scripts/build-sitl.sh`: the simulator always passes `--port-offset`, so an older SITL binary
+  stops at startup with `[SITL] Unknown argument: --port-offset`.
 
 ## 0.2.0 — 2026-10-17 (phases 2 and 3)
 Milestones M5 to M8c. Phase 2 made the models more accurate and the simulator verifiable; phase 3 hardened it, added

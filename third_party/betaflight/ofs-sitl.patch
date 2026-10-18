@@ -23,10 +23,10 @@ index 236ebf9..fefc234 100644
  extern uint8_t atomic_BASEPRI;
  
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
-index a922cc7..eec9b2f 100644
+index a922cc7..919ec43 100644
 --- a/src/main/drivers/serial_tcp.c
 +++ b/src/main/drivers/serial_tcp.c
-@@ -35,6 +35,11 @@
+@@ -35,11 +35,19 @@
  
  #include "common/utils.h"
  
@@ -38,7 +38,15 @@ index a922cc7..eec9b2f 100644
  #include "io/serial.h"
  #include "serial_tcp.h"
  
-@@ -86,6 +91,40 @@ static void onAccept(dyad_Event *e)
+ #define BASE_PORT 5760
+ 
++// The SITL's --port-offset (sitl.c): the TCP UART ports shift with the UDP ones.
++extern int sitlPortOffset;
++
+ static const struct serialPortVTable tcpVTable; // Forward
+ static tcpPort_t tcpSerialPorts[SERIAL_PORT_COUNT];
+ static bool tcpPortInitialized[SERIAL_PORT_COUNT];
+@@ -86,6 +94,40 @@ static void onAccept(dyad_Event *e)
      dyad_addListener(e->remote, DYAD_EVENT_CLOSE, onClose, e->udata);
  }
  
@@ -79,7 +87,7 @@ index a922cc7..eec9b2f 100644
  static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
  {
      if (tcpPortInitialized[id]) {
-@@ -112,14 +151,37 @@ static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
+@@ -112,14 +154,37 @@ static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
      s->clientCount = 0;
      s->id = id;
      s->conn = NULL;
@@ -92,7 +100,7 @@ index a922cc7..eec9b2f 100644
 -    } else {
 -        fprintf(stderr, "bind port %u for UART%u failed!!\n", (unsigned)BASE_PORT + id + 1, (unsigned)id + 1);
 +    {
-+        const unsigned bindPort = BASE_PORT + id + 1;
++        const unsigned bindPort = BASE_PORT + (unsigned)sitlPortOffset + id + 1;
 +        const int attempts = BIND_ATTEMPTS;
 +        int attempt;
 +        int probeErrno = 0;
@@ -125,7 +133,7 @@ index a922cc7..eec9b2f 100644
      }
      return s;
  }
-@@ -232,10 +294,85 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
+@@ -232,10 +297,85 @@ static void tcpWrite(serialPort_t *instance, uint8_t ch)
      tcpDataOut(s);
  }
  
@@ -212,7 +220,7 @@ index a922cc7..eec9b2f 100644
      pthread_mutex_lock(&s->txLock);
  
      if (s->port.txBufferHead < s->port.txBufferTail) {
-@@ -255,6 +392,15 @@ void tcpDataOut(tcpPort_t *instance)
+@@ -255,6 +395,15 @@ void tcpDataOut(tcpPort_t *instance)
  void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  {
      tcpPort_t *s = (tcpPort_t *)instance;
@@ -228,7 +236,7 @@ index a922cc7..eec9b2f 100644
      pthread_mutex_lock(&s->rxLock);
  
      while (size--) {
-@@ -270,17 +416,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
+@@ -270,17 +419,66 @@ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size)
  //    printf("\n");
  }
  
@@ -480,7 +488,7 @@ index d1288e2..db34ec0 100644
          telemetry/srxl.c \
          io/displayport_oled.c
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index ee216ef..12ff706 100644
+index ee216ef..4a9e08b 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -44,6 +44,8 @@
@@ -644,7 +652,13 @@ index ee216ef..12ff706 100644
  static pthread_t tcpWorker, udpWorker, udpWorkerRC;
  static bool workerRunning = true;
  static udpLink_t stateLink, pwmLink, pwmRawLink, rcLink;
-@@ -205,6 +352,11 @@ static void gpxTrackClose(void)
+@@ -202,9 +349,17 @@ static void gpxTrackClose(void)
+ #define PORT_PWM        9002    // Out
+ #define PORT_STATE      9003    // In
+ #define PORT_RC         9004    // In
++// --port-offset N moves every port (these four UDP ports and the TCP UART ports in serial_tcp.c) up by N, so
++// several SITLs can run on one machine. The simulator gives each one a slot of ten ports.
++int sitlPortOffset = 0;
  
  int targetParseArgs(int argc, char * argv[])
  {
@@ -656,7 +670,39 @@ index ee216ef..12ff706 100644
      for (int i = 1; i < argc; i++) {
          if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
              printf("Betaflight SITL\n");
-@@ -282,6 +434,23 @@ static void updateState(const fdm_packet* pkt)
+@@ -214,6 +369,7 @@ int targetParseArgs(int argc, char * argv[])
+ #ifdef CONFIG_IN_FILE
+             printf("  --config <file>    Load CLI config file, save to EEPROM, and exit\n");
+ #endif
++            printf("  --port-offset <n>  Add n (0 to 1000) to every port: UDP %d-%d, TCP %d and up (default: 0)\n", PORT_PWM_RAW, PORT_RC, 5761);
+             printf("  --gpx              Write GPS track to sitl_track.gpx\n");
+             printf("  --help, -h         Show this help message\n");
+             exit(0);
+@@ -224,6 +380,14 @@ int targetParseArgs(int argc, char * argv[])
+         } else if (strcmp(argv[i], "--ip") == 0 && i + 1 < argc) {
+             strncpy(simulator_ip, argv[++i], sizeof(simulator_ip) - 1);
+             simulator_ip[sizeof(simulator_ip) - 1] = '\0';
++        } else if (strcmp(argv[i], "--port-offset") == 0 && i + 1 < argc) {
++            char *end = NULL;
++            long offset = strtol(argv[++i], &end, 10);
++            if (end == argv[i] || *end != '\0' || offset < 0 || offset > 1000) {
++                fprintf(stderr, "[SITL] --port-offset needs a whole number from 0 to 1000, not \"%s\"\n", argv[i]);
++                exit(1);
++            }
++            sitlPortOffset = (int)offset;
+         } else if (strcmp(argv[i], "--gpx") == 0) {
+             gpxEnabled = true;
+         } else {
+@@ -245,7 +409,7 @@ int targetParseArgs(int argc, char * argv[])
+ #endif
+ 
+     printf("[SITL] The SITL will output to IP %s:%d (Gazebo) and %s:%d (RealFlightBridge)\n",
+-           simulator_ip, PORT_PWM, simulator_ip, PORT_PWM_RAW);
++           simulator_ip, PORT_PWM + sitlPortOffset, simulator_ip, PORT_PWM_RAW + sitlPortOffset);
+     return 0;
+ }
+ 
+@@ -282,6 +446,23 @@ static void updateState(const fdm_packet* pkt)
      clock_gettime(CLOCK_MONOTONIC, &now_ts);
  
      const uint64_t realtime_now = micros64_real();
@@ -680,7 +726,7 @@ index ee216ef..12ff706 100644
      if (realtime_now > last_realtime + 500*1e3) { // 500ms timeout
          last_timestamp = pkt->timestamp;
          last_realtime = realtime_now;
-@@ -483,8 +652,13 @@ static void updateState(const fdm_packet* pkt)
+@@ -483,8 +664,13 @@ static void updateState(const fdm_packet* pkt)
  
      // Periodic status (about 1 Hz)
      static uint64_t lastDebugTimeUs = 0;
@@ -696,7 +742,7 @@ index ee216ef..12ff706 100644
  
          const armingDisableFlags_e flags = getArmingDisableFlags();
          if (flags) {
-@@ -512,6 +686,31 @@ static void updateState(const fdm_packet* pkt)
+@@ -512,6 +698,31 @@ static void updateState(const fdm_packet* pkt)
      }
  
      pthread_mutex_unlock(&updateLock); // can send PWM output now
@@ -728,7 +774,7 @@ index ee216ef..12ff706 100644
  
  #if ENABLE_SIMULATOR_GYROPID_SYNC
      pthread_mutex_unlock(&mainLoopLock); // can run main loop
-@@ -524,8 +723,31 @@ static void* udpThread(void* data)
+@@ -524,8 +735,31 @@ static void* udpThread(void* data)
      int n = 0;
  
      while (workerRunning) {
@@ -760,7 +806,7 @@ index ee216ef..12ff706 100644
              if (!fdm_received) {
                  printf("[SITL] new fdm %d t:%f from %s:%d\n", n, fdmPkt.timestamp, inet_ntoa(stateLink.recv.sin_addr), stateLink.recv.sin_port);
                  fdm_received = true;
-@@ -570,7 +792,14 @@ static void* tcpThread(void* data)
+@@ -570,7 +804,14 @@ static void* tcpThread(void* data)
      dyad_setUpdateTimeout(0.01f);
  
      while (workerRunning) {
@@ -775,7 +821,7 @@ index ee216ef..12ff706 100644
      }
  
      dyad_shutdown();
-@@ -584,6 +813,16 @@ void systemInit(void)
+@@ -584,6 +825,16 @@ void systemInit(void)
      int ret;
  
      clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -792,24 +838,50 @@ index ee216ef..12ff706 100644
      printf("[system]Init...\n");
  
      // Close the GPX track file cleanly on exit
-@@ -691,7 +930,16 @@ uint64_t millis64_real(void)
+@@ -607,17 +858,17 @@ void systemInit(void)
+         exit(1);
+     }
+ 
+-    ret = udpInit(&pwmLink, simulator_ip, PORT_PWM, false);
+-    printf("[SITL] init PwmOut UDP link to gazebo %s:%d...%d\n", simulator_ip, PORT_PWM, ret);
++    ret = udpInit(&pwmLink, simulator_ip, PORT_PWM + sitlPortOffset, false);
++    printf("[SITL] init PwmOut UDP link to gazebo %s:%d...%d\n", simulator_ip, PORT_PWM + sitlPortOffset, ret);
+ 
+-    ret = udpInit(&pwmRawLink, simulator_ip, PORT_PWM_RAW, false);
+-    printf("[SITL] init PwmOut UDP link to RF9 %s:%d...%d\n", simulator_ip, PORT_PWM_RAW, ret);
++    ret = udpInit(&pwmRawLink, simulator_ip, PORT_PWM_RAW + sitlPortOffset, false);
++    printf("[SITL] init PwmOut UDP link to RF9 %s:%d...%d\n", simulator_ip, PORT_PWM_RAW + sitlPortOffset, ret);
+ 
+-    ret = udpInit(&stateLink, NULL, PORT_STATE, true);
+-    printf("[SITL] start UDP server @%d...%d\n", PORT_STATE, ret);
++    ret = udpInit(&stateLink, NULL, PORT_STATE + sitlPortOffset, true);
++    printf("[SITL] start UDP server @%d...%d\n", PORT_STATE + sitlPortOffset, ret);
+ 
+-    ret = udpInit(&rcLink, NULL, PORT_RC, true);
+-    printf("[SITL] start UDP server for RC input @%d...%d\n", PORT_RC, ret);
++    ret = udpInit(&rcLink, NULL, PORT_RC + sitlPortOffset, true);
++    printf("[SITL] start UDP server for RC input @%d...%d\n", PORT_RC + sitlPortOffset, ret);
+ 
+     ret = pthread_create(&udpWorker, NULL, udpThread, NULL);
+     if (ret != 0) {
+@@ -691,7 +942,16 @@ uint64_t millis64_real(void)
      return 1.0e3*((ts.tv_sec + (ts.tv_nsec*1.0e-9)) - (start_time.tv_sec + (start_time.tv_nsec*1.0e-9)));
  }
  
 +#if ENABLE_SIMULATOR_EXTERNAL_TIME
- uint64_t micros64(void)
++uint64_t micros64(void)
 +{
 +    return extTimeIsValid() ? __atomic_load_n(&extTimeUs, __ATOMIC_RELAXED) : wallScaledMicros64();
 +}
 +
 +static uint64_t wallScaledMicros64(void)
 +#else
-+uint64_t micros64(void)
+ uint64_t micros64(void)
 +#endif
  {
      static uint64_t last = 0;
      static uint64_t out = 0;
-@@ -705,6 +953,11 @@ uint64_t micros64(void)
+@@ -705,6 +965,11 @@ uint64_t micros64(void)
  
  uint64_t millis64(void)
  {
@@ -821,7 +893,7 @@ index ee216ef..12ff706 100644
      static uint64_t last = 0;
      static uint64_t out = 0;
      uint64_t now = nanos64_real();
-@@ -720,6 +973,85 @@ uint32_t micros(void)
+@@ -720,6 +985,85 @@ uint32_t micros(void)
      return micros64() & 0xFFFFFFFF;
  }
  
@@ -907,7 +979,7 @@ index ee216ef..12ff706 100644
  uint32_t millis(void)
  {
      return millis64() & 0xFFFFFFFF;
-@@ -760,6 +1092,12 @@ static void microsleep(uint32_t usec)
+@@ -760,6 +1104,12 @@ static void microsleep(uint32_t usec)
  
  void delayMicroseconds(uint32_t us)
  {
@@ -920,7 +992,7 @@ index ee216ef..12ff706 100644
      microsleep(us / simRate);
  }
  
-@@ -770,6 +1108,12 @@ void delayMicroseconds_real(uint32_t us)
+@@ -770,6 +1120,12 @@ void delayMicroseconds_real(uint32_t us)
  
  void delay(uint32_t ms)
  {
@@ -933,7 +1005,7 @@ index ee216ef..12ff706 100644
      uint64_t start = millis64();
  
      while ((millis64() - start) < ms) {
-@@ -873,11 +1217,74 @@ static void pwmCompleteMotorUpdate(void)
+@@ -873,11 +1229,74 @@ static void pwmCompleteMotorUpdate(void)
      }
  
      // get one "fdm_packet" can only send one "servo_packet"!!

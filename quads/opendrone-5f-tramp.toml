@@ -37,8 +37,8 @@ yaw_deg = 0.0
 kind = "sitl"
 exchange_hz = 1000
 # Overridden by the OFS_SITL_LAUNCH / OFS_SITL_CLEANUP environment variables (space-separated argv).
-# An empty cleanup defaults to "pkill -x betaflight_SITL" on Linux, and under WSL (launch[0] = wsl.exe)
-# to "<wsl prefix> pkill -x betaflight_SITL".
+# An empty cleanup removes the stray SITL of the session's own slot (the processes named betaflight_SITL launched
+# with its --port-offset) on Linux, and under WSL (launch[0] = wsl.exe) the same inside the VM.
 launch = ["betaflight_SITL.elf"]
 cleanup = []
 betaflight_diff = "opendrone-5f-tramp.betaflight.diff"

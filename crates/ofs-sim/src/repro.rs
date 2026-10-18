@@ -9,7 +9,7 @@ use ofs_log::recorder::next_numbered_path;
 use ofs_log::tail::DEFAULT_WINDOW_S;
 
 use crate::journal::Journal;
-use crate::vehicle::{build, firmware_dir, BuildOptions, Vehicle};
+use crate::vehicle::{build_seeded, BuildOptions, Vehicle};
 
 /// Version of the folder layout (`bundle.toml`'s `format_version`).
 pub const BUNDLE_FORMAT: u32 = 1;
@@ -19,7 +19,7 @@ const SITL_LOG_TAIL_BYTES: u64 = 64 * 1024;
 
 /// The files of a firmware directory that make a Betaflight session start the same way: the EEPROM and the diff
 /// that produced it.
-const FIRMWARE_STATE: [&str; 2] = ["eeprom.bin", "betaflight.diff"];
+pub(crate) const FIRMWARE_STATE: [&str; 2] = ["eeprom.bin", "betaflight.diff"];
 
 /// What a session knows about how it was loaded: the inputs of the replay. The configuration files are read when
 /// the session loads, not when it fails, so the bundle holds what the session flew even if the files were edited
@@ -293,17 +293,9 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
 
     let fc_override = open_loop.then_some(if stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
     let opts = BuildOptions { seed, data_dir: data_dir.to_path_buf(), fc_override, world };
-    if !open_loop && cfg.fc.kind == FcKind::Sitl {
-        let fw = firmware_dir(data_dir, &cfg.source_path);
-        std::fs::create_dir_all(&fw).map_err(|e| format!("{}: {e}", fw.display()))?;
-        for name in FIRMWARE_STATE {
-            let from = bundle.join("firmware").join(name);
-            if from.is_file() {
-                std::fs::copy(&from, fw.join(name)).map_err(|e| format!("copying {}: {e}", from.display()))?;
-            }
-        }
-    }
-    let mut vehicle = build(&cfg, &opts).map_err(|e| format!("building the bundle's vehicle: {e}"))?;
+    // The bundle's firmware state goes into the directory of the SITL slot the build takes (not necessarily slot 0).
+    let mut vehicle =
+        build_seeded(&cfg, &opts, Some(&bundle.join("firmware"))).map_err(|e| format!("building the bundle's vehicle: {e}"))?;
 
     let mut failure: Option<SimError> = None;
     'entries: for entry in journal.entries() {
@@ -350,7 +342,7 @@ pub(crate) fn test_source_for(logs_dir: &Path, quad: &Path, world: Option<&Path>
 mod tests {
     use super::*;
     use crate::inputs;
-    use crate::vehicle::{Fault, Sticks};
+    use crate::vehicle::{build, Fault, Sticks};
     use ofs_config::WorldConfig;
 
     fn repo(rel: &str) -> PathBuf {

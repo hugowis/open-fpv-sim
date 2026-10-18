@@ -28,7 +28,7 @@ then run the command.
 - `OFS_SIM_BIN` — path to `ofs-sim` used by `ofs.launch()`.
 - `OFS_SITL_LAUNCH` — SITL argv, space-separated (quote a path with spaces: `"..."` or `'...'`), overrides `fc.launch` in quad files.
   Windows: `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf`. Works with WSL's default NAT networking: the bridge discovers the WSL VM and host IPs and passes `--ip` (see `docs/research/sitl-interface.md` §6).
-- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes (also when a native SITL's UDP 9003 is still held). It defaults to `pkill -x betaflight_SITL` on Linux and to `<wsl prefix> pkill -x betaflight_SITL` under WSL (required there: a stale SITL would otherwise answer instead of the new one). It matches the process name: never use `pkill -f`, which also matches the shell running it.
+- `OFS_SITL_CLEANUP` — argv run before launch and after stop to kill stray SITL processes (also when a native SITL's UDP 9003 is still held). It defaults to removing the stray SITL of the session's own slot (a small `sh` script that SIGTERMs the processes named `betaflight_SITL` launched with the slot's `--port-offset`; see "Ports and parallel sessions") on Linux, and the same inside the VM with the `<wsl prefix>` under WSL (required there: a stale SITL would otherwise answer instead of the new one). It matches the process name, never `pkill -f` on the command line, which also matches the shell running it. A command of your own, such as `pkill -x betaflight_SITL`, kills every SITL by name.
 - `OFS_SITL_HOST`, `OFS_SITL_REPLY_IP` — override the address state datagrams go to, and the address SITL replies to (`--ip`, motor socket bind).
 
 ## Godot pilot client
@@ -364,5 +364,43 @@ WSL 2, 2.32 s to 0.29 s (8.0×) and 8.33 s to 2.08 s (4.0×). The
 fast path needs message indexes and zstd or uncompressed chunks, which every recording the server writes has; other
 files fall back to the iterator.
 
-## Ports
-SITL uses fixed ports (UDP 9001–9004, TCP 5760+), so only one SITL session can run per machine and SITL tests must not run in parallel.
+## Ports and parallel sessions
+Several simulators can run Betaflight side by side on one machine (each `ofs.launch()`, or each `ofs-sim` process, is one
+session). Every SITL runs on a *slot*, a block of ten ports (SITL's `--port-offset`, which the simulator passes itself):
+
+| Slot | UDP (raw PWM, motors, state, RC) | TCP (UART1 = the Configurator's MSP, UART2…) | Configurator address |
+|---|---|---|---|
+| 0 | 9001–9004 | 5761… | `tcp://127.0.0.1:5761` |
+| 1 | 9011–9014 | 5771… | `tcp://127.0.0.1:5771` |
+| n (up to 15) | 9001 + 10 n … | 5761 + 10 n … | `tcp://127.0.0.1:` 5761 + 10 n |
+
+The first session on the machine gets slot 0, exactly the ports of earlier releases; the next one gets the first slot
+that is free. A simulator takes a slot by holding two sockets for the life of its session, a loopback UDP lock on
+`47000 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
+crashed simulator frees its slot. Something else holding those ports makes the simulator skip the slot; with all 16
+taken the load fails with an error that says so. `LoadReply.configurator_address` (Python:
+`sim.configurator_address`, the game's toast) always says which address the session got.
+
+- **The cleanup is per slot.** Before a launch and after a stop, the simulator removes stray SITL processes *of its own
+  slot* (the processes named `betaflight_SITL` whose command line carries the slot's `--port-offset`, or none at all for
+  slot 0, which is how an older simulator started it; a path with spaces is no trouble; under WSL the same, inside the
+  VM), so starting or stopping one session never kills another. `OFS_SITL_CLEANUP` still replaces it with whatever you
+  give; a command that kills every SITL by name, such as `pkill -x betaflight_SITL`, brings back the one-session-per-machine
+  rule. The simulator owns the option: a `--port-offset` written into `OFS_SITL_LAUNCH` or `fc.launch` is replaced by the
+  slot's.
+- **The firmware directory is per slot.** Slot 0 uses `<data dir>/<quad>-<hash>` as before; slot n > 0 uses
+  `<data dir>/<quad>-<hash>-s<n>`, so two live SITLs never share an EEPROM, `sitl.log` or Blackbox log. A new slot's
+  directory starts empty: its first boot applies the quad's diff like any new directory, and the first boot of a fresh
+  directory differs from later ones (compare runs from a warmed-up directory, as the hover test does). Two simulators
+  that use different data directories never collide anyway (`ofs.launch()` defaults to `.ofs-data` in the working
+  directory, so sessions started from the same folder share it and use the slot suffix).
+- **Rebuild SITL** with `scripts/build-sitl.sh`: the simulator always passes `--port-offset`, and a SITL built before this
+  option answers `[SITL] Unknown argument: --port-offset` and exits, which is reported as a startup error.
+- **Limits.** Slots are claimed on the simulator's side of the machine: a simulator on Windows and a simulator running
+  inside WSL do not see each other's locks, so both can pick slot 0, and the second one's cleanup then removes the
+  first one's SITL inside the VM (the same slot there); the first session fails later with "no motor output". Run all
+  your simulators from one side (all on Windows with `wsl.exe` launches, or all inside WSL). Each session is still one
+  simulator process.
+  The Rust live tests keep running one at a time (`--test-threads=1`): several of them kill every SITL by name on
+  purpose. `python/tests/test_sitl_parallel.py` and `a_second_session_gets_its_own_slot_and_both_fly` are the tests of
+  parallel sessions.

@@ -31,6 +31,70 @@ impl Rig {
     }
 }
 
+/// A SITL vehicle whose firmware directory is under `data_dir` (shared with other vehicles, as two sessions of one
+/// simulator machine share a data directory).
+fn sitl_in(data_dir: &Path) -> Vehicle {
+    assert!(std::env::var("OFS_SITL_LAUNCH").is_ok(), "set OFS_SITL_LAUNCH");
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let opts = BuildOptions { seed: 1, data_dir: data_dir.to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
+    build(&cfg, &opts).unwrap()
+}
+
+fn msp_at(address: &str) -> MspClient {
+    let port: u16 = address.rsplit(':').next().unwrap().parse().unwrap();
+    MspClient::connect(SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_secs(5)).unwrap()
+}
+
+/// A second session started while the first runs takes the next slot: its own ports, firmware directory and
+/// Configurator address, and both fly (different throttles give different motor commands) without disturbing each other.
+#[test]
+#[ignore]
+fn a_second_session_gets_its_own_slot_and_both_fly() {
+    let data = tempfile::tempdir().unwrap();
+    let mut a = sitl_in(data.path());
+    let mut b = sitl_in(data.path());
+    assert_eq!(a.configurator_address().as_deref(), Some("tcp://127.0.0.1:5761"));
+    assert_eq!(b.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"));
+    let (dir_a, dir_b) = (a.firmware_dir().unwrap(), b.firmware_dir().unwrap());
+    assert_ne!(dir_a, dir_b);
+    assert_eq!(dir_b.file_name().unwrap().to_string_lossy(), format!("{}-s1", dir_a.file_name().unwrap().to_string_lossy()));
+    for v in [&mut a, &mut b] {
+        v.run_for(4.0).unwrap(); // boot and gyro calibration
+        v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+        v.run_for(1.0).unwrap();
+        assert!(armed(v), "never armed: {:?}", v.state().motor_cmd);
+    }
+    a.set_sticks(&Sticks { throttle: 0.6, aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+    b.set_sticks(&Sticks { throttle: 0.4, aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+    for _ in 0..100 {
+        a.run_for(0.01).unwrap();
+        b.run_for(0.01).unwrap();
+    }
+    let (ma, mb) = (a.state().motor_cmd[0], b.state().motor_cmd[0]);
+    assert!(ma > mb + 0.05, "each session follows its own sticks: A {ma:.3}, B {mb:.3}");
+    assert_eq!((a.state().fc_restarts, b.state().fc_restarts), (0, 0));
+    // Each Betaflight answers on its own MSP port.
+    let (addr_a, addr_b) = (a.configurator_address().unwrap(), b.configurator_address().unwrap());
+    let reply_a = msp_at(&addr_a).request(MSP_API_VERSION, &[], 500, || a.run_for(0.01)).unwrap();
+    let reply_b = msp_at(&addr_b).request(MSP_API_VERSION, &[], 500, || b.run_for(0.01)).unwrap();
+    assert_eq!((api_version(&reply_a).map(|v| v.1), api_version(&reply_b).map(|v| v.1)), (Some(1), Some(1)));
+}
+
+/// A finished session frees its slot: the next one takes the lowest free slot, not a higher one.
+#[test]
+#[ignore]
+fn dropping_the_first_session_lets_the_next_take_slot_zero_again() {
+    let data = tempfile::tempdir().unwrap();
+    let first = sitl_in(data.path());
+    let second = sitl_in(data.path());
+    assert_eq!(second.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"));
+    drop(first);
+    let third = sitl_in(data.path());
+    assert_eq!(third.configurator_address().as_deref(), Some("tcp://127.0.0.1:5761"), "slot 0 was free again");
+    drop(second);
+    drop(third);
+}
+
 fn msp() -> MspClient {
     MspClient::connect(SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT)), Duration::from_secs(5)).unwrap()
 }
@@ -282,10 +346,10 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
     assert!(!outcome.reproduced && outcome.failure.is_none(), "{outcome:?}");
 }
 
-#[test]
-#[ignore]
-fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
-    use ofs_sim::repro::{replay, snapshot_firmware, write_bundle, BundleSource};
+/// A bundle written from a SITL session that has flown for two seconds, with the session already gone (so SITL is
+/// stopped and its slot free). The directory holding the bundle is returned to keep it alive.
+fn a_bundle_of_a_flown_session() -> (std::path::PathBuf, tempfile::TempDir) {
+    use ofs_sim::repro::{snapshot_firmware, write_bundle, BundleSource};
     let mut rig = Rig::new();
     let data_dir = rig._dir.path().to_path_buf();
     let quad = std::path::absolute(QUAD).unwrap();
@@ -301,7 +365,16 @@ fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
     for wanted in ["firmware/eeprom.bin", "firmware/betaflight.diff", "firmware/sitl.log", "tail.mcap", "journal.txt", "bundle.toml"] {
         assert!(bundle.join(wanted).is_file(), "{wanted} missing from the bundle");
     }
-    drop(rig.v); // SITL must stop before the replay starts its own
+    let Rig { v, _dir } = rig;
+    drop(v); // SITL must stop before the replay starts its own
+    (bundle, _dir)
+}
+
+#[test]
+#[ignore]
+fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
+    use ofs_sim::repro::replay;
+    let (bundle, _keep) = a_bundle_of_a_flown_session();
     let scratch = tempfile::tempdir().unwrap();
     // A crash that never happened does not recur: the replay runs the journal to the failing tick and says it did
     // not reproduce, but it must run (the bundle's EEPROM boots SITL).
@@ -309,4 +382,27 @@ fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {
     assert!(!outcome.reproduced, "{outcome:?}");
     assert!(outcome.failure.is_none(), "{outcome:?}");
     assert_eq!(outcome.reached_tick, outcome.expected_tick + 1, "{outcome:?}");
+}
+
+/// A replay in the data directory of a running simulator takes the next free slot, so its SITL runs from that slot's
+/// firmware directory: the bundle's EEPROM must be seeded there, not into the slot-0 directory the replay does not use
+/// (which would also be a directory another replay of the same bundle could be flying from).
+#[test]
+#[ignore]
+fn a_replay_beside_a_running_session_seeds_the_slot_it_takes() {
+    use ofs_sim::repro::replay;
+    let (bundle, _keep) = a_bundle_of_a_flown_session();
+    let data = tempfile::tempdir().unwrap();
+    let running = sitl_in(data.path()); // takes slot 0
+    let outcome = replay(&bundle, data.path()).unwrap();
+    assert!(!outcome.reproduced && outcome.failure.is_none(), "{outcome:?}");
+    assert_eq!(outcome.reached_tick, outcome.expected_tick + 1, "{outcome:?}");
+    // The replay's quad is the bundle's own copy, so its firmware directory is named after that path.
+    let text = std::fs::read_to_string(bundle.join("bundle.toml")).unwrap();
+    let quad = text.lines().find_map(|l| l.strip_prefix("quad = ")).expect("bundle.toml names its quad").trim_matches('"');
+    let replay_dir = ofs_sim::vehicle::firmware_dir(data.path(), &bundle.join(quad));
+    let slot_1 = ofs_sim::vehicle::slot_firmware_dir(&replay_dir, 1);
+    assert!(slot_1.join("eeprom.bin").is_file(), "the replay flew from slot 1's directory: {}", slot_1.display());
+    assert!(!replay_dir.exists(), "nothing was seeded into the slot-0 directory the replay did not use: {}", replay_dir.display());
+    drop(running);
 }
