@@ -22,6 +22,9 @@ const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
 /// How long a `config.lock` may sit untouched before a waiter removes it: a holder killed mid-apply cannot release
 /// it, and its age is the only portable sign that it died.
 const LOCK_STALE: Duration = Duration::from_secs(300);
+/// How long a waiter that saw a stale lock re-checks before removing it, so a lock created in between (a fresh
+/// holder) is never the one removed.
+const STALE_RECHECK: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -162,8 +165,7 @@ impl SitlProcess {
             if let Some(_config_lock) = lock_config(&workdir, cfg.startup_timeout)? {
                 apply_diff(cfg, &workdir)?;
             }
-        }
-        let log_path = workdir.join("sitl.log");
+        }        let log_path = workdir.join("sitl.log");
         let file = if append_log {
             let file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
             file.map(|mut f| {
@@ -302,35 +304,71 @@ fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcErro
 
 /// The first boot's serialization: `config.lock` in the workdir, held while the diff applies, so two simulators
 /// first-booting one quad's directory do not both run `--config` in it (and cannot interleave a partial EEPROM into
-/// the other's boot). `Some(file)` while holding; `None` when a holder finished first (`eeprom.bin` appeared). A
-/// lock untouched for [`LOCK_STALE`] is a holder killed mid-apply: removed so the boot can go ahead.
-fn lock_config(workdir: &Path, timeout: Duration) -> Result<Option<File>, FcError> {
+/// the other's boot). `Some(guard)` while holding; `None` when someone else did the work — either a holder that
+/// finished while we waited, or one whose `eeprom.bin` appeared between our outer check and our acquire. The file
+/// is removed when the guard drops, so a leftover lock means only a holder killed mid-apply, which the
+/// [`LOCK_STALE`] rule clears; a holder that merely exited cannot leave one behind.
+fn lock_config(workdir: &Path, timeout: Duration) -> Result<Option<ConfigLock>, FcError> {
     let path = workdir.join("config.lock");
+    let is_stale = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .is_some_and(|m| m.elapsed().unwrap_or_default() > LOCK_STALE)
+    };
     let deadline = Instant::now() + timeout;
     loop {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(file) => return Ok(Some(file)),
+        match ConfigLock::acquire(&path) {
+            Ok(guard) => {
+                // A holder can finish in the window between the caller's outer check and our acquire.
+                if workdir.join("eeprom.bin").exists() {
+                    return Ok(None);
+                }
+                return Ok(Some(guard));
+            }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e.into()),
         }
         if workdir.join("eeprom.bin").exists() {
             return Ok(None);
         }
-        if Instant::now() >= deadline {
-            return Err(FcError::Config(format!(
-                "{} has been locked for {} ms: another simulator's first boot is stuck, or a stale config.lock \
-                 survived a hard kill and is younger than {} s",
-                path.display(),
-                timeout.as_millis(),
-                LOCK_STALE.as_secs()
-            )));
-        }
-        if let Ok(meta) = std::fs::metadata(&path) {
-            if meta.modified().ok().is_some_and(|m| m.elapsed().unwrap_or_default() > LOCK_STALE) {
+        if is_stale(&path) {
+            // Double-check after a beat: a lock created in between has a fresh mtime and must not be removed.
+            std::thread::sleep(STALE_RECHECK);
+            if is_stale(&path) {
                 let _ = std::fs::remove_file(&path);
+                continue;
             }
         }
+        if Instant::now() >= deadline {
+            return Err(FcError::Config(format!(
+                "{} has been locked for {} ms: another simulator's first boot is stuck, or a leftover config.lock \
+                 survived a hard kill (deleting the file is safe when no first boot is running)",
+                path.display(),
+                timeout.as_millis()
+            )));
+        }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The held `config.lock`: dropping it closes the file and then removes it, so only a hard kill leaves the file behind.
+struct ConfigLock {
+    file: Option<File>,
+    path: PathBuf,
+}
+
+impl ConfigLock {
+    fn acquire(path: &Path) -> std::io::Result<ConfigLock> {
+        let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+        Ok(ConfigLock { file: Some(file), path: path.to_path_buf() })
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        self.file.take(); // close first: Windows refuses to remove a file that is still open
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 

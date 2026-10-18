@@ -79,7 +79,11 @@ fn a_sitl_that_rejects_the_port_offset_points_at_the_rebuild() {
     assert!(hint.contains("--port-offset") && hint.contains("scripts/build-sitl.sh"), "{hint}");
     let native = ["/opt/betaflight_SITL.elf", "--port-offset", "0"].map(String::from);
     assert!(ofs_fc::sitl::startup_hint(&native, tail).contains("scripts/build-sitl.sh"), "{hint}");
-    assert_eq!(ofs_fc::sitl::startup_hint(&["/opt/betaflight_SITL.elf"].map(String::from), tail), "", "an unscoped old binary is not this failure");
+    // The same rejection from a launch without our --port-offset is the user's own old binary: still a rebuild.
+    let unscoped = ["/opt/betaflight_SITL.elf"].map(String::from);
+    assert!(ofs_fc::sitl::startup_hint(&unscoped, tail).contains("scripts/build-sitl.sh"), "{hint}");
+    // A patched binary rejecting some other unknown option of a hand-written launch is not this failure.
+    assert_eq!(ofs_fc::sitl::startup_hint(&native, "Unknown argument: --badflag"), "");
 }
 
 #[cfg(unix)]
@@ -122,6 +126,14 @@ mod first_boot_lock {
         }
         let count = std::fs::read_to_string(dir.path().join("applied-count.txt")).unwrap();
         assert_eq!(count.lines().count(), 1, "the diff applied once, not once per racing boot");
+    }
+
+    #[test]
+    fn a_finished_first_boot_leaves_no_lock_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = first_boot(dir.path());
+        let _proc = SitlProcess::start(&cfg).unwrap();
+        assert!(!cfg.workdir.join("config.lock").exists(), "the lock is removed when the first boot ends");
     }
 
     #[test]
