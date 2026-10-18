@@ -298,7 +298,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   - A pilot client disconnecting (the `Pilot` stream) switches the radio transmitter off: Betaflight fails safe and the session keeps running.
 
 ## Firmware state
-- **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log` and any Blackbox logs.
+- **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log`, a `config.lock` held while a first boot applies the diff (removed when it ends; deleting a leftover is safe when no first boot is running) and any Blackbox logs.
 - **Diff changes:** the quad's diff is applied only on first boot, so Configurator changes persist. If the quad's diff changes later, loading fails until you delete `eeprom.bin` (which also discards Configurator changes). M4c changed both shipped diffs (`set blackbox_device = VIRTUAL`): delete the `eeprom.bin` of each quad you flew before it, once.
 - **Reboots:** a Betaflight reboot (`MSP_REBOOT`, the Configurator's Reboot, flashing) relaunches SITL from its EEPROM; `State.fc_restarts` counts them. The PID tab's Save is not a reboot (see "Betaflight Configurator" below).
 
