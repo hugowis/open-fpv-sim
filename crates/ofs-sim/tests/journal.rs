@@ -120,17 +120,5 @@ fn replaying_a_journal_reproduces_the_run() {
     assert_eq!(a.journal().entries().len(), b.journal().entries().len());
 }
 
-#[test]
-fn a_replayed_journal_sees_the_clamped_sticks() {
-    let mut a = vehicle();
-    a.set_sticks(&Sticks { throttle: 7.0, roll: 4.0, ..Sticks::default() }).unwrap();
-    a.step_ticks(4000).unwrap();
-    let mut b = vehicle();
-    for e in a.journal().entries() {
-        b.step_ticks(e.tick - b.tick()).unwrap();
-        b.replay_action(&e.action).unwrap();
-    }
-    b.step_ticks(a.tick() - b.tick()).unwrap();
-    assert_eq!(a.digest(), b.digest());
-    assert_eq!(a.state(), b.state());
-}
+// The stick clamp is pinned by `set_sticks_clamps_what_it_accepts` (open_loop_vehicle.rs), which also checks what
+// the journal carries; a replay-specific clamp test passed with the clamp removed and was deleted (PR #83's list).
