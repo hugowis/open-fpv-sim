@@ -155,8 +155,6 @@ fn io<T>(what: &str, r: std::io::Result<T>) -> Result<T, String> {
     r.map_err(|e| format!("{what}: {e}"))
 }
 
-/// Writes the bundle for `vehicle`'s failure `error` and returns its folder. A partial folder is left if a step
-/// fails (it carries no `bundle.toml`, which is written last).
 /// The FC a session actually flew, as the bundle's two flags: the load request's override, if any, wins over the
 /// quad file's kind, and the winner is what the vehicle was built with. `(open_loop_fc, stabilize)`: a true
 /// `open_loop_fc` says an open-loop FC flew (plain or with the stabilizer), a true `stabilize` says the stabilizer
@@ -169,6 +167,8 @@ pub(crate) fn effective_fc_flags(file_kind: FcKind, requested: Option<FcKind>) -
     }
 }
 
+/// Writes the bundle for `vehicle`'s failure `error` and returns its folder. A partial folder is left if a step
+/// fails (it carries no `bundle.toml`, which is written last).
 pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> Result<PathBuf, String> {
     use toml::Value;
     let stem = src.quad_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
@@ -613,8 +613,6 @@ mod tests {
         assert!(replay(dir.path(), dir.path()).unwrap_err().contains("format_version 99"));
     }
 
-    /// A bundle written by a build that still said `format_version = 1` (0.2.0 and earlier, before stabilized
-    /// sessions) must replay on this build: only layout version 2 exists beyond it, and its meaning is unchanged.
     #[test]
     fn the_bundle_flags_say_what_actually_flew() {
         use ofs_config::FcKind;
@@ -625,6 +623,8 @@ mod tests {
         assert_eq!(effective_fc_flags(FcKind::Sitl, Some(FcKind::OpenLoop)), (true, false), "a SITL quad overridden to open loop");
     }
 
+    /// A bundle written by a build that still said `format_version = 1` (0.2.0 and earlier, before stabilized
+    /// sessions) must replay on this build: only layout version 2 exists beyond it, and its meaning is unchanged.
     #[test]
     fn a_format_1_bundle_still_replays() {
         let dir = tempfile::tempdir().unwrap();
