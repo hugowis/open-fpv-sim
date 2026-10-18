@@ -85,5 +85,7 @@ armed with the throttle down before the altitude loop may raise it. A lap takes 
 - `python/tests/test_sitl_circuit.py` (the `sitl` CI job, or locally with `OFS_SITL_LAUNCH`): the same assertions on real
   Betaflight.
 
-Not covered: an IMU-fed or filtered stabilizer, altitude or position hold inside it, acro/rate mode, a stabilized Godot
-session (the game has no `stabilize` option), and any claim that its response matches a real Betaflight tune (see issue #51).
+Not covered: an IMU-fed or filtered stabilizer, altitude or position hold inside it, acro/rate mode, and any claim that
+its response matches a real Betaflight tune (see issue #51). The game has no `stabilize` option, but a quad file with
+`[fc] kind = "open_loop_stabilized"` flies stabilized in Godot just as in Python (the same gRPC path the Rust
+stabilizer test drives); there is no Godot-specific test for it.

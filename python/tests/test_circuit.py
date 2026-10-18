@@ -53,8 +53,15 @@ def test_a_missed_gate_means_no_lap(sim):
 
 def test_an_unreachable_waypoint_raises_naming_it(sim):
     _load(sim)
+    # 8 s per waypoint: the 20 m first leg takes about 4 s on a slow runner, so the raise is the far waypoint's.
     with pytest.raises(RuntimeError, match=r"waypoint 1 .*10000"):
-        _circuit_module().fly_circuit(sim, waypoints=[(20.0, 0.0), (10000.0, 0.0)], per_waypoint_s=5.0)
+        _circuit_module().fly_circuit(sim, waypoints=[(20.0, 0.0), (10000.0, 0.0)], per_waypoint_s=8.0)
+
+
+def test_a_flight_that_outlasts_max_seconds_raises_naming_the_budget(sim):
+    _load(sim)
+    with pytest.raises(RuntimeError, match=r"more than 0 s"):
+        _circuit_module().fly_circuit(sim, max_seconds=0.1)
 
 
 def test_the_circuit_is_deterministic(sim):

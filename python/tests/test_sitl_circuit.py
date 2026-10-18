@@ -23,7 +23,8 @@ def _circuit_module():
 def test_betaflight_flies_the_circuit(sim):
     circuit = _circuit_module()
     # Every load() relaunches SITL from <data_dir>/<quad stem>-<hash>/eeprom.bin, and the first-ever load also applies
-    # betaflight.diff: a warm-up load first, as test_sitl_hover does, so the flight boots from the saved EEPROM.
+    # The first load applies betaflight.diff; the second boots from the saved EEPROM, so the flown circuit is not
+    # the first boot (the same trick test_sitl_hover uses before its compared flights).
     sim.load(QUAD, seed=1, world=CIRCUIT)
     sim.run(1.0)
     sim.load(QUAD, seed=1, world=CIRCUIT)
