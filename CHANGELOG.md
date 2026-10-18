@@ -5,6 +5,20 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### M9b: native Windows SITL (experimental)
+#### Added
+- **Betaflight SITL without WSL (#67).** `scripts/build-sitl-windows.sh`, run from an MSYS2 shell, builds the pinned
+  SITL as a Windows program (`third_party/betaflight/ofs-sitl-windows.patch` on top of `ofs-sitl.patch`) and copies
+  its two Cygwin runtime DLLs beside it; set `OFS_SITL_LAUNCH` to the `.exe`. It passes the live Rust and Python SITL
+  tests and ran 2.2 to 2.6 times faster than SITL in WSL 2 in the benchmark. WSL stays the supported path: no CI job
+  builds the native one yet. `docs/research/sitl-native-windows.md` has the findings, what is left, and the sizing of a
+  DLL-free port.
+- The default stray-SITL cleanup on a plain Windows host is scoped to the session's slot (a PowerShell command; it
+  returned nothing before), and a SITL that cannot load its runtime DLLs now says so.
+#### Changed
+- Two Python test helpers (`msp_status.py`, `test_sitl_telemetry.py`) keep pumping simulated time while they wait for an
+  MSP reply instead of blocking on the socket.
+
 ### M9a: parallel SITL sessions
 #### Added
 - **Several Betaflight sessions on one machine (#15).** Each simulator process takes the first free *slot*, a block of

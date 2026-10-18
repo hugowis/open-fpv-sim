@@ -108,8 +108,8 @@ What has to happen before native Windows can be the default path (not done here)
    when the patch or the pinned Betaflight changes.
 2. **The stub file** (`win_stubs.c`): find why `--gc-sections` removes nothing on this PE target, or generate the list
    in the build script; a new Betaflight tag will add names.
-3. **Distribution**: the executable and two DLLs are built by each user; shipping a prebuilt zip (license: Betaflight is
-   GPL-3.0, the Cygwin runtime LGPL-3.0 with a linking exception) is a separate decision.
+3. **Distribution**: the executable and two DLLs are built by each user; shipping a prebuilt zip is a separate decision that
+   needs a licence check (Betaflight is GPL-3.0; the Cygwin runtime has its own terms).
 4. **The Godot game and `quads/*.toml`**: `fc.launch` is `betaflight_SITL.elf` in every quad file, so a native launch
    goes through `OFS_SITL_LAUNCH` (or a per-quad override), as WSL does today.
 5. **Determinism**: compare a native and a Linux run of the same seeded flight, and decide whether the golden-free SITL

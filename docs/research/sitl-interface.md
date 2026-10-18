@@ -213,7 +213,7 @@ OFS_SITL_LAUNCH="wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaf
 # every SITL by name instead (one session per machine): OFS_SITL_CLEANUP="wsl.exe -d Ubuntu -e pkill -x betaflight_SITL"
 ```
 
-**Native Windows build:** not attempted. No MinGW/MSYS2/clang toolchain is installed, and installing one is a machine change. The SITL code is POSIX (pthreads, `clock_gettime`, `nanosleep`, BSD sockets; dyad has a `_WIN32` path), so an MSYS2/Cygwin port is plausible future work. **WSL2 is the supported Windows path for v1.**
+**Native Windows build (M9b, issue #67):** the SITL builds and runs natively through the Cygwin-based `msys` environment of MSYS2 (`scripts/build-sitl-windows.sh`, `third_party/betaflight/ofs-sitl-windows.patch`: seven small fixes, among them a `%ld` that the Windows x64 ABI turns into a divide by zero, an IPv6-only wildcard socket and a `SO_REUSEADDR` that lets a second socket bind a busy port). It passes the live Rust and Python SITL tests and runs about 2.4 times faster than SITL in WSL 2; the findings, the sizing of a DLL-free `ucrt64` port and what is left are in `docs/research/sitl-native-windows.md`. It is experimental; **WSL2 remains the supported Windows path.**
 
 Caveats:
 - The 9p-mounted `/mnt/c` working directories work for `eeprom.bin`, logs and blackbox files.
