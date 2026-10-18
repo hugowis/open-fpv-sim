@@ -5,6 +5,15 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### B2: stabilized-session semantics
+#### Changed
+- **Repro bundles of stabilized sessions say format 2.** The layout is unchanged, but an older build now refuses such
+  a bundle ("this build reads 1") instead of replaying it throttle-only and reporting "not reproduced"; this build
+  still reads the format-1 bundles 0.2.0 and earlier wrote. The bundle also records what the session actually flew
+  (a quad file that is `open_loop_stabilized` records `stabilize = true` even when the request sent no flags).
+- Loading a quad file whose kind is `open_loop_stabilized` with `open_loop_fc = true, stabilize = false` is refused
+  (invalid argument) instead of silently flying it throttle-only.
+
 ### M9a: parallel SITL sessions
 #### Added
 - **Several Betaflight sessions on one machine (#15).** Each simulator process takes the first free *slot*, a block of
