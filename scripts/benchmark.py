@@ -81,7 +81,8 @@ def load_baseline(path, runner: str) -> tuple:
     runners = data.get("runners", {})
     if runner not in runners:
         raise ValueError(f"{path}: no baseline for runner '{runner}' (known: {', '.join(sorted(runners)) or 'none'})")
-    return float(data["min_ratio"]), {name: float(v) for name, v in runners[runner]["rows"].items()}
+    # A null row (a paste-over from an environment that could not measure it) is no baseline: the gate then says so.
+    return float(data["min_ratio"]), {name: float(v) for name, v in runners[runner]["rows"].items() if v is not None}
 
 
 def measure(sim, seconds: float, load: dict, sticks: dict) -> float:
@@ -113,11 +114,19 @@ def main(argv=None) -> int:
     parser.add_argument("--print-baseline", action="store_true", help="print the measured rows as baseline JSON and exit")
     args = parser.parse_args(argv)
 
+    if args.runner and not args.baseline:
+        parser.error("--runner needs --baseline")
+    if args.min_ratio is not None and not args.baseline:
+        parser.error("--min-ratio needs --baseline")
     baseline, min_ratio = None, 0.0
     if args.baseline:
         if not args.runner:
             parser.error("--baseline needs --runner")
-        file_ratio, baseline = load_baseline(args.baseline, args.runner)
+        try:
+            file_ratio, baseline = load_baseline(args.baseline, args.runner)
+        except ValueError as e:
+            print(f"benchmark: {e}", file=sys.stderr)
+            return 2
         min_ratio = args.min_ratio if args.min_ratio is not None else file_ratio
 
     import ofs
@@ -134,7 +143,11 @@ def main(argv=None) -> int:
         finally:
             sim.close()
     if args.print_baseline:
-        print(json.dumps({"rows": {r.name: round(r.rtf, 1) for r in rows if r.rtf is not None}}, indent=2))
+        printed = {r.name: (round(r.rtf, 1) if r.rtf is not None else None) for r in rows}
+        if any(v is None for v in printed.values()):
+            print("rows this environment could not measure print as null (set OFS_SITL_LAUNCH for the Betaflight ones); "
+                  "a baseline built from this output must drop those rows, not paste null over them", file=sys.stderr)
+        print(json.dumps({"rows": printed}, indent=2))
         return 0
     accepted = os.environ.get("OFS_BENCH_ACCEPT_SLOWER", "").strip()
     text = table(rows, baseline, min_ratio, accepted)
