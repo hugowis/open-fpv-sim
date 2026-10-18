@@ -482,6 +482,32 @@ async fn unloading_mid_recording_publishes_the_stop_event_and_finishes_the_file(
 }
 
 #[tokio::test]
+async fn unloading_mid_mcap_recording_publishes_the_stop_event() {
+    let (mut c, service) = start_with_service().await;
+    let mut events = service.subscribe();
+    load_open_loop(&mut c).await;
+    let started = c.start_recording(StartRecordingRequest::default()).await.unwrap().into_inner();
+    c.run(RunRequest { seconds: 0.2 }).await.unwrap();
+    c.unload(Empty {}).await.unwrap();
+    let got = drain(&mut events, &[EventKind::RecordingStopped]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].1.starts_with(&started.path), "{got:?}");
+    assert!(std::path::Path::new(&started.path).is_file(), "the file is finished, not half-written");
+}
+
+#[tokio::test]
+async fn loading_another_quad_mid_mcap_recording_publishes_the_stop_event() {
+    let (mut c, _service) = start_with_service().await;
+    let mut events = _service.subscribe();
+    load_open_loop(&mut c).await;
+    let started = c.start_recording(StartRecordingRequest::default()).await.unwrap().into_inner();
+    load_open_loop(&mut c).await;
+    let got = drain(&mut events, &[EventKind::RecordingStopped]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].1.starts_with(&started.path), "{got:?}");
+}
+
+#[tokio::test]
 async fn loading_another_quad_mid_recording_publishes_the_stop_event() {
     let (mut c, service) = start_with_service().await;
     let mut events = service.subscribe();
