@@ -1,7 +1,7 @@
 """Runs the quad with Betaflight SITL in real time until Ctrl+C, so Betaflight Configurator can connect.
 
 Usage (repo root): OFS_SITL_LAUNCH="<sitl launch command>" python python/examples/serve_realtime.py [quad.toml] [seconds]
-Then in Betaflight Configurator (desktop app): enable manual connection, port tcp://127.0.0.1:5761, Connect.
+Then in Betaflight Configurator (desktop app): enable manual connection, enter the address this script prints (tcp://127.0.0.1:5761 for slot 0), Connect.
 A Save on the PID tab persists the change to EEPROM without rebooting (checked by hand 2026-10-14); a reboot sent
 to the port (MSP_REBOOT or the Configurator's Reboot) makes the simulator relaunch SITL from its EEPROM, verified
 live (see docs/dev-setup.md, "Betaflight Configurator").
