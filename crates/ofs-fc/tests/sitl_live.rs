@@ -90,6 +90,32 @@ fn still_quad_exchanges_packets_and_stays_disarmed() {
     }
 }
 
+/// `--port-offset N` shifts every port SITL binds by N (UDP 9001 to 9004, TCP 5761 and up), so a second SITL can run
+/// beside the first. The process is launched alone: the printed bind lines are the evidence.
+#[test]
+#[ignore]
+fn a_sitl_launched_with_a_port_offset_binds_the_shifted_ports() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let dir = tempfile::tempdir().unwrap();
+    let mut launch = argv("OFS_SITL_LAUNCH");
+    assert!(!launch.is_empty(), "set OFS_SITL_LAUNCH");
+    launch.extend(["--port-offset".to_string(), "10".to_string()]);
+    let cleanup = net::default_cleanup(&launch);
+    let process = SitlProcess::start(&LaunchConfig {
+        launch,
+        cleanup,
+        workdir: dir.path().join("fc"),
+        diff_file: QUAD_DIFF.into(),
+        startup_timeout: Duration::from_secs(15),
+    })
+    .unwrap();
+    let log = process.log_tail();
+    for expected in ["bind port 5771 for UART1", "start UDP server @9013", "start UDP server for RC input @9014"] {
+        assert!(log.contains(expected), "{expected:?} missing from:\n{log}");
+    }
+    assert!(!log.contains("port 5761") && !log.contains("@9003"), "nothing binds the unshifted ports:\n{log}");
+}
+
 /// Writes one CRSF RC frame per step, like a receiver at 500 Hz.
 struct CrsfSource {
     uart: Wire,
