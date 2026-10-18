@@ -3,6 +3,7 @@
 ## Requirements
 - Rust stable ≥ 1.85 (`rustup`), Python ≥ 3.10.
 - Betaflight SITL: Linux, or WSL2 (Ubuntu) on Windows. Build with `bash scripts/build-sitl.sh` (see the script for env options). It applies `third_party/betaflight/ofs-sitl.patch`: lockstep time, UART bytes in the state datagram, deterministic boot.
+- Windows without WSL (experimental): build the SITL natively with MSYS2, see "Native Windows SITL" below.
 
 ## Everyday commands
 | What | Command |
@@ -286,6 +287,31 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   The second command runs every Rust test, the live ones (`sitl_live`, `vtx_live`) included.
   WSL's system Python has no grpc module: run the Python tests there through `uv` (the "Live Python tests in
   WSL" command above), or from Windows.
+
+## Native Windows SITL (experimental, no WSL)
+The pinned Betaflight SITL also builds and runs as a native Windows program, through the Cygwin-based `msys`
+environment of MSYS2 (issue #67; the findings are in `docs/research/sitl-native-windows.md`). It measured about
+2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path: nothing builds this in CI yet.
+Windows may ask whether to allow `betaflight_SITL.exe` on the network the first time it starts (it listens on its
+Betaflight ports on every interface): answer Cancel, the simulator talks to it over loopback, which is not filtered.
+
+1. Install MSYS2: `winget install --id MSYS2.MSYS2 -e`, then in an "MSYS2 MSYS" shell
+   `pacman -Syu` (twice, the first run restarts the shell) and
+   `pacman -S --needed base-devel git patch diffutils python gcc make`.
+2. From that shell, in the repository: `bash scripts/build-sitl-windows.sh` (3 to 4 minutes; stop any running native
+   SITL first; the directory must not contain spaces, so a Windows user name with a space needs `BF_DIR=/c/ofs/betaflight`;
+   it clones the pinned tag to `~/ofs/betaflight`, applies `ofs-sitl.patch` and `ofs-sitl-windows.patch`, builds without link-time
+   optimisation, and copies the two Cygwin runtime DLLs beside the executable). It prints the line to use:
+3. In PowerShell: `$env:OFS_SITL_LAUNCH = "C:\msys64\home\<you>\ofs\betaflight\obj\main\betaflight_SITL.exe"`, then run
+   the live tests or the simulator as usual (the `ofs-fc` and `ofs-video` live tests split the variable at spaces, so
+   keep the path free of them). Keep the DLLs beside the `.exe` (a start-up error naming `msys-2.0.dll` means they are
+   missing).
+
+The default cleanup on a plain Windows host is a PowerShell command scoped to the session's slot (about 0.2 s before
+a launch and after a stop when no SITL is left over, and bounded to 10 s); `OFS_SITL_CLEANUP` still overrides it. The
+live Rust tests that kill SITL with `pkill` are Linux-only and do not run natively, and the Windows decoy tests
+(`crates/ofs-fc/tests/sitl_windows.rs`) take down any real native SITL running in slot 0 or 1, so do not run them
+beside a live session.
 
 ## Sessions
 - **Lockstep** (default): simulated time advances only through `Run`. Runs are deterministic, Betaflight included.

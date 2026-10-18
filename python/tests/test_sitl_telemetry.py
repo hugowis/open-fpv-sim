@@ -6,6 +6,7 @@ OFS_SITL_LAUNCH."""
 import os
 import socket
 import struct
+import time
 
 import pytest
 
@@ -26,14 +27,20 @@ def _msp_requester(sim):
     address = sim.configurator_address  # an attribute set by load(): "tcp://127.0.0.1:5761"
     port = int(address.rsplit(":", 1)[1])
     s = socket.create_connection(("127.0.0.1", port), timeout=2.0)
-    s.settimeout(2.0)
+    s.settimeout(0.05)
 
     def request(cmd):
         ck = cmd
         s.sendall(b"$M<" + bytes([0, cmd]) + bytes([ck]))
+        deadline = time.monotonic() + 2.0
         while True:
             sim.run(0.02)  # MSP is serviced only while simulated time advances
-            b = s.recv(4096)
+            try:
+                b = s.recv(4096)
+            except socket.timeout:  # the request may reach Betaflight only after this slice (Windows): pump on
+                if time.monotonic() >= deadline:
+                    raise
+                continue
             if b"$M>" in b:
                 i = b.index(b"$M>")
                 n, got = b[i + 3], b[i + 4]
@@ -55,8 +62,15 @@ def test_per_motor_erpm_reaches_betaflight(sim):
     rc = request(MSP_RC)  # MSP order: roll, pitch, yaw, throttle
     assert struct.unpack_from("<4H", rc, 0) == (1500, 1500, 1500, 1500), \
         "telemetry did not disturb RC: the sticks read back as sent"
-    d = request(MSP_MOTOR_TELEMETRY)
-    rpm = [struct.unpack_from("<I", d, 1 + i * 13)[0] for i in range(d[0])]
+    # The four motors differ by a few rpm only, and Betaflight's value is quantized in steps of about 14 rpm, so one
+    # sample can read all four alike (which one depends on how much simulated time the reply took: a few ms of wall
+    # time more on Windows, where a native SITL fails a single-sample version of this about 5 runs in 8). Look again.
+    for _ in range(20):
+        d = request(MSP_MOTOR_TELEMETRY)
+        rpm = [struct.unpack_from("<I", d, 1 + i * 13)[0] for i in range(d[0])]
+        if len(set(rpm)) > 1:
+            break
+        sim.run(0.05)
     assert len(rpm) == 4 and len(set(rpm)) > 1, f"expected distinct per-motor RPM, got {rpm}"
     sim_rpm = s.motor_rpm
     for bf, ours in zip(rpm, sim_rpm):

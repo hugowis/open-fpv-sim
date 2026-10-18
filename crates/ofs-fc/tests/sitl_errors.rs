@@ -78,7 +78,40 @@ fn missing_sitl_explains_how_to_fix_it() {
     }
     if cfg!(windows) {
         assert!(shown.contains("wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf"), "{shown}");
+        assert!(shown.contains("scripts/build-sitl-windows.sh"), "the native route is named too: {shown}");
     }
+}
+
+/// The cleanup is a courtesy before a launch: a command that hangs (a stuck WMI query behind the Windows cleanup, a
+/// wedged `wsl.exe`) must not hang the load with it.
+#[test]
+fn a_cleanup_that_hangs_is_given_up_on() {
+    let sleeper: Vec<String> = if cfg!(windows) {
+        ["ping", "-n", "8", "127.0.0.1"].map(String::from).to_vec()
+    } else {
+        ["sleep", "8"].map(String::from).to_vec()
+    };
+    let started = std::time::Instant::now();
+    ofs_fc::sitl::process::run_cleanup_within(&sleeper, Duration::from_millis(300));
+    assert!(started.elapsed() < Duration::from_secs(3), "waited {:?}", started.elapsed());
+    // A cleanup that finishes is waited for in full.
+    let quick: Vec<String> = if cfg!(windows) {
+        ["cmd", "/C", "exit", "0"].map(String::from).to_vec()
+    } else {
+        vec!["true".to_string()]
+    };
+    let started = std::time::Instant::now();
+    ofs_fc::sitl::process::run_cleanup_within(&quick, Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(3), "a quick cleanup returns when it ends: {:?}", started.elapsed());
+}
+
+/// A native Windows SITL that cannot find its Cygwin runtime DLLs exits at once with `0xC0000135` and prints nothing.
+#[test]
+fn a_missing_runtime_dll_is_named() {
+    let hint = ofs_fc::sitl::exit_hint("exit code: 0xc0000135");
+    assert!(hint.contains("msys-2.0.dll") && hint.contains("next to betaflight_SITL.exe"), "{hint}");
+    assert!(ofs_fc::sitl::exit_hint("exit code: 0x1").is_empty());
+    assert!(ofs_fc::sitl::exit_hint("exit status: 1").is_empty());
 }
 
 #[test]
