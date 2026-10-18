@@ -78,3 +78,68 @@ fn a_quad_at_100_mps_is_counted_once_per_gate_at_any_tick_rate() {
         assert!((split_s - 0.6).abs() < 1e-6, "{base_hz} Hz: {split_s}");
     }
 }
+
+/// The race path end to end through a `Session`: a stabilized quad steered through Gate0 of the circuit world raises
+/// a GatePassed event in `changes()` with the same text the state message's formatter produces, and every batch the
+/// client sees is time-ordered (the circuit example's pilot, in miniature: altitude hold, then two waypoints).
+#[test]
+fn a_gate_event_arrives_through_session_changes() {
+    use ofs_config::{load, FcKind};
+    use std::path::Path;
+    use ofs_sim::pacer::OverrunPolicy;
+    use ofs_sim::session::{RunMode, Session};
+    use ofs_sim::vehicle::{build, BuildOptions, Sticks};
+
+    let quad = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"));
+    let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/circuit.toml"))).unwrap();
+    let cfg = load(quad).unwrap();
+    let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-gates-session"), fc_override: Some(FcKind::OpenLoopStabilized), world };
+    let mut session = Session::new(build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, false);
+
+    const DT: f64 = 0.02;
+    let mut integral = 0.0_f64;
+    let sticks = |s: &ofs_sim::vehicle::VehicleState, integral: &mut f64, target: (f64, f64)| {
+        let (north, east) = (s.pos_ned_m.x, s.pos_ned_m.y);
+        let (vn, ve) = (s.vel_ned_mps.x, s.vel_ned_mps.y);
+        let (to_n, to_e) = (target.0 - north, target.1 - east);
+        let dist = to_n.hypot(to_e);
+        let scale = if dist > 1e-6 { (5.0 / (0.8 * dist)).min(1.0) } else { 0.0 };
+        let (an, ae) = ((2.0 * (0.8 * to_n * scale - vn)).clamp(-3.0, 3.0), (2.0 * (0.8 * to_e * scale - ve)).clamp(-3.0, 3.0));
+        let pitch = an.to_degrees().atan2(9.81) / 60.0; // a lean of atan(a/g) degrees, one stick = 60 degrees
+        let roll = ae.to_degrees().atan2(9.81) / 60.0;
+        let err = 2.0 + s.pos_ned_m.z; // 2 m up: down is negative
+        *integral = (*integral + err * DT).clamp(-2.0, 2.0);
+        let climb = -s.vel_ned_mps.z;
+        let throttle = (0.42 + 0.15 * err + 0.10 * *integral - 0.10 * climb).clamp(0.0, 1.0);
+        Sticks { roll: roll.clamp(-1.0, 1.0), pitch: pitch.clamp(-1.0, 1.0), yaw: 0.0, throttle, aux: [-1.0; 4] }
+    };
+
+    let ticks = (DT * f64::from(session.vehicle.base_hz())) as u64;
+    let mut gate_events: Vec<(f64, String)> = Vec::new();
+    // Gate0 stands at (north 20, east 0), opening facing east, 3 m to a side: settle west of it at north 20, then
+    // sweep east through the opening.
+    for target in [(20.0, -8.0), (20.0, -3.5), (20.0, 8.0)] {
+        for _ in 0..700 {
+            let s = session.vehicle.state();
+            session.vehicle.set_sticks(&sticks(&s, &mut integral, target)).unwrap();
+            session.step(ticks).unwrap();
+            for e in session.changes() {
+                if e.kind == ofs_sim::pb::EventKind::GatePassed as i32 {
+                    gate_events.push((e.time_s, e.message));
+                }
+            }
+            let s = session.vehicle.state();
+            let arrived = (target.0 - s.pos_ned_m.x).hypot(target.1 - s.pos_ned_m.y) <= 0.7;
+            if arrived {
+                break; // this waypoint is made; the next one steers from here
+            }
+        }
+    }
+    assert!(
+        gate_events.iter().any(|(_, m)| m == "Gate0 (gate 0) start"),
+        "Gate0's start crossing arrives through changes(): {gate_events:?}"
+    );
+    for batch_time in gate_events.windows(2) {
+        assert!(batch_time[0].0 <= batch_time[1].0, "the events a client sees are time-ordered: {gate_events:?}");
+    }
+}
