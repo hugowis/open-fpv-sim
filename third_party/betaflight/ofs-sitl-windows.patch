@@ -1,0 +1,163 @@
+diff --git a/lib/main/dyad/dyad.c b/lib/main/dyad/dyad.c
+index bb7f2cb..72c2a8d 100644
+--- a/lib/main/dyad/dyad.c
++++ b/lib/main/dyad/dyad.c
+@@ -964,7 +964,11 @@ int dyad_listenEx(
+ 
+   /* Get addrinfo */
+   memset(&hints, 0, sizeof(hints));
++#ifdef __CYGWIN__
++  hints.ai_family = AF_INET; /* a wildcard AF_INET6 socket is IPv6-only on Windows */
++#else
+   hints.ai_family = AF_UNSPEC;
++#endif
+   hints.ai_socktype = SOCK_STREAM;
+   hints.ai_flags = AI_PASSIVE;
+   sprintf(buf, "%d", port);
+@@ -980,8 +984,13 @@ int dyad_listenEx(
+   /* Set SO_REUSEADDR so that the socket can be immediately bound without
+    * having to wait for any closed socket on the same port to timeout */
+   optval = 1;
++#ifdef __CYGWIN__
++  (void) optval;
++#endif
++#ifndef __CYGWIN__ /* on Windows SO_REUSEADDR lets a second socket bind a port that is in use */
+   setsockopt(stream->sockfd, SOL_SOCKET, SO_REUSEADDR,
+              &optval, sizeof(optval));
++#endif
+   /* Bind and listen */
+   err = bind(stream->sockfd, ai->ai_addr, ai->ai_addrlen);
+   if (err) {
+diff --git a/src/main/common/printf.c b/src/main/common/printf.c
+index ce40994..1b0da41 100644
+--- a/src/main/common/printf.c
++++ b/src/main/common/printf.c
+@@ -40,6 +40,14 @@
+ 
+ #include "printf.h"
+ 
++#if defined(__CYGWIN__) || defined(_WIN32)
++// Windows x64 passes the arguments after the fourth on the stack, and a 32-bit value (a uint32_t read with %ld, as the
++// MCU's 32-bit long makes the CLI do) leaves the upper half of its 64-bit slot undefined: read %ld as 32 bits.
++#define PRINTF_LONG_ARG(va) ((unsigned long int)va_arg(va, unsigned int))
++#else
++#define PRINTF_LONG_ARG(va) va_arg(va, unsigned long int)
++#endif
++
+ #ifdef REQUIRE_PRINTF_LONG_SUPPORT
+ #include "typeconversion.h"
+ #endif
+@@ -104,7 +112,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+             case 'u':{
+ #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
+                     if (lng)
+-                        uli2a(va_arg(va, unsigned long int), 10, 0, bf);
++                        uli2a(PRINTF_LONG_ARG(va), 10, 0, bf);
+                     else
+ #endif
+                         ui2a(va_arg(va, unsigned int), 10, 0, bf);
+@@ -114,7 +122,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+             case 'd':{
+ #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
+                     if (lng)
+-                        li2a(va_arg(va, unsigned long int), bf);
++                        li2a(PRINTF_LONG_ARG(va), bf);
+                     else
+ #endif
+                         i2a(va_arg(va, int), bf);
+@@ -125,7 +133,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+             case 'X':
+ #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
+                 if (lng)
+-                    uli2a(va_arg(va, unsigned long int), 16, (ch == 'X'), bf);
++                    uli2a(PRINTF_LONG_ARG(va), 16, (ch == 'X'), bf);
+                 else
+ #endif
+                     ui2a(va_arg(va, unsigned int), 16, (ch == 'X'), bf);
+diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
+index 919ec43..4004d56 100644
+--- a/src/main/drivers/serial_tcp.c
++++ b/src/main/drivers/serial_tcp.c
+@@ -109,7 +109,11 @@ static int bindProbe(unsigned port)
+     int fd, optval = 1, result = 0;
+ 
+     memset(&hints, 0, sizeof(hints));
++#ifdef __CYGWIN__
++    hints.ai_family = AF_INET; // a wildcard AF_INET6 socket is IPv6-only on Windows, so 127.0.0.1 clients would be refused
++#else
+     hints.ai_family = AF_UNSPEC;
++#endif
+     hints.ai_socktype = SOCK_STREAM;
+     hints.ai_flags = AI_PASSIVE;
+     snprintf(service, sizeof(service), "%u", port);
+@@ -118,7 +122,11 @@ static int bindProbe(unsigned port)
+     }
+     fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+     if (fd >= 0) {
++#ifndef __CYGWIN__ // on Windows SO_REUSEADDR lets a second socket bind a port that is in use
+         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
++#else
++        (void)optval;
++#endif
+         if (bind(fd, ai->ai_addr, ai->ai_addrlen) != 0) {
+             result = errno;
+         }
+diff --git a/src/platform/SIMULATOR/link/sitl.ld b/src/platform/SIMULATOR/link/sitl.ld
+index 3eb1547..7ac383d 100644
+--- a/src/platform/SIMULATOR/link/sitl.ld
++++ b/src/platform/SIMULATOR/link/sitl.ld
+@@ -20,7 +20,7 @@ SECTIONS {
+     PROVIDE_HIDDEN (___pg_resetdata_end = . );
+   }
+ }
+-INSERT BEFORE .fini_array;
++INSERT AFTER .data;
+ 
+ 
+ 
+diff --git a/src/platform/SIMULATOR/mk/SITL.mk b/src/platform/SIMULATOR/mk/SITL.mk
+index db34ec0..e479d54 100644
+--- a/src/platform/SIMULATOR/mk/SITL.mk
++++ b/src/platform/SIMULATOR/mk/SITL.mk
+@@ -14,7 +14,8 @@ INCLUDE_DIRS := \
+ MCU_COMMON_SRC  := \
+         $(LIB_MAIN_DIR)/dyad/dyad.c \
+         SIMULATOR/sitl.c \
+-        SIMULATOR/udplink.c
++        SIMULATOR/udplink.c \
++        SIMULATOR/win_stubs.c
+ 
+ #Flags
+ ARCH_FLAGS      =
+@@ -46,7 +47,6 @@ LD_FLAGS    := \
+             -Wl,-gc-sections,-Map,$(TARGET_MAP) \
+             -Wl,-L$(LINKER_DIR) \
+             -Wl,--cref \
+-            -Wl,-z,noexecstack \
+             -T$(LD_SCRIPT)
+ 
+ ifneq ($(filter SITL_STATIC,$(OPTIONS)),)
+diff --git a/src/platform/SIMULATOR/win_stubs.c b/src/platform/SIMULATOR/win_stubs.c
+new file mode 100644
+index 0000000..c36456a
+--- /dev/null
++++ b/src/platform/SIMULATOR/win_stubs.c
+@@ -0,0 +1,18 @@
++// Windows (PE) build only: --gc-sections removed nothing in this link, so code that the other SITL builds drop as
++// unreachable stays and refers to hardware-only symbols. Define them (never called) so the link succeeds.
++#if defined(_WIN32) || defined(__CYGWIN__)
++char dmaDescriptors[256];
++char gpsLapTimerConfig_System[256];
++int dmaGetHandlerCount(void) { return 0; }
++int IORead(void *io) { (void)io; return 0; }
++void audioSetupIO(void) {}
++void audioGenerateWhiteNoise(void) {}
++void audioSilence(void) {}
++void audioPlayTone(void) {}
++int mpuGyroReadRegister(void) { return 0; }
++float clockCyclesToMicrosf(unsigned c) { return (float)c; }
++void hottTextmodeWriteChar(void) {}
++void hottTextmodeGrab(void) {}
++int hottTextmodeIsAlive(void) { return 0; }
++void hottTextmodeExit(void) {}
++#endif
