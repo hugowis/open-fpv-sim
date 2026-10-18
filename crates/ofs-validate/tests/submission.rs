@@ -89,18 +89,20 @@ fn an_unknown_kind_and_an_unknown_key_are_refused() {
 }
 
 #[test]
-fn a_toml_type_error_names_its_line() {
+fn a_toml_type_error_is_its_own_problem() {
+    // Schema problems lost their line number when they started coming back all together (B5); a file that does not
+    // PARSE still names its line.
     let dir = fixture("schema_version = 1\nkind = \"thrust_stand\"\nmotor = \"zero\"\n", GOOD_CSV);
     let problems = load(dir.path()).unwrap_err();
-    assert_eq!(problems.len(), 1, "{problems:?}");
-    assert!(problems[0].starts_with("submission.toml line 3:"), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("motor must be a whole number")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("missing title")), "{problems:?}");
 }
 
 #[test]
-fn an_unknown_key_names_its_line() {
+fn an_unknown_key_is_its_own_problem() {
     let dir = fixture("schema_version = 1\nkind = \"thrust_stand\"\n\ncolour = 1\n", GOOD_CSV);
     let problems = load(dir.path()).unwrap_err();
-    assert!(problems[0].starts_with("submission.toml line 4:"), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("unknown key 'colour'")), "{problems:?}");
 }
 
 #[test]
@@ -197,7 +199,9 @@ fn a_blackbox_submission_needs_a_diff() {
 fn several_bad_keys_are_all_reported_together() {
     let dir = tempfile::tempdir().unwrap();
     // One unknown key and one wrong-typed key, next to a perfectly good kind: both problems come back in one pass.
-    write(dir.path(), "submission.toml", &thrust_toml(&["colour = 1", "title = 5"]));
+    // (thrust_toml only emits its own keys, so the unknown one is spliced in here.)
+    write(dir.path(), "submission.toml", &thrust_toml(&["title = 5"]).replace("[origin]", "colour = 1
+[origin]"));
     let problems = load(dir.path()).unwrap_err();
     assert!(problems.iter().any(|p| p.contains("'colour'")), "{problems:?}");
     assert!(problems.iter().any(|p| p.contains("title") && p.contains("text")), "{problems:?}");
