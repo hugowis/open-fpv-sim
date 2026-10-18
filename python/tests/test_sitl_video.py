@@ -14,7 +14,6 @@ from conftest import QUAD, WORLD
 pytestmark = pytest.mark.skipif(not os.environ.get("OFS_SITL_LAUNCH"),
                                 reason="set OFS_SITL_LAUNCH to run against Betaflight SITL")
 
-MSP_PORT = 5761
 MSP_REBOOT = 68
 MSP_PID = 112
 MSP_SET_PID = 202
@@ -27,7 +26,9 @@ class Msp:
 
     def __init__(self, sim):
         self.sim = sim
-        self.sock = socket.create_connection(("127.0.0.1", MSP_PORT), timeout=5)
+        # The session's slot decides the port (5761 + 10 per slot): follow the address the server reported.
+        msp_port = int(sim.configurator_address.rsplit(":", 1)[1])
+        self.sock = socket.create_connection(("127.0.0.1", msp_port), timeout=5)
         self.sock.setblocking(False)
         self.buf = b""
 
