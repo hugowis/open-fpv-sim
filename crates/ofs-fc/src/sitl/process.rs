@@ -189,7 +189,11 @@ impl SitlProcess {
         loop {
             if let Some(status) = self.exit_status() {
                 let tail = self.log_tail();
-                let what = format!("exited with {status} during startup{}", super::startup_hint(&self.argv, &tail));
+                let what = format!(
+                    "exited with {status} during startup{}{}",
+                    super::startup_hint(&self.argv, &tail),
+                    super::exit_hint(&status.to_string())
+                );
                 return Err(FcError::Startup(what, tail));
             }
             let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
@@ -402,7 +406,11 @@ fn apply_diff(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
     let saved = log.lock().map(|l| l.tail.iter().any(|t| t.contains("[CONFIG] Config file processed, EEPROM saved"))).unwrap_or(false);
     if !status.success() || !saved || !workdir.join("eeprom.bin").exists() {
         let _ = std::fs::remove_file(workdir.join("eeprom.bin")); // the next load applies the diff again
-        return Err(FcError::Config(format!("`{}` did not apply the diff ({status}); output:\n{output}", argv.join(" "))));
+        return Err(FcError::Config(format!(
+            "`{}` did not apply the diff ({status}); output:\n{output}{}",
+            argv.join(" "),
+            super::exit_hint(&status.to_string())
+        )));
     }
     Ok(())
 }
@@ -530,9 +538,32 @@ pub fn port_holders(_port: u16) -> Vec<String> {
     Vec::new()
 }
 
+/// How long a cleanup command may run before it is given up on (a stuck WMI query behind the Windows cleanup, a wedged
+/// `wsl.exe`): the cleanup is a courtesy before a launch, and the launch's own bind check catches a stray SITL.
+pub const CLEANUP_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub fn run_cleanup(argv: &[String]) {
-    if let Some((program, args)) = argv.split_first() {
-        let _ = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    run_cleanup_within(argv, CLEANUP_TIMEOUT);
+}
+
+/// [`run_cleanup`] with its own bound: the command is killed if it has not finished within `timeout`.
+pub fn run_cleanup_within(argv: &[String], timeout: Duration) {
+    let Some((program, args)) = argv.split_first() else { return };
+    let Ok(mut child) = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+        return;
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                eprintln!("ofs-sitl: the cleanup command did not finish within {} ms and was stopped", timeout.as_millis());
+                return;
+            }
+            Ok(Some(_)) => return,
+        }
     }
 }
 
@@ -588,7 +619,8 @@ exit 0"
 /// `docs/superpowers/history/closeout-evidence.md`). A victim that ignores SIGTERM is SIGKILLed after
 /// [`CLEANUP_TERM_GRACE`]; the whole wait gives up after [`CLEANUP_KILL_GRACE`] and the launch proceeds — the
 /// startup diagnostics name any holder if the bind still fails. Under WSL the victims live in the VM, so the
-/// wait runs there too; on plain Windows there is nothing to wait for. Returns what was seen, so a recurrence
+/// wait runs there too; on plain Windows the cleanup command waits for its victims itself (so this reports nothing
+/// there). Returns what was seen, so a recurrence
 /// of the flake says whether a victim existed at launch at all.
 pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
     let scope = net::port_offset_in(launch);

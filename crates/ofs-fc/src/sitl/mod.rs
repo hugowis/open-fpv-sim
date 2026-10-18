@@ -46,6 +46,20 @@ pub fn startup_hint(argv: &[String], output: &str) -> String {
     }
 }
 
+/// What to add to "exited with {status} during startup" when the status says Windows could not load a DLL
+/// (`0xC0000135`, STATUS_DLL_NOT_FOUND): a native Windows SITL built with MSYS2 needs its Cygwin runtime beside it, and
+/// prints nothing when it is missing.
+pub fn exit_hint(status: &str) -> String {
+    if status.to_ascii_lowercase().contains("0xc0000135") {
+        "\nWindows could not load a DLL that the program needs. A SITL built by scripts/build-sitl-windows.sh needs \
+         msys-2.0.dll and msys-gcc_s-seh-1.dll next to betaflight_SITL.exe (the script copies them), or C:\\msys64\\usr\\bin \
+         on PATH."
+            .to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// How to fix a launch program that does not exist (spec §7: platform-specific instructions).
 fn launch_hint(source: &std::io::Error) -> &'static str {
     if source.kind() != std::io::ErrorKind::NotFound {
@@ -54,7 +68,8 @@ fn launch_hint(source: &std::io::Error) -> &'static str {
     if cfg!(windows) {
         "\nBuild Betaflight SITL inside WSL with scripts/build-sitl.sh, then set OFS_SITL_LAUNCH to \
          `wsl.exe -d Ubuntu -e /home/<user>/ofs/betaflight/obj/main/betaflight_SITL.elf` \
-         (or fc.launch in the quad file). See docs/dev-setup.md."
+         (or fc.launch in the quad file), or build it natively with scripts/build-sitl-windows.sh from an MSYS2 shell and \
+         set OFS_SITL_LAUNCH to the betaflight_SITL.exe it prints. See docs/dev-setup.md."
     } else {
         "\nBuild Betaflight SITL with scripts/build-sitl.sh, then set OFS_SITL_LAUNCH to the path of \
          obj/main/betaflight_SITL.elf (or fc.launch in the quad file). See docs/dev-setup.md."

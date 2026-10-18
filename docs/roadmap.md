@@ -54,6 +54,11 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
   (`docs/dev-setup.md`, Ports and parallel sessions): at most 16, claimed per operating system (a Windows simulator and
   one inside WSL do not see each other's claims), and the Rust live tests still run one at a time.
+- SITL runs natively on Windows, without WSL, from an MSYS2 build (`scripts/build-sitl-windows.sh`, #67,
+  `docs/research/sitl-native-windows.md`). It is experimental: no CI job builds it, the port needs a stub file for
+  hardware-only symbols (`--gc-sections` removes nothing on PE), the executable needs two Cygwin DLLs beside it, and it
+  has not been compared with the Linux SITL bit for bit. A DLL-free native Win32 (`ucrt64`) port is sized at several
+  days and not started.
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
 - A session that ends while the quad is armed disarms Betaflight first (restoring the link, stepping until the motors
@@ -89,7 +94,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   uncompressed chunks; any other file is read the slow way.
 - Open-loop sessions fly a scripted path only with the opt-in stabilizer (`stabilize=True`, `docs/scripted-flight.md`), a
   test stand-in: angle mode on the simulator's truth, no filters, arming, rates or I-term, gains tuned for the shipped
-  quad. Real tuning needs Betaflight SITL, which also needs WSL on Windows.
+  quad. Real tuning needs Betaflight SITL, which needs WSL on Windows (or the experimental native build).
 
 ### Performance
 - Headless lockstep runs at 7.4× real time with Betaflight SITL (WSL 2) and 84–296× open loop, on an AMD Ryzen 9

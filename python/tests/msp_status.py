@@ -7,6 +7,7 @@ RX_FAILSAFE (1 << 2) from stage 1 on, FAILSAFE (1 << 1) once stage 2 engages
 cleared on recovery at :204/:521).
 """
 import socket
+import time
 
 MSP_STATUS = 101
 ARMING_DISABLED_FAILSAFE = 1 << 1
@@ -37,15 +38,23 @@ class StatusClient:
     def __init__(self, sim, timeout_s=2.0):
         port = int(sim.configurator_address.rsplit(":", 1)[1])
         self._sock = socket.create_connection(("127.0.0.1", port), timeout=timeout_s)
-        self._sock.settimeout(timeout_s)
+        self._sock.settimeout(0.05)
+        self._timeout_s = timeout_s
         self._sim = sim
 
     def _exchange(self, cmd):
         self._sock.sendall(b"$M<" + bytes([0, cmd, cmd]))  # size 0, so the checksum is the command
         buf = b""
+        deadline = time.monotonic() + self._timeout_s
         while True:
             self._sim.run(0.02)  # MSP is serviced only while simulated time advances
-            buf += self._sock.recv(4096)
+            # A short read: the request may reach Betaflight's TCP thread only after this slice of simulated time has
+            # run (a few ms of wall time on Windows), so keep pumping time instead of waiting for the reply.
+            try:
+                buf += self._sock.recv(4096)
+            except socket.timeout:
+                if time.monotonic() >= deadline:
+                    raise
             payload = reply_payload(buf, cmd)
             if payload is not None:
                 return payload
