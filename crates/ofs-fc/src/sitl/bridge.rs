@@ -14,7 +14,7 @@ use super::codec::{
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
 use super::process::{run_cleanup, LaunchConfig, SitlProcess};
-use super::slot::SitlSlot;
+use super::slot::{SitlSlot, SlotClaim};
 use super::FcError;
 
 #[derive(Debug, Clone)]
@@ -97,7 +97,7 @@ pub struct SitlBridge {
     links_dropped: u64,
     /// The slot this bridge runs in, when it has one: held for the bridge's whole life (also across Betaflight
     /// reboots), so the ports stay claimed until the session ends.
-    _slot: Option<SitlSlot>,
+    _slot: Option<SlotClaim>,
 }
 
 /// How often the first state datagram is resent while SITL has not answered it.
@@ -139,11 +139,11 @@ impl SitlBridge {
     /// motor socket is the slot's, and the bridge keeps the slot (and so its claim on the ports) until it is dropped.
     pub fn start_in_slot(cfg: BridgeConfig, slot: SitlSlot, bus: &mut Bus) -> Result<Self, FcError> {
         debug_assert_eq!(cfg.ports, slot.ports, "the config names the slot's ports");
-        let rx = slot.rx.try_clone()?;
-        Self::start_with(cfg, rx, Some(slot), bus)
+        let (rx, claim) = slot.into_parts();
+        Self::start_with(cfg, rx, Some(claim), bus)
     }
 
-    fn start_with(cfg: BridgeConfig, rx: UdpSocket, slot: Option<SitlSlot>, bus: &mut Bus) -> Result<Self, FcError> {
+    fn start_with(cfg: BridgeConfig, rx: UdpSocket, slot: Option<SlotClaim>, bus: &mut Bus) -> Result<Self, FcError> {
         if cfg.motor_count > 4 {
             return Err(FcError::Config(format!(
                 "Betaflight SITL's servo_packet carries 4 motors; the quad has {}",

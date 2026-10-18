@@ -55,6 +55,21 @@ impl SitlSlot {
             hint: "every simulator slot is taken (16 simulators, or other programs on those ports, are running)",
         })
     }
+
+    /// Splits the motor socket off, for its user to own outright (no duplicated handle: on Windows a duplicate is a
+    /// second handle to the socket, which a child process can inherit and keep alive after the session is gone); what
+    /// remains is the claim on the slot's number, to be held for the session's life.
+    pub fn into_parts(self) -> (UdpSocket, SlotClaim) {
+        (self.rx, SlotClaim { index: self.index, ports: self.ports, _lock: self._lock })
+    }
+}
+
+/// A slot's lock without its motor socket (see [`SitlSlot::into_parts`]). Dropping it frees the slot's number.
+#[derive(Debug)]
+pub struct SlotClaim {
+    pub index: u16,
+    pub ports: PortMap,
+    _lock: UdpSocket,
 }
 
 #[cfg(test)]
@@ -95,6 +110,20 @@ mod tests {
         drop(first);
         let third = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         assert_eq!((second.index, third.index), (1, 0), "the lowest free slot is reused");
+    }
+
+    /// The bridge owns the motor socket and holds the claim: the slot stays taken while either lives, and is free once
+    /// both are gone.
+    #[test]
+    fn a_split_slot_stays_taken_until_its_socket_and_claim_are_both_dropped() {
+        let (lock, shift) = space(7);
+        let (rx, claim) = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().into_parts();
+        assert_eq!((claim.index, claim.ports.offset, rx.local_addr().unwrap().port()), (0, shift, PORT_PWM + shift));
+        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 1, "slot 0 is taken by the parts");
+        drop(claim);
+        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 1, "the socket alone still holds the motor port");
+        drop(rx);
+        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 0, "both gone: slot 0 is free again");
     }
 
     #[test]
