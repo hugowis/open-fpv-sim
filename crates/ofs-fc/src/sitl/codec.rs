@@ -7,6 +7,53 @@ pub const PORT_RC: u16 = 9004;
 /// UART1 (MSP) is served on TCP 5760 + 1.
 pub const MSP_TCP_PORT: u16 = 5761;
 
+/// How far apart two SITL slots' ports are (`--port-offset`): UDP 9001 to 9004 and TCP 5761 to 5768 (UARTs 1 to 8)
+/// fit in ten, so slots never overlap.
+pub const SLOT_PORT_STRIDE: u16 = 10;
+
+/// The ports of one SITL instance: the stock ones plus its `--port-offset`. Slot 0 is the stock ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PortMap {
+    pub offset: u16,
+}
+
+impl PortMap {
+    /// The ports of slot `slot` (offset = slot x [`SLOT_PORT_STRIDE`]).
+    pub fn slot(slot: u16) -> PortMap {
+        PortMap { offset: slot * SLOT_PORT_STRIDE }
+    }
+
+    /// UDP: raw PWM out.
+    pub fn pwm_raw(self) -> u16 {
+        PORT_PWM_RAW + self.offset
+    }
+
+    /// UDP: motor packets out of SITL (the simulator binds this one).
+    pub fn pwm(self) -> u16 {
+        PORT_PWM + self.offset
+    }
+
+    /// UDP: state datagrams into SITL.
+    pub fn state(self) -> u16 {
+        PORT_STATE + self.offset
+    }
+
+    /// UDP: RC into SITL.
+    pub fn rc(self) -> u16 {
+        PORT_RC + self.offset
+    }
+
+    /// TCP: UART1, Betaflight's MSP port (the Configurator's).
+    pub fn msp(self) -> u16 {
+        MSP_TCP_PORT + self.offset
+    }
+
+    /// Where Betaflight Configurator connects.
+    pub fn configurator_address(self) -> String {
+        format!("tcp://127.0.0.1:{}", self.msp())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FdmPacket {
     pub timestamp_s: f64,

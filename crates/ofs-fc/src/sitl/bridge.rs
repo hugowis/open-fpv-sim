@@ -9,7 +9,7 @@ use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx, Wire};
 
 use super::codec::{
     erpm_block_payload, parse_reply_serial, state_datagram_with_serial, RcPacket, ReplySerial, ServoPacket,
-    EXT_ERPM_BLOCK_ID, PORT_PWM, PORT_STATE, REPLY_MAX, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
+    EXT_ERPM_BLOCK_ID, PortMap, REPLY_MAX, SERIAL_BLOCK_HEADER, SERIAL_SECTION_MAX,
 };
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
@@ -20,6 +20,8 @@ use super::FcError;
 pub struct BridgeConfig {
     pub launch: LaunchConfig,
     pub net: SitlNet,
+    /// The SITL's ports (its `--port-offset`; the default is the stock ports).
+    pub ports: PortMap,
     pub rate_divisor: u32,
     /// The first exchange can arrive before SITL's main loop runs; allow seconds. The first datagram is
     /// resent every [`FIRST_RESEND_INTERVAL`] until SITL answers or this elapses.
@@ -128,12 +130,13 @@ impl SitlBridge {
             )));
         }
         let net = cfg.net;
-        let rx = UdpSocket::bind(SocketAddr::from((net.bind_ip, PORT_PWM)))
-            .map_err(|_| FcError::PortInUse { port: PORT_PWM, hint: "another simulator instance may be running" })?;
+        let ports = cfg.ports;
+        let rx = UdpSocket::bind(SocketAddr::from((net.bind_ip, ports.pwm())))
+            .map_err(|_| FcError::PortInUse { port: ports.pwm(), hint: "another simulator instance may be running" })?;
         if net.send_ip.is_loopback() {
             // Native SITL must be able to bind its state port; probe and release it to fail early.
             // (Under WSL the port lives inside the VM; the cleanup command and bind-failure check cover it.)
-            probe_state_port(net.send_ip, &cfg.launch.cleanup)?;
+            probe_state_port(net.send_ip, ports.state(), &cfg.launch.cleanup)?;
         }
         let tx = UdpSocket::bind(SocketAddr::from((net.bind_ip, 0)))?;
         let inputs = Inputs {
@@ -192,7 +195,7 @@ impl SitlBridge {
 
     /// One send/receive. Until SITL has answered once, the datagram is resent (see [`exchange_with_resend`]).
     fn exchange(&mut self, datagram: &[u8], buf: &mut [u8]) -> std::io::Result<usize> {
-        let to = SocketAddr::from((self.cfg.net.send_ip, PORT_STATE));
+        let to = SocketAddr::from((self.cfg.net.send_ip, self.cfg.ports.state()));
         if self.answered {
             send(&self.tx, datagram, to);
             return recv_from_ip(&self.rx, buf, to.ip());
@@ -249,8 +252,8 @@ impl SitlBridge {
 
 /// Checks that SITL's state port is free. If it is held (typically by a SITL orphaned by a killed
 /// simulator), runs the cleanup command and waits briefly for the port to be released.
-fn probe_state_port(ip: Ipv4Addr, cleanup: &[String]) -> Result<(), FcError> {
-    let free = || UdpSocket::bind(SocketAddr::from((ip, PORT_STATE))).is_ok();
+fn probe_state_port(ip: Ipv4Addr, port: u16, cleanup: &[String]) -> Result<(), FcError> {
+    let free = || UdpSocket::bind(SocketAddr::from((ip, port))).is_ok();
     if free() {
         return Ok(());
     }
@@ -265,7 +268,7 @@ fn probe_state_port(ip: Ipv4Addr, cleanup: &[String]) -> Result<(), FcError> {
         }
     }
     Err(FcError::PortInUse {
-        port: PORT_STATE,
+        port,
         hint: "a Betaflight SITL instance may still be running (see fc.cleanup / OFS_SITL_CLEANUP)",
     })
 }

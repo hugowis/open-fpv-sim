@@ -58,6 +58,7 @@ fn still_quad(
                 startup_timeout: Duration::from_secs(15),
             },
             net: sitl_net,
+            ports: ofs_fc::sitl::codec::PortMap::default(),
             rate_divisor: 8,
             first_reply_timeout: Duration::from_secs(5),
             reply_timeout: Duration::from_millis(500),

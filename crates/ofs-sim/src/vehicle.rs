@@ -21,7 +21,7 @@ use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
-use ofs_fc::sitl::codec::MSP_TCP_PORT;
+use ofs_fc::sitl::codec::PortMap;
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
@@ -474,6 +474,8 @@ pub struct Vehicle {
     scheduler: Scheduler,
     h: Handles,
     sitl: bool,
+    /// The SITL's ports (the stock ones unless the session took another slot).
+    ports: PortMap,
     osd: Option<OsdHandle>,
     fc_telemetry: FcTelemetryHandle,
     world: WorldConfig,
@@ -954,6 +956,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
     let fc_divisor = base_hz / cfg.fc.exchange_hz;
     let fc_kind = opts.fc_override.unwrap_or(cfg.fc.kind);
     let mut osd: Option<OsdHandle> = None;
+    let ports = PortMap::default();
     match fc_kind {
         FcKind::OpenLoop | FcKind::OpenLoopStabilized => {
             if fc_kind == FcKind::OpenLoopStabilized {
@@ -988,6 +991,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
                 BridgeConfig {
                     launch,
                     net: sitl_net,
+                    ports,
                     rate_divisor: fc_divisor,
                     first_reply_timeout: Duration::from_millis(cfg.fc.first_reply_timeout_ms),
                     reply_timeout: Duration::from_millis(cfg.fc.reply_timeout_ms),
@@ -1045,6 +1049,7 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
         scheduler,
         h,
         sitl: fc_kind == FcKind::Sitl,
+        ports,
         osd,
         fc_telemetry,
         world: opts.world.clone(),
@@ -1471,7 +1476,7 @@ impl Vehicle {
 
     /// Where Betaflight Configurator can connect (SITL's MSP UART), when this vehicle runs Betaflight SITL.
     pub fn configurator_address(&self) -> Option<String> {
-        self.sitl.then(|| format!("tcp://127.0.0.1:{MSP_TCP_PORT}"))
+        self.sitl.then(|| self.ports.configurator_address())
     }
 
     /// The latest OSD frame, when the quad has an `[osd]` section and runs Betaflight.

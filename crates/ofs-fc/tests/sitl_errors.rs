@@ -25,6 +25,7 @@ fn config(dir: &std::path::Path, launch: &[&str]) -> BridgeConfig {
             startup_timeout: Duration::from_secs(2),
         },
         net: SitlNet::loopback(),
+        ports: ofs_fc::sitl::codec::PortMap::default(),
         rate_divisor: 8,
         first_reply_timeout: Duration::from_millis(500),
         reply_timeout: Duration::from_millis(200),
