@@ -125,6 +125,15 @@ fn the_link_loss_fault_drops_the_link_until_cleared() {
 }
 
 #[test]
+fn slot_zero_keeps_the_firmware_dir_and_other_slots_get_a_sibling() {
+    use ofs_sim::vehicle::slot_firmware_dir;
+    let base = Path::new("/d/quad-ab12cd34");
+    assert_eq!(slot_firmware_dir(base, 0), base);
+    assert_eq!(slot_firmware_dir(base, 3), Path::new("/d/quad-ab12cd34-s3"));
+    assert_ne!(slot_firmware_dir(base, 1), slot_firmware_dir(base, 2));
+}
+
+#[test]
 fn a_relative_and_an_absolute_path_to_one_quad_share_a_firmware_dir() {
     // Tests run in the crate directory.
     let data = Path::new("data");

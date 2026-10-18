@@ -275,9 +275,9 @@ impl Sim for SimService {
         let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override, world };
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
-        let sitl = opts.fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl;
-        let blackbox = sitl.then(|| BlackboxCopy::new(vehicle::firmware_dir(&self.data_dir, &cfg.source_path), self.logs_dir()));
-        // What a repro bundle needs to run this session again.
+        let logs_dir = self.logs_dir();
+        // What a repro bundle needs to run this session again. A SITL session's firmware directory depends on the
+        // slot it takes, which the build decides: it is filled in below.
         let world_file = (!req.world_path.is_empty()).then(|| ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path)));
         let mut repro = BundleSource::new(
             &cfg,
@@ -286,8 +286,8 @@ impl Sim for SimService {
             req.seed,
             req.open_loop_fc,
             mode == RunMode::Realtime,
-            self.logs_dir(),
-            sitl.then(|| vehicle::firmware_dir(&self.data_dir, &cfg.source_path)),
+            logs_dir.clone(),
+            None,
         )
         .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
         .ok();
@@ -297,8 +297,11 @@ impl Sim for SimService {
         self.blocking(move |shared, slot| {
             end_session(shared, slot); // stop the previous vehicle (and its SITL) before the new one binds the ports
             let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
+            // The firmware's directory is the slot's (the first simulator on the machine has the stock one).
+            let blackbox = vehicle.firmware_dir().map(|dir| BlackboxCopy::new(dir, logs_dir));
             // The firmware's state as the session starts: after the first boot's diff apply, before any flight.
             if let Some(r) = repro.as_mut() {
+                r.firmware_dir = vehicle.firmware_dir();
                 r.firmware_initial = r.firmware_dir.as_deref().map(snapshot_firmware).unwrap_or_default();
             }
             let configurator_address = vehicle.configurator_address().unwrap_or_default();

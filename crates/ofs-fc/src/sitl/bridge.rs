@@ -14,6 +14,7 @@ use super::codec::{
 use super::frames::{fdm_packet, motor_commands, Home, SensorFrame};
 use super::net::SitlNet;
 use super::process::{run_cleanup, LaunchConfig, SitlProcess};
+use super::slot::SitlSlot;
 use super::FcError;
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,9 @@ pub struct SitlBridge {
     restart_budget: RestartBudget,
     /// Bytes the serial links had dropped at the last step (added to `fc.serial_dropped_bytes` as they grow).
     links_dropped: u64,
+    /// The slot this bridge runs in, when it has one: held for the bridge's whole life (also across Betaflight
+    /// reboots), so the ports stay claimed until the session ends.
+    _slot: Option<SitlSlot>,
 }
 
 /// How often the first state datagram is resent while SITL has not answered it.
@@ -122,7 +126,24 @@ impl RestartBudget {
 }
 
 impl SitlBridge {
+    /// Starts the bridge on `cfg.ports`, binding the motor socket there itself (a port held by someone else is
+    /// [`FcError::PortInUse`]). The simulator itself uses [`SitlBridge::start_in_slot`].
     pub fn start(cfg: BridgeConfig, bus: &mut Bus) -> Result<Self, FcError> {
+        let ports = cfg.ports;
+        let rx = UdpSocket::bind(SocketAddr::from((cfg.net.bind_ip, ports.pwm())))
+            .map_err(|_| FcError::PortInUse { port: ports.pwm(), hint: "another simulator instance may be running" })?;
+        Self::start_with(cfg, rx, None, bus)
+    }
+
+    /// Starts the bridge in a slot this process holds ([`SitlSlot::acquire`]): `cfg.ports` must be the slot's, the
+    /// motor socket is the slot's, and the bridge keeps the slot (and so its claim on the ports) until it is dropped.
+    pub fn start_in_slot(cfg: BridgeConfig, slot: SitlSlot, bus: &mut Bus) -> Result<Self, FcError> {
+        debug_assert_eq!(cfg.ports, slot.ports, "the config names the slot's ports");
+        let rx = slot.rx.try_clone()?;
+        Self::start_with(cfg, rx, Some(slot), bus)
+    }
+
+    fn start_with(cfg: BridgeConfig, rx: UdpSocket, slot: Option<SitlSlot>, bus: &mut Bus) -> Result<Self, FcError> {
         if cfg.motor_count > 4 {
             return Err(FcError::Config(format!(
                 "Betaflight SITL's servo_packet carries 4 motors; the quad has {}",
@@ -131,8 +152,6 @@ impl SitlBridge {
         }
         let net = cfg.net;
         let ports = cfg.ports;
-        let rx = UdpSocket::bind(SocketAddr::from((net.bind_ip, ports.pwm())))
-            .map_err(|_| FcError::PortInUse { port: ports.pwm(), hint: "another simulator instance may be running" })?;
         if net.send_ip.is_loopback() {
             // Native SITL must be able to bind its state port; probe and release it to fail early.
             // (Under WSL the port lives inside the VM; the cleanup command and bind-failure check cover it.)
@@ -172,6 +191,7 @@ impl SitlBridge {
             answered: false,
             restart_budget: RestartBudget::default(),
             links_dropped: 0,
+            _slot: slot,
         })
     }
 

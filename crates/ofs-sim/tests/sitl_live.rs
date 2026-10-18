@@ -31,6 +31,70 @@ impl Rig {
     }
 }
 
+/// A SITL vehicle whose firmware directory is under `data_dir` (shared with other vehicles, as two sessions of one
+/// simulator machine share a data directory).
+fn sitl_in(data_dir: &Path) -> Vehicle {
+    assert!(std::env::var("OFS_SITL_LAUNCH").is_ok(), "set OFS_SITL_LAUNCH");
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let opts = BuildOptions { seed: 1, data_dir: data_dir.to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
+    build(&cfg, &opts).unwrap()
+}
+
+fn msp_at(address: &str) -> MspClient {
+    let port: u16 = address.rsplit(':').next().unwrap().parse().unwrap();
+    MspClient::connect(SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_secs(5)).unwrap()
+}
+
+/// A second session started while the first runs takes the next slot: its own ports, firmware directory and
+/// Configurator address, and both fly (different throttles give different motor commands) without disturbing each other.
+#[test]
+#[ignore]
+fn a_second_session_gets_its_own_slot_and_both_fly() {
+    let data = tempfile::tempdir().unwrap();
+    let mut a = sitl_in(data.path());
+    let mut b = sitl_in(data.path());
+    assert_eq!(a.configurator_address().as_deref(), Some("tcp://127.0.0.1:5761"));
+    assert_eq!(b.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"));
+    let (dir_a, dir_b) = (a.firmware_dir().unwrap(), b.firmware_dir().unwrap());
+    assert_ne!(dir_a, dir_b);
+    assert_eq!(dir_b.file_name().unwrap().to_string_lossy(), format!("{}-s1", dir_a.file_name().unwrap().to_string_lossy()));
+    for v in [&mut a, &mut b] {
+        v.run_for(4.0).unwrap(); // boot and gyro calibration
+        v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+        v.run_for(1.0).unwrap();
+        assert!(armed(v), "never armed: {:?}", v.state().motor_cmd);
+    }
+    a.set_sticks(&Sticks { throttle: 0.6, aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+    b.set_sticks(&Sticks { throttle: 0.4, aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+    for _ in 0..100 {
+        a.run_for(0.01).unwrap();
+        b.run_for(0.01).unwrap();
+    }
+    let (ma, mb) = (a.state().motor_cmd[0], b.state().motor_cmd[0]);
+    assert!(ma > mb + 0.05, "each session follows its own sticks: A {ma:.3}, B {mb:.3}");
+    assert_eq!((a.state().fc_restarts, b.state().fc_restarts), (0, 0));
+    // Each Betaflight answers on its own MSP port.
+    let (addr_a, addr_b) = (a.configurator_address().unwrap(), b.configurator_address().unwrap());
+    let reply_a = msp_at(&addr_a).request(MSP_API_VERSION, &[], 500, || a.run_for(0.01)).unwrap();
+    let reply_b = msp_at(&addr_b).request(MSP_API_VERSION, &[], 500, || b.run_for(0.01)).unwrap();
+    assert_eq!((api_version(&reply_a).map(|v| v.1), api_version(&reply_b).map(|v| v.1)), (Some(1), Some(1)));
+}
+
+/// A finished session frees its slot: the next one takes the lowest free slot, not a higher one.
+#[test]
+#[ignore]
+fn dropping_the_first_session_lets_the_next_take_slot_zero_again() {
+    let data = tempfile::tempdir().unwrap();
+    let first = sitl_in(data.path());
+    let second = sitl_in(data.path());
+    assert_eq!(second.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"));
+    drop(first);
+    let third = sitl_in(data.path());
+    assert_eq!(third.configurator_address().as_deref(), Some("tcp://127.0.0.1:5761"), "slot 0 was free again");
+    drop(second);
+    drop(third);
+}
+
 fn msp() -> MspClient {
     MspClient::connect(SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT)), Duration::from_secs(5)).unwrap()
 }
