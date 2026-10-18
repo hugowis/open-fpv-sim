@@ -19,6 +19,9 @@ const EXIT_FLUSH: Duration = Duration::from_millis(200);
 const BIND_GRACE: Duration = Duration::from_millis(300);
 /// How long after the diff-applying run exits its output may still be on its way through the pipes.
 const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
+/// How long a `config.lock` may sit untouched before a waiter removes it: a holder killed mid-apply cannot release
+/// it, and its age is the only portable sign that it died.
+const LOCK_STALE: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -155,7 +158,10 @@ impl SitlProcess {
             eprintln!("ofs-sitl: waited for the cleanup's victims: {awaited:?}");
         }
         if !workdir.join("eeprom.bin").exists() {
-            apply_diff(cfg, &workdir)?;
+            // Someone else may configure it while we wait for the lock (`None`): then skip the diff they applied.
+            if let Some(_config_lock) = lock_config(&workdir, cfg.startup_timeout)? {
+                apply_diff(cfg, &workdir)?;
+            }
         }
         let log_path = workdir.join("sitl.log");
         let file = if append_log {
@@ -292,6 +298,40 @@ fn check_diff_unchanged(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcErro
         )));
     }
     Ok(())
+}
+
+/// The first boot's serialization: `config.lock` in the workdir, held while the diff applies, so two simulators
+/// first-booting one quad's directory do not both run `--config` in it (and cannot interleave a partial EEPROM into
+/// the other's boot). `Some(file)` while holding; `None` when a holder finished first (`eeprom.bin` appeared). A
+/// lock untouched for [`LOCK_STALE`] is a holder killed mid-apply: removed so the boot can go ahead.
+fn lock_config(workdir: &Path, timeout: Duration) -> Result<Option<File>, FcError> {
+    let path = workdir.join("config.lock");
+    let deadline = Instant::now() + timeout;
+    loop {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok(Some(file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.into()),
+        }
+        if workdir.join("eeprom.bin").exists() {
+            return Ok(None);
+        }
+        if Instant::now() >= deadline {
+            return Err(FcError::Config(format!(
+                "{} has been locked for {} ms: another simulator's first boot is stuck, or a stale config.lock \
+                 survived a hard kill and is younger than {} s",
+                path.display(),
+                timeout.as_millis(),
+                LOCK_STALE.as_secs()
+            )));
+        }
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.modified().ok().is_some_and(|m| m.elapsed().unwrap_or_default() > LOCK_STALE) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// First boot: `<launch> --config betaflight.diff` loads the diff, saves eeprom.bin and exits.

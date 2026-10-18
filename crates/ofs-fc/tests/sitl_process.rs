@@ -81,3 +81,58 @@ fn a_sitl_that_rejects_the_port_offset_points_at_the_rebuild() {
     assert!(ofs_fc::sitl::startup_hint(&native, tail).contains("scripts/build-sitl.sh"), "{hint}");
     assert_eq!(ofs_fc::sitl::startup_hint(&["/opt/betaflight_SITL.elf"].map(String::from), tail), "", "an unscoped old binary is not this failure");
 }
+
+#[cfg(unix)]
+mod first_boot_lock {
+    //! Two simulators first-booting one quad's directory at once: the diff applies once (the config.lock serialization).
+    use std::sync::Arc;
+
+    use ofs_fc::sitl::process::{LaunchConfig, SitlProcess};
+
+    /// A fake SITL whose first boot (`--config`, no eeprom.bin yet) sleeps, saves the EEPROM, counts the apply and
+    /// exits; its real boot prints the ready line and stays alive like a running SITL.
+    fn sh_first_boot() -> Vec<String> {
+        vec!["sh".into(), "-c".into(), "\
+             if [ ! -f eeprom.bin ]; then \
+               sleep 0.3; echo '[CONFIG] Config file processed, EEPROM saved'; echo x >> ../applied-count.txt; touch eeprom.bin; exit 0; \
+             fi; \
+             echo '[SITL] ready for the simulator'; sleep 30"
+            .into()]
+    }
+
+    fn first_boot(dir: &std::path::Path) -> LaunchConfig {
+        let workdir = dir.join("fc");
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::fs::write(dir.join("quad.diff"), "feature -GPS\n").unwrap();
+        LaunchConfig { launch: sh_first_boot(), cleanup: vec![], workdir, diff_file: dir.join("quad.diff"), startup_timeout: std::time::Duration::from_secs(20) }
+    }
+
+    #[test]
+    fn two_first_boots_of_one_quad_apply_the_diff_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Arc::new(first_boot(dir.path()));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let cfg = Arc::clone(&cfg);
+                std::thread::spawn(move || SitlProcess::start(&cfg))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+        let count = std::fs::read_to_string(dir.path().join("applied-count.txt")).unwrap();
+        assert_eq!(count.lines().count(), 1, "the diff applied once, not once per racing boot");
+    }
+
+    #[test]
+    fn a_stale_config_lock_does_not_wedge_the_boot() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = first_boot(dir.path());
+        let lock = cfg.workdir.join("config.lock");
+        std::fs::write(&lock, b"").unwrap();
+        assert!(std::process::Command::new("touch").args(["-d", "10 minutes ago"]).arg(&lock).status().unwrap().success());
+        let _proc = SitlProcess::start(&cfg).unwrap();
+        let count = std::fs::read_to_string(dir.path().join("applied-count.txt")).unwrap();
+        assert_eq!(count.lines().count(), 1, "the stale lock was removed and the boot went ahead");
+    }
+}
