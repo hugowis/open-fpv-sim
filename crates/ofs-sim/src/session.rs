@@ -83,6 +83,13 @@ pub fn event(time_s: f64, kind: pb::EventKind, message: impl Into<String>) -> pb
 
 /// A race event as the protocol carries it; the text formats are documented in `docs/race-timing.md`:
 /// "Gate0 (gate 0) start", "Gate1 (gate 1) split 8.412 s", "lap 1: 31.204 s (best)".
+/// One `changes()` batch in time order: race events keep their crossing time, which can sit between two
+/// state-derived events of the same batch. Stable, so events at the same time keep the order they were raised.
+pub(crate) fn events_in_time_order(mut out: Vec<pb::Event>) -> Vec<pb::Event> {
+    out.sort_by(|a, b| a.time_s.total_cmp(&b.time_s));
+    out
+}
+
 pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
     match *e {
         RaceEvent::GatePassed { gate, time_s, split_s } => {
@@ -347,7 +354,7 @@ impl Session {
         if let Some(message) = self.vehicle.take_inputs_recording_failure() {
             out.push(event(s.time_s, pb::EventKind::InputsRecordingStopped, format!("inputs recording failed: {message}")));
         }
-        out
+        events_in_time_order(out)
     }
 
     /// The events a vehicle state implies, compared against the remembered previous state; `faults` is the
@@ -559,6 +566,19 @@ mod tests {
     use super::*;
     use crate::vehicle::VtxInfo;
     use std::path::Path;
+
+    #[test]
+    fn a_batch_of_events_is_time_ordered_with_ties_kept_in_insertion_order() {
+        let mut out = vec![event(1.0, pb::EventKind::LinkDown, "early state event"), event(3.0, pb::EventKind::LinkUp, "later state event")];
+        let names = vec!["Gate0".to_string(), "Gate1".to_string()];
+        let race = [RaceEvent::GatePassed { gate: 1, time_s: 2.0, split_s: 2.0 }];
+        out.extend(race.iter().map(|e| race_event(e, &names)));
+        let times: Vec<f64> = events_in_time_order(out).iter().map(|e| e.time_s).collect();
+        assert_eq!(times, vec![1.0, 2.0, 3.0], "the race crossing sits between the two state events");
+        let tied =
+            events_in_time_order(vec![event(1.0, pb::EventKind::LinkDown, "first"), event(1.0, pb::EventKind::LinkUp, "second")]);
+        assert_eq!((tied[0].message.as_str(), tied[1].message.as_str()), ("first", "second"), "a stable sort keeps ties");
+    }
 
     #[test]
     fn a_vtx_change_is_described_by_band_channel_frequency_and_power() {
