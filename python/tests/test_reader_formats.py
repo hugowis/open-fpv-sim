@@ -108,7 +108,7 @@ def test_an_index_entry_whose_time_lies_falls_back_to_the_slow_way(tmp_path):
     _write(path, CompressionType.ZSTD, IndexType.ALL)
     at = _first_index_record_offset(path)
     with open(path, "r+b") as f:
-        f.seek(at + 9 + 2 + 4)  # record head, channel id, entry count: the first entry's log_time
+        f.seek(at + 9 + 2 + 4)  # record head, channel id, entries' byte length: the first entry's log_time
         f.write(b"\xff" * 8)
     assert reader.read(path) == reader._read_with_mcap(path), "the slow way reads the true times"
     assert reader._used_indexed_path is False
@@ -122,5 +122,17 @@ def test_a_corrupt_message_index_is_not_reported_damaged(tmp_path):
     with open(path, "r+b") as f:
         f.seek(at + 9)  # the record's channel id
         f.write(b"\xff\xff")
+    assert reader.read(path) == reader._read_with_mcap(path)
+    assert reader._used_indexed_path is False
+
+def test_an_index_entry_pointing_outside_its_chunk_falls_back(tmp_path):
+    """A plausible single-byte corruption: the entry's offset u64 flips high, pointing far outside the chunk. The
+    unpack must not become a 'damaged' verdict — the iterator reads the file fine."""
+    path = tmp_path / "wild-offset.mcap"
+    _write(path, CompressionType.ZSTD, IndexType.ALL)
+    at = _first_index_record_offset(path)
+    with open(path, "r+b") as f:
+        f.seek(at + 9 + 2 + 4 + 8)  # the first entry's offset u64, after its log_time
+        f.write(b"\xff" * 8)
     assert reader.read(path) == reader._read_with_mcap(path)
     assert reader._used_indexed_path is False

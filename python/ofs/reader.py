@@ -168,7 +168,7 @@ def _collect_by_index(f, summary, selected):
     decompress = None
     rows, columns, seen = {}, {}, {cid: 0 for cid in wanted}
     for chunk in summary.chunk_indexes:
-        entries = []  # (offset into the chunk's records, channel id), in file order per channel
+        entries = []  # (the entry's log_time, offset into the chunk's records, channel id), in file order per channel
         for cid, index_offset in chunk.message_index_offsets.items():
             if cid not in wanted:
                 continue
@@ -200,7 +200,11 @@ def _collect_by_index(f, summary, selected):
         else:
             data = raw
         for entry_time, offset, cid in entries:
+            if offset + _MESSAGE_HEAD.size > len(data):
+                raise _IndexCorrupt("a message index entry points outside its chunk's records")
             opcode, length, channel, _, log_time, _ = _MESSAGE_HEAD.unpack_from(data, offset)
+            if offset + _RECORD_HEAD.size + length > len(data):
+                raise _IndexCorrupt("a message index entry's record runs past its chunk's records")
             if opcode != _OP_MESSAGE or channel != cid:
                 raise _IndexCorrupt("a message index points at something that is not its message")
             if log_time != entry_time:
