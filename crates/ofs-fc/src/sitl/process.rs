@@ -181,7 +181,11 @@ impl SitlProcess {
         loop {
             if let Some(status) = self.exit_status() {
                 let tail = self.log_tail();
-                let what = format!("exited with {status} during startup{}", super::startup_hint(&self.argv, &tail));
+                let what = format!(
+                    "exited with {status} during startup{}{}",
+                    super::startup_hint(&self.argv, &tail),
+                    super::exit_hint(&status.to_string())
+                );
                 return Err(FcError::Startup(what, tail));
             }
             let (ready, bind_failed) = self.log.lock().map(|l| (l.ready_seen, l.bind_failed)).unwrap_or((false, false));
@@ -324,7 +328,11 @@ fn apply_diff(cfg: &LaunchConfig, workdir: &Path) -> Result<(), FcError> {
     let saved = log.lock().map(|l| l.tail.iter().any(|t| t.contains("[CONFIG] Config file processed, EEPROM saved"))).unwrap_or(false);
     if !status.success() || !saved || !workdir.join("eeprom.bin").exists() {
         let _ = std::fs::remove_file(workdir.join("eeprom.bin")); // the next load applies the diff again
-        return Err(FcError::Config(format!("`{}` did not apply the diff ({status}); output:\n{output}", argv.join(" "))));
+        return Err(FcError::Config(format!(
+            "`{}` did not apply the diff ({status}); output:\n{output}{}",
+            argv.join(" "),
+            super::exit_hint(&status.to_string())
+        )));
     }
     Ok(())
 }
