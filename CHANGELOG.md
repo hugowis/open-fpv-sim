@@ -5,6 +5,20 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### B3: benchmark-gate truth
+#### Fixed
+- **The ci-linux baseline's "open loop, recording" row is 47.1, not 47.9**, and the five runs agreed within about 6 %,
+  not 4 % (the M8c review recomputed the medians; the gate moves 28.7 to 28.3, negligible). The docs now name the
+  baseline file instead of a superseded run, and the reader benchmark says "three patterns".
+- `scripts/benchmark.py` refuses `--runner`/`--min-ratio` without `--baseline` (they were silently ignored), reports
+  an unknown runner as a clean error instead of a traceback, and `--print-baseline` prints the rows it could not
+  measure as `null` with a warning, so a paste-over cannot silently un-gate the Betaflight rows (a `null` baseline
+  row is no baseline).
+- **The indexed MCAP reader cross-checks its message indexes** (record opcode and channel, each entry's time against
+  its message header, truncation) and falls back to the mcap iterator on any disagreement: a corrupted index can no
+  longer return wrong data silently, and index-only damage no longer fails a read the iterator serves.
+- `OFS_BENCH_ACCEPT_SLOWER`'s docs say to delete the repository variable once the baseline PR has merged.
+
 ### B2: stabilized-session semantics
 #### Changed
 - **Repro bundles say format 2.** The layout is unchanged, but a 0.2.0-or-older build now refuses the bundles this
