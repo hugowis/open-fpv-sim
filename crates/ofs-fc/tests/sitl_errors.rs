@@ -520,7 +520,8 @@ fn the_cleanup_does_not_hang_when_nobody_survives() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let mut victim = spawn_fake_sitl(dir.path(), "sleep 30");
-    victim.wait().unwrap();
+    let _ = victim.0.kill();
+    victim.wait().unwrap(); // dead and reaped BEFORE the measurement: the drop guard alone would measure the wait
     let started = std::time::Instant::now();
     let outcome = ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);
     assert!(

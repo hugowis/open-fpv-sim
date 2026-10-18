@@ -12,8 +12,8 @@ repository). The format follows Keep a Changelog.
 - **Ending a session stops a running MCAP recording with a named `recording_stopped` event**, exactly as a running
   inputs recording does; the file is finished, not left half-written.
 - The live SITL tests kill their own session's SITL by slot (the same selection the product's cleanup makes) instead
-  of `pkill -x betaflight_SITL`, which took down every SITL on a developer machine; a same-named outsider survives,
-  and the crash test proves it.
+  of `pkill -x betaflight_SITL`, which took down every SITL on a developer machine; the crash test holds a decoy SITL
+  in another slot across the kill to prove the scoping.
 - The victim tests' fake SITL processes are killed when a test's assertion fires (a drop guard), so a failing test
   no longer leaks a process holding the ports.
 - The release checker's changelog walk catches an empty `## Unreleased` section and a `###` heading outside any

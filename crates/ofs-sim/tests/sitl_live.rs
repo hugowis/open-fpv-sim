@@ -202,7 +202,7 @@ fn a_client_that_hangs_up_right_after_msp_reboot_does_not_stop_the_reboot() {
 }
 
 /// A SITL session served over gRPC (lockstep, Betaflight), booted and armed: the client, the service and the data
-/// directory that holds its firmware and logs. Linux only (the tests that use it kill SITL with `pkill -x`).
+/// directory that holds its firmware and logs. Linux only (the live tests need a real Betaflight in the VM).
 #[cfg(target_os = "linux")]
 async fn serve_an_armed_quad() -> (
     ofs_sim::pb::sim_client::SimClient<tonic::transport::Channel>,
@@ -376,11 +376,21 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
     let (mut c, service, _data_dir, address) = serve_an_armed_quad().await;
     let mut events = service.subscribe();
 
-    // A decoy running under the SITL process name but outside this session's slot must survive the scoped kill.
-    let mut decoy = std::process::Command::new("bash").arg("-c").arg("exec -a betaflight_SITL sleep 60").spawn().unwrap();
+    // A decoy SITL in another slot must survive the scoped kill: a copy of /bin/sh named betaflight_SITL (comm is
+    // the file's name, which is what the selection matches) whose command line reads like another slot's SITL —
+    // the same trick sitl_errors' fakes use, since a sleep binary cannot carry SITL's arguments.
+    let decoy_dir = tempfile::tempdir().unwrap();
+    let decoy_path = decoy_dir.path().join("betaflight_SITL");
+    std::fs::copy("/bin/sh", &decoy_path).unwrap();
+    let mut decoy = std::process::Command::new(&decoy_path).args(["-c", "sleep 60", "--port-offset", "5"]).spawn().unwrap();
     kill_this_sessions_sitl(&address);
-    let decoy_lives = std::process::Command::new("sh").arg("-c").arg("pgrep -x betaflight_SITL").status().unwrap().success();
-    assert!(decoy_lives, "the kill stayed in this session's slot: a same-named process outside it survives");
+    let decoy_lives = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{} slot_pids 5 | grep -q .", ofs_fc::sitl::net::SLOT_PIDS_SH))
+        .status()
+        .unwrap()
+        .success();
+    assert!(decoy_lives, "the kill stayed in this session's slot: another slot's SITL survives");
     decoy.kill().unwrap();
     let err = c.run(RunRequest { seconds: 2.0 }).await.expect_err("a run with a dead SITL must fail");
 

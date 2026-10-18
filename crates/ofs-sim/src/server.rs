@@ -111,7 +111,7 @@ pub(crate) fn parse_sticks(s: pb::Sticks) -> Result<Sticks, Status> {
     Ok(sticks)
 }
 
-/// Ends the loaded session, if any. A running inputs recording is stopped first, so its file is complete and the
+/// Ends the loaded session, if any. A running recording (MCAP or inputs) is stopped first, so its file is complete and the
 /// clients that track the recording's state hear that it ended (as they do for `StopInputsRecording`).
 fn end_session(shared: &Shared, slot: &mut Slot) {
     if let Some(s) = slot.as_mut() {
