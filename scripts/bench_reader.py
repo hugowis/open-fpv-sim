@@ -45,7 +45,7 @@ def main(argv=None) -> int:
         megabytes = os.path.getsize(path) / 1e6
         lines = [f"A {args.seconds:.0f} s recording, {megabytes:.1f} MB.", "",
                  "| Read | mcap iterator (s) | message indexes (s) | Speed-up |", "|---|---|---|---|"]
-        for label, patterns in (("3 signals", THREE), ("every signal", None)):
+        for label, patterns in (("3 patterns", THREE), ("every signal", None)):
             if reader._read_with_mcap(path, patterns) != reader.read(path, patterns):
                 print(f"the readers disagree on {label}", file=sys.stderr)
                 return 1
