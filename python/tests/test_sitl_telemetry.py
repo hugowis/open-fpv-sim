@@ -6,6 +6,7 @@ OFS_SITL_LAUNCH."""
 import os
 import socket
 import struct
+import time
 
 import pytest
 
@@ -26,14 +27,20 @@ def _msp_requester(sim):
     address = sim.configurator_address  # an attribute set by load(): "tcp://127.0.0.1:5761"
     port = int(address.rsplit(":", 1)[1])
     s = socket.create_connection(("127.0.0.1", port), timeout=2.0)
-    s.settimeout(2.0)
+    s.settimeout(0.05)
 
     def request(cmd):
         ck = cmd
         s.sendall(b"$M<" + bytes([0, cmd]) + bytes([ck]))
+        deadline = time.monotonic() + 2.0
         while True:
             sim.run(0.02)  # MSP is serviced only while simulated time advances
-            b = s.recv(4096)
+            try:
+                b = s.recv(4096)
+            except socket.timeout:  # the request may reach Betaflight only after this slice (Windows): pump on
+                if time.monotonic() >= deadline:
+                    raise
+                continue
             if b"$M>" in b:
                 i = b.index(b"$M>")
                 n, got = b[i + 3], b[i + 4]
