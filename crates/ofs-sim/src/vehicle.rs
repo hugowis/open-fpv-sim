@@ -877,6 +877,13 @@ pub fn drivetrain_params(cfg: &QuadConfig, i: usize) -> Drivetrain {
 }
 
 pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
+    build_seeded(cfg, opts, None)
+}
+
+/// As [`build`]; with `seed_firmware` (a repro bundle's `firmware` folder), a SITL quad's firmware state files
+/// ([`crate::repro::FIRMWARE_STATE`]) are copied into the directory of the slot the session takes before SITL
+/// boots, so a replay starts from the bundle's EEPROM whichever slot is free.
+pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option<&Path>) -> Result<Vehicle, SimError> {
     let mut bus = Bus::new();
     let n = cfg.frame.motor_positions_frd_m.len();
     let base_hz = cfg.sim.base_hz;
@@ -1000,6 +1007,15 @@ pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError>
             }
             let workdir = slot_firmware_dir(&firmware_dir(&opts.data_dir, &cfg.source_path), slot.index);
             sitl_firmware_dir = Some(workdir.clone());
+            if let Some(from) = seed_firmware {
+                std::fs::create_dir_all(&workdir).map_err(|e| SimError::Firmware(format!("{}: {e}", workdir.display())))?;
+                for name in crate::repro::FIRMWARE_STATE {
+                    let file = from.join(name);
+                    if file.is_file() {
+                        std::fs::copy(&file, workdir.join(name)).map_err(|e| SimError::Firmware(format!("copying {}: {e}", file.display())))?;
+                    }
+                }
+            }
             let launch = LaunchConfig {
                 launch: launch_argv,
                 cleanup,
