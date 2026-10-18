@@ -1,8 +1,9 @@
 extends Node3D
 ## The grey-box world. The sky, the sun and the ground plane with its metre grid are drawn here; the objects on the
 ## field (launch pad, pylons, gates, buildings), the pilot's spot and other transmitters come from the world file the
-## simulator loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here collides with
-## the drone: the simulator's ground is a plane at height 0, and it knows the objects only for the video signal.
+## simulator loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the
+## physics: the simulator collides the drone with these objects and its ground plane, and the video link's
+## occlusion is its too — this node only draws.
 ##
 ## Godot's frame: +Y up, forward (north, where the drone starts facing) is -Z, +X is right (east).
 

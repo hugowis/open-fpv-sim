@@ -87,6 +87,8 @@ print(state.race.present, state.race.running, state.race.laps)
 for event in sim.events():
     if event.kind in ("gate_passed", "lap_completed"):
         print(event.time_s, event.message)
+
+# This flight never moves, so the loop above prints nothing: race events need a steered flight through the gates.
 ```
 
 Flying the course needs a pilot or a script that can steer: under Betaflight, or on the open-loop stabilizer

@@ -170,3 +170,9 @@
 - [ ] **Step 3: Check** every `docs/` link and code snippet: run the snippet's logic against the flat world's numbers by reading, and `grep -rn "protocol 10" docs README.md python/README.md` outside `docs/superpowers`.
 - [ ] **Step 4: Run** `cargo test --workspace --locked --no-fail-fast`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo +1.85 check -p ofs-config -p ofs-sim -p ofs-client -p ofs-proto -p ofs-godot`, and WSL `cargo test --workspace --locked --no-fail-fast -- --test-threads=1` (goldens must not move) — Expected: PASS.
 - [ ] **Step 5: Commit** `docs: race timing, M8a changelog and roadmap (#71)`.
+
+## Ledger
+
+- Ruled 2026-10-18 (PR #84's deferred list): the Review Focus sentence saying the exact opening edge is not counted is
+  wrong; the code and Design call 2 count it (`Gate::crossing` counts s1 >= 0, and `a_gate_headed_east_is_crossed_eastward_only`
+  pins it).
