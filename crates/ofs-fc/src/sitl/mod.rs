@@ -5,6 +5,7 @@ pub mod esc_telemetry;
 pub mod frames;
 pub mod net;
 pub mod process;
+pub mod slot;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FcError {
