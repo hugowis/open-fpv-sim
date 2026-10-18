@@ -5,6 +5,16 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### B4: race polish
+#### Fixed
+- **The HUD's lap clock rounds before it splits minutes**, so a lap of 59.96 s shows `1:00.0`, never `0:60.0`.
+- **Race events keep their crossing time inside a `changes()` batch**: the batch is time-ordered (a stable sort, so
+  events at the same time keep the order they were raised). A gate event now also has its end-to-end test through
+  `Session::changes()`, flying the circuit world on the stabilizer.
+- The Godot world node's header, `python/README.md`'s race fields (missing `gate_count`) and the race-timing Python
+  snippet's note (an unsteered flight prints no events) say what is true; the M8a plan's ledger rules that the exact
+  opening edge of a gate is counted.
+
 ### B3: benchmark-gate truth
 #### Fixed
 - **The ci-linux baseline's "open loop, recording" row is 47.1, not 47.9**, and the five runs agreed within about 6 %,
