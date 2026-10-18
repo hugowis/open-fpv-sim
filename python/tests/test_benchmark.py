@@ -82,9 +82,40 @@ def test_the_cli_gates_on_a_baseline_and_the_override_passes_it(sim_bin, tmp_pat
     monkeypatch.delenv("OFS_BENCH_ACCEPT_SLOWER")
     assert benchmark.main(["--binary", sim_bin, "--seconds", "0.5", "--print-baseline"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert set(printed["rows"]) == set(names) and all(v > 0 for v in printed["rows"].values())
+    assert all(printed["rows"][n] > 0 for n in names)
 
 
 def test_one_open_loop_row_runs_against_a_real_server(sim):
     wall = benchmark.measure(sim, 0.5, {"open_loop_fc": True, "record": False}, {"throttle": 0.5})
     assert 0.0 < wall < 60.0
+
+def test_the_cli_refuses_runner_or_ratio_without_a_baseline():
+    for args in (["--runner", "t"], ["--min-ratio", "0.5"]):
+        with pytest.raises(SystemExit) as e:
+            benchmark.main(args)
+        assert e.value.code == 2, args
+
+
+def test_an_unknown_runner_is_a_clean_cli_error(sim_bin, tmp_path, capsys):
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps({"min_ratio": 0.6, "runners": {"t": {"rows": {"open loop, recording": 1e9}}}}))
+    code = benchmark.main(["--binary", sim_bin, "--seconds", "0.5", "--baseline", str(path), "--runner", "laptop"])
+    assert code == 2
+    assert "known:" in capsys.readouterr().err, "no traceback: the error names the known runners"
+
+
+def test_print_baseline_names_the_rows_it_could_not_measure(sim_bin, monkeypatch, capsys):
+    monkeypatch.delenv("OFS_SITL_LAUNCH", raising=False)
+    assert benchmark.main(["--binary", sim_bin, "--seconds", "0.5", "--print-baseline"]) == 0
+    captured = capsys.readouterr()
+    printed = json.loads(captured.out)
+    assert printed["rows"]["open loop, recording"] > 0
+    assert printed["rows"]["Betaflight SITL, recording"] is None, "a paste-over must not silently drop the Betaflight rows"
+    assert "OFS_SITL_LAUNCH" in captured.err
+
+
+def test_load_baseline_skips_null_rows(tmp_path):
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps({"min_ratio": 0.6, "runners": {"t": {"rows": {"a": 1.0, "b": None}}}}))
+    ratio, rows = benchmark.load_baseline(path, "t")
+    assert ratio == 0.6 and rows == {"a": 1.0}

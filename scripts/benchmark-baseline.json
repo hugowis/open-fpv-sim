@@ -2,9 +2,9 @@
   "min_ratio": 0.6,
   "runners": {
     "ci-linux": {
-      "note": "GitHub's ubuntu-24.04 runner, release build, 30 simulated seconds: the median of the benchmark tables of the five green main runs 39017824619, 39020889413, 39026139379, 39030241182 and 39041634879 (2026-10-17); the runs agreed within 4 %",
+      "note": "GitHub's ubuntu-24.04 runner, release build, 30 simulated seconds: the median of the benchmark tables of the five green main runs 39017824619, 39020889413, 39026139379, 39030241182 and 39041634879 (2026-10-17); the runs agreed within about 6 %",
       "rows": {
-        "open loop, recording": 47.9,
+        "open loop, recording": 47.1,
         "open loop, no recording": 131.9,
         "Betaflight SITL, recording": 10.0,
         "Betaflight SITL, no recording": 11.8

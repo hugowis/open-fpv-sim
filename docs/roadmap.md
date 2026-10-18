@@ -98,7 +98,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 
 ### Performance
 - Headless lockstep runs at 7.4× real time with Betaflight SITL (WSL 2) and 84–296× open loop, on an AMD Ryzen 9
-  9900X3D (`docs/dev-setup.md`, Performance), 12.4× on CI's Linux runner: above the 2× target. CI fails below 1×, and when a row falls under 60 % of the
+  9900X3D (`docs/dev-setup.md`, Performance), 10.0–11.8× Betaflight on CI's Linux runner (`scripts/benchmark-baseline.json`): above the 2× target. CI fails below 1×, and when a row falls under 60 % of the
   baseline recorded for CI's runner (`scripts/benchmark-baseline.json`).
 
 ## Post-v1 backlog

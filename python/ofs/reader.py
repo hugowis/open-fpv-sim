@@ -104,6 +104,12 @@ _OP_MESSAGE = 0x05
 _U32 = struct.Struct("<I")
 _U64 = struct.Struct("<Q")
 _INDEX_ENTRY = struct.Struct("<QQ")  # log_time, offset into the chunk's decompressed records
+_OP_MESSAGE_INDEX = 0x07
+
+
+class _IndexCorrupt(Exception):
+    """The message indexes do not agree with the records they point at: read the file the slow way, which trusts
+    nothing of theirs. Raised for a lying entry time, a wrong record opcode or channel, or truncated structures."""
 
 
 def _row_of(record, topic, columns, rows, log_time):
@@ -154,25 +160,28 @@ def _can_read_by_index(summary) -> bool:
 def _collect_by_index(f, summary, selected):
     """The selected signals' records, read through each chunk's per-channel message indexes: only the wanted records
     are cut out of the (decompressed) chunk and parsed. Returns None when the indexes do not account for every record
-    of a selected signal (the caller then reads the file the slow way); a corrupt file raises."""
+    of a selected signal (the caller then reads the file the slow way); an index that disagrees with the records it
+    points at raises _IndexCorrupt, which the caller also answers with the slow way, so no wrong data is returned."""
     wanted = {cid: channel.topic for cid, channel in summary.channels.items() if channel.topic in set(selected)}
     if len(set(wanted.values())) != len(wanted):
         return None  # two channels on one topic: only the iterator merges their records in file order
     decompress = None
     rows, columns, seen = {}, {}, {cid: 0 for cid in wanted}
     for chunk in summary.chunk_indexes:
-        entries = []  # (offset into the chunk's records, channel id), in file order per channel
+        entries = []  # (the entry's log_time, offset into the chunk's records, channel id), in file order per channel
         for cid, index_offset in chunk.message_index_offsets.items():
             if cid not in wanted:
                 continue
             f.seek(index_offset)
             head = f.read(_RECORD_HEAD.size + 2 + _U32.size)
+            if head[0] != _OP_MESSAGE_INDEX or struct.unpack_from("<H", head, _RECORD_HEAD.size)[0] != cid:
+                raise _IndexCorrupt("a message-index record is not its channel's")
             (size,) = _U32.unpack_from(head, _RECORD_HEAD.size + 2)
             body = f.read(size)
             if len(body) != size:
-                raise ValueError("a message index is cut short")
-            for _, offset in _INDEX_ENTRY.iter_unpack(body):
-                entries.append((offset, cid))
+                raise _IndexCorrupt("a message index is cut short")
+            for entry_time, offset in _INDEX_ENTRY.iter_unpack(body):
+                entries.append((entry_time, offset, cid))
             seen[cid] += size // _INDEX_ENTRY.size
         if not entries:
             continue
@@ -182,7 +191,7 @@ def _collect_by_index(f, summary, selected):
         (records_size,) = _U64.unpack(f.read(_U64.size))
         raw = f.read(records_size)
         if len(raw) != records_size:
-            raise ValueError("a chunk is cut short")
+            raise _IndexCorrupt("a chunk is cut short")
         if chunk.compression == "zstd":
             decompress = decompress or _zstd_decompressor()
             if decompress is None:
@@ -190,10 +199,16 @@ def _collect_by_index(f, summary, selected):
             data = decompress.decompress(raw, chunk.uncompressed_size)
         else:
             data = raw
-        for offset, cid in entries:
+        for entry_time, offset, cid in entries:
+            if offset + _MESSAGE_HEAD.size > len(data):
+                raise _IndexCorrupt("a message index entry points outside its chunk's records")
             opcode, length, channel, _, log_time, _ = _MESSAGE_HEAD.unpack_from(data, offset)
+            if offset + _RECORD_HEAD.size + length > len(data):
+                raise _IndexCorrupt("a message index entry's record runs past its chunk's records")
             if opcode != _OP_MESSAGE or channel != cid:
-                raise ValueError("a message index points at something that is not its message")
+                raise _IndexCorrupt("a message index points at something that is not its message")
+            if log_time != entry_time:
+                raise _IndexCorrupt("a message index entry's time disagrees with its message")
             start = offset + _MESSAGE_HEAD.size
             _row_of(json.loads(data[start:offset + _RECORD_HEAD.size + length]), wanted[cid], columns, rows, log_time)
     counts = summary.statistics.channel_message_counts if summary.statistics else None
@@ -220,7 +235,8 @@ def read(path, patterns=None):
 
     A recording with message indexes in zstd or uncompressed chunks (the server's own) is read by cutting only the
     selected signals' records out of each chunk, several times faster than parsing every record; any other file is
-    read through `mcap`'s message iterator."""
+    read through `mcap`'s message iterator. On foreign files whose log times run backwards within a topic, or whose
+    JSON keys vary between records, the column names and their order can differ from the iterator path's."""
     global _used_indexed_path
     _used_indexed_path = False
     make_reader = _mcap_reader()
@@ -233,6 +249,8 @@ def read(path, patterns=None):
         if _can_read_by_index(summary):
             try:
                 collected = _collect_by_index(f, summary, selected)
+            except _IndexCorrupt:
+                pass  # the indexes lie about the records they point at: the slow way reads the true ones
             except Exception as e:  # a half-written chunk: the same verdict as the slow path gives
                 raise ValueError(_damaged(path)) from e
             _used_indexed_path = collected is not None
