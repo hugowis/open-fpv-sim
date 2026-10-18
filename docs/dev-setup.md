@@ -50,7 +50,7 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
   1. `godot --path godot`, press F2 and check the bindings of your radio or gamepad against the stick display (roll right, pitch forward, yaw right).
   2. Wait for the HUD to show a flying state, put the throttle low and arm with aux 1; switch aux 2 for Angle mode.
   3. Fly, then cut the radio (K, or switch the transmitter off): the HUD reports the link lost and Betaflight fails safe within a few seconds. R reloads the quad.
-  4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761`), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
+  4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761` on an otherwise idle machine — it is the slot's, +10 per simulator, see the ports table), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
 - **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views, the OSD, the three looks of the analog video link (`video_grain.png`, `video_unstable.png`, `video_lost.png`), and the help and controls screens (`start_fpv.png`, `start_chase.png`, `osd_fpv.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`); review them by eye. Without `--out=` they go to the project's user data dir.
 
 ## OSD, VTX and battery telemetry (M3a)
@@ -298,14 +298,14 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
   - A pilot client disconnecting (the `Pilot` stream) switches the radio transmitter off: Betaflight fails safe and the session keeps running.
 
 ## Firmware state
-- **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log` and any Blackbox logs.
+- **Directory:** each quad file gets `<data_dir>/<quad file stem>-<8 hex digits>/` (the digits hash the quad file's path), holding `eeprom.bin`, `betaflight.diff` (the copy applied on first boot), `sitl.log`, a `config.lock` held while a first boot applies the diff (removed when it ends; deleting a leftover is safe when no first boot is running) and any Blackbox logs.
 - **Diff changes:** the quad's diff is applied only on first boot, so Configurator changes persist. If the quad's diff changes later, loading fails until you delete `eeprom.bin` (which also discards Configurator changes). M4c changed both shipped diffs (`set blackbox_device = VIRTUAL`): delete the `eeprom.bin` of each quad you flew before it, once.
 - **Reboots:** a Betaflight reboot (`MSP_REBOOT`, the Configurator's Reboot, flashing) relaunches SITL from its EEPROM; `State.fc_restarts` counts them. The PID tab's Save is not a reboot (see "Betaflight Configurator" below).
 
 ## Betaflight Configurator
-SITL serves MSP on `tcp://127.0.0.1:5761` (also from Windows, through WSL's localhost forwarding), but only while simulated time advances. So connect while a real-time session runs:
+SITL serves MSP on its slot's TCP port (`tcp://127.0.0.1:5761` for slot 0, +10 per slot; also from Windows, through WSL's localhost forwarding), but only while simulated time advances. So connect while a real-time session runs:
 1. Start `python python/examples/serve_realtime.py` (with `OFS_SITL_LAUNCH` set). It prints the Configurator address.
-2. In the Betaflight Configurator desktop app, enable manual connection in the options, enter `tcp://127.0.0.1:5761`, and press Connect.
+2. In the Betaflight Configurator desktop app, enable manual connection in the options, enter the address the script printed (`tcp://127.0.0.1:5761` for slot 0), and press Connect.
 3. A Save persists the change to EEPROM. The PID tab's Save does **not** reboot Betaflight (checked by hand, 2026-10-14: a change survived a reconnect and the script's `betaflight restarts` stayed 0). A reboot sent to the port does make the simulator relaunch SITL from its EEPROM — verified live: an `MSP_REBOOT` sent to the Configurator port relaunched SITL in about 1.6 s, the radio link came back up, and the Configurator reconnected.
 
 The web Betaflight App cannot open raw TCP connections.
@@ -376,7 +376,7 @@ session). Every SITL runs on a *slot*, a block of ten ports (SITL's `--port-offs
 
 The first session on the machine gets slot 0, exactly the ports of earlier releases; the next one gets the first slot
 that is free. A simulator takes a slot by holding two sockets for the life of its session, a loopback UDP lock on
-`47000 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
+`21600 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
 crashed simulator frees its slot. Something else holding those ports makes the simulator skip the slot; with all 16
 taken the load fails with an error that says so. `LoadReply.configurator_address` (Python:
 `sim.configurator_address`, the game's toast) always says which address the session got.

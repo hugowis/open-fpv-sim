@@ -93,7 +93,7 @@ message LoadRequest {
 message LoadReply {
   string quad_name = 1;
   uint32 base_hz = 2;
-  string configurator_address = 3;  // tcp://127.0.0.1:5761 when the FC is Betaflight SITL, else empty
+  string configurator_address = 3;  // the slot's Configurator address (tcp://127.0.0.1:5761 for slot 0) when the FC is Betaflight SITL, else empty
 }
 
 // roll, pitch, yaw, aux in [-1, 1]; throttle in [0, 1]. Up to 4 aux channels; missing ones are -1.

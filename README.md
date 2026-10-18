@@ -76,7 +76,7 @@ it editable with every extra and the test tools.
     export OFS_SIM_BIN=target/debug/ofs-sim
     export OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf   # Windows: see docs/dev-setup.md
     python python/examples/hover.py                 # lockstep: arm and hold 1 m
-    python python/examples/serve_realtime.py        # real time; connect Betaflight Configurator to tcp://127.0.0.1:5761
+    python python/examples/serve_realtime.py        # real time; connect Betaflight Configurator to the address it prints
 
 ## The Godot pilot client
 

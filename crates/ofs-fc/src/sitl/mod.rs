@@ -21,9 +21,17 @@ pub enum FcError {
     Io(#[from] std::io::Error),
 }
 
-/// How to fix a SITL that exited during startup because `wsl.exe` could not find the program after `-e` (WSL itself
-/// started, so this is not a [`FcError::Launch`]). Empty when the output does not show that.
+/// How to fix a SITL that exited during startup: because `wsl.exe` could not find the program after `-e` (WSL itself
+/// started, so this is not a [`FcError::Launch`]), or because a binary built before the slot patch rejected the
+/// `--port-offset` the simulator gives it (a rebuild fixes both; see docs/dev-setup.md). The rejection is matched by
+/// its whole message, so a patched binary rejecting some *other* unknown option of a hand-written launch is not
+/// mistaken for it. Empty when the output does not show either.
 pub fn startup_hint(argv: &[String], output: &str) -> String {
+    if output.contains("Unknown argument: --port-offset") {
+        return "\nThe Betaflight SITL binary rejected --port-offset: it predates the patch that adds it. Rebuild it \
+                with scripts/build-sitl.sh and re-run. See docs/dev-setup.md."
+            .to_string();
+    }
     let Some(prefix) = net::wsl_prefix(argv) else {
         return String::new();
     };

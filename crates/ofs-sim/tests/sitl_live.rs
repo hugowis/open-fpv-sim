@@ -406,3 +406,47 @@ fn a_replay_beside_a_running_session_seeds_the_slot_it_takes() {
     assert!(!replay_dir.exists(), "nothing was seeded into the slot-0 directory the replay did not use: {}", replay_dir.display());
     drop(running);
 }
+
+/// Something that is not a simulator — any process holding a slot's loopback lock — pushes the session to the next
+/// slot all the same: the product path skips the taken slot, and the session reports the next slot's address. The
+/// lock is held on loopback in every launch mode (native Linux, and Windows against SITL in WSL), so this works in
+/// both, which a held motor port would not (that binds the gateway IP under WSL's NAT).
+#[test]
+#[ignore]
+fn a_foreign_holder_of_the_slot_lock_pushes_the_session_to_the_next_slot() {
+    let _holder = std::net::UdpSocket::bind(("127.0.0.1", ofs_fc::sitl::slot::LOCK_PORT_BASE)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let v = sitl_in(dir.path());
+    assert_eq!(v.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"), "slot 0's lock was held, so the session took slot 1");
+}
+
+/// A bundle recorded by a session that flew in slot 1 (slot 0's lock held by a foreign socket) replays like any
+/// other: nothing in the bundle path assumes the stock ports.
+#[test]
+#[ignore]
+fn a_bundle_from_a_session_in_slot_n_replays() {
+    use ofs_sim::repro::{replay, snapshot_firmware, write_bundle, BundleSource};
+
+    let _holder = std::net::UdpSocket::bind(("127.0.0.1", ofs_fc::sitl::slot::LOCK_PORT_BASE)).unwrap();
+    let mut rig = Rig::new();
+    assert_eq!(rig.v.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"), "flying in slot 1");
+    let data_dir = rig._dir.path().to_path_buf();
+    let quad = std::path::absolute(QUAD).unwrap();
+    let cfg = load(&quad).unwrap();
+    let firmware = rig.v.firmware_dir().unwrap();
+    assert!(firmware.file_name().unwrap().to_string_lossy().ends_with("-s1"), "{firmware:?}");
+    let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    source.firmware_initial = snapshot_firmware(&firmware);
+    rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
+    rig.v.run_for(2.0).unwrap();
+    let error = ofs_core::SimError::Firmware("simulated failure for the slot-n bundle test".into());
+    let bundle = write_bundle(&source, &rig.v, &error).unwrap();
+    let Rig { v, _dir } = rig;
+    drop(v); // SITL must stop before the replay starts its own; _dir keeps the bundle alive
+    drop(_holder); // the replay takes the lowest free slot, as a plain replay does
+    let scratch = tempfile::tempdir().unwrap();
+    let outcome = replay(&bundle, scratch.path()).unwrap();
+    assert!(!outcome.reproduced, "{outcome:?}");
+    assert!(outcome.failure.is_none(), "{outcome:?}");
+    assert_eq!(outcome.reached_tick, outcome.expected_tick + 1, "{outcome:?}");
+}
