@@ -334,6 +334,7 @@ async fn a_session_whose_pilot_left_first_still_leaves_a_finished_blackbox_log()
 }
 
 
+#[cfg(target_os = "linux")]
 /// This session's SITL processes are killed by their slot (the same selection the product's cleanup makes, from the
 /// session's Configurator address): SIGTERM first, then SIGKILL for whoever survived. Never a machine-wide match by
 /// process name: another simulator's SITL must not lose its session to this test.
