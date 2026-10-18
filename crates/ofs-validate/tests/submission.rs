@@ -192,3 +192,14 @@ fn a_blackbox_submission_needs_a_diff() {
     write(dir.path(), "flight.csv", &format!("{BLACKBOX_HEADER}\n0, 0, 1, 2, 3, 4, 5, 6, 7\n"));
     assert!(load(dir.path()).unwrap_err().join("\n").contains("diff"));
 }
+
+#[test]
+fn several_bad_keys_are_all_reported_together() {
+    let dir = tempfile::tempdir().unwrap();
+    // One unknown key and one wrong-typed key, next to a perfectly good kind: both problems come back in one pass.
+    write(dir.path(), "submission.toml", &thrust_toml(&["colour = 1", "title = 5"]));
+    let problems = load(dir.path()).unwrap_err();
+    assert!(problems.iter().any(|p| p.contains("'colour'")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("title") && p.contains("text")), "{problems:?}");
+    assert!(!problems.iter().any(|p| p.contains("kind")), "{problems:?}");
+}
