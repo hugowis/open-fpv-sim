@@ -41,12 +41,42 @@ pub fn wsl_prefix(launch: &[String]) -> Option<Vec<String>> {
     }
 }
 
+/// The `--port-offset` a launch argv gives SITL (its slot, see [`super::slot`]): `None` for an unscoped launch (an
+/// argv without the option, such as a hand-made `OFS_SITL_LAUNCH` in a test), whose cleanup is by process name.
+pub fn port_offset_in(launch: &[String]) -> Option<u16> {
+    let at = launch.iter().position(|a| a == "--port-offset")?;
+    launch.get(at + 1)?.parse().ok()
+}
+
+/// The `pkill -f` / `pgrep -f` pattern (an extended regular expression over the whole command line) that matches
+/// the SITL processes of one slot and nothing else: the first word is the SITL binary (so no shell whose command
+/// line merely mentions it), and its arguments end in this slot's `--port-offset`.
+pub fn victim_pattern(offset: u16) -> String {
+    format!("^[^ ]*{SITL_PROCESS_NAME}[^ ]* .*--port-offset {offset}( |$)")
+}
+
+/// [`victim_pattern`] on an argv, for the native scan of `/proc`: the program is the SITL binary and the arguments
+/// contain `--port-offset <offset>` exactly.
+pub fn is_victim(args: &[&str], offset: u16) -> bool {
+    let Some((program, rest)) = args.split_first() else { return false };
+    if !program.contains(SITL_PROCESS_NAME) {
+        return false;
+    }
+    let wanted = offset.to_string();
+    rest.windows(2).any(|w| w[0] == "--port-offset" && w[1] == wanted)
+}
+
 /// Cleanup argv that removes stray SITL processes (e.g. left behind by a simulator that was killed).
-/// Matches the process *name* (`pkill -x`; Linux truncates `betaflight_SITL.elf` to `betaflight_SITL`):
-/// `pkill -f` would also match (and kill) any shell whose command line contains the binary path.
+/// A launch with a `--port-offset` (a slot) matches only that slot's processes, by their command line
+/// ([`victim_pattern`]: the anchored pattern cannot match a shell, and `pkill` never matches itself); that is what
+/// lets several simulators share a machine. An unscoped launch matches the process *name* (`pkill -x`; Linux
+/// truncates `betaflight_SITL.elf` to `betaflight_SITL`), every SITL on the machine.
 /// Under WSL it runs inside the VM; natively it needs a unix host, so plain Windows gets none.
 pub fn default_cleanup(launch: &[String]) -> Vec<String> {
-    let pkill = ["pkill", "-x", SITL_PROCESS_NAME].map(String::from);
+    let pkill = match port_offset_in(launch) {
+        Some(offset) => vec!["pkill".to_string(), "-f".to_string(), victim_pattern(offset)],
+        None => ["pkill", "-x", SITL_PROCESS_NAME].map(String::from).to_vec(),
+    };
     match wsl_prefix(launch) {
         Some(mut prefix) => {
             prefix.extend(pkill);

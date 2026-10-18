@@ -1,6 +1,8 @@
 use std::net::Ipv4Addr;
 
-use ofs_fc::sitl::net::{default_cleanup, parse_default_gateway, parse_hostname_ips, resolve, wsl_prefix, SitlNet};
+use ofs_fc::sitl::net::{
+    default_cleanup, is_victim, parse_default_gateway, parse_hostname_ips, port_offset_in, resolve, victim_pattern, wsl_prefix, SitlNet,
+};
 
 fn argv(a: &[&str]) -> Vec<String> {
     a.iter().map(|s| s.to_string()).collect()
@@ -28,6 +30,45 @@ fn native_cleanup_is_pkill_on_unix_and_empty_on_plain_windows() {
     } else {
         assert!(native.is_empty(), "{native:?}");
     }
+}
+
+#[test]
+fn the_port_offset_is_read_from_the_launch_argv() {
+    assert_eq!(port_offset_in(&argv(&["/x/betaflight_SITL.elf", "--ip", "1.2.3.4", "--port-offset", "10"])), Some(10));
+    assert_eq!(port_offset_in(&argv(&["wsl.exe", "-e", "/x/b", "--port-offset", "0"])), Some(0));
+    assert_eq!(port_offset_in(&argv(&["/x/betaflight_SITL.elf", "--ip", "1.2.3.4"])), None, "an unscoped launch");
+    assert_eq!(port_offset_in(&argv(&["/x/b", "--port-offset"])), None, "no value");
+    assert_eq!(port_offset_in(&argv(&["/x/b", "--port-offset", "ten"])), None, "not a number");
+}
+
+#[test]
+fn a_slots_cleanup_matches_only_that_slots_processes() {
+    let pattern = "^[^ ]*betaflight_SITL[^ ]* .*--port-offset 10( |$)";
+    assert_eq!(victim_pattern(10), pattern);
+    let native = default_cleanup(&argv(&["/x/betaflight_SITL.elf", "--ip", "1.2.3.4", "--port-offset", "10"]));
+    let wsl = default_cleanup(&argv(&["wsl.exe", "-d", "Ubuntu", "-e", "/x/betaflight_SITL.elf", "--port-offset", "10"]));
+    assert_eq!(wsl, argv(&["wsl.exe", "-d", "Ubuntu", "-e", "pkill", "-f", pattern]));
+    if cfg!(unix) {
+        assert_eq!(native, argv(&["pkill", "-f", pattern]));
+    } else {
+        assert!(native.is_empty(), "{native:?}");
+    }
+}
+
+#[test]
+fn the_native_matcher_agrees_with_the_pattern_on_a_table() {
+    let sitl = "/home/u/ofs/betaflight/obj/main/betaflight_SITL.elf";
+    let yes = |args: &[&str], offset| assert!(is_victim(args, offset), "{args:?} should be a victim of slot {offset}");
+    let no = |args: &[&str], offset| assert!(!is_victim(args, offset), "{args:?} must not be a victim of slot {offset}");
+    yes(&[sitl, "--ip", "1.2.3.4", "--port-offset", "10"], 10);
+    yes(&[sitl, "--port-offset", "10", "--config", "betaflight.diff"], 10);
+    yes(&[sitl, "--port-offset", "0"], 0);
+    no(&[sitl, "--port-offset", "100"], 10);
+    no(&[sitl, "--port-offset", "1"], 10);
+    no(&[sitl, "--port-offset", "10"], 0);
+    no(&[sitl, "--ip", "1.2.3.4"], 0);
+    no(&["sh", "-c", "betaflight_SITL --port-offset 10"], 10);
+    no(&["pkill", "-f", "betaflight_SITL --port-offset 10"], 10);
 }
 
 #[test]
