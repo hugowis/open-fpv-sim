@@ -29,10 +29,10 @@ index bb7f2cb..72c2a8d 100644
    err = bind(stream->sockfd, ai->ai_addr, ai->ai_addrlen);
    if (err) {
 diff --git a/src/main/common/printf.c b/src/main/common/printf.c
-index ce40994..1b0da41 100644
+index ce40994..1473d08 100644
 --- a/src/main/common/printf.c
 +++ b/src/main/common/printf.c
-@@ -40,6 +40,14 @@
+@@ -40,6 +40,16 @@
  
  #include "printf.h"
  
@@ -40,14 +40,16 @@ index ce40994..1b0da41 100644
 +// Windows x64 passes the arguments after the fourth on the stack, and a 32-bit value (a uint32_t read with %ld, as the
 +// MCU's 32-bit long makes the CLI do) leaves the upper half of its 64-bit slot undefined: read %ld as 32 bits.
 +#define PRINTF_LONG_ARG(va) ((unsigned long int)va_arg(va, unsigned int))
++#define PRINTF_SIGNED_LONG_ARG(va) ((unsigned long int)(long int)va_arg(va, int))
 +#else
 +#define PRINTF_LONG_ARG(va) va_arg(va, unsigned long int)
++#define PRINTF_SIGNED_LONG_ARG(va) va_arg(va, unsigned long int)
 +#endif
 +
  #ifdef REQUIRE_PRINTF_LONG_SUPPORT
  #include "typeconversion.h"
  #endif
-@@ -104,7 +112,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+@@ -104,7 +114,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
              case 'u':{
  #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
                      if (lng)
@@ -56,16 +58,16 @@ index ce40994..1b0da41 100644
                      else
  #endif
                          ui2a(va_arg(va, unsigned int), 10, 0, bf);
-@@ -114,7 +122,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+@@ -114,7 +124,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
              case 'd':{
  #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
                      if (lng)
 -                        li2a(va_arg(va, unsigned long int), bf);
-+                        li2a(PRINTF_LONG_ARG(va), bf);
++                        li2a(PRINTF_SIGNED_LONG_ARG(va), bf);
                      else
  #endif
                          i2a(va_arg(va, int), bf);
-@@ -125,7 +133,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
+@@ -125,7 +135,7 @@ int tfp_format(void *putp, putcf putf, const char *fmt, va_list va)
              case 'X':
  #ifdef  REQUIRE_PRINTF_LONG_SUPPORT
                  if (lng)
@@ -137,27 +139,48 @@ index db34ec0..e479d54 100644
              -T$(LD_SCRIPT)
  
  ifneq ($(filter SITL_STATIC,$(OPTIONS)),)
+diff --git a/src/platform/SIMULATOR/udplink.c b/src/platform/SIMULATOR/udplink.c
+index 21658f6..109399f 100644
+--- a/src/platform/SIMULATOR/udplink.c
++++ b/src/platform/SIMULATOR/udplink.c
+@@ -31,7 +31,11 @@ int udpInit(udpLink_t* link, const char* addr, int port, bool isServer)
+     link->port = port;
+ 
+     if (addr == NULL) {
++#ifdef __CYGWIN__
++        link->si.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // only this machine talks to a native Windows SITL
++#else
+         link->si.sin_addr.s_addr = htonl(INADDR_ANY);
++#endif
+     }else{
+         link->si.sin_addr.s_addr = inet_addr(addr);
+     }
 diff --git a/src/platform/SIMULATOR/win_stubs.c b/src/platform/SIMULATOR/win_stubs.c
 new file mode 100644
-index 0000000..c36456a
+index 0000000..267e345
 --- /dev/null
 +++ b/src/platform/SIMULATOR/win_stubs.c
-@@ -0,0 +1,18 @@
-+// Windows (PE) build only: --gc-sections removed nothing in this link, so code that the other SITL builds drop as
-+// unreachable stays and refers to hardware-only symbols. Define them (never called) so the link succeeds.
+@@ -0,0 +1,23 @@
++// Windows (PE) build only. Code that the Linux SITL link drops as unreachable stays in this one and refers to
++// hardware-only symbols: --gc-sections removed nothing here, and this build has no LTO (the Linux build has, which
++// also drops unreferenced code; which of the two matters is not established). Define the symbols so the link
++// succeeds; a function stub that is ever called says so and aborts.
 +#if defined(_WIN32) || defined(__CYGWIN__)
++#include <stdio.h>
++#include <stdlib.h>
++#define STUB_CALLED(name) do { fprintf(stderr, "[SITL] win_stubs.c: %s was called\n", name); abort(); } while (0)
 +char dmaDescriptors[256];
 +char gpsLapTimerConfig_System[256];
-+int dmaGetHandlerCount(void) { return 0; }
-+int IORead(void *io) { (void)io; return 0; }
-+void audioSetupIO(void) {}
-+void audioGenerateWhiteNoise(void) {}
-+void audioSilence(void) {}
-+void audioPlayTone(void) {}
-+int mpuGyroReadRegister(void) { return 0; }
-+float clockCyclesToMicrosf(unsigned c) { return (float)c; }
-+void hottTextmodeWriteChar(void) {}
-+void hottTextmodeGrab(void) {}
-+int hottTextmodeIsAlive(void) { return 0; }
-+void hottTextmodeExit(void) {}
++int dmaGetHandlerCount(void) { STUB_CALLED("dmaGetHandlerCount"); return 0; }
++int IORead(void *io) { (void)io; STUB_CALLED("IORead"); return 0; }
++void audioSetupIO(void) { STUB_CALLED("audioSetupIO"); }
++void audioGenerateWhiteNoise(void) { STUB_CALLED("audioGenerateWhiteNoise"); }
++void audioSilence(void) { STUB_CALLED("audioSilence"); }
++void audioPlayTone(void) { STUB_CALLED("audioPlayTone"); }
++int mpuGyroReadRegister(void) { STUB_CALLED("mpuGyroReadRegister"); return 0; }
++float clockCyclesToMicrosf(unsigned c) { (void)c; STUB_CALLED("clockCyclesToMicrosf"); return 0; }
++void hottTextmodeWriteChar(void) { STUB_CALLED("hottTextmodeWriteChar"); }
++void hottTextmodeGrab(void) { STUB_CALLED("hottTextmodeGrab"); }
++int hottTextmodeIsAlive(void) { STUB_CALLED("hottTextmodeIsAlive"); return 0; }
++void hottTextmodeExit(void) { STUB_CALLED("hottTextmodeExit"); }
 +#endif

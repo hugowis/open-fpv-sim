@@ -4,14 +4,16 @@
 #![cfg(windows)]
 
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use ofs_fc::sitl::net::default_cleanup;
 use ofs_fc::sitl::process::{await_cleanup, run_cleanup};
 
-/// The decoys are named processes of the whole machine: tests that start and clean them take turns.
+/// The decoys are named processes of the whole machine: tests that start and clean them take turns. (The cleanup of
+/// slot 0 or slot 1 also takes down a real native SITL running in that slot on the machine: do not run these tests
+/// beside a live session.)
 static DECOYS: Mutex<()> = Mutex::new(());
 
 /// `<dir>\betaflight_SITL.exe /c ping ... & rem <extra...>`: sleeps about 30 s; the copy of cmd.exe is made once per
@@ -22,7 +24,15 @@ fn spawn_decoy(dir: &Path, extra: &[&str]) -> Child {
         let cmd = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
         std::fs::copy(cmd, &fake).unwrap();
     }
-    Command::new(&fake).args(["/c", "ping -n 30 127.0.0.1 > nul & rem decoy"]).args(extra).spawn().unwrap()
+    // No inherited stdio: the `ping` the decoy starts outlives it by up to 30 s and must not hold the test's output open.
+    Command::new(&fake)
+        .args(["/c", "ping -n 30 127.0.0.1 > nul & rem decoy"])
+        .args(extra)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
 }
 
 fn alive(child: &mut Child) -> bool {

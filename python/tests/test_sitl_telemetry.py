@@ -62,8 +62,15 @@ def test_per_motor_erpm_reaches_betaflight(sim):
     rc = request(MSP_RC)  # MSP order: roll, pitch, yaw, throttle
     assert struct.unpack_from("<4H", rc, 0) == (1500, 1500, 1500, 1500), \
         "telemetry did not disturb RC: the sticks read back as sent"
-    d = request(MSP_MOTOR_TELEMETRY)
-    rpm = [struct.unpack_from("<I", d, 1 + i * 13)[0] for i in range(d[0])]
+    # The four motors differ by a few rpm only, and Betaflight's value is quantized in steps of about 14 rpm, so one
+    # sample can read all four alike (which one depends on how much simulated time the reply took: a few ms of wall
+    # time more on Windows, where a native SITL fails a single-sample version of this about 5 runs in 8). Look again.
+    for _ in range(20):
+        d = request(MSP_MOTOR_TELEMETRY)
+        rpm = [struct.unpack_from("<I", d, 1 + i * 13)[0] for i in range(d[0])]
+        if len(set(rpm)) > 1:
+            break
+        sim.run(0.05)
     assert len(rpm) == 4 and len(set(rpm)) > 1, f"expected distinct per-motor RPM, got {rpm}"
     sim_rpm = s.motor_rpm
     for bf, ours in zip(rpm, sim_rpm):

@@ -103,7 +103,9 @@ pub const SLOT_KILL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_pids \"
 /// to be gone, so the SITL launched next finds its ports free. Written with single quotes only (it travels as one
 /// command-line argument).
 pub const WINDOWS_SLOT_KILL_SCRIPT: &str = "& { param($offset) \
-Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'betaflight_SITL.exe' } | ForEach-Object { \
+if (-not (Get-Process -Name betaflight_SITL -ErrorAction SilentlyContinue)) { return }; \
+Get-CimInstance Win32_Process -Filter 'Name=''betaflight_SITL.exe''' -OperationTimeoutSec 5 | ForEach-Object { \
+if ($null -eq $_.CommandLine) { return }; \
 $m = [regex]::Matches($_.CommandLine, '\\s--port-offset\\s+(\\d+)'); \
 $o = 0; if ($m.Count -gt 0) { $o = [int]$m[$m.Count - 1].Groups[1].Value }; \
 if ($o -eq [int]$offset) { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId } \
@@ -126,7 +128,8 @@ pub fn is_victim(args: &[&str], offset: u16) -> bool {
 /// A launch with a `--port-offset` (a slot) removes only that slot's processes ([`SLOT_KILL_SCRIPT`]); that is what
 /// lets several simulators share a machine. An unscoped launch matches the process *name* (`pkill -x`; Linux
 /// truncates `betaflight_SITL.elf` to `betaflight_SITL`), every SITL on the machine.
-/// Under WSL it runs inside the VM; natively it needs a unix host, so plain Windows gets none.
+/// Under WSL it runs inside the VM; natively on unix it is the same rule in `sh`; on a plain Windows host it is a
+/// PowerShell command ([`WINDOWS_SLOT_KILL_SCRIPT`]) that also waits for its victims, which a scoped launch needs.
 pub fn default_cleanup(launch: &[String]) -> Vec<String> {
     let kill = match port_offset_in(launch) {
         Some(offset) => ["sh", "-c", SLOT_KILL_SCRIPT, "sh"].into_iter().map(String::from).chain([offset.to_string()]).collect(),

@@ -9,15 +9,19 @@ repository). The format follows Keep a Changelog.
 #### Added
 - **Betaflight SITL without WSL (#67).** `scripts/build-sitl-windows.sh`, run from an MSYS2 shell, builds the pinned
   SITL as a Windows program (`third_party/betaflight/ofs-sitl-windows.patch` on top of `ofs-sitl.patch`) and copies
-  its two Cygwin runtime DLLs beside it; set `OFS_SITL_LAUNCH` to the `.exe`. It passes the live Rust and Python SITL
-  tests and ran 2.2 to 2.6 times faster than SITL in WSL 2 in the benchmark. WSL stays the supported path: no CI job
-  builds the native one yet. `docs/research/sitl-native-windows.md` has the findings, what is left, and the sizing of a
+  its two Cygwin runtime DLLs beside it; set `OFS_SITL_LAUNCH` to the `.exe`. Run from Windows it passed the `ofs-fc`
+  and `ofs-video` live tests, the `ofs-sim` live tests that run on Windows (9 of 9; 5 more are Linux-only) and the 26
+  Python SITL tests, and measured 2.1 to 2.5 times faster than SITL in WSL 2 in one benchmark run. WSL stays the
+  supported path: no CI job builds the native one yet. `docs/research/sitl-native-windows.md` has the findings, what is left, and the sizing of a
   DLL-free port.
 - The default stray-SITL cleanup on a plain Windows host is scoped to the session's slot (a PowerShell command; it
   returned nothing before), and a SITL that cannot load its runtime DLLs now says so.
 #### Changed
 - Two Python test helpers (`msp_status.py`, `test_sitl_telemetry.py`) keep pumping simulated time while they wait for an
-  MSP reply instead of blocking on the socket.
+  MSP reply instead of blocking on the socket, and `test_per_motor_erpm_reaches_betaflight` samples again until the
+  four rpm values differ (a single sample failed 5 runs in 8 against the native SITL).
+- The cleanup commands of a SITL launch are given up on after 10 s (`CLEANUP_TIMEOUT`) instead of waited for without a
+  bound.
 
 ### M9a: parallel SITL sessions
 #### Added
