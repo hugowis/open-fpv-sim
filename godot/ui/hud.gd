@@ -290,7 +290,9 @@ func _update_race(t: Dictionary) -> void:
 	var next_gate: int = t.get("race_next_gate", 0)
 	var lap_s: float = t.get("race_lap_s", 0.0)
 	var laps: int = t.get("race_laps", 0)
-	var text := "LAP %d   NEXT %s   %d:%04.1f" % [laps + 1, "START" if next_gate == 0 else str(next_gate), int(lap_s) / 60, fmod(lap_s, 60.0)]
+	# Round to the displayed tenth first, then split: formatting 59.96 directly gives "0:60.0".
+	var shown_s: float = snappedf(lap_s, 0.1)
+	var text := "LAP %d   NEXT %s   %d:%04.1f" % [laps + 1, "START" if next_gate == 0 else str(next_gate), int(shown_s) / 60, fmod(shown_s, 60.0)]
 	if laps > 0:
 		text += "   LAST %.1f   BEST %.1f" % [t.get("race_last_lap_s", 0.0), t.get("race_best_lap_s", 0.0)]
 	_race.text = text
