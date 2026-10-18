@@ -397,10 +397,10 @@ taken the load fails with an error that says so. `LoadReply.configurator_address
 - **Rebuild SITL** with `scripts/build-sitl.sh`: the simulator always passes `--port-offset`, and a SITL built before this
   option answers `[SITL] Unknown argument: --port-offset` and exits, which is reported as a startup error.
 - **Limits.** Slots are claimed on the simulator's side of the machine: a simulator on Windows and a simulator running
-  inside WSL do not see each other's locks, so both can pick slot 0 and then compete for the same ports in the VM. The
-  second one does not fly on the wrong SITL: SITL's own bind-failure check turns it into a startup error that names
-  the port. Run all your simulators from one side (all on Windows with `wsl.exe` launches, or all inside WSL). Each
-  session is still one simulator process.
+  inside WSL do not see each other's locks, so both can pick slot 0, and the second one's cleanup then removes the
+  first one's SITL inside the VM (the same slot there); the first session fails later with "no motor output". Run all
+  your simulators from one side (all on Windows with `wsl.exe` launches, or all inside WSL). Each session is still one
+  simulator process.
   The Rust live tests keep running one at a time (`--test-threads=1`): several of them kill every SITL by name on
   purpose. `python/tests/test_sitl_parallel.py` and `a_second_session_gets_its_own_slot_and_both_fly` are the tests of
   parallel sessions.

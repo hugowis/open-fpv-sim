@@ -10,9 +10,8 @@
 //!    foreign process holds the slot's ports, and the slot is skipped.
 //!
 //! Two simulators on the same operating system share this lock domain. A Windows simulator and a simulator running
-//! inside WSL do not, so launching both into one WSL VM can pick the same slot: the second one's SITL then fails to
-//! bind the VM's ports and its session ends in a startup error (SITL's own bind-failure check), never in flying the
-//! wrong SITL.
+//! inside WSL do not, so launching both into one WSL VM can pick the same slot, and the second one's cleanup removes
+//! the first one's SITL there. Run all simulators from one side of the machine (`docs/dev-setup.md`).
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
 use super::codec::{PortMap, PORT_PWM, SLOT_PORT_STRIDE};

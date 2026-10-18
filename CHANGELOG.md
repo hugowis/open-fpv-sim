@@ -18,8 +18,12 @@ repository). The format follows Keep a Changelog.
 #### Changed
 - **The stray-SITL cleanup is scoped to the session's slot.** The default cleanup, the wait for its victims and the
   SIGKILL escalation used to match every `betaflight_SITL` on the machine by name, so a second session would have killed
-  the first; they now match only processes launched with the slot's `--port-offset`. A launch argv without that option
-  (a hand-made `OFS_SITL_LAUNCH` in a test) and an explicit `OFS_SITL_CLEANUP` keep the by-name behaviour.
+  the first; they now match only processes named `betaflight_SITL` launched with the slot's `--port-offset` (slot 0
+  also takes one launched without the option, as 0.2.0 did). A `--port-offset` in `OFS_SITL_LAUNCH` or `fc.launch` is
+  replaced by the slot's. A launch argv without the option (a hand-made `OFS_SITL_LAUNCH` in a test) and an explicit
+  `OFS_SITL_CLEANUP` keep the by-name behaviour.
+- A replay (`ofs-sim --replay`) seeds the bundle's firmware into the slot it takes, so it replays exactly while another
+  session is running.
 - **Rebuild SITL** with `scripts/build-sitl.sh`: the simulator always passes `--port-offset`, so an older SITL binary
   stops at startup with `[SITL] Unknown argument: --port-offset`.
 
