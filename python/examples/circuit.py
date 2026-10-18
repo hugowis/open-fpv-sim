@@ -28,7 +28,7 @@ G = 9.81
 
 # Per backend: horizontal speed cap (m/s), lean cap (m/s^2 of horizontal acceleration), and the throttle that hovers.
 # "lean" is the lean in degrees one full stick gives: the stabilizer's MAX_ANGLE_DEG is 60; the shipped Betaflight tune
-# measured about 24 (a 0.3 stick leans 7 degrees, `angle_probe` in the M8b ledger), so the same stick asks for less.
+# leans about 7 degrees at a 0.3 stick (hold the stick for 2 s and read the attitude), so the same stick asks for less.
 TUNING = {
     "stabilizer": {"speed": 5.0, "accel": 3.0, "hover": 0.35, "lean": 60.0},
     "betaflight": {"speed": 5.0, "accel": 3.0, "hover": 0.35, "lean": 24.0},
@@ -80,7 +80,10 @@ def fly_circuit(sim, waypoints=None, betaflight=False, max_seconds=120.0, per_wa
     """Flies `waypoints` (default WAYPOINTS) on a session loaded with the circuit world and returns a summary:
     `events` (every (kind, message) the simulator raised), `laps` (completed), `seconds` (simulated flight time, from
     take-off), `collisions`, and `final` (the last State). Raises RuntimeError naming the waypoint when one is not reached
-    within `per_waypoint_s`, or the flight outlasts `max_seconds`."""
+    within `per_waypoint_s`, or the flight outlasts `max_seconds`.
+
+    The session must be loaded to match the `betaflight` flag (`open_loop_fc=not betaflight, stabilize=not betaflight`,
+    the circuit world, seed=1, as `__main__` does): a mismatch is not an error here, it shows up as waypoint timeouts."""
     waypoints = list(waypoints if waypoints is not None else WAYPOINTS)
     tuning = TUNING["betaflight" if betaflight else "stabilizer"]
     aux = ARM_AND_ANGLE if betaflight else DISARMED

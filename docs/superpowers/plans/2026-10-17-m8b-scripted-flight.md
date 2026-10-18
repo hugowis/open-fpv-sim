@@ -147,3 +147,12 @@
 - [ ] **Step 3: Check** links and snippets by running the snippet's logic against the shipped files; `grep -rn "protocol 11" docs README.md python/README.md` outside `docs/superpowers`.
 - [ ] **Step 4: Run** the whole gate: Windows `cargo test --workspace --locked --no-fail-fast`, clippy, `cargo +1.85 check`, `PYTHONPATH=python python -m pytest python/tests -q`, and the WSL workspace + live run with `OFS_SITL_LAUNCH` set (goldens unmoved) — Expected: PASS.
 - [ ] **Step 5: Commit** `docs: scripted flight, M8b changelog and roadmap (#66, #53)`.
+
+## Ledger
+
+Recorded 2026-10-18, from the PR #85 review's deferred-minors list (deviations the ledger had not received):
+
+- `fly_circuit` returns `final` (the last State) rather than `states` as the plan's Design call sketched.
+- The gRPC stabilizer test shipped as `a_stabilized_session_obeys_a_roll_stick_and_a_plain_open_loop_one_ignores_it`,
+  not the plan's working name `a_stabilized_session_levels_itself`.
+- The Python stabilize test checks the roll response; level holding is checked by the Rust test.

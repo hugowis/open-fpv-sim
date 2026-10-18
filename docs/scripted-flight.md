@@ -74,7 +74,8 @@ stabilizer a lap takes about 35 s and the whole flight about 51 s of simulated t
 
 With Betaflight (`fly_circuit(sim, betaflight=True)`, or `python python/examples/circuit.py --betaflight` with
 `OFS_SITL_LAUNCH` set) the pilot first sits still for the 4 s boot, arms with the throttle down (AUX1) and selects angle mode (AUX2).
-Two things differ from the stabilizer and are tuned per backend in the script: the shipped tune leans only about 24 degrees at
+Two things differ from the stabilizer and are tuned per backend in the script (measure a tune's lean yourself: hold a
+full stick for 2 s in a hover and read the attitude): the shipped tune leans only about 24 degrees at
 a full angle-mode stick (measured: a 0.3 stick leans 7 degrees), not the 60 the stabilizer gives; and the quad has to be
 armed with the throttle down before the altitude loop may raise it. A lap takes about 33 s there.
 
@@ -85,5 +86,7 @@ armed with the throttle down before the altitude loop may raise it. A lap takes 
 - `python/tests/test_sitl_circuit.py` (the `sitl` CI job, or locally with `OFS_SITL_LAUNCH`): the same assertions on real
   Betaflight.
 
-Not covered: an IMU-fed or filtered stabilizer, altitude or position hold inside it, acro/rate mode, a stabilized Godot
-session (the game has no `stabilize` option), and any claim that its response matches a real Betaflight tune (see issue #51).
+Not covered: an IMU-fed or filtered stabilizer, altitude or position hold inside it, acro/rate mode, and any claim that
+its response matches a real Betaflight tune (see issue #51). The game has no `stabilize` option, but a quad file with
+`[fc] kind = "open_loop_stabilized"` flies stabilized in Godot just as in Python (the same gRPC path the Rust
+stabilizer test drives); there is no Godot-specific test for it.

@@ -5,6 +5,15 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### B2: stabilized-session semantics
+#### Changed
+- **Repro bundles say format 2.** The layout is unchanged, but a 0.2.0-or-older build now refuses the bundles this
+  build writes ("this build reads 1") instead of misreading them — for a stabilized session it would have replayed
+  the bundle throttle-only and reported "not reproduced"; this build still reads the format-1 bundles 0.2.0 wrote. The bundle also records what the session actually flew
+  (a quad file that is `open_loop_stabilized` records `stabilize = true` even when the request sent no flags).
+- Loading a quad file whose kind is `open_loop_stabilized` with `open_loop_fc = true, stabilize = false` is refused
+  (invalid argument) instead of silently flying it throttle-only.
+
 ### M9b: native Windows SITL (experimental)
 #### Added
 - **Betaflight SITL without WSL (#67).** `scripts/build-sitl-windows.sh`, run from an MSYS2 shell, builds the pinned

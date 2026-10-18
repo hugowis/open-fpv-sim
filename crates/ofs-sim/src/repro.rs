@@ -11,8 +11,10 @@ use ofs_log::tail::DEFAULT_WINDOW_S;
 use crate::journal::Journal;
 use crate::vehicle::{build_seeded, BuildOptions, Vehicle};
 
-/// Version of the folder layout (`bundle.toml`'s `format_version`).
-pub const BUNDLE_FORMAT: u32 = 1;
+/// Version of the folder layout (`bundle.toml`'s `format_version`). 2 exists so a build that predates stabilized
+/// sessions refuses their bundles ("this build reads 1") instead of replaying them throttle-only; the layout is
+/// otherwise unchanged, so this build still reads the 1-bundles earlier releases wrote.
+pub const BUNDLE_FORMAT: u32 = 2;
 
 /// The last bytes of SITL's own log a bundle keeps.
 const SITL_LOG_TAIL_BYTES: u64 = 64 * 1024;
@@ -153,6 +155,18 @@ fn io<T>(what: &str, r: std::io::Result<T>) -> Result<T, String> {
     r.map_err(|e| format!("{what}: {e}"))
 }
 
+/// The FC a session actually flew, as the bundle's two flags: the load request's override, if any, wins over the
+/// quad file's kind, and the winner is what the vehicle was built with. `(open_loop_fc, stabilize)`: a true
+/// `open_loop_fc` says an open-loop FC flew (plain or with the stabilizer), a true `stabilize` says the stabilizer
+/// was on.
+pub(crate) fn effective_fc_flags(file_kind: FcKind, requested: Option<FcKind>) -> (bool, bool) {
+    match requested.unwrap_or(file_kind) {
+        FcKind::OpenLoop => (true, false),
+        FcKind::OpenLoopStabilized => (true, true),
+        FcKind::Sitl => (false, false),
+    }
+}
+
 /// Writes the bundle for `vehicle`'s failure `error` and returns its folder. A partial folder is left if a step
 /// fails (it carries no `bundle.toml`, which is written last).
 pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> Result<PathBuf, String> {
@@ -269,8 +283,8 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
     let text = std::fs::read_to_string(bundle.join("bundle.toml")).map_err(|e| format!("{}: {e}", bundle.join("bundle.toml").display()))?;
     let t: toml::Table = toml::from_str(&text).map_err(|e| format!("bundle.toml: {e}"))?;
     let format = int_of(&t, "format_version")?;
-    if format != i64::from(BUNDLE_FORMAT) {
-        return Err(format!("bundle.toml: format_version {format} (this build reads {BUNDLE_FORMAT})"));
+    if format != 1 && format != i64::from(BUNDLE_FORMAT) {
+        return Err(format!("bundle.toml: format_version {format} (this build reads 1 and {BUNDLE_FORMAT})"));
     }
     let seed: u64 = text_of(&t, "seed")?.parse().map_err(|_| "bundle.toml: seed is not a number".to_string())?;
     let open_loop = flag_of(&t, "open_loop_fc")?;
@@ -418,7 +432,7 @@ mod tests {
         let original = files_under(&repo("library")).into_iter().map(|f| format!("library/{f}")).collect::<Vec<_>>();
         assert_eq!(library, original, "the whole library root");
         let t = bundle_toml(&dir);
-        assert_eq!(t["format_version"].as_integer(), Some(1));
+        assert_eq!(t["format_version"].as_integer(), Some(i64::from(BUNDLE_FORMAT)));
         assert_eq!(t["failure_kind"].as_str(), Some("non_finite"));
         assert_eq!(t["reason"].as_str(), Some(error.to_string().as_str()));
         assert_eq!(t["failed_tick"].as_integer(), Some(v.tick() as i64));
@@ -597,5 +611,30 @@ mod tests {
         assert!(replay(dir.path(), dir.path()).unwrap_err().contains("bundle.toml"));
         std::fs::write(dir.path().join("bundle.toml"), "format_version = 99\n").unwrap();
         assert!(replay(dir.path(), dir.path()).unwrap_err().contains("format_version 99"));
+    }
+
+    #[test]
+    fn the_bundle_flags_say_what_actually_flew() {
+        use ofs_config::FcKind;
+        assert_eq!(effective_fc_flags(FcKind::OpenLoopStabilized, None), (true, true), "the file's kind, no override");
+        assert_eq!(effective_fc_flags(FcKind::OpenLoopStabilized, Some(FcKind::OpenLoopStabilized)), (true, true));
+        assert_eq!(effective_fc_flags(FcKind::OpenLoop, Some(FcKind::OpenLoop)), (true, false));
+        assert_eq!(effective_fc_flags(FcKind::Sitl, None), (false, false));
+        assert_eq!(effective_fc_flags(FcKind::Sitl, Some(FcKind::OpenLoop)), (true, false), "a SITL quad overridden to open loop");
+    }
+
+    /// A bundle written by a build that still said `format_version = 1` (0.2.0 and earlier, before stabilized
+    /// sessions) must replay on this build: only layout version 2 exists beyond it, and its meaning is unchanged.
+    #[test]
+    fn a_format_1_bundle_still_replays() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("bundle.toml"),
+            "format_version = 1\nseed = \"1\"\nopen_loop_fc = false\nstabilize = false\nfailed_tick = 5\nreason = \"x\"\ndigest = \"0\"\nexact = true\nquad = \"missing.toml\"\n",
+        )
+        .unwrap();
+        let err = replay(dir.path(), dir.path()).unwrap_err();
+        assert!(!err.contains("format_version"), "the version check passed: {err}");
+        assert!(err.contains("missing.toml"), "{err}");
     }
 }
