@@ -186,7 +186,7 @@ fn raw_from(t: &toml::Table, problems: &mut Vec<String>) -> Raw {
         data: text_of(t, "data", problems),
         motor: int_of(t, "motor", problems),
         diff: text_of(t, "diff", problems),
-        origin: t.get("origin").and_then(toml::Value::as_table).map(|_| origin_of(t, problems)).flatten(),
+        origin: t.get("origin").and_then(toml::Value::as_table).and_then(|_| origin_of(t, problems)),
     }
 }
 
