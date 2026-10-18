@@ -493,7 +493,7 @@ fn a_victim_that_ignores_sigterm_is_sigkilled() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let ready = dir.path().join("ready");
-    let mut victim = spawn_fake_sitl(dir.path(), &format!("trap \"\" TERM; : > '{}'; sleep 30; sleep 30", ready.display()));
+    let victim = spawn_fake_sitl(dir.path(), &format!("trap \"\" TERM; : > '{}'; sleep 30; sleep 30", ready.display()));
     let pid = victim.id();
     // TERM before the trap is installed kills the shell outright (the race that made this test fail 2 runs in 5).
     let deadline = std::time::Instant::now() + Duration::from_secs(10);

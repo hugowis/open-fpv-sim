@@ -392,6 +392,7 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
         .success();
     assert!(decoy_lives, "the kill stayed in this session's slot: another slot's SITL survives");
     decoy.kill().unwrap();
+    decoy.wait().unwrap();
     let err = c.run(RunRequest { seconds: 2.0 }).await.expect_err("a run with a dead SITL must fail");
 
     let mut message = None;
