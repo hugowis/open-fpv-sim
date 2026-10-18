@@ -70,3 +70,14 @@ fn a_wsl_launch_whose_program_is_missing_points_at_the_path() {
     assert_eq!(ofs_fc::sitl::startup_hint(&native, tail), "");
     let _: Option<FcError> = None;
 }
+
+#[test]
+fn a_sitl_that_rejects_the_port_offset_points_at_the_rebuild() {
+    let tail = "Unknown argument: --port-offset";
+    let wsl = ["wsl.exe", "-d", "Ubuntu", "-e", "/home/me/betaflight_SITL.elf", "--port-offset", "10"].map(String::from);
+    let hint = ofs_fc::sitl::startup_hint(&wsl, tail);
+    assert!(hint.contains("--port-offset") && hint.contains("scripts/build-sitl.sh"), "{hint}");
+    let native = ["/opt/betaflight_SITL.elf", "--port-offset", "0"].map(String::from);
+    assert!(ofs_fc::sitl::startup_hint(&native, tail).contains("scripts/build-sitl.sh"), "{hint}");
+    assert_eq!(ofs_fc::sitl::startup_hint(&["/opt/betaflight_SITL.elf"].map(String::from), tail), "", "an unscoped old binary is not this failure");
+}
