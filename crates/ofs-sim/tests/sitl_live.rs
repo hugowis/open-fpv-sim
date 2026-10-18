@@ -243,6 +243,38 @@ fn finished_blackbox_logs(logs_dir: &Path) -> (usize, usize) {
     (logs.len(), finished)
 }
 
+/// #58's "done when" also says the log's *last second* is present. The repo has no Blackbox frame decoder, so the
+/// content is pinned at the mechanism level: the log grows with the armed flight's length (logging ran throughout)
+/// and ends with Blackbox's own End of log event (it stopped on the disarm, not mid-write) — together that is the
+/// flight's final second.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_blackbox_log_grows_with_the_armed_flight_it_recorded() {
+    use ofs_sim::pb::RunRequest;
+    let armed = |seconds: f64| async move {
+        let (mut c, service, _data_dir, _address) = serve_an_armed_quad().await;
+        c.run(RunRequest { seconds }).await.unwrap();
+        c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+        let mut size = 0;
+        for entry in std::fs::read_dir(service.logs_dir()).unwrap().flatten() {
+            if entry.file_name().to_string_lossy().ends_with(".BFL") {
+                size += entry.metadata().unwrap().len();
+            }
+        }
+        size
+    };
+    let one_second = armed(1.0).await;
+    let four_seconds = armed(4.0).await;
+    // The log carries a fixed header, so the bar is the slope: three extra armed seconds add well over 4 KB/s of
+    // frames (an earlier run measured about 9.5), proving frames were written throughout the flight, not once.
+    assert!(four_seconds > one_second, "the log grows with the flight it recorded: 1 s {one_second}, 4 s {four_seconds}");
+    assert!(
+        (four_seconds - one_second) as f64 / 3.0 > 4000.0,
+        "frames are written throughout the armed flight, not once: 1 s {one_second}, 4 s {four_seconds}"
+    );
+}
+
 /// #58: a session that ends armed (the Unload comes with the quad still armed) used to leave the Blackbox log cut
 /// short; the session now disarms Betaflight first.
 #[cfg(target_os = "linux")]
