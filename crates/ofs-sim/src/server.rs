@@ -272,6 +272,15 @@ impl Sim for SimService {
             return Err(error("invalid_argument", Code::InvalidArgument, "stabilize needs open_loop_fc"));
         }
         let fc_override = req.open_loop_fc.then_some(if req.stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
+        // An override that downgrades a quad file's own stabilizer would fly it throttle-only and only the digest
+        // would ever say so: refuse, and say what to ask for instead.
+        if fc_override == Some(FcKind::OpenLoop) && cfg.fc.kind == FcKind::OpenLoopStabilized {
+            return Err(error(
+                "invalid_argument",
+                Code::InvalidArgument,
+                "this quad file is open_loop_stabilized; load with stabilize = true, or without the open_loop_fc override",
+            ));
+        }
         let opts = BuildOptions { seed: req.seed, data_dir: self.data_dir.clone(), fc_override, world };
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
@@ -303,6 +312,11 @@ impl Sim for SimService {
             if let Some(r) = repro.as_mut() {
                 r.firmware_dir = vehicle.firmware_dir();
                 r.firmware_initial = r.firmware_dir.as_deref().map(snapshot_firmware).unwrap_or_default();
+                // The bundle records what the session flies (the build's FC), not what the request asked for: a
+                // quad file that is `open_loop_stabilized` flies stabilized even with no load-request flags.
+                let (open_loop_fc, stabilize) = crate::repro::effective_fc_flags(cfg.fc.kind, fc_override);
+                r.open_loop_fc = open_loop_fc;
+                r.stabilize = stabilize;
             }
             let configurator_address = vehicle.configurator_address().unwrap_or_default();
             let mut session = Session::new(vehicle, mode, policy, keep_alive);
@@ -646,6 +660,62 @@ mod tests {
         }
         svc.shutdown();
     }
+
+    /// A session loaded from a quad file whose kind is `open_loop_stabilized`, with no load-request flags (Godot's
+    /// only way to fly one): its bundle says the stabilizer flew, because the bundle records the effective FC, not
+    /// the request.
+    #[tokio::test]
+    async fn a_quad_file_stabilized_sessions_bundle_records_the_stabilizer() {
+        let svc = SimService::new(std::env::temp_dir().join("ofs-unit-test-data"));
+        let dir = tempfile::tempdir().unwrap();
+        // The library resolves beside the quads directory (`<quad_dir>/../library`): the quad goes in its own
+        // subdirectory, next to a copy of the repo's library.
+        std::fs::create_dir(dir.path().join("quads")).unwrap();
+        let quad = dir.path().join("quads").join("stabilized.toml");
+        std::fs::write(
+            &quad,
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))
+                .unwrap()
+                .replace("kind = \"sitl\"", "kind = \"open_loop_stabilized\""),
+        )
+        .unwrap();
+        let lib = dir.path().join("library");
+        for entry in walk(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")) {
+            let to = lib.join(&entry);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            let from = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).join(&entry);
+            std::fs::copy(from, to).unwrap();
+        }
+        svc.load(Request::new(pb::LoadRequest { quad_path: quad.display().to_string(), seed: 1, ..Default::default() }))
+            .await
+            .unwrap();
+        // The poison's capture_failure writes the bundle at once; take the folder from the session.
+        svc.shared.lock().as_mut().unwrap().poison(SimError::Firmware("simulated failure".into()));
+        let mut binding = svc.shared.lock();
+        let folder = binding.as_mut().unwrap().bundle.as_ref().unwrap().as_ref().unwrap().clone();
+        drop(binding);
+        let t: toml::Table = std::fs::read_to_string(folder.join("bundle.toml")).unwrap().parse().unwrap();
+        assert_eq!(t["open_loop_fc"].as_bool(), Some(true), "the session flew an open-loop FC");
+        assert_eq!(t["stabilize"].as_bool(), Some(true), "and its stabilizer was on");
+        svc.shutdown();
+    }
+    /// Paths of every file under `root`, relative to it.
+    fn walk(root: &str) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(root).unwrap().flatten() {
+            let name = entry.file_name();
+            let rel = std::path::PathBuf::from(&name);
+            if entry.file_type().unwrap().is_dir() {
+                for sub in walk(&format!("{root}/{}", name.to_string_lossy())) {
+                    out.push(rel.join(sub));
+                }
+            } else {
+                out.push(rel);
+            }
+        }
+        out
+    }
+
 
     #[tokio::test]
     async fn a_failure_at_the_end_of_an_inputs_recording_still_publishes_its_stop_event() {

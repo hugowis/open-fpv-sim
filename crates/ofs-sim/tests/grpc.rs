@@ -711,3 +711,46 @@ async fn a_world_can_be_named() {
     assert_eq!(kind(&err), "config");
     assert!(err.message().contains("nowhere.toml"), "{}", err.message());
 }
+
+#[tokio::test]
+async fn a_downgrade_override_on_a_stabilized_quad_is_refused() {
+    // The library resolves beside the quads directory, so the quad goes in `quads/` next to a copy of the repo's.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("quads")).unwrap();
+    let quad = dir.path().join("quads").join("stabilized.toml");
+    std::fs::write(&quad, std::fs::read_to_string(QUAD).unwrap().replace("kind = \"sitl\"", "kind = \"open_loop_stabilized\"")).unwrap();
+    copy_library(dir.path());
+    let mut c = start().await;
+    let err = c
+        .load(LoadRequest { quad_path: quad.display().to_string(), open_loop_fc: true, stabilize: false, ..open_loop(Mode::Lockstep) })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&err), "invalid_argument");
+    assert!(err.message().contains("open_loop_stabilized"), "{}", err.message());
+    // Asking for what the file already is stays fine.
+    c.load(LoadRequest { quad_path: quad.display().to_string(), open_loop_fc: true, stabilize: true, ..open_loop(Mode::Lockstep) })
+        .await
+        .unwrap();
+}
+
+/// Copies the repo's parts library into `<dir>/library`, so a quad written under `<dir>/quads/` resolves its parts.
+fn copy_library(dir: &std::path::Path) {
+    let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library"));
+    fn walk(root: &std::path::Path, rel: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(root).unwrap().flatten() {
+            let sub = rel.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                walk(&entry.path(), &sub, out);
+            } else {
+                out.push(sub);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root, std::path::Path::new(""), &mut files);
+    for f in files {
+        let to = dir.join("library").join(&f);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(root.join(&f), to).unwrap();
+    }
+}
