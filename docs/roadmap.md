@@ -51,7 +51,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - The DVR stops when the picture's size changes mid-recording, and it records what the pilot sees (no clean feed).
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
-- One SITL per machine: its ports are fixed (UDP 9001–9004, TCP 5760+).
+- Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
+  (`docs/dev-setup.md`, Ports and parallel sessions): at most 16, claimed per operating system (a Windows simulator and
+  one inside WSL do not see each other's claims), and the Rust live tests still run one at a time.
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
 - A session that ends while the quad is armed disarms Betaflight first (restoring the link, stepping until the motors

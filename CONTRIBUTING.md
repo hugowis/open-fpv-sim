@@ -34,7 +34,9 @@ report. Data comes under CC-BY-SA-4.0, like the component library.
    `python -m pytest python/tests` (the tests that need Betaflight skip themselves).
 3. **Live, with Betaflight SITL** (Linux or WSL; build it with `scripts/build-sitl.sh`): set `OFS_SITL_LAUNCH` to the
    SITL binary, then `cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1` and the
-   `python/tests/test_sitl_*.py` files. One SITL per machine: never run these in parallel.
+   `python/tests/test_sitl_*.py` files. Run the live test files one at a time (several kill every SITL by name on
+   purpose); only `test_sitl_parallel.py` and the two-session test in `ofs-sim`'s `sitl_live` run sessions side by
+   side (`docs/dev-setup.md`, Ports and parallel sessions).
 4. **Godot:** `GODOT_BIN=<godot 4.7.2> bash scripts/run-godot-tests.sh unit` (or `e2e`, or `all`); the script builds
    what it needs.
 5. **Performance:** `python scripts/benchmark.py --binary target/release/ofs-sim` (`docs/dev-setup.md`, Performance).

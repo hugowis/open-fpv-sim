@@ -189,8 +189,18 @@ Host: Windows 11, WSL 2.6.3, kernel 6.6.87.2, Ubuntu 24.04. `.wslconfig` has **n
   - under NAT, Windows-side port probes can't see ports inside WSL at all.
 
   The simulator would silently talk to the wrong SITL, with the wrong config.
-- **Cleanup is therefore required on Windows:** `OFS_SITL_CLEANUP="wsl.exe -d Ubuntu -e pkill -x betaflight_SITL"`, run before every launch. Match the process name exactly (`-x`), never with `-f`: the command line of the launching shell often contains the binary path, and `pkill -f` then kills the shell itself (this bit M0 twice). It kills every SITL on the machine, which is acceptable under the one-session-per-machine rule.
+- **Cleanup is therefore required on Windows:** `OFS_SITL_CLEANUP="wsl.exe -d Ubuntu -e pkill -x betaflight_SITL"`, run before every launch. Match the process name exactly (`-x`), never with `-f` on a loose pattern: the command line of the launching shell often contains the binary path, and `pkill -f` then kills the shell itself (this bit M0 twice). By name it kills every SITL on the machine, which was acceptable under the one-session-per-machine rule of v1. Since M9a the default cleanup is scoped to the session's slot instead (below, "Parallel sessions"); the by-name command remains for a launch without `--port-offset` and as an explicit `OFS_SITL_CLEANUP` override.
 - **Also treat any `bind port … failed` line in SITL's output as a startup error.**
+
+**Parallel sessions (M9a, issue #15).** The patched SITL takes `--port-offset N` (0 to 1000), added to the four UDP ports
+and to the TCP base of its UARTs; the simulator gives each session a slot of ten ports (offset = slot x 10), claims it by
+holding loopback UDP sockets (so the OS frees it when the process dies) and scopes everything that kills or waits for a
+stray SITL to the slot: the default cleanup is `pkill -f '^[^ ]*betaflight_SITL[^ ]* .*--port-offset N( |$)'` (anchored on
+the SITL binary as the first word, so it cannot match a shell; executed directly, not through one), the wait for the
+victims to die and its SIGKILL escalation use the same pattern (inside the VM under WSL; on Linux by reading
+`/proc/<pid>/cmdline`). The motor socket the simulator binds and the state/RC datagrams it sends move with the slot;
+under WSL's NAT the offset ports are reached the same way as the stock ones (VM IP for state, host IP for motors).
+`docs/dev-setup.md`, "Ports and parallel sessions", is the user-facing description.
 
 **Launch values (Windows):**
 ```
