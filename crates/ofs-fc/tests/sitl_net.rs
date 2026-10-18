@@ -23,12 +23,12 @@ fn wsl_cleanup_matches_the_process_name_not_the_command_line() {
 }
 
 #[test]
-fn native_cleanup_is_pkill_on_unix_and_empty_on_plain_windows() {
+fn an_unscoped_native_cleanup_kills_by_name_on_unix_and_on_windows() {
     let native = default_cleanup(&argv(&["/x/betaflight_SITL.elf"]));
     if cfg!(unix) {
         assert_eq!(native, argv(&["pkill", "-x", "betaflight_SITL"]));
     } else {
-        assert!(native.is_empty(), "{native:?}");
+        assert_eq!(native, argv(&["taskkill", "/F", "/IM", "betaflight_SITL.exe"]));
     }
 }
 
@@ -66,7 +66,9 @@ fn a_slots_cleanup_runs_the_slot_script_with_its_offset_as_an_argument() {
     if cfg!(unix) {
         assert_eq!(native, argv(&["sh", "-c", script, "sh", "10"]));
     } else {
-        assert!(native.is_empty(), "{native:?}");
+        let ps = ofs_fc::sitl::net::WINDOWS_SLOT_KILL_SCRIPT;
+        assert!(!ps.contains("10"), "the offset is an argument of the Windows script too");
+        assert_eq!(native, argv(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps, "10"]));
     }
 }
 
