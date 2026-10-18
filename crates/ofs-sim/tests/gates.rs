@@ -105,8 +105,8 @@ fn a_gate_event_arrives_through_session_changes() {
         let dist = to_n.hypot(to_e);
         let scale = if dist > 1e-6 { (5.0 / (0.8 * dist)).min(1.0) } else { 0.0 };
         let (an, ae) = ((2.0 * (0.8 * to_n * scale - vn)).clamp(-3.0, 3.0), (2.0 * (0.8 * to_e * scale - ve)).clamp(-3.0, 3.0));
-        let pitch = an.to_degrees().atan2(9.81) / 60.0; // a lean of atan(a/g) degrees, one stick = 60 degrees
-        let roll = ae.to_degrees().atan2(9.81) / 60.0;
+        let pitch = an.atan2(9.81).to_degrees() / 60.0; // a lean of atan(a/g) degrees, one stick = 60 degrees
+        let roll = ae.atan2(9.81).to_degrees() / 60.0;
         let err = 2.0 + s.pos_ned_m.z; // 2 m up: down is negative
         *integral = (*integral + err * DT).clamp(-2.0, 2.0);
         let climb = -s.vel_ned_mps.z;
@@ -139,7 +139,6 @@ fn a_gate_event_arrives_through_session_changes() {
         gate_events.iter().any(|(_, m)| m == "Gate0 (gate 0) start"),
         "Gate0's start crossing arrives through changes(): {gate_events:?}"
     );
-    for batch_time in gate_events.windows(2) {
-        assert!(batch_time[0].0 <= batch_time[1].0, "the events a client sees are time-ordered: {gate_events:?}");
-    }
+    // The flight raises one race event, so batch order is not exercisable here; the unit test
+    // `a_batch_of_events_is_time_ordered_with_ties_kept_in_insertion_order` pins it.
 }

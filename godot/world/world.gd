@@ -3,7 +3,7 @@ extends Node3D
 ## field (launch pad, pylons, gates, buildings), the pilot's spot and other transmitters come from the world file the
 ## simulator loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the
 ## physics: the simulator collides the drone with these objects and its ground plane, and the video link's
-## occlusion is its too — this node only draws.
+## occlusion is the simulator's too — this node only draws.
 ##
 ## Godot's frame: +Y up, forward (north, where the drone starts facing) is -Z, +X is right (east).
 
