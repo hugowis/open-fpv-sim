@@ -311,38 +311,65 @@ fn a_config_run_is_judged_on_its_whole_output() {
 // The cleanup must wait for the victim to be really gone — escalating to SIGKILL when it ignores SIGTERM — and
 // report what it saw, so a recurrence says whether a victim existed at launch at all.
 
+/// A spawned fake SITL that is killed when dropped: an assertion firing between the spawn and the test's own
+/// cleanup cannot leak the process (the M6d review's deferred minor).
+#[cfg(target_os = "linux")]
+struct FakeSitl(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl FakeSitl {
+    /// The child's pid (a test that kills by hand, before the drop's own kill).
+    fn id(&self) -> u32 {
+        self.0.id()
+    }
+
+    /// Reaps the child early (the drop's kill and wait still run on an already-reaped child).
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for FakeSitl {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Spawns `<dir>/betaflight_SITL -c <script>`: a copy of /bin/sh under the SITL name, so the process's comm is
 /// the name the cleanup waits for, without touching a real SITL.
 #[cfg(target_os = "linux")]
-fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> std::process::Child {
+fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> FakeSitl {
     let fake = dir.join("betaflight_SITL");
     std::fs::copy("/bin/sh", &fake).unwrap();
-    std::process::Command::new(&fake).arg("-c").arg(sh_script).spawn().unwrap()
+    FakeSitl(std::process::Command::new(&fake).arg("-c").arg(sh_script).spawn().unwrap())
 }
 
 /// As [`spawn_fake_sitl`], launched with SITL's `--port-offset <offset>` after the script (the shell takes the
 /// arguments as its positionals, so its command line reads like a slot's SITL).
 #[cfg(target_os = "linux")]
-fn spawn_fake_sitl_in_slot(dir: &std::path::Path, sh_script: &str, offset: u16) -> std::process::Child {
+fn spawn_fake_sitl_in_slot(dir: &std::path::Path, sh_script: &str, offset: u16) -> FakeSitl {
     spawn_fake_sitl_with(dir, sh_script, &["--port-offset", &offset.to_string()])
 }
 
 /// A fake SITL with `extra` after the script; the binary is copied once per directory (a copy over a running binary
 /// is "text file busy").
 #[cfg(target_os = "linux")]
-fn spawn_fake_sitl_with(dir: &std::path::Path, sh_script: &str, extra: &[&str]) -> std::process::Child {
+fn spawn_fake_sitl_with(dir: &std::path::Path, sh_script: &str, extra: &[&str]) -> FakeSitl {
     let fake = dir.join("betaflight_SITL");
     if !fake.exists() {
         std::fs::copy("/bin/sh", &fake).unwrap();
     }
-    std::process::Command::new(&fake).arg("-c").arg(sh_script).args(extra).spawn().unwrap()
+    FakeSitl(std::process::Command::new(&fake).arg("-c").arg(sh_script).args(extra).spawn().unwrap())
 }
 
 #[cfg(target_os = "linux")]
-fn is_alive(child: &mut std::process::Child) -> bool {
+fn is_alive(child: &mut FakeSitl) -> bool {
     // A killed child stays a zombie until waited for, which holds no ports: try_wait reaps it.
-    child.try_wait().unwrap().is_none()
+    child.0.try_wait().unwrap().is_none()
 }
+
 
 /// A slot's cleanup and wait take down that slot's SITL and leave every other slot's running: a second session
 /// starting (or a crashed one's slot being reused) must not kill the first.
@@ -362,8 +389,6 @@ fn a_cleanup_for_one_slot_leaves_another_slots_sitl_alive() {
     assert!(!outcome.escalated, "{outcome:?}");
     assert!(!is_alive(&mut slot1), "slot 1's SITL is gone");
     assert!(is_alive(&mut slot0), "slot 0's SITL survives slot 1's cleanup");
-    let _ = slot0.kill();
-    let _ = slot0.wait();
 }
 
 /// A SITL started without the option (an older simulator, a hand-made launch) holds the stock ports, so it is slot 0's:
@@ -385,8 +410,6 @@ fn a_sitl_without_the_option_belongs_to_slot_zero() {
     ofs_fc::sitl::process::await_cleanup(&launch_for("0"));
     assert!(!is_alive(&mut stock), "slot 0's cleanup took down the SITL started without the option");
     assert!(is_alive(&mut slot1), "slot 1's SITL survives slot 0's cleanup");
-    let _ = slot1.kill();
-    let _ = slot1.wait();
 }
 
 /// A SITL binary in a directory with spaces in its path (`C:\Program Files`, a home folder named "My Projects" under
@@ -405,8 +428,6 @@ fn a_slots_sitl_is_found_when_its_path_has_spaces() {
     ofs_fc::sitl::process::await_cleanup(&launch);
     assert!(!is_alive(&mut slot1), "slot 1's SITL, whose path has spaces, is gone");
     assert!(is_alive(&mut slot0), "slot 0's SITL survives");
-    let _ = slot0.kill();
-    let _ = slot0.wait();
 }
 
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.
@@ -431,8 +452,6 @@ fn the_sigkill_escalation_only_reaches_its_own_slot() {
     assert!(outcome.escalated && outcome.victims_seen == 1, "{outcome:?}");
     assert!(!is_alive(&mut slot1), "slot 1's TERM-ignoring SITL was SIGKILLed");
     assert!(is_alive(&mut slot0), "slot 0's TERM-ignoring SITL was left alone");
-    let _ = slot0.kill();
-    let _ = slot0.wait();
 }
 
 /// The script WSL runs inside the VM (`sh -c SCRIPT sh s OFFSET`) is scoped like the native wait: run here on Linux
@@ -464,8 +483,6 @@ fn the_wsl_wait_script_is_scoped_to_its_slot_too() {
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&none.stdout).contains("seen=0"), "no slot-2 victims: {:?}", none.stdout);
-    let _ = slot0.kill();
-    let _ = slot0.wait();
 }
 
 /// A victim that ignores SIGTERM (a SITL in a slow teardown) must not survive the cleanup: the wait escalates to
@@ -494,8 +511,6 @@ fn a_victim_that_ignores_sigterm_is_sigkilled() {
         state.is_empty() || state.rsplit_once(')').is_some_and(|(_, s)| s.trim_start().starts_with('Z')),
         "the victim ignored SIGTERM and was not escalated: {state}"
     );
-    let _ = victim.kill();
-    let _ = victim.wait();
 }
 
 /// The common path — the victim is already dying or dead — must fall through fast, not cost every launch.
@@ -505,7 +520,6 @@ fn the_cleanup_does_not_hang_when_nobody_survives() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let mut victim = spawn_fake_sitl(dir.path(), "sleep 30");
-    victim.kill().unwrap();
     victim.wait().unwrap();
     let started = std::time::Instant::now();
     let outcome = ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);
