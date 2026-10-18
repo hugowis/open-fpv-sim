@@ -1000,7 +1000,7 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
             // can run side by side; the first one gets the stock ports and directory).
             let slot = SitlSlot::acquire(sitl_net.bind_ip).map_err(|e| SimError::Firmware(e.to_string()))?;
             ports = slot.ports;
-            launch_argv.extend(["--port-offset".to_string(), ports.offset.to_string()]);
+            launch_argv = net::with_port_offset(&launch_argv, ports.offset); // whatever the user wrote is the slot's to set
             let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
             if cleanup.is_empty() {
                 cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6); only this slot's SITL

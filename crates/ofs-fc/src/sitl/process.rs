@@ -483,11 +483,13 @@ const CLEANUP_KILL_GRACE: Duration = Duration::from_secs(1);
 /// gone — a zombie holds no ports, but `pgrep` matches it, so init's reap ends the wait — escalating to SIGKILL
 /// after [`CLEANUP_TERM_GRACE`], then report what was seen as `seen=<n> escalated=<0|1> ms=<t>` for
 /// [`await_cleanup`] to parse. The victims are chosen by the script's arguments (never spliced into its text):
-/// `$1` is `x` for every process named `betaflight_SITL`, or `f` for the command lines matching the pattern `$2`
-/// (one slot's SITL, see [`net::victim_pattern`]).
-pub const WSL_WAIT_SCRIPT: &str = "\
-live() { if [ \"$1\" = f ]; then pkill -0 -f -- \"$2\" 2>/dev/null; else pkill -0 -x betaflight_SITL 2>/dev/null; fi; }
-slay() { if [ \"$1\" = f ]; then pkill -9 -f -- \"$2\" 2>/dev/null; else pkill -9 -x betaflight_SITL 2>/dev/null; fi; }
+/// `$1` is `x` for every process named `betaflight_SITL`, or `s` for the processes of the slot whose
+/// `--port-offset` is `$2` (see [`net::slot_pids_sh`]).
+pub const WSL_WAIT_SCRIPT: &str = concat!(
+    net::slot_pids_sh!(),
+    "\
+live() { if [ \"$1\" = s ]; then [ -n \"$(slot_pids \"$2\")\" ]; else pkill -0 -x betaflight_SITL 2>/dev/null; fi; }
+slay() { if [ \"$1\" = s ]; then pids=$(slot_pids \"$2\"); [ -z \"$pids\" ] || kill -9 $pids 2>/dev/null; else pkill -9 -x betaflight_SITL 2>/dev/null; fi; }
 live \"$@\" || { echo 'seen=0 escalated=0 ms=0'; exit 0; }
 t0=$(date +%s%N)
 i=0; while live \"$@\" && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
@@ -499,7 +501,8 @@ if live \"$@\"; then
 fi
 t1=$(date +%s%N)
 echo \"seen=1 escalated=$esc ms=$(( (t1-t0)/1000000 ))\"
-exit 0";
+exit 0"
+);
 
 /// Waits for the cleanup's victims to actually die before a new SITL binds. The `pkill` in the cleanup only
 /// *signals* them, and their sockets close one by one during teardown, so a launch that immediately follows can
@@ -515,7 +518,7 @@ pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
         let mut argv = prefix;
         argv.extend(["sh", "-c", WSL_WAIT_SCRIPT, "sh"].map(String::from));
         match scope {
-            Some(offset) => argv.extend(["f".to_string(), net::victim_pattern(offset)]),
+            Some(offset) => argv.extend(["s".to_string(), offset.to_string()]),
             None => argv.push("x".to_string()),
         }
         let output = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output();
@@ -550,14 +553,15 @@ fn parse_wait_output(stdout: Vec<u8>) -> AwaitCleanup {
 /// with a `scope` (a slot's `--port-offset`) only that slot's.
 #[cfg(target_os = "linux")]
 fn await_cleanup_native(scope: Option<u16>) -> AwaitCleanup {
-    let first = live_victims_count(scope);
+    let first = live_victims(scope).len() as u32;
     if first == 0 {
         return AwaitCleanup::NONE;
     }
     let started = Instant::now();
     let mut escalated = false;
     loop {
-        if live_victims_count(scope) == 0 {
+        let alive = live_victims(scope);
+        if alive.is_empty() {
             return AwaitCleanup {
                 victims_seen: first,
                 escalated,
@@ -565,10 +569,7 @@ fn await_cleanup_native(scope: Option<u16>) -> AwaitCleanup {
             };
         }
         if !escalated && started.elapsed() >= CLEANUP_TERM_GRACE {
-            let _ = match scope {
-                Some(offset) => Command::new("pkill").args(["-9", "-f", &net::victim_pattern(offset)]).status(),
-                None => Command::new("pkill").args(["-9", "-x", net::SITL_PROCESS_NAME]).status(),
-            };
+            let _ = Command::new("kill").arg("-9").args(alive.iter().map(u32::to_string)).stdin(Stdio::null()).stderr(Stdio::null()).status();
             escalated = true;
         }
         if started.elapsed() >= CLEANUP_TERM_GRACE + CLEANUP_KILL_GRACE {
@@ -582,13 +583,13 @@ fn await_cleanup_native(scope: Option<u16>) -> AwaitCleanup {
     }
 }
 
-/// The number of live victims: processes named `betaflight_SITL`, with a `scope` only those launched with that
-/// `--port-offset` (a zombie holds no ports and does not count).
+/// The pids of the live victims: processes named `betaflight_SITL`, with a `scope` only those of that slot
+/// ([`net::is_victim`]; a zombie holds no ports and does not count).
 #[cfg(target_os = "linux")]
-fn live_victims_count(scope: Option<u16>) -> u32 {
-    let mut count = 0u32;
+fn live_victims(scope: Option<u16>) -> Vec<u32> {
+    let mut pids = Vec::new();
     for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Some(_) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
         let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) else { continue };
         if comm.trim() != net::SITL_PROCESS_NAME {
             continue;
@@ -606,9 +607,9 @@ fn live_victims_count(scope: Option<u16>) -> u32 {
         if rest.trim_start().starts_with('Z') {
             continue;
         }
-        count += 1;
+        pids.push(pid);
     }
-    count
+    pids
 }
 
 #[cfg(all(test, target_os = "linux"))]

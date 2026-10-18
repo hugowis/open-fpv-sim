@@ -291,11 +291,18 @@ fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> std::process::Chil
 /// arguments as its positionals, so its command line reads like a slot's SITL).
 #[cfg(target_os = "linux")]
 fn spawn_fake_sitl_in_slot(dir: &std::path::Path, sh_script: &str, offset: u16) -> std::process::Child {
+    spawn_fake_sitl_with(dir, sh_script, &["--port-offset", &offset.to_string()])
+}
+
+/// A fake SITL with `extra` after the script; the binary is copied once per directory (a copy over a running binary
+/// is "text file busy").
+#[cfg(target_os = "linux")]
+fn spawn_fake_sitl_with(dir: &std::path::Path, sh_script: &str, extra: &[&str]) -> std::process::Child {
     let fake = dir.join("betaflight_SITL");
     if !fake.exists() {
-        std::fs::copy("/bin/sh", &fake).unwrap(); // once: a copy over a running binary is "text file busy"
+        std::fs::copy("/bin/sh", &fake).unwrap();
     }
-    std::process::Command::new(&fake).arg("-c").arg(sh_script).args(["--port-offset", &offset.to_string()]).spawn().unwrap()
+    std::process::Command::new(&fake).arg("-c").arg(sh_script).args(extra).spawn().unwrap()
 }
 
 #[cfg(target_os = "linux")]
@@ -326,6 +333,49 @@ fn a_cleanup_for_one_slot_leaves_another_slots_sitl_alive() {
     let _ = slot0.wait();
 }
 
+/// A SITL started without the option (an older simulator, a hand-made launch) holds the stock ports, so it is slot 0's:
+/// slot 0's cleanup takes it down, and another slot's cleanup leaves it alone.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sitl_without_the_option_belongs_to_slot_zero() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut stock = spawn_fake_sitl_with(dir.path(), "sleep 30; sleep 30", &[]);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    std::thread::sleep(Duration::from_millis(100)); // let both exec
+    let sitl = dir.path().join("betaflight_SITL").display().to_string();
+    let launch_for = |offset: &str| [sitl.clone(), "--port-offset".to_string(), offset.to_string()].to_vec();
+    ofs_fc::sitl::process::run_cleanup(&ofs_fc::sitl::net::default_cleanup(&launch_for("20")));
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(is_alive(&mut stock) && is_alive(&mut slot1), "slot 2's cleanup touches neither");
+    ofs_fc::sitl::process::run_cleanup(&ofs_fc::sitl::net::default_cleanup(&launch_for("0")));
+    ofs_fc::sitl::process::await_cleanup(&launch_for("0"));
+    assert!(!is_alive(&mut stock), "slot 0's cleanup took down the SITL started without the option");
+    assert!(is_alive(&mut slot1), "slot 1's SITL survives slot 0's cleanup");
+    let _ = slot1.kill();
+    let _ = slot1.wait();
+}
+
+/// A SITL binary in a directory with spaces in its path (`C:\Program Files`, a home folder named "My Projects" under
+/// WSL) is still found by its slot: the match is on the process name and the `--port-offset` argument, not on the
+/// shape of the whole command line.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_slots_sitl_is_found_when_its_path_has_spaces() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::Builder::new().prefix("my sitl ").tempdir().unwrap();
+    let mut slot0 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 0);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    std::thread::sleep(Duration::from_millis(100)); // let both exec
+    let launch: Vec<String> = [dir.path().join("betaflight_SITL").display().to_string(), "--port-offset".into(), "10".into()].to_vec();
+    ofs_fc::sitl::process::run_cleanup(&ofs_fc::sitl::net::default_cleanup(&launch));
+    ofs_fc::sitl::process::await_cleanup(&launch);
+    assert!(!is_alive(&mut slot1), "slot 1's SITL, whose path has spaces, is gone");
+    assert!(is_alive(&mut slot0), "slot 0's SITL survives");
+    let _ = slot0.kill();
+    let _ = slot0.wait();
+}
+
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.
 #[cfg(target_os = "linux")]
 #[test]
@@ -352,7 +402,7 @@ fn the_sigkill_escalation_only_reaches_its_own_slot() {
     let _ = slot0.wait();
 }
 
-/// The script WSL runs inside the VM (`sh -c SCRIPT sh f PATTERN`) is scoped like the native wait: run here on Linux
+/// The script WSL runs inside the VM (`sh -c SCRIPT sh s OFFSET`) is scoped like the native wait: run here on Linux
 /// with the same arguments, it SIGKILLs slot 1's TERM-ignoring SITL and reports it, and leaves slot 0's alone.
 #[cfg(target_os = "linux")]
 #[test]
@@ -368,9 +418,8 @@ fn the_wsl_wait_script_is_scoped_to_its_slot_too() {
         assert!(std::time::Instant::now() < deadline, "the fake SITLs never installed their traps");
         std::thread::sleep(Duration::from_millis(5));
     }
-    let pattern = ofs_fc::sitl::net::victim_pattern(10);
     let out = std::process::Command::new("sh")
-        .args(["-c", ofs_fc::sitl::process::WSL_WAIT_SCRIPT, "sh", "f", &pattern])
+        .args(["-c", ofs_fc::sitl::process::WSL_WAIT_SCRIPT, "sh", "s", "10"])
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -378,7 +427,7 @@ fn the_wsl_wait_script_is_scoped_to_its_slot_too() {
     assert!(!is_alive(&mut slot1), "slot 1's SITL is gone");
     assert!(is_alive(&mut slot0), "slot 0's SITL is left alone");
     let none = std::process::Command::new("sh")
-        .args(["-c", ofs_fc::sitl::process::WSL_WAIT_SCRIPT, "sh", "f", &ofs_fc::sitl::net::victim_pattern(20)])
+        .args(["-c", ofs_fc::sitl::process::WSL_WAIT_SCRIPT, "sh", "s", "20"])
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&none.stdout).contains("seen=0"), "no slot-2 victims: {:?}", none.stdout);
