@@ -214,7 +214,8 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 The client and server speak **protocol 12**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
-`HandshakeReply.logs_dir`, and gates with lap timing (`World.gates`, `State.race`, M8a).
+`HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), and the stabilizer flags
+`LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

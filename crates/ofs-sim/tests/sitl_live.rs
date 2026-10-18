@@ -202,9 +202,14 @@ fn a_client_that_hangs_up_right_after_msp_reboot_does_not_stop_the_reboot() {
 }
 
 /// A SITL session served over gRPC (lockstep, Betaflight), booted and armed: the client, the service and the data
-/// directory that holds its firmware and logs. Linux only (the tests that use it kill SITL with `pkill -x`).
+/// directory that holds its firmware and logs. Linux only (the live tests need a real Betaflight in the VM).
 #[cfg(target_os = "linux")]
-async fn serve_an_armed_quad() -> (ofs_sim::pb::sim_client::SimClient<tonic::transport::Channel>, ofs_sim::server::SimService, tempfile::TempDir) {
+async fn serve_an_armed_quad() -> (
+    ofs_sim::pb::sim_client::SimClient<tonic::transport::Channel>,
+    ofs_sim::server::SimService,
+    tempfile::TempDir,
+    String, // the session's Configurator address (its slot's), so a test can scope its cleanup to the slot
+) {
     use ofs_sim::pb::sim_client::SimClient;
     use ofs_sim::pb::{LoadRequest, Mode, RunRequest, Sticks as PbSticks};
     use ofs_sim::server::{sim_server, SimService};
@@ -218,14 +223,14 @@ async fn serve_an_armed_quad() -> (ofs_sim::pb::sim_client::SimClient<tonic::tra
     tokio::spawn(tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_incoming(TcpListenerStream::new(listener)));
     let mut c = SimClient::connect(format!("http://{addr}")).await.unwrap();
     let quad = std::path::absolute(QUAD).unwrap();
-    c.load(LoadRequest { quad_path: quad.to_string_lossy().into(), seed: 1, mode: Mode::Lockstep as i32, open_loop_fc: false, ..Default::default() }).await.unwrap();
+    let reply = c.load(LoadRequest { quad_path: quad.to_string_lossy().into(), seed: 1, mode: Mode::Lockstep as i32, open_loop_fc: false, ..Default::default() }).await.unwrap().into_inner();
     // Betaflight refuses to arm with the switch already up at boot: let it boot and calibrate with the switch low
     // (about 4 s), then raise it.
     c.run(RunRequest { seconds: 4.0 }).await.unwrap();
     c.set_sticks(PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() }).await.unwrap();
     let flying = c.run(RunRequest { seconds: 2.0 }).await.unwrap().into_inner();
     assert!(flying.motor_cmd.iter().all(|m| *m > 0.0), "not armed: {:?}", flying.motor_cmd);
-    (c, service, data_dir)
+    (c, service, data_dir, reply.configurator_address)
 }
 
 /// Blackbox ends a log with an "End of log" event when logging stops (on disarm); a log cut short lacks it.
@@ -238,6 +243,38 @@ fn finished_blackbox_logs(logs_dir: &Path) -> (usize, usize) {
     (logs.len(), finished)
 }
 
+/// #58's "done when" also says the log's *last second* is present. The repo has no Blackbox frame decoder, so the
+/// content is pinned at the mechanism level: the log grows with the armed flight's length (logging ran throughout)
+/// and ends with Blackbox's own End of log event (it stopped on the disarm, not mid-write) — together that is the
+/// flight's final second.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore]
+async fn a_blackbox_log_grows_with_the_armed_flight_it_recorded() {
+    use ofs_sim::pb::RunRequest;
+    let armed = |seconds: f64| async move {
+        let (mut c, service, _data_dir, _address) = serve_an_armed_quad().await;
+        c.run(RunRequest { seconds }).await.unwrap();
+        c.unload(ofs_sim::pb::Empty {}).await.unwrap();
+        let mut size = 0;
+        for entry in std::fs::read_dir(service.logs_dir()).unwrap().flatten() {
+            if entry.file_name().to_string_lossy().ends_with(".BFL") {
+                size += entry.metadata().unwrap().len();
+            }
+        }
+        size
+    };
+    let one_second = armed(1.0).await;
+    let four_seconds = armed(4.0).await;
+    // The log carries a fixed header, so the bar is the slope: three extra armed seconds add well over 4 KB/s of
+    // frames (an earlier run measured about 9.5), proving frames were written throughout the flight, not once.
+    assert!(four_seconds > one_second, "the log grows with the flight it recorded: 1 s {one_second}, 4 s {four_seconds}");
+    assert!(
+        (four_seconds - one_second) as f64 / 3.0 > 4000.0,
+        "frames are written throughout the armed flight, not once: 1 s {one_second}, 4 s {four_seconds}"
+    );
+}
+
 /// #58: a session that ends armed (the Unload comes with the quad still armed) used to leave the Blackbox log cut
 /// short; the session now disarms Betaflight first.
 #[cfg(target_os = "linux")]
@@ -245,7 +282,7 @@ fn finished_blackbox_logs(logs_dir: &Path) -> (usize, usize) {
 #[ignore]
 async fn a_session_that_ends_armed_leaves_a_finished_blackbox_log() {
     use ofs_sim::pb::{Empty, RunRequest};
-    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (mut c, service, _data_dir, _address) = serve_an_armed_quad().await;
     // An inputs recording is running when the session ends: the shutdown disarm must not write a row into it.
     let recording = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
     c.run(RunRequest { seconds: 0.2 }).await.unwrap();
@@ -266,7 +303,7 @@ async fn a_session_that_ends_armed_leaves_a_finished_blackbox_log() {
 #[ignore]
 async fn a_session_that_ends_with_its_link_cut_still_leaves_a_finished_blackbox_log() {
     use ofs_sim::pb::{fault, Fault, RadioLinkLoss, RunRequest};
-    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (mut c, service, _data_dir, _address) = serve_an_armed_quad().await;
     c.inject_fault(Fault { kind: Some(fault::Kind::RadioLinkLoss(RadioLinkLoss {})), at_s: None }).await.unwrap();
     c.run(RunRequest { seconds: 0.3 }).await.unwrap();
     c.unload(ofs_sim::pb::Empty {}).await.unwrap();
@@ -282,7 +319,7 @@ async fn a_session_whose_pilot_left_first_still_leaves_a_finished_blackbox_log()
     use ofs_sim::pb::{PilotInput, Sticks as PbSticks};
     use tokio_stream::wrappers::ReceiverStream;
     use tokio_stream::StreamExt;
-    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (mut c, service, _data_dir, _address) = serve_an_armed_quad().await;
     let (tx, rx) = tokio::sync::mpsc::channel(8);
     let armed = PbSticks { aux: ARM_AND_ANGLE.to_vec(), ..Default::default() };
     tx.send(PilotInput { sticks: Some(armed), state_rate_hz: 50 }).await.unwrap();
@@ -296,21 +333,39 @@ async fn a_session_whose_pilot_left_first_still_leaves_a_finished_blackbox_log()
     assert_eq!((logs, finished), (1, 1), "one log, finished, though the transmitter was off when the session ended");
 }
 
+
+#[cfg(target_os = "linux")]
+/// This session's SITL processes are killed by their slot (the same selection the product's cleanup makes, from the
+/// session's Configurator address): SIGTERM first, then SIGKILL for whoever survived. Never a machine-wide match by
+/// process name: another simulator's SITL must not lose its session to this test.
+fn kill_this_sessions_sitl(address: &str) {
+    let slot = (address.rsplit(':').next().unwrap().parse::<u16>().unwrap() - MSP_TCP_PORT) / 10;
+    std::process::Command::new("sh").args(["-c", ofs_fc::sitl::net::SLOT_KILL_SCRIPT, "sh", &slot.to_string()]).status().unwrap();
+    for _ in 0..40 {
+        let alive = std::process::Command::new("sh").arg("-c").arg(format!("pgrep -x betaflight_SITL | while read p; do tr '\\0' '\\n' < /proc/$p/cmdline | grep -q -- --port-offset {slot} && echo x; done")).status().unwrap().success();
+        if !alive {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::process::Command::new("pkill").args(["-9", "-f", "--", &format!("--port-offset {slot}")]).status().unwrap();
+}
+
 /// A session whose SITL died is not made to wait for a disarm that cannot happen.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore]
 async fn a_session_whose_sitl_died_still_ends_promptly() {
-    let (mut c, _service, _data_dir) = serve_an_armed_quad().await;
-    assert!(std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap().success());
+    let (mut c, _service, _data_dir, address) = serve_an_armed_quad().await;
+    kill_this_sessions_sitl(&address);
     let started = std::time::Instant::now();
     c.unload(ofs_sim::pb::Empty {}).await.unwrap();
     assert!(started.elapsed() < Duration::from_secs(5), "unload took {:?}", started.elapsed());
 }
 
 /// A real crash, end to end: SITL is killed from outside during a lockstep run served over gRPC, so the failure goes
-/// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only: it kills SITL
-/// with `pkill -x`, which takes down every Betaflight SITL on the machine, so run it alone (CI does, one test at a time).
+/// through `Session::step` and its failure hook (the test above builds the bundle by hand). Linux only; the kill is
+/// this session's slot's, and the test proves a same-named outsider survives it.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore]
@@ -318,11 +373,25 @@ async fn a_sitl_crash_through_the_session_leaves_a_replayable_bundle() {
     use ofs_sim::pb::{EventKind, RunRequest};
     use ofs_sim::repro::replay;
 
-    let (mut c, service, _data_dir) = serve_an_armed_quad().await;
+    let (mut c, service, _data_dir, address) = serve_an_armed_quad().await;
     let mut events = service.subscribe();
 
-    let killed = std::process::Command::new("pkill").args(["-9", "-x", "betaflight_SITL"]).status().unwrap();
-    assert!(killed.success(), "no SITL to kill");
+    // A decoy SITL in another slot must survive the scoped kill: a copy of /bin/sh named betaflight_SITL (comm is
+    // the file's name, which is what the selection matches) whose command line reads like another slot's SITL —
+    // the same trick sitl_errors' fakes use, since a sleep binary cannot carry SITL's arguments.
+    let decoy_dir = tempfile::tempdir().unwrap();
+    let decoy_path = decoy_dir.path().join("betaflight_SITL");
+    std::fs::copy("/bin/sh", &decoy_path).unwrap();
+    let mut decoy = std::process::Command::new(&decoy_path).args(["-c", "sleep 60", "--port-offset", "5"]).spawn().unwrap();
+    kill_this_sessions_sitl(&address);
+    let decoy_lives = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{} slot_pids 5 | grep -q .", ofs_fc::sitl::net::SLOT_PIDS_SH))
+        .status()
+        .unwrap()
+        .success();
+    assert!(decoy_lives, "the kill stayed in this session's slot: another slot's SITL survives");
+    decoy.kill().unwrap();
     let err = c.run(RunRequest { seconds: 2.0 }).await.expect_err("a run with a dead SITL must fail");
 
     let mut message = None;

@@ -132,12 +132,79 @@ fn toml_error(text: &str, e: &toml::de::Error) -> String {
     }
 }
 
+fn text_of(t: &toml::Table, key: &str, problems: &mut Vec<String>) -> Option<String> {
+    match t.get(key).map(toml::Value::as_str) {
+        None => None,
+        Some(None) => {
+            problems.push(format!("submission.toml: {key} must be text"));
+            None
+        }
+        Some(Some(s)) => Some(s.to_string()),
+    }
+}
+
+fn int_of(t: &toml::Table, key: &str, problems: &mut Vec<String>) -> Option<i64> {
+    match t.get(key).map(toml::Value::as_integer) {
+        None => None,
+        Some(None) => {
+            problems.push(format!("submission.toml: {key} must be a whole number"));
+            None
+        }
+        Some(Some(i)) => Some(i),
+    }
+}
+
+fn origin_of(t: &toml::Table, problems: &mut Vec<String>) -> Option<RawOrigin> {
+    let o = t.get("origin")?.as_table()?;
+    const KEYS: [&str; 4] = ["source", "note", "contributor", "license"];
+    for key in o.keys() {
+        if !KEYS.contains(&key.as_str()) {
+            problems.push(format!("submission.toml: unknown key 'origin.{key}'"));
+        }
+    }
+    Some(RawOrigin {
+        source: text_of(o, "source", problems),
+        note: text_of(o, "note", problems),
+        contributor: text_of(o, "contributor", problems),
+        license: text_of(o, "license", problems),
+    })
+}
+
+/// The `Raw` fields, one key at a time, so every wrong type is its own problem (a serde pass would stop at the
+/// first) and every unknown key was named before this ran.
+fn raw_from(t: &toml::Table, problems: &mut Vec<String>) -> Raw {
+    if let Some(v) = t.get("origin") {
+        if v.as_table().is_none() {
+            problems.push("submission.toml: [origin] must be a table".into());
+        }
+    }
+    Raw {
+        schema_version: int_of(t, "schema_version", problems),
+        kind: text_of(t, "kind", problems),
+        title: text_of(t, "title", problems),
+        quad: text_of(t, "quad", problems),
+        data: text_of(t, "data", problems),
+        motor: int_of(t, "motor", problems),
+        diff: text_of(t, "diff", problems),
+        origin: t.get("origin").and_then(toml::Value::as_table).and_then(|_| origin_of(t, problems)),
+    }
+}
+
 /// Loads and checks the submission in `dir`. Every problem found is returned together.
 pub fn load(dir: &Path) -> Result<Submission, Vec<String>> {
     let toml_path = dir.join("submission.toml");
     let text = std::fs::read_to_string(&toml_path).map_err(|e| vec![format!("submission.toml: {}: {e}", toml_path.display())])?;
-    let raw: Raw = toml::from_str(&text).map_err(|e| vec![toml_error(&text, &e)])?;
+    // Syntax first (one problem, with its line): a file that does not parse can say nothing else. Then every key is
+    // read on its own, so unknown keys and wrong types all come back together instead of the first one alone.
+    let table: toml::Table = toml::from_str(&text).map_err(|e| vec![toml_error(&text, &e)])?;
     let mut problems = Vec::new();
+    const TOP: [&str; 8] = ["schema_version", "kind", "title", "quad", "data", "motor", "diff", "origin"];
+    for key in table.keys() {
+        if !TOP.contains(&key.as_str()) {
+            problems.push(format!("submission.toml: unknown key '{key}'"));
+        }
+    }
+    let raw = raw_from(&table, &mut problems);
 
     match raw.schema_version {
         Some(SCHEMA_VERSION) => {}

@@ -94,6 +94,9 @@ slot_pids() {
 }
 pub(crate) use slot_pids_sh;
 
+/// [`slot_pids_sh!`]'s text as a constant, for the tests that select processes by the same rule the scripts do.
+pub const SLOT_PIDS_SH: &str = slot_pids_sh!();
+
 /// The cleanup script for one slot (`sh -c SLOT_KILL_SCRIPT sh <offset>`): SIGTERM to the slot's SITL processes.
 pub const SLOT_KILL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_pids \"$1\"); [ -z \"$pids\" ] || kill $pids 2>/dev/null\nexit 0");
 

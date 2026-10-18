@@ -5,6 +5,23 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### B5: the small-tails sweep
+#### Fixed
+- **`ofs-validate` reports every `submission.toml` schema problem in one pass** (unknown keys, wrong types, per key),
+  instead of stopping at the first; a file that does not parse still says so with its line.
+- **Ending a session stops a running MCAP recording with a named `recording_stopped` event**, exactly as a running
+  inputs recording does; the file is finished, not left half-written.
+- The live SITL tests kill their own session's SITL by slot (the same selection the product's cleanup makes) instead
+  of `pkill -x betaflight_SITL`, which took down every SITL on a developer machine; the crash test holds a decoy SITL
+  in another slot across the kill to prove the scoping.
+- The victim tests' fake SITL processes are killed when a test's assertion fires (a drop guard), so a failing test
+  no longer leaks a process holding the ports.
+- The release checker's changelog walk catches an empty `## Unreleased` section and a `###` heading outside any
+  release; `docs/dev-setup.md`'s protocol-12 line names the stabilizer flags.
+#### Removed
+- A redundant journal-replay stick-clamp test that passed with the clamp removed (the clamp is pinned by
+  `set_sticks_clamps_what_it_accepts`).
+
 ### B4: race polish
 #### Fixed
 - **The HUD's lap clock rounds before it splits minutes**, so a lap of 59.96 s shows `1:00.0`, never `0:60.0`.
