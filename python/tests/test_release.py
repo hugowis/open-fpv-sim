@@ -31,3 +31,42 @@ def test_the_changelog_has_an_entry_for_the_version():
     version = _python_version()
     headings = [line for line in (REPO / "CHANGELOG.md").read_text(encoding="utf-8").splitlines() if line.startswith("## ")]
     assert any(h.startswith(f"## {version} — ") for h in headings), f"no '## {version} — <date>' heading in {headings[:3]}"
+
+
+def _changelog_problems(lines):
+    """The heading walk the release checker owes the changelog: every '## ' release is a level, '## Unreleased' must
+    carry at least one '### ' notes section before the next '## ', and no '### ' may appear before any '## '."""
+    problems = []
+    release_seen = False
+    in_unreleased = False
+    unreleased_has_sections = False
+    for line in lines:
+        if line.startswith("## Unreleased"):
+            in_unreleased = True
+            release_seen = True
+        elif line.startswith("## "):
+            if in_unreleased and not unreleased_has_sections:
+                problems.append("'## Unreleased' has no '###' sections: the notes were never written under it")
+            in_unreleased = False
+            release_seen = True
+        elif line.startswith("### "):
+            if not release_seen:
+                problems.append("a '###' section appears before the first '## ' heading")
+            elif in_unreleased:
+                unreleased_has_sections = True
+    if in_unreleased and not unreleased_has_sections:
+        problems.append("'## Unreleased' has no '###' sections: the notes were never written under it")
+    return problems
+
+
+def test_an_unfolded_unreleased_section_is_an_error():
+    assert _changelog_problems(["## Unreleased", "## 0.2.0 — 2026-10-17", "### Fixed", "- x"])
+
+
+def test_a_misplaced_heading_is_an_error():
+    assert _changelog_problems(["### Fixed", "- x", "## 0.2.0 — 2026-10-17", "### Fixed", "- y"])
+
+
+def test_the_real_changelog_headings_are_well_formed():
+    lines = (REPO / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+    assert not _changelog_problems(lines), lines[:8]
