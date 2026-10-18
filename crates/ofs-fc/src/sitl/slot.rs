@@ -4,7 +4,7 @@
 //! stock ports. A simulator takes the first free slot by *holding sockets*, which the OS releases when the process
 //! exits however it exits, so a crashed simulator frees its slot with no stale lock file to clean up:
 //!
-//! 1. a UDP "lock" socket on `127.0.0.1:47000 + slot`: if it cannot be bound, another simulator (or anything else)
+//! 1. a UDP "lock" socket on `127.0.0.1:21600 + slot`: if it cannot be bound, another simulator (or anything else)
 //!    owns the slot;
 //! 2. the motor socket on `bind_ip:9002 + offset`, the one the simulator needs anyway: if it cannot be bound, some
 //!    foreign process holds the slot's ports, and the slot is skipped.
@@ -19,8 +19,9 @@ use super::FcError;
 
 /// How many simulators can hold a slot at once (offsets 0 to 150).
 pub const MAX_SLOTS: u16 = 16;
-/// The loopback UDP port of slot 0's lock; slot n locks `LOCK_PORT_BASE + n`.
-pub const LOCK_PORT_BASE: u16 = 47000;
+/// The loopback UDP port of slot 0's lock; slot n locks `LOCK_PORT_BASE + n`. Below every OS's default ephemeral
+/// range (Linux 32768–60999, Windows and macOS 49152–65535): the OS must not hand a lock port to an outbound socket.
+pub const LOCK_PORT_BASE: u16 = 21600;
 
 /// A slot held by this process: its ports, the motor socket bound on them and the lock. Dropping it frees the slot.
 #[derive(Debug)]

@@ -376,7 +376,7 @@ session). Every SITL runs on a *slot*, a block of ten ports (SITL's `--port-offs
 
 The first session on the machine gets slot 0, exactly the ports of earlier releases; the next one gets the first slot
 that is free. A simulator takes a slot by holding two sockets for the life of its session, a loopback UDP lock on
-`47000 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
+`21600 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
 crashed simulator frees its slot. Something else holding those ports makes the simulator skip the slot; with all 16
 taken the load fails with an error that says so. `LoadReply.configurator_address` (Python:
 `sim.configurator_address`, the game's toast) always says which address the session got.
