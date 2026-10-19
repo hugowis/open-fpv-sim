@@ -116,7 +116,8 @@ fn late_duplicate_replies_are_drained_after_a_resend() {
         std::thread::sleep(Duration::from_millis(30));
         sitl.send_to(&[2], to).unwrap();
     });
-    let drained = drain_late_replies(&link.rx, Duration::from_millis(150)).unwrap();
+    // A wide window: on a loaded CI runner (macOS arm64, once in five runs) the 30 ms thread ran later than 150 ms.
+    let drained = drain_late_replies(&link.rx, Duration::from_millis(500)).unwrap();
     late.join().unwrap();
     assert_eq!(drained, 1);
     link.rx.set_nonblocking(true).unwrap();
