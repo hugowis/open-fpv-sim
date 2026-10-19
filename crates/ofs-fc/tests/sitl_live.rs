@@ -290,7 +290,9 @@ fn a_held_serial_port_is_retried_then_refused_with_the_errno() {
     };
     std::fs::create_dir_all(&cfg.workdir).unwrap();
     std::fs::copy(OSD_DIFF, cfg.workdir.join("betaflight.diff")).unwrap();
-    let _holder = std::net::TcpListener::bind("127.0.0.1:5761").unwrap();
+    // A stale SITL holds the wildcard address like the new one binds it. (A holder on 127.0.0.1 alone is not refused on
+    // macOS/BSD, where SO_REUSEADDR lets a wildcard bind coexist with a specific-address listener.)
+    let _holder = std::net::TcpListener::bind("0.0.0.0:5761").unwrap();
     let err = ofs_fc::sitl::process::SitlProcess::start(&cfg).err().expect("a held MSP port fails the start");
     let text = err.to_string();
     assert!(text.contains("bind port 5761 for UART1 failed!! after 20 attempts"), "the spent retries are on the record: {text}");

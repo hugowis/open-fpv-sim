@@ -72,3 +72,19 @@ def test_closing_one_sim_does_not_disturb_the_other(launcher):
     c.load(QUAD, seed=1)
     assert c.configurator_address == "tcp://127.0.0.1:5761"
     assert b.run(0.2).fc_restarts == 0
+
+
+def test_a_killed_simulators_orphan_sitl_is_replaced_by_the_next_session(launcher):
+    a, b = launcher("a"), launcher("b")
+    a.load(QUAD, seed=1)
+    b.load(QUAD, seed=1)
+    _boot_and_arm(b)
+    # A hard kill gives the simulator no chance to stop its SITL: slot 0's Betaflight is left running.
+    a._process.kill()
+    a._process.wait()
+    # The next simulator takes slot 0 again; its cleanup must remove that orphan (and only that one), or the new SITL
+    # cannot bind the ports and the load fails.
+    c = launcher("c")
+    c.load(QUAD, seed=1)
+    assert c.configurator_address == "tcp://127.0.0.1:5761"
+    assert b.run(0.5).fc_restarts == 0, "B's Betaflight was disturbed by the cleanup of slot 0"
