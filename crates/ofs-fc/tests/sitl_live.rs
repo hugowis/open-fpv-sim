@@ -117,6 +117,36 @@ fn a_sitl_launched_with_a_port_offset_binds_the_shifted_ports() {
     assert!(!log.contains("port 5761") && !log.contains("@9003"), "nothing binds the unshifted ports:\n{log}");
 }
 
+/// The default cleanup of a slot finds and stops a SITL that is really running: the production path behind "a simulator
+/// was killed and left its SITL" (on Linux the script reads `/proc`, on macOS it uses `ps`), against the real binary
+/// and its real process name rather than a decoy. The test starts the SITL itself and runs the cleanup by hand.
+#[cfg(unix)]
+#[test]
+#[ignore]
+fn the_slot_cleanup_stops_a_running_sitl() {
+    use ofs_fc::sitl::process::{run_cleanup, SitlProcess};
+    let dir = tempfile::tempdir().unwrap();
+    let mut launch = argv("OFS_SITL_LAUNCH");
+    assert!(!launch.is_empty(), "set OFS_SITL_LAUNCH");
+    launch.extend(["--port-offset".to_string(), "20".to_string()]);
+    let cleanup = net::default_cleanup(&launch);
+    let mut process = SitlProcess::start(&LaunchConfig {
+        launch,
+        cleanup: Vec::new(), // the cleanup under test must be the only thing that stops it
+        workdir: dir.path().join("fc"),
+        diff_file: QUAD_DIFF.into(),
+        startup_timeout: Duration::from_secs(15),
+    })
+    .unwrap();
+    assert!(process.exit_status().is_none(), "the SITL is running");
+    run_cleanup(&cleanup);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while process.exit_status().is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(process.exit_status().is_some(), "the slot's cleanup stopped the running SITL");
+}
+
 /// Writes one CRSF RC frame per step, like a receiver at 500 Hz.
 struct CrsfSource {
     uart: Wire,

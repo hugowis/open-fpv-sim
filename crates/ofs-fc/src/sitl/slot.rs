@@ -266,6 +266,7 @@ mod tests {
     /// session's own address, so a loopback holder — the relay — never pushes a WSL session off its slot. 127.0.0.2
     /// stands in for the WSL gateway address here.
     #[test]
+    #[cfg_attr(target_os = "macos", ignore = "macOS has no 127.0.0.2 on lo0 (a second local address needs `sudo ifconfig lo0 alias 127.0.0.2`)")]
     fn a_loopback_holder_does_not_push_a_session_on_another_address_off_its_slot() {
         let (lock, shift) = space(13);
         let _relay = std::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, MSP_TCP_PORT + shift))).unwrap();

@@ -271,7 +271,11 @@ fn port_holders_finds_a_listener_and_nothing_on_a_free_port() {
     let found = port_holders(port);
     assert!(found.iter().any(|h| h.contains("LISTEN") && h.contains(&format!("pid {}", std::process::id()))), "{found:?}");
     drop(listener);
-    assert!(port_holders(port).iter().all(|h| !h.contains("LISTEN")), "a closed listener is gone");
+    // Not every LISTEN on the port: another test in this process may take the freed ephemeral port at once, or a child
+    // another test thread is forking may hold a copy for the instant before it execs (it failed so once in CI). This
+    // process's own listener is what must be gone.
+    let mine = format!("pid {}", std::process::id());
+    assert!(port_holders(port).iter().all(|h| !(h.contains("LISTEN") && h.contains(&mine))), "a closed listener is gone");
 }
 
 /// SITL creates eeprom.bin at boot, so its existence does not prove the diff was applied: a config run that exits
