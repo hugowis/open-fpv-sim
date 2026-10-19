@@ -257,7 +257,7 @@ mod tests {
         let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         assert_eq!(slot.index, 1, "slot 0's TCP block is held by someone else");
         drop(foreign);
-        let next = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
+        let next = acquire_until(0, lock, shift);
         assert_eq!(next.index, 0, "the skip left slot 0 free for whoever can use it");
     }
 

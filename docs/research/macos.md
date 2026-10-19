@@ -49,8 +49,13 @@ M9a's slot cleanup selects processes with `pgrep -x betaflight_SITL` and reads `
 characters, `betaflight_SITL.` for `betaflight_SITL.elf`, while `ps -o comm` prints the full path (reasoned from the BSD
 tools, and consistent with the failure; `pgrep -x` itself was not run on a runner). A SITL left behind by a hard-killed simulator was
 therefore never found, the next session could not bind (`UDP port 9003 is already in use`), and every later test in the
-process failed (`test_a_killed_simulators_orphan_sitl_is_replaced_by_the_next_session`, added in this branch, failed on both
-runners before the fix). Where `/proc` is absent the script now finds the processes with `ps -ww -axo pid=,comm=` (the
+process failed (the orphan test, added in this branch, failed on both runners before the fix). Main then gained #100's probe of the
+slot's TCP ports at acquire time: on Linux an orphan now makes the next session skip its slot (so the test no longer
+asserts the slot, only that the next session loads and flies and is never B's), but on macOS the probe cannot see the
+orphan, because it binds `127.0.0.1` with `SO_REUSEADDR` and the orphan listens on the wildcard address, which BSD allows
+(the next session took slot 0 in CI run 39312234434): there the cleanup below is what removes it, and the probe still
+works against a holder on `127.0.0.1` (`a_foreign_holder_of_a_tcp_port_of_the_slots_block_skips_the_slot` passes its skip
+assertion on macOS). Where `/proc` is absent the script now finds the processes with `ps -ww -axo pid=,comm=` (the
 basename starts with `betaflight_SITL`) and `ps -o args= -p`; the optional second argument `ps` forces that path on Linux,
 where `the_slot_script_through_ps_alone_takes_the_same_victims` runs the same decoys through it (the macOS full-path-with-spaces
 case itself is untested: the Linux decoys see the short name). The cleanup of a launch with no slot at all (the hand-made launches of
@@ -63,8 +68,9 @@ bind retries and the simulator's probe of UDP 9003).
 
 ### macOS differences in the tests, fixed
 - `touch -d "10 minutes ago"` is GNU only: `sitl_process.rs` sets the modification time from Rust.
-- One test needs a second loopback address: macOS answers only on `127.0.0.1` unless one is added with `sudo ifconfig lo0
-  alias 127.0.0.2`: `replies_from_another_address_are_ignored` is ignored on macOS with that reason.
+- Two tests need a second loopback address: macOS answers only on `127.0.0.1` unless one is added with `sudo ifconfig lo0
+  alias 127.0.0.2`: `replies_from_another_address_are_ignored` and (from #100)
+  `a_loopback_holder_does_not_push_a_session_on_another_address_off_its_slot` are ignored on macOS with that reason.
 - A held TCP port did not stop SITL's own bind on macOS: `a_held_serial_port_is_retried_then_refused_with_the_errno` holds
   `127.0.0.1:5761` and SITL started anyway. The likely reason is that BSD `SO_REUSEADDR` lets a wildcard bind coexist with a
   specific-address listener (untested: a holder on `0.0.0.0` also did not stop it in one run, and Rust's listener sets the
