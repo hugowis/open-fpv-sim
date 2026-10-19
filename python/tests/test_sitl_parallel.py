@@ -92,13 +92,15 @@ def test_a_killed_simulators_orphan_sitl_does_not_block_the_next_session(launche
     orphans = _children(a._process.pid)
     assert orphans, "A's simulator started a SITL"
     # A hard kill gives the simulator no chance to stop its SITL: slot 0's Betaflight is left running, holding that
-    # slot's ports. The next simulator must still load and fly (it skips the busy slot), without disturbing B.
+    # slot's ports. The next simulator must still load and fly, without disturbing B. Where the probe sees the orphan's
+    # ports as held (Linux) it skips that slot; where it does not (macOS: a loopback probe of a wildcard listener) it
+    # takes slot 0 and its cleanup removes the orphan. Either way it is never B's slot.
     a._process.kill()
     a._process.wait()
     try:
         c = launcher("c")
         c.load(QUAD, seed=1)
-        assert c.configurator_address not in (b.configurator_address, a.configurator_address), c.configurator_address
+        assert c.configurator_address != b.configurator_address, c.configurator_address
         _boot_and_arm(c)
         assert b.run(0.5).fc_restarts == 0, "B's Betaflight was disturbed"
     finally:
