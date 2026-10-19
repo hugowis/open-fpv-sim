@@ -112,7 +112,12 @@ except the Godot DVR frame count (the error and Betaflight Godot suites were not
 times slower than Apple silicon in the benchmark. `macos-15-intel` is run only by the manual survey workflow.
 
 First measured run of the `macos` job: run 39307557811 (commit 9d93847), every step passed, 15 min 47 s (an earlier run of the
-job was cancelled by a newer push after 13 min). That is one run: the job has no track record yet.
+job was cancelled by a newer push after 13 min). Its record after that is mixed, which is why it is non-blocking: on the
+final commit the `pull_request` run (39315660145) passed and the `push` run of the same commit (39315650666) failed, in
+the Godot open-loop end-to-end test on Apple silicon, on two real-time checks ("a clean link holds nothing: held_fields is 0" and
+"79 frames for 2.01 simulated seconds at 50 fields a second (about 100)", the DVR needing at least 80 %). Those Godot
+checks are paced by the wall clock and have now failed once on each runner type; the earlier failures of the job were
+tests that `main` gained (#100) or that were fixed in this branch (listed above).
 
 Not done, and why:
 1. **Radio goldens for macOS.** The digests depend on the platform's libm; recording them on a runner would pin a third set
