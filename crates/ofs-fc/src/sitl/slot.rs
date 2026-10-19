@@ -294,7 +294,17 @@ mod tests {
         let (lock, shift) = space(12);
         let (rx, claim) = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().into_parts();
         drop(rx);
-        let _thief = UdpSocket::bind(SocketAddr::from((LOOPBACK, PORT_PWM + shift))).unwrap();
+        // The thief takes the port the moment it is free (on macOS that was sometimes a moment after the drop).
+        let thief_addr = SocketAddr::from((LOOPBACK, PORT_PWM + shift));
+        let patience = if cfg!(target_os = "macos") { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+        let deadline = std::time::Instant::now() + patience;
+        let _thief = loop {
+            match UdpSocket::bind(thief_addr) {
+                Ok(socket) => break socket,
+                Err(e) if std::time::Instant::now() >= deadline => panic!("the motor port was not released: {e}"),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
         let err = SitlSlot::from_claim(claim, LOOPBACK).unwrap_err();
         assert!(matches!(err, FcError::PortInUse { port, .. } if port == PORT_PWM + shift), "{err}");
     }

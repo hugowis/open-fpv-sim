@@ -85,7 +85,9 @@ jobs:
           key: sitl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sitl.sh', 'third_party/betaflight/**') }}
       - if: steps.sitl-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-sitl.sh
-      - run: cargo test --workspace --locked
+      # One test at a time: on macOS a port a test just released was sometimes still held (a child another test thread
+      # was spawning inherited the descriptor, most likely), which failed tests that bind, drop and rebind.
+      - run: cargo test --workspace --locked -- --test-threads=1
       - run: cargo test -p ofs-fc -p ofs-sim --test sitl_live --locked -- --ignored --test-threads=1
       - run: cargo test -p ofs-video --test vtx_live --locked -- --ignored --test-threads=1
       - run: cargo build -p ofs-sim --locked
