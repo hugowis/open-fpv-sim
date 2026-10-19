@@ -29,11 +29,15 @@ if [ -n "$BF_SHA" ] && [ "$(git rev-parse HEAD)" != "$BF_SHA" ]; then
 fi
 if [ "$OFS_SITL_PATCH" != "none" ]; then
   git apply "$OFS_SITL_PATCH"
+  # macOS lacks a few POSIX calls the lockstep build uses (docs/research/macos.md).
+  if [ "$(uname -s)" = Darwin ]; then
+    git apply "$REPO/third_party/betaflight/ofs-sitl-macos.patch"
+  fi
 fi
 # The Makefile initialises submodules on demand; under -j that races on .git/config, so do it first.
 git submodule update --init --recursive --depth 1
 # Betaflight's make does not track EXTRA_FLAGS or target.h edits reliably; build clean.
 rm -rf obj/main/SITL
-make TARGET=SITL EXTRA_FLAGS="$FLAGS" -j"$(nproc)"
+make TARGET=SITL EXTRA_FLAGS="$FLAGS" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 echo "commit: $(git rev-parse HEAD)"
 ls -l obj/main/betaflight_SITL.elf

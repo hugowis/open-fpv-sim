@@ -1,0 +1,33 @@
+diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
+index 4a9e08b..9fd8c7a 100644
+--- a/src/platform/SIMULATOR/sitl.c
++++ b/src/platform/SIMULATOR/sitl.c
+@@ -828,11 +828,16 @@ void systemInit(void)
+ #if ENABLE_SIMULATOR_EXTERNAL_TIME
+     {
+         // The idle wait must not jump with wall-clock steps (WSL2 resyncs its clock after host sleep).
++#if defined(__APPLE__)
++        // macOS has no pthread_condattr_setclock: its condition variables wait on the realtime clock (see the wait below).
++        pthread_cond_init(&extPacketCond, NULL);
++#else
+         pthread_condattr_t attr;
+         pthread_condattr_init(&attr);
+         pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+         pthread_cond_init(&extPacketCond, &attr);
+         pthread_condattr_destroy(&attr);
++#endif
+     }
+ #endif
+     printf("[system]Init...\n");
+@@ -1271,7 +1276,11 @@ void simulatorSchedulerIdle(void)
+     pthread_mutex_lock(&extPacketMutex);
+     if (extGyroTicks == extGyroTicksTaken) {
+         struct timespec until;
++#if defined(__APPLE__)
++        clock_gettime(CLOCK_REALTIME, &until);  // extPacketCond waits on the realtime clock here (systemInit)
++#else
+         clock_gettime(CLOCK_MONOTONIC, &until);  // extPacketCond uses CLOCK_MONOTONIC (systemInit)
++#endif
+         until.tv_nsec += 1000000;
+         if (until.tv_nsec >= 1000000000) {
+             until.tv_sec += 1;
