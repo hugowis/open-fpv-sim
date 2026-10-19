@@ -10,7 +10,7 @@ const AGED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/batteries
 
 fn vehicle(cfg: &QuadConfig) -> Vehicle {
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    build(cfg, &opts).unwrap()
+    build(cfg, &opts, None).unwrap()
 }
 
 fn full_throttle() -> Sticks {

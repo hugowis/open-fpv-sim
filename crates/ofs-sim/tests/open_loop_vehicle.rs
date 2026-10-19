@@ -8,7 +8,7 @@ const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5
 fn vehicle(seed: u64) -> Vehicle {
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    build(&cfg, &opts).unwrap()
+    build(&cfg, &opts, None).unwrap()
 }
 
 fn flat_world() -> WorldConfig {
@@ -17,7 +17,7 @@ fn flat_world() -> WorldConfig {
 
 fn vehicle_in(cfg: &ofs_config::QuadConfig, world: WorldConfig) -> Vehicle {
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world };
-    build(cfg, &opts).unwrap()
+    build(cfg, &opts, None).unwrap()
 }
 
 fn throttle(t: f64) -> Sticks {

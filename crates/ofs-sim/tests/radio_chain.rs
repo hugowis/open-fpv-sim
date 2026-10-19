@@ -10,7 +10,7 @@ fn quad(file: &str) -> Vehicle {
     let path = format!("{}/../../quads/{file}", env!("CARGO_MANIFEST_DIR"));
     let cfg = load(Path::new(&path)).unwrap();
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    build(&cfg, &opts).unwrap()
+    build(&cfg, &opts, None).unwrap()
 }
 
 #[test]

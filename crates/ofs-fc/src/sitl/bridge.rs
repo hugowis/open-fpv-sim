@@ -95,9 +95,6 @@ pub struct SitlBridge {
     restart_budget: RestartBudget,
     /// Bytes the serial links had dropped at the last step (added to `fc.serial_dropped_bytes` as they grow).
     links_dropped: u64,
-    /// The slot this bridge runs in, when it has one: held for the bridge's whole life (also across Betaflight
-    /// reboots), so the ports stay claimed until the session ends.
-    _slot: Option<SlotClaim>,
 }
 
 /// How often the first state datagram is resent while SITL has not answered it.
@@ -132,18 +129,21 @@ impl SitlBridge {
         let ports = cfg.ports;
         let rx = UdpSocket::bind(SocketAddr::from((cfg.net.bind_ip, ports.pwm())))
             .map_err(|_| FcError::PortInUse { port: ports.pwm(), hint: "another simulator instance may be running" })?;
-        Self::start_with(cfg, rx, None, bus)
+        Self::start_with(cfg, rx, bus)
     }
 
     /// Starts the bridge in a slot this process holds ([`SitlSlot::acquire`]): `cfg.ports` must be the slot's, the
-    /// motor socket is the slot's, and the bridge keeps the slot (and so its claim on the ports) until it is dropped.
-    pub fn start_in_slot(cfg: BridgeConfig, slot: SitlSlot, bus: &mut Bus) -> Result<Self, FcError> {
+    /// motor socket is the slot's. The slot's claim comes back for the caller to hold for the session's life (the
+    /// vehicle keeps it, so a rebuild — a reload — can retake the same slot through [`SitlSlot::from_claim`]
+    /// without releasing it in between; issue #90).
+    pub fn start_in_slot(cfg: BridgeConfig, slot: SitlSlot, bus: &mut Bus) -> Result<(Self, SlotClaim), FcError> {
         debug_assert_eq!(cfg.ports, slot.ports, "the config names the slot's ports");
         let (rx, claim) = slot.into_parts();
-        Self::start_with(cfg, rx, Some(claim), bus)
+        let bridge = Self::start_with(cfg, rx, bus)?;
+        Ok((bridge, claim))
     }
 
-    fn start_with(cfg: BridgeConfig, rx: UdpSocket, slot: Option<SlotClaim>, bus: &mut Bus) -> Result<Self, FcError> {
+    fn start_with(cfg: BridgeConfig, rx: UdpSocket, bus: &mut Bus) -> Result<Self, FcError> {
         if cfg.motor_count > 4 {
             return Err(FcError::Config(format!(
                 "Betaflight SITL's servo_packet carries 4 motors; the quad has {}",
@@ -191,7 +191,6 @@ impl SitlBridge {
             answered: false,
             restart_budget: RestartBudget::default(),
             links_dropped: 0,
-            _slot: slot,
         })
     }
 
