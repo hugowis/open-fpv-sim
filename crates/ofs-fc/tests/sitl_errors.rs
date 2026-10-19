@@ -430,6 +430,33 @@ fn a_slots_sitl_is_found_when_its_path_has_spaces() {
     assert!(is_alive(&mut slot0), "slot 0's SITL survives");
 }
 
+/// macOS has no `/proc` (and names a process by its whole executable name): the slot script finds its victims with `ps`
+/// there. Forced on Linux with the script's second argument, the same decoys give the same answers as through `/proc`:
+/// a slot's cleanup takes only that slot's SITL, a SITL without the option is slot 0's, a path with spaces is no trouble.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_slot_script_through_ps_alone_takes_the_same_victims() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::Builder::new().prefix("my sitl ").tempdir().unwrap();
+    let mut stock = spawn_fake_sitl_with(dir.path(), "sleep 30; sleep 30", &[]);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    std::thread::sleep(Duration::from_millis(100)); // let both exec
+    let run = |offset: &str| {
+        std::process::Command::new("sh")
+            .args(["-c", ofs_fc::sitl::net::SLOT_KILL_SCRIPT, "sh", offset, "ps"])
+            .status()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(150)); // let the TERM land
+    };
+    run("20");
+    assert!(is_alive(&mut stock) && is_alive(&mut slot1), "slot 2's cleanup touches neither");
+    run("10");
+    assert!(!is_alive(&mut slot1), "slot 1's SITL, whose path has spaces, is gone");
+    assert!(is_alive(&mut stock), "the SITL without the option is slot 0's, not slot 1's");
+    run("0");
+    assert!(!is_alive(&mut stock), "slot 0's cleanup took the SITL without the option");
+}
+
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.
 #[cfg(target_os = "linux")]
 #[test]

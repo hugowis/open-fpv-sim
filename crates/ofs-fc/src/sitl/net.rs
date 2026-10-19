@@ -75,12 +75,32 @@ pub fn with_port_offset(launch: &[String], offset: u16) -> Vec<String> {
 macro_rules! slot_pids_sh {
     () => {
         "\
+slot_candidates() {
+  if [ \"$1\" != ps ] && [ -d /proc/self ]; then
+    pgrep -x betaflight_SITL
+  else
+    ps -ww -axo pid=,comm= | awk '{ pid = $1; $1 = \"\"; n = $0; sub(/^ +/, \"\", n); sub(/.*\\//, \"\", n); if (n ~ /^betaflight_SITL/) print pid }'
+  fi
+}
+slot_args() {
+  if [ \"$2\" != ps ] && [ -d /proc/self ]; then
+    tr '\\0' ' ' < /proc/$1/cmdline 2>/dev/null
+  else
+    a=$(ps -ww -o args= -p $1 2>/dev/null); [ -n \"$a\" ] && echo \"$a \"
+  fi
+}
+slot_state() {
+  if [ \"$2\" != ps ] && [ -d /proc/self ]; then
+    st=$(sed 's/^.*) //' /proc/$1/stat 2>/dev/null); echo \"${st%% *}\"
+  else
+    st=$(ps -o state= -p $1 2>/dev/null); echo \"${st%\"${st#?}\"}\"
+  fi
+}
 slot_pids() {
-  for p in $(pgrep -x betaflight_SITL); do
-    a=$(tr '\\0' ' ' < /proc/$p/cmdline 2>/dev/null) || continue
+  for p in $(slot_candidates \"$2\"); do
+    a=$(slot_args \"$p\" \"$2\") || continue
     [ -n \"$a\" ] || continue
-    st=$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null); st=${st%% *}
-    [ \"$st\" = Z ] && continue
+    [ \"$(slot_state \"$p\" \"$2\")\" = Z ] && continue
     case \" $a\" in
       *\" --port-offset $1 \"*) echo \"$p\" ;;
       *\" --port-offset \"*) ;;
@@ -97,8 +117,10 @@ pub(crate) use slot_pids_sh;
 /// [`slot_pids_sh!`]'s text as a constant, for the tests that select processes by the same rule the scripts do.
 pub const SLOT_PIDS_SH: &str = slot_pids_sh!();
 
-/// The cleanup script for one slot (`sh -c SLOT_KILL_SCRIPT sh <offset>`): SIGTERM to the slot's SITL processes.
-pub const SLOT_KILL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_pids \"$1\"); [ -z \"$pids\" ] || kill $pids 2>/dev/null\nexit 0");
+/// The cleanup script for one slot (`sh -c SLOT_KILL_SCRIPT sh <offset> [ps]`): SIGTERM to the slot's SITL processes.
+/// Where there is no `/proc` (macOS) the processes are found with `ps`; the optional second argument `ps` forces that
+/// path on Linux, for the tests.
+pub const SLOT_KILL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_pids \"$1\" \"$2\"); [ -z \"$pids\" ] || kill $pids 2>/dev/null\nexit 0");
 
 /// The cleanup for one slot on a plain Windows host (`powershell.exe ... -Command SCRIPT <offset>`: PowerShell makes
 /// the offset the scriptblock's argument): terminates the `betaflight_SITL.exe` processes whose command line's last
