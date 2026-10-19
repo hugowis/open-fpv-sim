@@ -4,8 +4,6 @@ name: macos-survey
 # allowed to fail and is reported in the job summary. Run it by hand (Actions, "macos-survey", Run workflow).
 on:
   workflow_dispatch:
-  push:
-    branches: [worktree-m9c-macos-survey]
 
 permissions:
   contents: read
