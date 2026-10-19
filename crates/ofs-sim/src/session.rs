@@ -557,7 +557,7 @@ pub(crate) mod testing {
             fc_override: Some(FcKind::OpenLoop),
             world: ofs_config::WorldConfig::open_field(),
         };
-        Session::new(vehicle::build(&cfg, &opts).unwrap(), mode, OverrunPolicy::Warn, false)
+        Session::new(vehicle::build(&cfg, &opts, None).unwrap(), mode, OverrunPolicy::Warn, false)
     }
 }
 
@@ -657,7 +657,7 @@ mod tests {
             fc_override: Some(ofs_config::FcKind::OpenLoop),
             world,
         };
-        Session::new(crate::vehicle::build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true)
+        Session::new(crate::vehicle::build(&cfg, &opts, None).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true)
     }
 
     #[test]
@@ -699,7 +699,7 @@ mod tests {
             fc_override: Some(ofs_config::FcKind::OpenLoop),
             world,
         };
-        let mut session = Session::new(crate::vehicle::build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true);
+        let mut session = Session::new(crate::vehicle::build(&cfg, &opts, None).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true);
         session.last_link_up = true; // the state's link edge is already consumed: only collisions raise here
         let state = crate::vehicle::VehicleState {
             time_s: 1.0,

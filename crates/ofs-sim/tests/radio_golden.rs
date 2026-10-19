@@ -28,7 +28,7 @@ fn flight(quad: &str, seed: u64, path: &Path) -> u64 {
         fc_override: Some(FcKind::OpenLoop),
         world: WorldConfig::open_field(),
     };
-    let mut v = build(&cfg, &opts).unwrap();
+    let mut v = build(&cfg, &opts, None).unwrap();
     v.start_recording(&[], path).unwrap();
     v.schedule_fault(Fault::RadioLoss { fraction: 0.3 }, 1.0)
         .unwrap();

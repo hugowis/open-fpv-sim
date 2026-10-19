@@ -309,7 +309,7 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
     let opts = BuildOptions { seed, data_dir: data_dir.to_path_buf(), fc_override, world };
     // The bundle's firmware state goes into the directory of the SITL slot the build takes (not necessarily slot 0).
     let mut vehicle =
-        build_seeded(&cfg, &opts, Some(&bundle.join("firmware"))).map_err(|e| format!("building the bundle's vehicle: {e}"))?;
+        build_seeded(&cfg, &opts, Some(&bundle.join("firmware")), None).map_err(|e| format!("building the bundle's vehicle: {e}"))?;
 
     let mut failure: Option<SimError> = None;
     'entries: for entry in journal.entries() {
@@ -370,7 +370,7 @@ mod tests {
             fc_override: Some(FcKind::OpenLoop),
             world: WorldConfig::open_field(),
         };
-        build(cfg, &opts).unwrap()
+        build(cfg, &opts, None).unwrap()
     }
 
     /// Full throttle, then a finite fault that overflows the vibration model once the rotors spin: the run stops with

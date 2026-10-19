@@ -48,6 +48,13 @@ impl PortMap {
         MSP_TCP_PORT + self.offset
     }
 
+    /// TCP: the whole UART block SITL binds at launch — UART1 (MSP) and the seven UARTs above it. What a slot's
+    /// acquire probes for foreign holders ([`super::slot`]): a process on any of these ports would break the
+    /// launch later, so the slot is skipped up front.
+    pub fn uart_ports(self) -> std::ops::RangeInclusive<u16> {
+        self.msp()..=self.msp() + 7
+    }
+
     /// Where Betaflight Configurator connects.
     pub fn configurator_address(self) -> String {
         format!("tcp://127.0.0.1:{}", self.msp())

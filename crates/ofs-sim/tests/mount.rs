@@ -18,7 +18,7 @@ fn digest(mount: Option<FcMountSection>, imbalance_kgm: f64) -> u64 {
         fc_override: Some(FcKind::OpenLoop),
         world: WorldConfig::open_field(),
     };
-    let mut v: Vehicle = build(&cfg, &opts).unwrap();
+    let mut v: Vehicle = build(&cfg, &opts, None).unwrap();
     if imbalance_kgm > 0.0 {
         v.set_fault(Fault::PropDamage { prop: 0, thrust_scale: 1.0, imbalance_kgm }, true).unwrap();
     }

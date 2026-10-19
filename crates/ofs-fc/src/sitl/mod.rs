@@ -11,6 +11,10 @@ pub mod slot;
 pub enum FcError {
     #[error("UDP port {port} is already in use: {hint}")]
     PortInUse { port: u16, hint: &'static str },
+    /// No simulator slot could be taken, and not (only) because they are taken: a bind during the acquire failed
+    /// another way, one `details` line per slot (`slot::acquire_in`, issue #90).
+    #[error("no simulator slot could be taken: {details}")]
+    Acquire { details: String },
     #[error("failed to launch Betaflight SITL `{command}`: {source}{}", launch_hint(.source))]
     Launch { command: String, source: std::io::Error },
     #[error("Betaflight SITL config step failed: {0}")]

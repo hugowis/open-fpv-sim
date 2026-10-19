@@ -26,7 +26,7 @@ impl Rig {
         let dir = tempfile::tempdir().unwrap();
         let cfg = load(Path::new(QUAD)).unwrap();
         let opts = BuildOptions { seed: 1, data_dir: dir.path().to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
-        let v = build(&cfg, &opts).unwrap();
+        let v = build(&cfg, &opts, None).unwrap();
         Self { v, _dir: dir }
     }
 }
@@ -37,7 +37,7 @@ fn sitl_in(data_dir: &Path) -> Vehicle {
     assert!(std::env::var("OFS_SITL_LAUNCH").is_ok(), "set OFS_SITL_LAUNCH");
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 1, data_dir: data_dir.to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
-    build(&cfg, &opts).unwrap()
+    build(&cfg, &opts, None).unwrap()
 }
 
 fn msp_at(address: &str) -> MspClient {
@@ -93,6 +93,29 @@ fn dropping_the_first_session_lets_the_next_take_slot_zero_again() {
     assert_eq!(third.configurator_address().as_deref(), Some("tcp://127.0.0.1:5761"), "slot 0 was free again");
     drop(second);
     drop(third);
+}
+
+/// #90: a session rebuilt over itself (a reload — the server's Load over a live session) keeps its slot, and so its
+/// firmware directory, instead of acquiring the first free one: another simulator quitting mid-reload would otherwise
+/// hand the rebuild a different slot's EEPROM. The claim is taken out of the old vehicle before its drop (what
+/// `load` does ahead of `end_session`) and the next build retakes the slot through it.
+#[test]
+#[ignore]
+fn a_rebuilt_session_keeps_its_slot_and_firmware_directory() {
+    let data = tempfile::tempdir().unwrap();
+    // Another simulator holds slot 0's lock, so this session flies slot 1 and the `-s1` directory.
+    let holder = std::net::UdpSocket::bind(("127.0.0.1", ofs_fc::sitl::slot::LOCK_PORT_BASE)).unwrap();
+    let mut a = sitl_in(data.path());
+    assert_eq!(a.configurator_address().as_deref(), Some("tcp://127.0.0.1:5771"));
+    let (dir, address) = (a.firmware_dir().unwrap(), a.configurator_address().unwrap());
+    let claim = a.take_slot_claim().unwrap(); // the reload carries the claim across the rebuild
+    drop(a); // the old session ends: its SITL stops and its ports are released
+    drop(holder); // mid-reload the other simulator quit: slot 0 is free, and a fresh acquire would take it
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let opts = BuildOptions { seed: 1, data_dir: data.path().to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
+    let rebuilt = build(&cfg, &opts, Some(claim)).unwrap();
+    assert_eq!(rebuilt.configurator_address().as_deref(), Some(address.as_str()), "the rebuild kept its slot");
+    assert_eq!(rebuilt.firmware_dir().as_deref(), Some(dir.as_path()), "and its firmware directory");
 }
 
 fn msp() -> MspClient {

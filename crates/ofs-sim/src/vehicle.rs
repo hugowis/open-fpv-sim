@@ -22,7 +22,7 @@ use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::PortMap;
-use ofs_fc::sitl::slot::SitlSlot;
+use ofs_fc::sitl::slot::{SitlSlot, SlotClaim};
 use ofs_fc::sitl::esc_telemetry::EscTelemetry;
 use ofs_fc::sitl::frames::Home;
 use ofs_fc::sitl::net;
@@ -479,6 +479,10 @@ pub struct Vehicle {
     ports: PortMap,
     /// The SITL's working directory (its EEPROM, logs and Blackbox files); `None` without Betaflight.
     firmware_dir: Option<PathBuf>,
+    /// The SITL slot this session holds; `None` without Betaflight. Dropped with the vehicle, and taken out by the
+    /// server for a rebuild (a reload), which retakes the same slot through [`SitlSlot::from_claim`] so the reload
+    /// cannot land in another slot's firmware directory (issue #90).
+    slot_claim: Option<SlotClaim>,
     osd: Option<OsdHandle>,
     fc_telemetry: FcTelemetryHandle,
     world: WorldConfig,
@@ -876,14 +880,22 @@ pub fn drivetrain_params(cfg: &QuadConfig, i: usize) -> Drivetrain {
     }
 }
 
-pub fn build(cfg: &QuadConfig, opts: &BuildOptions) -> Result<Vehicle, SimError> {
-    build_seeded(cfg, opts, None)
+/// Builds a vehicle from a quad file. `keep_slot` retakes a slot kept across a session rebuild (a reload): the
+/// claim never left this process, so the rebuild keeps its slot — and its firmware directory — instead of racing
+/// other simulators' acquires for the first free one (issue #90). `None` for every fresh session.
+pub fn build(cfg: &QuadConfig, opts: &BuildOptions, keep_slot: Option<SlotClaim>) -> Result<Vehicle, SimError> {
+    build_seeded(cfg, opts, None, keep_slot)
 }
 
 /// As [`build`]; with `seed_firmware` (a repro bundle's `firmware` folder), a SITL quad's firmware state files
 /// ([`crate::repro::FIRMWARE_STATE`]) are copied into the directory of the slot the session takes before SITL
 /// boots, so a replay starts from the bundle's EEPROM whichever slot is free.
-pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option<&Path>) -> Result<Vehicle, SimError> {
+pub fn build_seeded(
+    cfg: &QuadConfig,
+    opts: &BuildOptions,
+    seed_firmware: Option<&Path>,
+    keep_slot: Option<SlotClaim>,
+) -> Result<Vehicle, SimError> {
     let mut bus = Bus::new();
     let n = cfg.frame.motor_positions_frd_m.len();
     let base_hz = cfg.sim.base_hz;
@@ -979,6 +991,7 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
     let mut osd: Option<OsdHandle> = None;
     let mut ports = PortMap::default();
     let mut sitl_firmware_dir: Option<PathBuf> = None;
+    let mut slot_claim: Option<SlotClaim> = None;
     match fc_kind {
         FcKind::OpenLoop | FcKind::OpenLoopStabilized => {
             if fc_kind == FcKind::OpenLoopStabilized {
@@ -996,9 +1009,13 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
             let mut launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
             let sitl_net = net::resolve(&launch_argv, env_ip("OFS_SITL_HOST")?, env_ip("OFS_SITL_REPLY_IP")?)
                 .map_err(|e| SimError::Firmware(e.to_string()))?;
-            // The first free slot of the machine: its ports, its firmware directory, its cleanup (several simulators
-            // can run side by side; the first one gets the stock ports and directory).
-            let slot = SitlSlot::acquire(sitl_net.bind_ip).map_err(|e| SimError::Firmware(e.to_string()))?;
+            // The slot of this session: the first free one, or — for a rebuild whose claim never left this process —
+            // the same one as before, whose firmware directory (and EEPROM) is therefore also the same (issue #90).
+            let slot = match keep_slot {
+                Some(claim) => SitlSlot::from_claim(claim, sitl_net.bind_ip),
+                None => SitlSlot::acquire(sitl_net.bind_ip),
+            }
+            .map_err(|e| SimError::Firmware(e.to_string()))?;
             ports = slot.ports;
             launch_argv = net::with_port_offset(&launch_argv, ports.offset); // whatever the user wrote is the slot's to set
             let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
@@ -1025,7 +1042,7 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
             };
             let mut serial = vec![SerialLink { uart_index: r.uart - 1, rx: receiver_uart }];
             serial.extend(video.serial);
-            let bridge = SitlBridge::start_in_slot(
+            let (bridge, claim) = SitlBridge::start_in_slot(
                 BridgeConfig {
                     launch,
                     net: sitl_net,
@@ -1050,6 +1067,7 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
             .map_err(|e| SimError::Firmware(e.to_string()))?;
             models.extend(video.before_fc);
             models.push(Box::new(bridge));
+            slot_claim = Some(claim);
             models.extend(video.after_fc);
             osd = video.osd;
         }
@@ -1090,6 +1108,7 @@ pub fn build_seeded(cfg: &QuadConfig, opts: &BuildOptions, seed_firmware: Option
         sitl: fc_kind == FcKind::Sitl,
         ports,
         firmware_dir: sitl_firmware_dir,
+        slot_claim,
         osd,
         fc_telemetry,
         world: opts.world.clone(),
@@ -1524,6 +1543,13 @@ impl Vehicle {
         self.firmware_dir.clone()
     }
 
+    /// Hands the SITL slot's claim to a rebuild of this session (a reload), which retakes the same slot through
+    /// [`SitlSlot::from_claim`]: without this, the vehicle's drop releases the slot, and the first acquire after it
+    /// can be another simulator's, landing the reload in a different slot's firmware directory (issue #90).
+    pub fn take_slot_claim(&mut self) -> Option<SlotClaim> {
+        self.slot_claim.take()
+    }
+
     /// The latest OSD frame, when the quad has an `[osd]` section and runs Betaflight.
     pub fn osd_frame(&self) -> Option<OsdFrame> {
         self.osd.as_ref().map(OsdHandle::latest)
@@ -1785,7 +1811,7 @@ mod tests {
             fc_override: Some(FcKind::OpenLoop),
             world,
         };
-        build(cfg, &opts).unwrap()
+        build(cfg, &opts, None).unwrap()
     }
 
     #[test]

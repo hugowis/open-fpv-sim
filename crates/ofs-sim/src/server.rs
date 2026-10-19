@@ -314,8 +314,11 @@ impl Sim for SimService {
             r.stabilize = req.stabilize;
         }
         self.blocking(move |shared, slot| {
+            // The rebuild keeps the old session's slot (its claim never leaves this process), so a reload cannot
+            // land in a slot — and firmware directory — that another simulator's acquire took in between (#90).
+            let keep_slot = slot.as_mut().and_then(|s| s.vehicle.take_slot_claim());
             end_session(shared, slot); // stop the previous vehicle (and its SITL) before the new one binds the ports
-            let vehicle = vehicle::build(&cfg, &opts).map_err(|e| sim_error(&e))?;
+            let vehicle = vehicle::build(&cfg, &opts, keep_slot).map_err(|e| sim_error(&e))?;
             // The firmware's directory is the slot's (the first simulator on the machine has the stock one).
             let blackbox = vehicle.firmware_dir().map(|dir| BlackboxCopy::new(dir, logs_dir));
             // The firmware's state as the session starts: after the first boot's diff apply, before any flight.
