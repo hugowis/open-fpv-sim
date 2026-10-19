@@ -42,7 +42,8 @@ esac
 # macOS has `shasum` instead of `sha512sum`, and no `timeout`: a minimal stand-in for `timeout -k KILL SECONDS CMD...`
 # (an alarm ends the command after SECONDS; the KILL grace is not needed for a plain SIGALRM).
 sha512_check() {
-    if command -v sha512sum >/dev/null 2>&1; then sha512sum --check --status; else shasum -a 512 --check --status; fi
+    # macOS ships a `sha512sum` that takes BSD options (no --check/--status): use `shasum` there.
+    if [ "$(uname -s)" = Darwin ]; then shasum -a 512 -c -s; else sha512sum --check --status; fi
 }
 if ! command -v timeout >/dev/null 2>&1; then
     if command -v gtimeout >/dev/null 2>&1; then
