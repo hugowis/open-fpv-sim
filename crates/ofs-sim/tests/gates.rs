@@ -94,7 +94,7 @@ fn a_gate_event_arrives_through_session_changes() {
     let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/circuit.toml"))).unwrap();
     let cfg = load(quad).unwrap();
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-gates-session"), fc_override: Some(FcKind::OpenLoopStabilized), world };
-    let mut session = Session::new(build(&cfg, &opts).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, false);
+    let mut session = Session::new(build(&cfg, &opts, None).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, false);
 
     const DT: f64 = 0.02;
     let mut integral = 0.0_f64;

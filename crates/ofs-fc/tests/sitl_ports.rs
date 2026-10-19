@@ -20,6 +20,14 @@ fn a_slot_shifts_every_port_by_ten_per_slot() {
 }
 
 #[test]
+fn a_slots_uart_tcp_block_is_the_msp_port_and_the_seven_above_it() {
+    let p = PortMap::slot(3);
+    assert_eq!(p.uart_ports().collect::<Vec<_>>(), (5791..=5798).collect::<Vec<_>>());
+    // The block stays inside the slot's ten ports (the next slot's MSP port is not probed).
+    assert!(!p.uart_ports().contains(&PortMap::slot(4).msp()));
+}
+
+#[test]
 fn slots_never_share_a_port() {
     let mut udp = HashSet::new();
     let mut tcp = HashSet::new();

@@ -406,9 +406,14 @@ session). Every SITL runs on a *slot*, a block of ten ports (SITL's `--port-offs
 The first session on the machine gets slot 0, exactly the ports of earlier releases; the next one gets the first slot
 that is free. A simulator takes a slot by holding two sockets for the life of its session, a loopback UDP lock on
 `21600 + n` and the motor socket on `9002 + 10 n`, which the OS releases when the process ends however it ends, so a
-crashed simulator frees its slot. Something else holding those ports makes the simulator skip the slot; with all 16
-taken the load fails with an error that says so. `LoadReply.configurator_address` (Python:
-`sim.configurator_address`, the game's toast) always says which address the session got.
+crashed simulator frees its slot. It also probes the slot's TCP UART block (`5761 + 10 n` and the seven above it,
+which Betaflight binds at launch) bind-and-release on the address its own sockets use, so a foreign holder there
+skips the slot instead of turning the launch into a bind failure (under WSL the probe watches the Windows side,
+where the OS's loopback relay for the VM's SITL must not count as a holder). A bind that fails for another reason
+(permissions, say) is named in the error when no slot can be taken; with all 16 taken the load fails with an error
+that says so. A session rebuilt over itself (a reload) keeps its slot instead of racing for the first free one, so
+its EEPROM directory stays its own. `LoadReply.configurator_address` (Python: `sim.configurator_address`, the
+game's toast) always says which address the session got.
 
 - **The cleanup is per slot.** Before a launch and after a stop, the simulator removes stray SITL processes *of its own
   slot* (the processes named `betaflight_SITL` whose command line carries the slot's `--port-offset`, or none at all for

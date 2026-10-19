@@ -10,7 +10,7 @@ const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5
 fn a_built_vehicle_has_a_tail_of_its_last_ten_seconds() {
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 3, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    let mut v = build(&cfg, &opts).unwrap();
+    let mut v = build(&cfg, &opts, None).unwrap();
     v.set_sticks(&Sticks { throttle: 0.4, ..Sticks::default() }).unwrap();
     v.run_for(12.0).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -31,8 +31,8 @@ fn the_tail_does_not_change_the_run() {
     // The same vehicle with and without a snapshot taken in the middle ends on the same digest.
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 3, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    let mut a = build(&cfg, &opts).unwrap();
-    let mut b = build(&cfg, &opts).unwrap();
+    let mut a = build(&cfg, &opts, None).unwrap();
+    let mut b = build(&cfg, &opts, None).unwrap();
     let dir = tempfile::tempdir().unwrap();
     a.run_for(1.0).unwrap();
     b.run_for(0.5).unwrap();

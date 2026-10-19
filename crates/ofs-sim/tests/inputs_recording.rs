@@ -14,7 +14,7 @@ const HEADER: &str = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4";
 fn vehicle() -> Vehicle {
     let cfg = load(Path::new(QUAD)).unwrap();
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoop), world: WorldConfig::open_field() };
-    build(&cfg, &opts).unwrap()
+    build(&cfg, &opts, None).unwrap()
 }
 
 fn lines(path: &Path) -> Vec<String> {

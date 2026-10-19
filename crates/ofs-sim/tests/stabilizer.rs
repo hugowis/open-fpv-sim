@@ -16,7 +16,7 @@ fn vehicle() -> Vehicle {
         fc_override: Some(FcKind::OpenLoopStabilized),
         world: WorldConfig::open_field(),
     };
-    build(&cfg, &opts).unwrap()
+    build(&cfg, &opts, None).unwrap()
 }
 
 /// A pilot's altitude loop (the numbers of `python/examples/hover.py`), so the tests can ask for attitudes without the
