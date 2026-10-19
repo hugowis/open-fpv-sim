@@ -105,6 +105,9 @@ measured run and duration: see the line at the end of this section. **Intel Macs
 except the Godot DVR frame count (the error and Betaflight Godot suites were not reached); the Intel runner is about 3 to 4
 times slower than Apple silicon in the benchmark. `macos-15-intel` is run only by the manual survey workflow.
 
+First measured run of the `macos` job: run 39307557811 (commit 9d93847), every step passed, 15 min 47 s (an earlier run of the
+job was cancelled by a newer push after 13 min). That is one run: the job has no track record yet.
+
 Not done, and why:
 1. **Radio goldens for macOS.** The digests depend on the platform's libm; recording them on a runner would pin a third set
    of files for one OS, which is the maintainer's decision (the same question as Linux and Windows had).
