@@ -25,7 +25,9 @@ fn wsl_cleanup_matches_the_process_name_not_the_command_line() {
 #[test]
 fn an_unscoped_native_cleanup_kills_by_name_on_unix_and_on_windows() {
     let native = default_cleanup(&argv(&["/x/betaflight_SITL.elf"]));
-    if cfg!(unix) {
+    if cfg!(target_os = "macos") {
+        assert_eq!(native, argv(&["sh", "-c", ofs_fc::sitl::net::SITL_KILL_ALL_SCRIPT, "sh"]), "BSD pkill -x sees a 16-character name");
+    } else if cfg!(unix) {
         assert_eq!(native, argv(&["pkill", "-x", "betaflight_SITL"]));
     } else {
         assert_eq!(native, argv(&["taskkill", "/F", "/IM", "betaflight_SITL.exe"]));

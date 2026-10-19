@@ -457,6 +457,26 @@ fn the_slot_script_through_ps_alone_takes_the_same_victims() {
     assert!(!is_alive(&mut stock), "slot 0's cleanup took the SITL without the option");
 }
 
+/// The unscoped cleanup (a launch without `--port-offset`) is `pkill -x betaflight_SITL` on Linux. BSD's `pkill -x` matches
+/// the kernel's 16-character process name, which for `betaflight_SITL.elf` is `betaflight_SITL.`, so on macOS it
+/// finds nothing: there the cleanup is a script over the same `ps` search as the slot script, shown here on Linux with
+/// its `ps` argument. It takes every SITL of the machine, in any slot, and nothing else.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_unscoped_script_through_ps_kills_every_sitl_and_only_those() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut stock = spawn_fake_sitl_with(dir.path(), "sleep 30; sleep 30", &[]);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    let bystander = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let mut bystander = FakeSitl(bystander);
+    std::thread::sleep(Duration::from_millis(100)); // let them exec
+    std::process::Command::new("sh").args(["-c", ofs_fc::sitl::net::SITL_KILL_ALL_SCRIPT, "sh", "ps"]).status().unwrap();
+    std::thread::sleep(Duration::from_millis(150)); // let the TERM land
+    assert!(!is_alive(&mut stock) && !is_alive(&mut slot1), "every SITL is gone, whatever its slot");
+    assert!(is_alive(&mut bystander), "a process that is not a SITL is left alone");
+}
+
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.
 #[cfg(target_os = "linux")]
 #[test]

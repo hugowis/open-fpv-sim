@@ -1,5 +1,5 @@
 diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
-index 4a9e08b..9fd8c7a 100644
+index 4a9e08b..1627759 100644
 --- a/src/platform/SIMULATOR/sitl.c
 +++ b/src/platform/SIMULATOR/sitl.c
 @@ -828,11 +828,16 @@ void systemInit(void)
@@ -7,7 +7,7 @@ index 4a9e08b..9fd8c7a 100644
      {
          // The idle wait must not jump with wall-clock steps (WSL2 resyncs its clock after host sleep).
 +#if defined(__APPLE__)
-+        // macOS has no pthread_condattr_setclock: its condition variables wait on the realtime clock (see the wait below).
++        // macOS has no pthread_condattr_setclock (see the relative wait in simulatorSchedulerIdle).
 +        pthread_cond_init(&extPacketCond, NULL);
 +#else
          pthread_condattr_t attr;
@@ -19,15 +19,24 @@ index 4a9e08b..9fd8c7a 100644
      }
  #endif
      printf("[system]Init...\n");
-@@ -1271,7 +1276,11 @@ void simulatorSchedulerIdle(void)
+@@ -1270,6 +1275,12 @@ void simulatorSchedulerIdle(void)
+     // so wall-time behaviour before the first packet and TCP serial traffic are still serviced).
      pthread_mutex_lock(&extPacketMutex);
      if (extGyroTicks == extGyroTicksTaken) {
-         struct timespec until;
 +#if defined(__APPLE__)
-+        clock_gettime(CLOCK_REALTIME, &until);  // extPacketCond waits on the realtime clock here (systemInit)
++        // A relative 1 ms wait: macOS conditions cannot be given a monotonic clock, and an absolute realtime deadline would
++        // stretch if the wall clock stepped back.
++        const struct timespec relative = { 0, 1000000 };
++        pthread_cond_timedwait_relative_np(&extPacketCond, &extPacketMutex, &relative);
 +#else
+         struct timespec until;
          clock_gettime(CLOCK_MONOTONIC, &until);  // extPacketCond uses CLOCK_MONOTONIC (systemInit)
-+#endif
          until.tv_nsec += 1000000;
-         if (until.tv_nsec >= 1000000000) {
-             until.tv_sec += 1;
+@@ -1278,6 +1289,7 @@ void simulatorSchedulerIdle(void)
+             until.tv_nsec -= 1000000000;
+         }
+         pthread_cond_timedwait(&extPacketCond, &extPacketMutex, &until);
++#endif
+     }
+     pthread_mutex_unlock(&extPacketMutex);
+ }

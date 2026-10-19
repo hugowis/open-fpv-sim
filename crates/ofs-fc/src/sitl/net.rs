@@ -66,31 +66,35 @@ pub fn with_port_offset(launch: &[String], offset: u16) -> Vec<String> {
     out
 }
 
-/// Shell text defining `slot_pids <offset>`: the pids of the live SITL processes of one slot, one per line. It
-/// selects by process *name* (`pgrep -x`, which no shell or `pkill` mentioning the binary's path can match) and then
-/// reads each command line (`/proc/<pid>/cmdline`, so a path with spaces is no trouble): the slot is the process's
-/// `--port-offset`, and a process launched without the option is slot 0, the stock ports. Zombies hold no ports and
-/// are skipped. Compiled into [`SLOT_KILL_SCRIPT`] and the WSL wait script; the offset is always an argument of the
-/// script, never part of its text. [`is_victim`] is the same rule for the native Rust scan.
+/// Shell text defining `slot_pids <offset> [ps]` (and `slot_candidates`, which lists every SITL process): the pids of the
+/// live SITL processes of one slot, one per line. Where `/proc` exists (Linux) it selects by process *name* (`pgrep -x`,
+/// which no shell or `pkill` mentioning the binary's path can match) and reads each command line
+/// (`/proc/<pid>/cmdline`, so a path with spaces is no trouble); elsewhere (macOS, where `pgrep -x` sees the kernel's
+/// 16-character name `betaflight_SITL.` and there is no `/proc`) it takes the processes whose executable's basename starts
+/// with `betaflight_SITL` from `ps`, and reads their command lines and states with it. The optional `ps` argument forces
+/// that path on Linux, for the tests. The slot is the process's `--port-offset`, and a process launched without the option
+/// is slot 0, the stock ports. Zombies hold no ports and are skipped. Compiled into [`SLOT_KILL_SCRIPT`],
+/// [`SITL_KILL_ALL_SCRIPT`] and the WSL wait script; the offset is always an argument of the script, never part of its
+/// text. [`is_victim`] is the same rule for the native Rust scan.
 macro_rules! slot_pids_sh {
     () => {
         "\
 slot_candidates() {
-  if [ \"$1\" != ps ] && [ -d /proc/self ]; then
+  if [ \"$1\" != ps ] && [ -r /proc/self/cmdline ]; then
     pgrep -x betaflight_SITL
   else
     ps -ww -axo pid=,comm= | awk '{ pid = $1; $1 = \"\"; n = $0; sub(/^ +/, \"\", n); sub(/.*\\//, \"\", n); if (n ~ /^betaflight_SITL/) print pid }'
   fi
 }
 slot_args() {
-  if [ \"$2\" != ps ] && [ -d /proc/self ]; then
+  if [ \"$2\" != ps ] && [ -r /proc/self/cmdline ]; then
     tr '\\0' ' ' < /proc/$1/cmdline 2>/dev/null
   else
     a=$(ps -ww -o args= -p $1 2>/dev/null); [ -n \"$a\" ] && echo \"$a \"
   fi
 }
 slot_state() {
-  if [ \"$2\" != ps ] && [ -d /proc/self ]; then
+  if [ \"$2\" != ps ] && [ -r /proc/self/cmdline ]; then
     st=$(sed 's/^.*) //' /proc/$1/stat 2>/dev/null); echo \"${st%% *}\"
   else
     st=$(ps -o state= -p $1 2>/dev/null); echo \"${st%\"${st#?}\"}\"
@@ -121,6 +125,10 @@ pub const SLOT_PIDS_SH: &str = slot_pids_sh!();
 /// Where there is no `/proc` (macOS) the processes are found with `ps`; the optional second argument `ps` forces that
 /// path on Linux, for the tests.
 pub const SLOT_KILL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_pids \"$1\" \"$2\"); [ -z \"$pids\" ] || kill $pids 2>/dev/null\nexit 0");
+
+/// The cleanup for a launch without a slot (`sh -c SITL_KILL_ALL_SCRIPT sh [ps]`): SIGTERM to every SITL process of the
+/// machine. Used where `pkill -x betaflight_SITL` finds nothing (macOS, see [`slot_pids_sh`]); Linux keeps `pkill -x`.
+pub const SITL_KILL_ALL_SCRIPT: &str = concat!(slot_pids_sh!(), "pids=$(slot_candidates \"$1\"); [ -z \"$pids\" ] || kill $pids 2>/dev/null\nexit 0");
 
 /// The cleanup for one slot on a plain Windows host (`powershell.exe ... -Command SCRIPT <offset>`: PowerShell makes
 /// the offset the scriptblock's argument): terminates the `betaflight_SITL.exe` processes whose command line's last
@@ -159,6 +167,12 @@ pub fn default_cleanup(launch: &[String]) -> Vec<String> {
     let kill = match port_offset_in(launch) {
         Some(offset) => ["sh", "-c", SLOT_KILL_SCRIPT, "sh"].into_iter().map(String::from).chain([offset.to_string()]).collect(),
         None => ["pkill", "-x", SITL_PROCESS_NAME].map(String::from).to_vec(),
+    };
+    // BSD's `pkill -x` compares the kernel's 16-character name (`betaflight_SITL.` for `betaflight_SITL.elf`).
+    let kill = if cfg!(target_os = "macos") && wsl_prefix(launch).is_none() && port_offset_in(launch).is_none() {
+        ["sh", "-c", SITL_KILL_ALL_SCRIPT, "sh"].map(String::from).to_vec()
+    } else {
+        kill
     };
     match wsl_prefix(launch) {
         Some(mut prefix) => {

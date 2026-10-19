@@ -17,10 +17,10 @@ First run (run 39289050136, nothing changed yet) and the last run of this branch
 | `cargo test --workspace` | 2 failures on both (below), 3 more on Intel | ok on both |
 | `pip install -e "python[dev]"` | arm64 ok; **Intel fails** (no `rerun-sdk` 0.39 wheel) | ok on both |
 | `pytest python/tests` | arm64 105 passed, 26 skipped (no SITL); Intel could not install | ok on both (SITL tests run in the next rows) |
-| Godot client tests (`scripts/run-godot-tests.sh`) | **Linux only**: the script downloaded the Linux editor, and macOS' `sha512sum` rejects GNU flags | unit and open-loop e2e pass on both (362 checks); arm64 also the game flying Betaflight; Intel fails one timing check (below) |
-| Betaflight SITL, stock | builds (about 40 s) | builds |
-| Betaflight SITL, with `ofs-sitl.patch` | **does not build**: `pthread_condattr_setclock` does not exist on macOS | builds with `ofs-sitl-macos.patch` (one hunk) |
-| Live tests against the patched SITL (`ofs-fc`, `ofs-sim`, `ofs-video`) | not reachable | all pass on both |
+| Godot client tests (`scripts/run-godot-tests.sh`) | **Linux only**: the script downloaded the Linux editor, and macOS' `sha512sum` rejects GNU flags | Apple silicon: the unit suites (362 checks), the open-loop and error e2e and the game flying Betaflight all pass. Intel: the unit suites pass, the open-loop e2e fails one frame-count check (below), and the error and Betaflight e2e were **not reached** (the script stops at the first failure) |
+| Betaflight SITL, stock | builds (35 to 123 s across runs) | builds |
+| Betaflight SITL, with `ofs-sitl.patch` | **does not build**: `pthread_condattr_setclock` does not exist on macOS | builds with `ofs-sitl-macos.patch` (two hunks, one wait) |
+| Live tests against the patched SITL (`ofs-fc`, `ofs-sim`, `ofs-video`) | not reachable | pass on both (two tests return early on macOS, see below) |
 | Python SITL tests (26 + the orphan-SITL test) | not reachable | all pass on both |
 | Slot cleanup after a hard-killed simulator | blind (below) | works (test added) |
 
@@ -31,42 +31,54 @@ rows are not comparable.
 
 ## What the survey found, and what was done
 
-### The SITL patch needed one macOS hunk
-The lockstep build waits for the next state datagram on a condition variable whose clock is `CLOCK_MONOTONIC`, set with
-`pthread_condattr_setclock`, which macOS does not have (its condition variables wait on the realtime clock).
-`third_party/betaflight/ofs-sitl-macos.patch` uses the realtime clock there under `__APPLE__`; `scripts/build-sitl.sh`
-applies it on Darwin. Nothing else failed to compile or link, `sitl.ld` is not used on Mach-O, and the `%ld` print
-that crashes the Windows build (`docs/research/sitl-native-windows.md`, row 5) did not on Apple silicon.
-`nproc` does not exist: the script now falls back to `sysctl -n hw.ncpu`. The wall-clock jump the monotonic wait
-protected against under WSL 2 (the VM resyncing its clock) is not a macOS concern that was observed; a clock step during a
-wait costs at most the 1 ms timeout it is bounded by.
+### The SITL patch needed one macOS change
+The lockstep build idles for at most 1 ms on a condition variable whose clock is `CLOCK_MONOTONIC`, set with
+`pthread_condattr_setclock` so that a wall-clock step cannot lengthen the wait (WSL 2 resyncs its clock after the host
+sleeps). macOS has no `pthread_condattr_setclock`. `third_party/betaflight/ofs-sitl-macos.patch` plainly initialises
+the condition on macOS and waits a *relative* 1 ms with `pthread_cond_timedwait_relative_np`, which a wall-clock step cannot
+stretch either; `scripts/build-sitl.sh` applies it on Darwin (`OFS_SITL_MACOS_PATCH=none` skips it, for a patch of your
+own). The first version of the patch used an absolute realtime deadline and passed every test; review pointed out it would
+stall serial traffic by the size of a backward clock step, which is why it was replaced. Nothing else failed to compile
+or link, `sitl.ld` is not used on Mach-O, and the `%ld` print that crashes the Windows build
+(`docs/research/sitl-native-windows.md`, row 5) did not crash on Apple silicon. `nproc` does not exist: the script falls back to
+`sysctl -n hw.ncpu`.
 
 ### The stray-SITL cleanup was blind on macOS
 M9a's slot cleanup selects processes with `pgrep -x betaflight_SITL` and reads `/proc/<pid>/cmdline`. macOS has no
-`/proc`, and a process is named by its whole executable name there. A SITL left behind by a hard-killed simulator was
+`/proc`, and the kernel's process name (what `pgrep -x` and `pkill -x` compare) is the executable name cut at 16
+characters, `betaflight_SITL.` for `betaflight_SITL.elf`, while `ps -o comm` prints the full path (reasoned from the BSD
+tools, and consistent with the failure; `pgrep -x` itself was not run on a runner). A SITL left behind by a hard-killed simulator was
 therefore never found, the next session could not bind (`UDP port 9003 is already in use`), and every later test in the
 process failed (`test_a_killed_simulators_orphan_sitl_is_replaced_by_the_next_session`, added in this branch, failed on both
 runners before the fix). Where `/proc` is absent the script now finds the processes with `ps -ww -axo pid=,comm=` (the
 basename starts with `betaflight_SITL`) and `ps -o args= -p`; the optional second argument `ps` forces that path on Linux,
-where `the_slot_script_through_ps_alone_takes_the_same_victims` runs the same decoys through it. The native wait for the
-victims (`await_cleanup_native`) is still Linux only, so on macOS the cleanup does not wait for the killed process to be
-gone before the launch; the launch's own checks are the backstop (SITL's bind retries and the simulator's probe of UDP 9003).
+where `the_slot_script_through_ps_alone_takes_the_same_victims` runs the same decoys through it (the macOS full-path-with-spaces
+case itself is untested: the Linux decoys see the short name). The cleanup of a launch with no slot at all (the hand-made launches of
+the live tests) was `pkill -x betaflight_SITL`, blind the same way; on macOS it is now `SITL_KILL_ALL_SCRIPT`, the same
+`ps` search, tested on Linux through its `ps` argument (`the_unscoped_script_through_ps_kills_every_sitl_and_only_those`) and
+not yet seen working on a runner before this branch's last push. The native wait for the victims
+(`await_cleanup_native`) is still Linux only, so on macOS the cleanup neither waits for the killed process to be gone
+before the launch nor escalates to SIGKILL for a SITL that ignores SIGTERM; the launch's own checks are the backstop (SITL's
+bind retries and the simulator's probe of UDP 9003).
 
 ### macOS differences in the tests, fixed
 - `touch -d "10 minutes ago"` is GNU only: `sitl_process.rs` sets the modification time from Rust.
-- Two tests needed a second loopback address: macOS answers only on `127.0.0.1` unless one is added with `sudo ifconfig lo0
+- One test needs a second loopback address: macOS answers only on `127.0.0.1` unless one is added with `sudo ifconfig lo0
   alias 127.0.0.2`: `replies_from_another_address_are_ignored` is ignored on macOS with that reason.
-- A held TCP port does not stop SITL's own bind on macOS: `a_held_serial_port_is_retried_then_refused_with_the_errno` holds
-  `127.0.0.1:5761` and SITL started anyway (BSD `SO_REUSEADDR` lets a wildcard bind coexist with a specific-address listener;
-  Rust's own listener sets the option too). The test returns early on macOS and says so. A stale SITL is still caught by the
-  simulator's probe of UDP 9003 (the orphan test above shows it doing so).
+- A held TCP port did not stop SITL's own bind on macOS: `a_held_serial_port_is_retried_then_refused_with_the_errno` holds
+  `127.0.0.1:5761` and SITL started anyway. The likely reason is that BSD `SO_REUSEADDR` lets a wildcard bind coexist with a
+  specific-address listener (untested: a holder on `0.0.0.0` also did not stop it in one run, and Rust's listener sets the
+  option itself, which was not isolated). The test returns early on macOS and prints that, so it shows as passed. A stale
+  SITL is still caught by the simulator's probe of UDP 9003 (the orphan test shows it doing so).
 - The radio goldens (`elrs.*.digests`, `radio-flight.*.digests`) exist for Windows and Linux only; on macOS the two tests
-  print that and pass without comparing anything. No digest was generated: macOS needs a decision (see below).
-- Three slot unit tests failed on the Intel runner only: after a slot was dropped the same slot was sometimes still taken a
-  moment later. The tests now wait up to 2 s for it. The cause is not established; the likeliest is a child process that
-  another test thread was starting at that instant inheriting the descriptor before it was marked close-on-exec.
-- `late_duplicate_replies_are_drained_after_a_resend` (a 30 ms thread against a 150 ms window) failed once in five arm64 runs on
-  a loaded runner: the window is 500 ms.
+  print that and pass without comparing anything (also shown as passed). No digest was generated: macOS needs a decision.
+- Slot unit tests failed on macOS in survey runs 39289050136 (three tests, Intel), 39293693518 (two, Intel) and
+  39295539454 (one test, **both** runners): after a slot was dropped the same slot was sometimes still taken a moment later.
+  The arm64 job passed them in the other runs. The tests now retry for up to 2 s, on macOS only (`acquire_until`), and passed
+  in the one survey run after that. The cause is not established; the likeliest is a child process that another test
+  thread was starting at that instant inheriting the descriptor before it was marked close-on-exec.
+- `late_duplicate_replies_are_drained_after_a_resend` (a 30 ms thread against a 150 ms window) failed on arm64 in run
+  39297354882 (it passed in the runs before and after): the window is 500 ms. It has had one survey run since.
 - `test_the_recording_reports_its_events_and_refuses_misuse` read the event stream once, before its background thread had
   delivered the second event (failed on both runners in one run, passed in another): it waits for both events now.
 - Intel Macs: `rerun-sdk` 0.39 publishes no x86_64 macOS wheel, so the `[dev]` extra skips it there
@@ -76,18 +88,22 @@ gone before the launch; the launch's own checks are the backstop (SITL's bind re
 `scripts/run-godot-tests.sh` knows the macOS editor (`Godot_v4.7.2-stable_macos.universal.zip`, its SHA-512 pinned from the
 release's `SHA512-SUMS.txt`, which also contains the Linux hash already pinned), uses `shasum` where macOS' `sha512sum`
 refuses GNU options, supplies a `timeout` (`gtimeout`, or a perl alarm) because macOS has none, and `godot/ofs.gdextension`
-lists `libofs_godot.dylib` for `macos.debug` and `macos.release`. On Apple silicon the unit suites (362 checks), the
-open-loop and error end-to-end tests and the end-to-end test with Betaflight all pass. On the Intel runner everything passes
-but one check of the open-loop test: "44 frames for 2.01 simulated seconds at 50 fields a second (about 100)" (the DVR
-counts frames in real time, and that runner flew Betaflight at 3 times real time, with overruns); it is not an
-Intel-specific defect that was established, and it passed on every Apple-silicon run.
+lists `libofs_godot.dylib` for `macos.debug` and `macos.release`. (Whether the runners used `gtimeout` or the perl stand-in is
+not recorded; the stand-in signals only the editor, not its children.) On Apple silicon the unit suites (362 checks),
+the open-loop and error end-to-end tests and the end-to-end test with Betaflight all passed in the one survey run that ran
+them (39301047490). On the Intel runner, in that run, the unit suites passed and the open-loop end-to-end test failed one check:
+"44 frames for 2.01 simulated seconds at 50 fields a second (about 100)"; the script stops at the first failing step, so the
+error and Betaflight end-to-end tests have **never run on Intel**. The DVR counts frames in real time and that runner is slow
+(its open-loop recording ran 3 times slower than Apple silicon's); whether that is the cause was not established.
 
 ## Decision
 **Apple silicon is supported best-effort, and CI now has a `macos` job for it** (`ci.yml`, `macos-latest`: the Rust tests, the
-live Betaflight tests, every Python test with SITL, the Godot suites with the game flying Betaflight; about 15 minutes). It
-is not in `publish`'s `needs`, so a macOS flake cannot block a release; whether it should be a required check is the
-maintainer's call. **Intel Macs** pass everything except the Godot DVR frame count, on a runner 4 times slower than
-Apple silicon; `macos-15-intel` is run only by the manual survey workflow.
+live Betaflight tests, every Python test with SITL, the Godot suites with the game flying Betaflight). It is not in
+`publish`'s `needs`, and it is `continue-on-error`: it shows green even when it fails, until it has a track record (about ten
+green runs), because several of the tests it runs had only one to four survey runs and two of them flaked once. Its first
+measured run and duration: see the line at the end of this section. **Intel Macs** passed everything the survey reached
+except the Godot DVR frame count (the error and Betaflight Godot suites were not reached); the Intel runner is about 3 to 4
+times slower than Apple silicon in the benchmark. `macos-15-intel` is run only by the manual survey workflow.
 
 Not done, and why:
 1. **Radio goldens for macOS.** The digests depend on the platform's libm; recording them on a runner would pin a third set

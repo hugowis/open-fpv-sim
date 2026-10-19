@@ -42,5 +42,6 @@ def test_the_recording_reports_its_events_and_refuses_misuse(sim):
         kinds += [(e.kind, e.message) for e in sim.events() if e.kind.startswith("inputs_recording")]
         if len(kinds) < 2:
             time.sleep(0.02)
+    assert len(kinds) >= 2, f"expected a started and a stopped event, got {kinds}"
     assert kinds[0] == ("inputs_recording_started", path)
     assert kinds[1][0] == "inputs_recording_stopped" and kinds[1][1].startswith(path)

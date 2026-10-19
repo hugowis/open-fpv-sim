@@ -14,8 +14,10 @@ repository). The format follows Keep a Changelog.
   builds and what does not, with run ids: `docs/research/macos.md`. A manual `macos-survey` workflow reruns the survey on
   Apple silicon and Intel.
 #### Changed
-- Tests that assumed GNU/Linux are portable (`touch -d`, a second loopback address, a one-shot read of the event stream, a
-  tight timing window); `[dev]` leaves out `rerun-sdk` on Intel Macs, which it has no wheel for.
+- Tests that assumed GNU/Linux no longer do (`touch -d`, a one-shot read of the event stream, a tight timing window); one
+  test that needs a second loopback address and one that needs a held port to stop SITL are skipped on macOS (the second
+  returns early, so it shows as passed); `[dev]` leaves out `rerun-sdk` on Intel Macs, which it has no wheel for.
+- The cleanup of a SITL launched without a slot is a `ps`-based script on macOS, where `pkill -x betaflight_SITL` finds nothing.
 
 ### B5: the small-tails sweep
 #### Fixed

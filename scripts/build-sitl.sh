@@ -29,9 +29,11 @@ if [ -n "$BF_SHA" ] && [ "$(git rev-parse HEAD)" != "$BF_SHA" ]; then
 fi
 if [ "$OFS_SITL_PATCH" != "none" ]; then
   git apply "$OFS_SITL_PATCH"
-  # macOS lacks a few POSIX calls the lockstep build uses (docs/research/macos.md).
-  if [ "$(uname -s)" = Darwin ]; then
-    git apply "$REPO/third_party/betaflight/ofs-sitl-macos.patch"
+  # macOS lacks a POSIX call the lockstep build uses (docs/research/macos.md). It is made for the default patch: set
+  # OFS_SITL_MACOS_PATCH=none along with a patch of your own.
+  OFS_SITL_MACOS_PATCH="${OFS_SITL_MACOS_PATCH:-$REPO/third_party/betaflight/ofs-sitl-macos.patch}"
+  if [ "$(uname -s)" = Darwin ] && [ "$OFS_SITL_MACOS_PATCH" != "none" ]; then
+    git apply "$OFS_SITL_MACOS_PATCH"
   fi
 fi
 # The Makefile initialises submodules on demand; under -j that races on .git/config, so do it first.

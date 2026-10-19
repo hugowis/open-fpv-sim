@@ -316,13 +316,15 @@ live Rust tests that kill SITL with `pkill` are Linux-only and do not run native
 beside a live session.
 
 ## macOS
-Everything runs natively on macOS, Betaflight SITL included (issue #68; the survey is `docs/research/macos.md`). CI covers
-Apple silicon (`macos-latest`); Intel Macs passed the same survey except one timing check of the Godot suite.
+The Rust core, the Python package and Betaflight SITL build and pass their tests on macOS (issue #68; the survey is
+`docs/research/macos.md`). CI covers Apple silicon (`macos-latest`, not yet a required check); Intel Macs passed the survey
+except one timing check of the Godot suite, and two of the Godot suites were not reached there. Nothing was tried on a
+physical Mac: no window, rendering or game controller.
 
 1. Install the Xcode command line tools (`xcode-select --install`: clang, make, git), Rust (`rustup`) and Python 3.10+.
 2. Rust and Python as everywhere else: `cargo test --workspace`, `python3 -m pip install -e "python[dev]"`,
    `cargo build -p ofs-sim && python3 -m pytest python/tests`. (On an Intel Mac the `[dev]` extra leaves out `rerun-sdk`, which has
-   no wheel for it; the Rerun test skips.)
+   no wheel for it, and the Rerun test skips; the `[rerun]` extra itself cannot be installed there.)
 3. Betaflight SITL: `bash scripts/build-sitl.sh` (about a minute; it applies `ofs-sitl.patch` and, on Darwin,
    `ofs-sitl-macos.patch`), then `export OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf` for the live tests and
    the Python SITL tests.

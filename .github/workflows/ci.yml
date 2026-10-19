@@ -63,6 +63,9 @@ jobs:
   # Godot suites with the game flying Betaflight. Not in `publish`'s needs: macOS is supported best-effort for now.
   macos:
     runs-on: macos-latest
+    # Shown as passing even when it fails, until it has a track record (docs/research/macos.md: about ten green runs); the
+    # failure is still listed in the run and its annotations.
+    continue-on-error: true
     env:
       BF_DIR: ${{ github.workspace }}/../betaflight
       OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
@@ -79,7 +82,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
-          key: sitl-${{ runner.os }}-${{ hashFiles('scripts/build-sitl.sh', 'third_party/betaflight/**') }}
+          key: sitl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sitl.sh', 'third_party/betaflight/**') }}
       - if: steps.sitl-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-sitl.sh
       - run: cargo test --workspace --locked

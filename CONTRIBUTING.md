@@ -47,7 +47,7 @@ report. Data comes under CC-BY-SA-4.0, like the component library.
 | `core` (Linux) | clippy, the Rust tests, the Python tests | every push |
 | `msrv` | `cargo check` on Rust 1.85 | every push |
 | `windows` | the Rust and Python tests on Windows | every push |
-| `macos` (Apple silicon) | the Rust tests, the live Betaflight tests, all Python tests with SITL, the Godot suites with Betaflight | every push; not needed by `publish` |
+| `macos` (Apple silicon) | the Rust tests, the live Betaflight tests, all Python tests with SITL, the Godot suites with Betaflight | every push; non-blocking for now (`continue-on-error`) and not needed by `publish` |
 | `godot` | the Godot unit and e2e suites | every push |
 | `sitl` (Linux) | the live Rust and Python tests against real Betaflight, the built wheel in a clean venv, the benchmark (fails below 1× real time), the Godot e2e with Betaflight | every push |
 | `publish` | builds and uploads to PyPI | `v*` tags only, after core, windows and sitl pass |

@@ -84,12 +84,13 @@ mod tests {
         (LOCK_PORT_BASE + 100 * n, 200 * n)
     }
 
-    /// Acquires until the slot with this index comes back, for up to two seconds. A closed socket's port is free at
-    /// once on Linux, Windows and Apple silicon, but on the Intel macOS runner it was sometimes still held a moment
-    /// later (most likely a child process another test thread was spawning at that instant inherited the descriptor
-    /// before it was marked close-on-exec, and kept it until it exited): the slot is then really taken for that long.
+    /// Acquires the slot that should be free. On macOS (both runners) a closed socket's port was sometimes still held a
+    /// moment later in these tests (most likely a child process another test thread was spawning at that instant
+    /// inherited the descriptor before it was marked close-on-exec, and kept it until it exited): there the slot is
+    /// retried for up to two seconds. Everywhere else a slot that is not free at once is a failure.
     fn acquire_until(index: u16, lock: u16, shift: u16) -> SitlSlot {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let patience = if cfg!(target_os = "macos") { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+        let deadline = std::time::Instant::now() + patience;
         loop {
             let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
             if slot.index == index || std::time::Instant::now() >= deadline {
