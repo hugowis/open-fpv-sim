@@ -4,6 +4,7 @@
 - Rust stable ≥ 1.85 (`rustup`), Python ≥ 3.10.
 - Betaflight SITL: Linux, or WSL2 (Ubuntu) on Windows. Build with `bash scripts/build-sitl.sh` (see the script for env options). It applies `third_party/betaflight/ofs-sitl.patch`: lockstep time, UART bytes in the state datagram, deterministic boot.
 - Windows without WSL (experimental): build the SITL natively with MSYS2, see "Native Windows SITL" below.
+- macOS (Apple silicon, best effort): everything builds and runs natively, SITL included, see "macOS" below.
 
 ## Everyday commands
 | What | Command |
@@ -313,6 +314,24 @@ a launch and after a stop when no SITL is left over, and bounded to 10 s); `OFS_
 live Rust tests that kill SITL with `pkill` are Linux-only and do not run natively, and the Windows decoy tests
 (`crates/ofs-fc/tests/sitl_windows.rs`) take down any real native SITL running in slot 0 or 1, so do not run them
 beside a live session.
+
+## macOS
+Everything runs natively on macOS, Betaflight SITL included (issue #68; the survey is `docs/research/macos.md`). CI covers
+Apple silicon (`macos-latest`); Intel Macs passed the same survey except one timing check of the Godot suite.
+
+1. Install the Xcode command line tools (`xcode-select --install`: clang, make, git), Rust (`rustup`) and Python 3.10+.
+2. Rust and Python as everywhere else: `cargo test --workspace`, `python3 -m pip install -e "python[dev]"`,
+   `cargo build -p ofs-sim && python3 -m pytest python/tests`. (On an Intel Mac the `[dev]` extra leaves out `rerun-sdk`, which has
+   no wheel for it; the Rerun test skips.)
+3. Betaflight SITL: `bash scripts/build-sitl.sh` (about a minute; it applies `ofs-sitl.patch` and, on Darwin,
+   `ofs-sitl-macos.patch`), then `export OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf` for the live tests and
+   the Python SITL tests.
+4. Godot: `bash scripts/run-godot-tests.sh all` downloads the macOS editor (checked against a pinned SHA-512) and runs the
+   unit and end-to-end suites headless; with `OFS_SITL_LAUNCH` set the game flies Betaflight.
+
+Known differences: the radio goldens are not compared on macOS (none recorded); `replies_from_another_address_are_ignored`
+needs `sudo ifconfig lo0 alias 127.0.0.2` and is ignored; a held TCP port does not stop SITL's own bind (the simulator's
+UDP 9003 probe catches a stale SITL instead); a window, rendering and a game controller on a real Mac are untested.
 
 ## Sessions
 - **Lockstep** (default): simulated time advances only through `Run`. Runs are deterministic, Betaflight included.
