@@ -332,6 +332,8 @@ physical Mac: no window, rendering or game controller.
 4. Godot: `bash scripts/run-godot-tests.sh all` downloads the macOS editor (checked against a pinned SHA-512) and runs the
    unit and end-to-end suites headless; with `OFS_SITL_LAUNCH` set the game flies Betaflight.
 
+For a physical-Mac check (window, Metal, gamepad, Gatekeeper), follow `docs/research/macos-manual.md`.
+
 Known differences: the radio goldens expect per-architecture macOS files (the survey records them; until committed the
 macOS tests fail loudly); `replies_from_another_address_are_ignored`
 needs `sudo ifconfig lo0 alias 127.0.0.2` and is ignored; a held TCP port does not stop SITL's own bind (the simulator's

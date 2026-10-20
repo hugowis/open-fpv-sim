@@ -131,14 +131,17 @@ the Godot open-loop end-to-end test on Apple silicon, on two real-time checks ("
 checks are paced by the wall clock and have now failed once on each runner type; the earlier failures of the job were
 tests that `main` gained (#100) or that were fixed in this branch (listed above).
 
+## A physical Mac
+Not run yet: no physical Mac has been tried. The checklist for the window, Metal renderer, gamepad probe, Gatekeeper
+quarantine and the source build is `docs/research/macos-manual.md`; its result table is the record to copy here.
+
 Not done, and why:
 1. **The macOS radio golden files are not recorded yet.** The naming and the survey's `write_goldens` input are in place,
    and the tests fail loudly until the files exist; the generation run is pending. Recording them is not a decision left to
    the maintainer any more: the plan is one file per architecture, from the two runners.
-2. **A physical Mac.** Whether the game opens a window, renders, and reads a gamepad on macOS is unknown. Godot's Metal
-   renderer, `Info.plist` permissions for the joystick and Gatekeeper's quarantine of the downloaded Godot are untested.
-3. **Distribution.** The Python package is pure Python and installs on both architectures; `ofs-sim` must be built from
-   source (`cargo build -p ofs-sim`), and a notarised binary is not planned.
+2. **A physical Mac.** The window, Metal renderer, gamepad, and Gatekeeper quarantine are untested. Follow
+   `docs/research/macos-manual.md` on a real machine and copy its table into this file; the CI runners cannot answer
+   these questions.
 
 The `macos` job is still not promoted: of the last ten `ci.yml` runs on `main`, only run 39459360292 has the job (the
 earlier nine predate it), and it failed one step, `Run bash scripts/run-godot-tests.sh all`. That step is now split into
