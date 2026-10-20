@@ -61,10 +61,11 @@ where `the_slot_script_through_ps_alone_takes_the_same_victims` runs the same de
 case itself is untested: the Linux decoys see the short name). The cleanup of a launch with no slot at all (the hand-made launches of
 the live tests) was `pkill -x betaflight_SITL`, blind the same way; on macOS it is now `SITL_KILL_ALL_SCRIPT`, the same
 `ps` search, tested on Linux through its `ps` argument (`the_unscoped_script_through_ps_kills_every_sitl_and_only_those`) and
-not yet seen working on a runner before this branch's last push. The native wait for the victims
-(`await_cleanup_native`) is still Linux only, so on macOS the cleanup neither waits for the killed process to be gone
-before the launch nor escalates to SIGKILL for a SITL that ignores SIGTERM; the launch's own checks are the backstop (SITL's
-bind retries and the simulator's probe of UDP 9003).
+not yet seen working on a runner before this branch's last push. The wait for the victims is now the same on macOS:
+`await_cleanup` runs `UNIX_WAIT_SCRIPT` through `sh` and `ps`, with the Linux path's 300 ms SIGTERM grace and 1 s SIGKILL
+grace. A victim that ignores SIGTERM is therefore SIGKILLed on macOS too, and the path-with-spaces test now runs there
+instead of only on Linux. The macOS CI job's step conclusions are the acceptance; until that run is green, treat the
+macOS path as implemented but unverified on a runner.
 
 ### macOS differences in the tests, fixed
 - `touch -d "10 minutes ago"` is GNU only: `sitl_process.rs` sets the modification time from Rust.
@@ -126,5 +127,3 @@ Not done, and why:
    renderer, `Info.plist` permissions for the joystick and Gatekeeper's quarantine of the downloaded Godot are untested.
 3. **Distribution.** The Python package is pure Python and installs on both architectures; `ofs-sim` must be built from
    source (`cargo build -p ofs-sim`), and a notarised binary is not planned.
-4. **The native wait for the cleanup's victims on macOS** (`await_cleanup`): worth adding if the port-bind flake of M0
-   appears there.
