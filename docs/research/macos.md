@@ -150,6 +150,6 @@ have. Reopen this only with an Apple Developer account and a release-workflow ow
 The `macos` job is still not promoted: of the last ten `ci.yml` runs on `main`, only run 39459360292 has the job (the
 earlier nine predate it), and it failed one step, `Run bash scripts/run-godot-tests.sh all`. That step is now split into
 named suites and its DVR check counts rendered field boundaries, so the next ten runs are the new record. The branch's
-survey run 39479683784 is clean on both runners (all four Godot suites included), but a survey run does not replace the
-`ci.yml` record. It remains `continue-on-error` and outside `publish.needs` until that record is clean; `ci.yml` is
+survey run 39479683784 is clean on both runners (all four Godot suites included), and its `ci.yml` run 39479674930 is
+green with no failed macOS step, but one branch run does not replace the `ci.yml` record. It remains `continue-on-error` and outside `publish.needs` until that record is clean; `ci.yml` is
 deliberately unchanged in this branch.
