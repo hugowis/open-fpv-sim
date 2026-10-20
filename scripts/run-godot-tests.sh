@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 ## Runs the Godot pilot client's headless tests: the unit suites and the open-loop end-to-end.
-## Usage: scripts/run-godot-tests.sh [unit|e2e|all]   (default: all)
+## Usage: scripts/run-godot-tests.sh [unit|open-loop|errors|betaflight|e2e|all]   (default: all)
+##   e2e = open-loop + errors + betaflight (when OFS_SITL_LAUNCH is set); all = unit + e2e.
 ##
 ## Needs a Godot 4.7 binary: set GODOT_BIN, or the script downloads Godot 4.7.2 (the official release
 ## zip, checked against the SHA-512 pinned below) into build/godot-dl/ and uses that. The server and the extension must be
@@ -35,8 +36,8 @@ suite="${1:-all}"
 # The mode is selected here so an unknown one fails loudly before anything runs; it would
 # otherwise run no suite at all and still print "Godot tests passed.".
 case "$suite" in
-    unit|e2e|all) ;;
-    *) echo "usage: scripts/run-godot-tests.sh [unit|e2e|all]"; exit 1 ;;
+    unit|open-loop|errors|betaflight|e2e|all) ;;
+    *) echo "usage: scripts/run-godot-tests.sh [unit|open-loop|errors|betaflight|e2e|all]"; exit 1 ;;
 esac
 
 # macOS has `shasum` instead of `sha512sum`, and no `timeout`: a minimal stand-in for `timeout -k KILL SECONDS CMD...`
@@ -97,9 +98,15 @@ if [ "$suite" = unit ] || [ "$suite" = all ]; then
     run_godot 120 --headless --path godot -s res://tests/run_tests.gd
 fi
 
-if [ "$suite" = e2e ] || [ "$suite" = all ]; then
+if [ "$suite" = open-loop ] || [ "$suite" = e2e ] || [ "$suite" = all ]; then
     run_godot 180 --headless --path godot -s res://tests/e2e_open_loop.gd
+fi
+
+if [ "$suite" = errors ] || [ "$suite" = e2e ] || [ "$suite" = all ]; then
     run_godot 180 --headless --path godot -s res://tests/e2e_errors.gd
+fi
+
+if [ "$suite" = betaflight ] || [ "$suite" = e2e ] || [ "$suite" = all ]; then
     if [ -n "${OFS_SITL_LAUNCH:-}" ]; then
         run_godot 300 --headless --path godot -s res://tests/e2e_betaflight.gd
     else
