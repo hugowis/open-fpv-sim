@@ -9,6 +9,10 @@ on:
         description: "Run the slot-test stress harness on Apple silicon"
         type: boolean
         default: false
+      write_goldens:
+        description: "Record this runner's radio goldens as an artifact (commit them by hand)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,6 +64,20 @@ jobs:
           fi
       - if: inputs.stress_slot && matrix.os == 'macos-latest'
         run: bash scripts/macos-slot-stress.sh 50
+      - name: Record the radio goldens for this runner
+        if: inputs.write_goldens
+        run: |
+          OFS_GOLDEN_WRITE=1 cargo test -p ofs-radio --test golden --locked
+          OFS_GOLDEN_WRITE=1 cargo test -p ofs-sim --test radio_golden --locked
+          mkdir -p survey/goldens
+          cp crates/ofs-radio/tests/golden/elrs.macos-*.digests survey/goldens/
+          cp crates/ofs-sim/tests/golden/radio-flight.macos-*.digests survey/goldens/
+      - name: Upload this runner's radio goldens
+        if: always() && inputs.write_goldens
+        uses: actions/upload-artifact@v4
+        with:
+          name: radio-goldens-${{ matrix.os }}
+          path: survey/goldens/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
