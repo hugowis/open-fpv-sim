@@ -318,9 +318,9 @@ beside a live session.
 
 ## macOS
 The Rust core, the Python package and Betaflight SITL build and pass their tests on macOS (issue #68; the survey is
-`docs/research/macos.md`). CI covers Apple silicon (`macos-latest`, not yet a required check); Intel Macs passed the survey
-except one timing check of the Godot suite, and two of the Godot suites were not reached there. Nothing was tried on a
-physical Mac: no window, rendering or game controller.
+`docs/research/macos.md`). CI covers Apple silicon (`macos-latest`, not yet a required check); the Intel survey now runs
+all four Godot suites, and the latest run passed them. Nothing was tried on a physical Mac: no window, rendering or game
+controller.
 
 1. Install the Xcode command line tools (`xcode-select --install`: clang, make, git), Rust (`rustup`) and Python 3.10+.
 2. Rust and Python as everywhere else: `cargo test --workspace`, `python3 -m pip install -e "python[dev]"`,
@@ -334,8 +334,8 @@ physical Mac: no window, rendering or game controller.
 
 For a physical-Mac check (window, Metal, gamepad, Gatekeeper), follow `docs/research/macos-manual.md`.
 
-Known differences: the radio goldens expect per-architecture macOS files (the survey records them; until committed the
-macOS tests fail loudly); `replies_from_another_address_are_ignored`
+Known differences: the radio goldens are compared per architecture on macOS (`*.macos-<arch>.digests`, recorded by the
+survey's `write_goldens` input); `replies_from_another_address_are_ignored`
 needs `sudo ifconfig lo0 alias 127.0.0.2` and is ignored; a held TCP port does not stop SITL's own bind (the simulator's
 UDP 9003 probe catches a stale SITL instead); a window, rendering and a game controller on a real Mac are untested.
 
