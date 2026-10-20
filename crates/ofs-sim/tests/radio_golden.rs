@@ -58,7 +58,11 @@ fn golden_file_name(os: &str, arch: &str) -> Option<String> {
 
 fn golden_path() -> Option<PathBuf> {
     let name = golden_file_name(std::env::consts::OS, std::env::consts::ARCH)?;
-    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name))
+    Some(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(name),
+    )
 }
 
 /// macOS has one file per architecture: their libm builds differ, so a shared file would make the second runner fail
