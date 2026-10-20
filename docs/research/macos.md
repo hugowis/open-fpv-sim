@@ -17,7 +17,7 @@ First run (run 39289050136, nothing changed yet) and the last run of this branch
 | `cargo test --workspace` | 2 failures on both (below), 3 more on Intel | ok on both |
 | `pip install -e "python[dev]"` | arm64 ok; **Intel fails** (no `rerun-sdk` 0.39 wheel) | ok on both |
 | `pytest python/tests` | arm64 105 passed, 26 skipped (no SITL); Intel could not install | ok on both (SITL tests run in the next rows) |
-| Godot client tests (`scripts/run-godot-tests.sh`) | **Linux only**: the script downloaded the Linux editor, and macOS' `sha512sum` rejects GNU flags | Apple silicon: the unit suites (362 checks), the open-loop and error e2e and the game flying Betaflight all pass. Intel: the unit suites pass, the open-loop e2e fails one frame-count check (below), and the error and Betaflight e2e were **not reached** (the script stops at the first failure) |
+| Godot client tests (`scripts/run-godot-tests.sh`) | **Linux only**: the script downloaded the Linux editor, and macOS' `sha512sum` rejects GNU flags | Apple silicon: the unit suites (362 checks), the open-loop and error e2e and the game flying Betaflight all pass. Intel: the unit suites pass; the open-loop e2e failed one frame-count check before the DVR check was changed. The survey now runs `unit`, `open-loop`, `errors` and `betaflight` as separate steps, so a failure no longer hides the later suites; the next survey run records their Intel outcomes |
 | Betaflight SITL, stock | builds (35 to 123 s across runs) | builds |
 | Betaflight SITL, with `ofs-sitl.patch` | **does not build**: `pthread_condattr_setclock` does not exist on macOS | builds with `ofs-sitl-macos.patch` (two hunks, one wait) |
 | Live tests against the patched SITL (`ofs-fc`, `ofs-sim`, `ofs-video`) | not reachable | pass on both (the held-port test is replaced on macOS, see below) |
@@ -107,9 +107,11 @@ lists `libofs_godot.dylib` for `macos.debug` and `macos.release`. (Whether the r
 not recorded; the stand-in signals only the editor, not its children.) On Apple silicon the unit suites (362 checks),
 the open-loop and error end-to-end tests and the end-to-end test with Betaflight all passed in the one survey run that ran
 them (39301047490). On the Intel runner, in that run, the unit suites passed and the open-loop end-to-end test failed one check:
-"44 frames for 2.01 simulated seconds at 50 fields a second (about 100)"; the script stops at the first failing step, so the
-error and Betaflight end-to-end tests have **never run on Intel**. The DVR counts frames in real time and that runner is slow
-(its open-loop recording ran 3 times slower than Apple silicon's); whether that is the cause was not established.
+"44 frames for 2.01 simulated seconds at 50 fields a second (about 100)". That check multiplied simulated time by the
+nominal 50 Hz, so it measured the runner's speed: the DVR writes one frame per field the client actually renders. It now
+counts the distinct `target_field` values seen between DVR start and stop and allows one boundary of skew; on Linux it
+reports "101 frames for 101 rendered field boundaries". The survey runs the four suites as separate steps now, so the error
+and Betaflight end-to-end tests are reachable on Intel; their next-run outcomes are still pending.
 
 ## Decision
 **Apple silicon is supported best-effort, and CI now has a `macos` job for it** (`ci.yml`, `macos-latest`: the Rust tests, the
@@ -117,8 +119,9 @@ live Betaflight tests, every Python test with SITL, the Godot suites with the ga
 `publish`'s `needs`, and it is `continue-on-error`: it shows green even when it fails, until it has a track record (about ten
 green runs), because several of the tests it runs had only one to four survey runs and two of them flaked once. Its first
 measured run and duration: see the line at the end of this section. **Intel Macs** passed everything the survey reached
-except the Godot DVR frame count (the error and Betaflight Godot suites were not reached); the Intel runner is about 3 to 4
-times slower than Apple silicon in the benchmark. `macos-15-intel` is run only by the manual survey workflow.
+except the Godot DVR frame count, which is now measured against rendered fields; the four Godot suites are separately
+reachable and their Intel outcomes await the next run. The Intel runner is about 3 to 4 times slower than Apple silicon in
+the benchmark. `macos-15-intel` is run only by the manual survey workflow.
 
 First measured run of the `macos` job: run 39307557811 (commit 9d93847), every step passed, 15 min 47 s (an earlier run of the
 job was cancelled by a newer push after 13 min). Its record after that is mixed, which is why it is non-blocking: on the
@@ -129,9 +132,15 @@ checks are paced by the wall clock and have now failed once on each runner type;
 tests that `main` gained (#100) or that were fixed in this branch (listed above).
 
 Not done, and why:
-1. **Radio goldens for macOS.** The digests depend on the platform's libm; recording them on a runner would pin a third set
-   of files for one OS, which is the maintainer's decision (the same question as Linux and Windows had).
+1. **The macOS radio golden files are not recorded yet.** The naming and the survey's `write_goldens` input are in place,
+   and the tests fail loudly until the files exist; the generation run is pending. Recording them is not a decision left to
+   the maintainer any more: the plan is one file per architecture, from the two runners.
 2. **A physical Mac.** Whether the game opens a window, renders, and reads a gamepad on macOS is unknown. Godot's Metal
    renderer, `Info.plist` permissions for the joystick and Gatekeeper's quarantine of the downloaded Godot are untested.
 3. **Distribution.** The Python package is pure Python and installs on both architectures; `ofs-sim` must be built from
    source (`cargo build -p ofs-sim`), and a notarised binary is not planned.
+
+The `macos` job is still not promoted: of the last ten `ci.yml` runs on `main`, only run 39459360292 has the job (the
+earlier nine predate it), and it failed one step, `Run bash scripts/run-godot-tests.sh all`. That step is now split into
+named suites and its DVR check counts rendered field boundaries, so the next ten runs are the new record. It remains
+`continue-on-error` and outside `publish.needs` until that record is clean.

@@ -56,11 +56,17 @@ jobs:
             bash scripts/macos-survey.sh sitl-live-ofs-sim cargo test -p ofs-sim --test sitl_live --locked -- --ignored --test-threads=1
             bash scripts/macos-survey.sh sitl-live-vtx cargo test -p ofs-video --test vtx_live --locked -- --ignored --test-threads=1
             bash scripts/macos-survey.sh sitl-python python3 -m pytest python/tests -v -k sitl
-            bash scripts/macos-survey.sh godot-all bash scripts/run-godot-tests.sh all
+            bash scripts/macos-survey.sh godot-unit bash scripts/run-godot-tests.sh unit
+            bash scripts/macos-survey.sh godot-open-loop bash scripts/run-godot-tests.sh open-loop
+            bash scripts/macos-survey.sh godot-errors bash scripts/run-godot-tests.sh errors
+            bash scripts/macos-survey.sh godot-betaflight bash scripts/run-godot-tests.sh betaflight
             bash scripts/macos-survey.sh benchmark bash -c 'cargo build -p ofs-sim --release --locked && python3 scripts/benchmark.py --binary target/release/ofs-sim --seconds 20'
           else
             echo "| sitl-live | skipped | | no patched SITL binary |" >> "$GITHUB_STEP_SUMMARY"
-            bash scripts/macos-survey.sh godot-all bash scripts/run-godot-tests.sh all
+            bash scripts/macos-survey.sh godot-unit bash scripts/run-godot-tests.sh unit
+            bash scripts/macos-survey.sh godot-open-loop bash scripts/run-godot-tests.sh open-loop
+            bash scripts/macos-survey.sh godot-errors bash scripts/run-godot-tests.sh errors
+            echo "| godot-betaflight | skipped | | no patched SITL binary |" >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: inputs.stress_slot && matrix.os == 'macos-latest'
         run: bash scripts/macos-slot-stress.sh 50
