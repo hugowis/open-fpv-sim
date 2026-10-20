@@ -675,9 +675,18 @@ fn a_sitl_that_reports_a_spent_bind_fails_with_the_errno() {
     let cfg = config(dir.path(), &["sh", "-c", script]);
     std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
     std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
-    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
-    let err = SitlProcess::start(&cfg.launch).err().expect("a spent bind fails the start");
+    std::fs::copy(
+        &cfg.launch.diff_file,
+        cfg.launch.workdir.join("betaflight.diff"),
+    )
+    .unwrap();
+    let err = SitlProcess::start(&cfg.launch)
+        .err()
+        .expect("a spent bind fails the start");
     let text = err.to_string();
-    assert!(text.contains("bind port 5761 for UART1 failed!! after 20 attempts"), "the spent retries are on the record: {text}");
+    assert!(
+        text.contains("bind port 5761 for UART1 failed!! after 20 attempts"),
+        "the spent retries are on the record: {text}"
+    );
     assert!(text.contains("errno 48"), "the failure names the errno: {text}");
 }
