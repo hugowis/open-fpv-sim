@@ -20,7 +20,7 @@ First run (run 39289050136, nothing changed yet) and the last run of this branch
 | Godot client tests (`scripts/run-godot-tests.sh`) | **Linux only**: the script downloaded the Linux editor, and macOS' `sha512sum` rejects GNU flags | Apple silicon: the unit suites (362 checks), the open-loop and error e2e and the game flying Betaflight all pass. Intel: the unit suites pass, the open-loop e2e fails one frame-count check (below), and the error and Betaflight e2e were **not reached** (the script stops at the first failure) |
 | Betaflight SITL, stock | builds (35 to 123 s across runs) | builds |
 | Betaflight SITL, with `ofs-sitl.patch` | **does not build**: `pthread_condattr_setclock` does not exist on macOS | builds with `ofs-sitl-macos.patch` (two hunks, one wait) |
-| Live tests against the patched SITL (`ofs-fc`, `ofs-sim`, `ofs-video`) | not reachable | pass on both (two tests return early on macOS, see below) |
+| Live tests against the patched SITL (`ofs-fc`, `ofs-sim`, `ofs-video`) | not reachable | pass on both (the held-port test is replaced on macOS, see below) |
 | Python SITL tests (26 + the orphan-SITL test) | not reachable | all pass on both |
 | Slot cleanup after a hard-killed simulator | blind (below) | works (test added) |
 
@@ -72,13 +72,13 @@ macOS path as implemented but unverified on a runner.
 - Two tests need a second loopback address: macOS answers only on `127.0.0.1` unless one is added with `sudo ifconfig lo0
   alias 127.0.0.2`: `replies_from_another_address_are_ignored` and (from #100)
   `a_loopback_holder_does_not_push_a_session_on_another_address_off_its_slot` are ignored on macOS with that reason.
-- A held TCP port did not stop SITL's own bind on macOS: `a_held_serial_port_is_retried_then_refused_with_the_errno` holds
+- A held TCP port did not stop SITL's own bind on macOS: `a_held_serial_port_is_retried_then_refused_with_the_errno` held
   `127.0.0.1:5761` and SITL started anyway. The likely reason is that BSD `SO_REUSEADDR` lets a wildcard bind coexist with a
   specific-address listener (untested: a holder on `0.0.0.0` also did not stop it in one run, and Rust's listener sets the
-  option itself, which was not isolated). The test returns early on macOS and prints that, so it shows as passed. A stale
-  SITL is still caught by the simulator's probe of UDP 9003 (the orphan test shows it doing so).
-- The radio goldens (`elrs.*.digests`, `radio-flight.*.digests`) exist for Windows and Linux only; on macOS the two tests
-  print that and pass without comparing anything (also shown as passed). No digest was generated: macOS needs a decision.
+  option itself, which was not isolated). The live test is now not compiled on macOS; `a_held_tcp_port_does_not_stop_sitl_on_macos`
+  pins that behaviour instead of returning early. `a_sitl_that_reports_a_spent_bind_fails_with_the_errno` covers the
+  retry/errno error mapping on every OS, so the macOS gap loses no coverage. A stale SITL is still caught by the simulator's
+  probe of UDP 9003 (the orphan test shows it doing so).
 - Slot unit tests failed on macOS in survey runs 39289050136 (three tests, Intel), 39293693518 (two, Intel) and
   39295539454 (one test, **both** runners): after a slot was dropped the same slot was sometimes still taken a moment later.
   The arm64 job passed them in the other runs. The tests now retry for up to 2 s, on macOS only (`acquire_until`), and passed

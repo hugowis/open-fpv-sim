@@ -658,3 +658,26 @@ fn a_bind_that_succeeds_after_retries_starts_the_session() {
         started.err().map(|e| e.to_string())
     );
 }
+
+/// A permanent bind failure (the 20 retries are spent) must fail the start and keep the errno on the record.
+/// This is the parser/error-mapping half of the live test, so it runs on macOS where SITL's own BSD bind
+/// check cannot refuse a held port.
+#[test]
+fn a_sitl_that_reports_a_spent_bind_fails_with_the_errno() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let script = "i=1; while [ $i -le 20 ]; do \
+                  echo \"bind port 5761 for UART1 retry $i/20 (errno 48)\" >&2; \
+                  i=$((i+1)); done; \
+                  echo 'bind port 5761 for UART1 failed!! after 20 attempts (errno 48)' >&2; \
+                  sleep 5";
+    let cfg = config(dir.path(), &["sh", "-c", script]);
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(&cfg.launch.diff_file, cfg.launch.workdir.join("betaflight.diff")).unwrap();
+    let err = SitlProcess::start(&cfg.launch).err().expect("a spent bind fails the start");
+    let text = err.to_string();
+    assert!(text.contains("bind port 5761 for UART1 failed!! after 20 attempts"), "the spent retries are on the record: {text}");
+    assert!(text.contains("errno 48"), "the failure names the errno: {text}");
+}
