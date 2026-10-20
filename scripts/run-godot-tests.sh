@@ -14,10 +14,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 GODOT_VERSION="4.7.2"
-GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-# SHA-512 of that zip, from the 4.7.2-stable release's SHA512-SUMS.txt. Pinned here so that a swapped download and a
-# swapped checksum list on the release page cannot both pass; update it together with GODOT_VERSION.
-GODOT_SHA512="9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65"
+# SHA-512 of the zip, from the 4.7.2-stable release's SHA512-SUMS.txt. Pinned here so that a swapped download and a
+# swapped checksum list on the release page cannot both pass; update them together with GODOT_VERSION.
+case "$(uname -s)" in
+    Darwin)
+        GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+        GODOT_SHA512="38aa16e5bba2083941fc5b3e54be0089bd4cc35e32415f5b9fd9a8a6a7b9818255d44532ea8ef94b5aef56c4b407c2d634fa4f657e4ebe681ebbf59b7bac69ca"
+        GODOT_REL_BIN="Godot.app/Contents/MacOS/Godot"
+        ;;
+    *)
+        GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+        GODOT_SHA512="9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65"
+        GODOT_REL_BIN="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+        ;;
+esac
 GODOT_DL="${OFS_GODOT_DL:-build/godot-dl}"
 
 suite="${1:-all}"
@@ -29,14 +39,28 @@ case "$suite" in
     *) echo "usage: scripts/run-godot-tests.sh [unit|e2e|all]"; exit 1 ;;
 esac
 
+# macOS has `shasum` instead of `sha512sum`, and no `timeout`: a minimal stand-in for `timeout -k KILL SECONDS CMD...`
+# (an alarm ends the command after SECONDS; the KILL grace is not needed for a plain SIGALRM).
+sha512_check() {
+    # macOS ships a `sha512sum` that takes BSD options (no --check/--status): use `shasum` there.
+    if [ "$(uname -s)" = Darwin ]; then shasum -a 512 -c -s; else sha512sum --check --status; fi
+}
+if ! command -v timeout >/dev/null 2>&1; then
+    if command -v gtimeout >/dev/null 2>&1; then
+        timeout() { gtimeout "$@"; }
+    else
+        timeout() { shift 2; local seconds="$1"; shift; perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$seconds" "$@"; }
+    fi
+fi
+
 if [ -z "${GODOT_BIN:-}" ]; then
     mkdir -p "$GODOT_DL"
-    GODOT_BIN="$GODOT_DL/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+    GODOT_BIN="$GODOT_DL/$GODOT_REL_BIN"
     if [ ! -x "$GODOT_BIN" ]; then
         echo "Downloading Godot ${GODOT_VERSION} into $GODOT_DL ..."
         curl -sSL --retry 3 -o "$GODOT_DL/$GODOT_ASSET" \
             "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/$GODOT_ASSET"
-        echo "$GODOT_SHA512  $GODOT_DL/$GODOT_ASSET" | sha512sum --check --status \
+        echo "$GODOT_SHA512  $GODOT_DL/$GODOT_ASSET" | sha512_check \
             || { echo "FAILED: the Godot download does not match the SHA-512 pinned in this script"; rm -f "$GODOT_DL/$GODOT_ASSET"; exit 1; }
         unzip -q -o "$GODOT_DL/$GODOT_ASSET" -d "$GODOT_DL"
         chmod +x "$GODOT_BIN"

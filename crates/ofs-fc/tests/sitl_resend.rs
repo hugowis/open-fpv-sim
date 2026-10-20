@@ -90,7 +90,9 @@ fn silent_sitl_times_out_after_the_first_reply_timeout() {
     assert!(got >= 4, "only {got} datagrams sent in {waited:?}");
 }
 
+// The stranger needs a second loopback address; macOS answers only on 127.0.0.1 unless one is added with `ifconfig lo0 alias`.
 #[test]
+#[cfg_attr(target_os = "macos", ignore = "macOS has no 127.0.0.2 on lo0 (a second local address needs `sudo ifconfig lo0 alias 127.0.0.2`)")]
 fn replies_from_another_address_are_ignored() {
     let link = Link::new();
     // Something else on the machine sends to the motor port before SITL answers.
@@ -114,7 +116,8 @@ fn late_duplicate_replies_are_drained_after_a_resend() {
         std::thread::sleep(Duration::from_millis(30));
         sitl.send_to(&[2], to).unwrap();
     });
-    let drained = drain_late_replies(&link.rx, Duration::from_millis(150)).unwrap();
+    // A wide window: on a loaded CI runner (macOS arm64, once in five runs) the 30 ms thread ran later than 150 ms.
+    let drained = drain_late_replies(&link.rx, Duration::from_millis(500)).unwrap();
     late.join().unwrap();
     assert_eq!(drained, 1);
     link.rx.set_nonblocking(true).unwrap();

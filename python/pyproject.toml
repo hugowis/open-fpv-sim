@@ -23,7 +23,8 @@ Homepage = "https://github.com/hugowis/open-fpv-sim"
 log = ["mcap>=1.5", "pandas>=2"]
 # The live view; Rerun's SDK changes between minor releases, so the extra pins one.
 rerun = ["rerun-sdk>=0.39,<0.40"]
-dev = ["grpcio-tools>=1.84", "pytest>=8", "mcap>=1.5", "pandas>=2", "pyarrow>=15", "rerun-sdk>=0.39,<0.40", "build>=1"]
+# rerun-sdk 0.39 publishes no wheel for Intel Macs, so `[dev]` skips it there (test_rerun.py skips itself without it).
+dev = ["grpcio-tools>=1.84", "pytest>=8", "mcap>=1.5", "pandas>=2", "pyarrow>=15", "rerun-sdk>=0.39,<0.40; sys_platform != 'darwin' or platform_machine != 'x86_64'", "build>=1"]
 
 [tool.setuptools.packages.find]
 include = ["ofs*"]

@@ -162,6 +162,23 @@ mod tests {
         (LOCK_PORT_BASE + 100 * n, 200 * n)
     }
 
+    /// Acquires the slot that should be free. On macOS (both runners) a closed socket's port was sometimes still held a
+    /// moment later in these tests (most likely a child process another test thread was spawning at that instant
+    /// inherited the descriptor before it was marked close-on-exec, and kept it until it exited): there the slot is
+    /// retried for up to two seconds. Everywhere else a slot that is not free at once is a failure.
+    fn acquire_until(index: u16, lock: u16, shift: u16) -> SitlSlot {
+        let patience = if cfg!(target_os = "macos") { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+        let deadline = std::time::Instant::now() + patience;
+        loop {
+            let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
+            if slot.index == index || std::time::Instant::now() >= deadline {
+                return slot;
+            }
+            drop(slot);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn the_first_acquire_takes_slot_zero_and_its_motor_port() {
         let (lock, shift) = space(1);
@@ -186,7 +203,7 @@ mod tests {
         let first = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         let second = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         drop(first);
-        let third = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
+        let third = acquire_until(0, lock, shift);
         assert_eq!((second.index, third.index), (1, 0), "the lowest free slot is reused");
     }
 
@@ -197,11 +214,11 @@ mod tests {
         let (lock, shift) = space(7);
         let (rx, claim) = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().into_parts();
         assert_eq!((claim.index, claim.ports.offset, rx.local_addr().unwrap().port()), (0, shift, PORT_PWM + shift));
-        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 1, "slot 0 is taken by the parts");
+        assert_eq!(acquire_until(1, lock, shift).index, 1, "slot 0 is taken by the parts");
         drop(claim);
-        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 1, "the socket alone still holds the motor port");
+        assert_eq!(acquire_until(1, lock, shift).index, 1, "the socket alone still holds the motor port");
         drop(rx);
-        assert_eq!(SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().index, 0, "both gone: slot 0 is free again");
+        assert_eq!(acquire_until(0, lock, shift).index, 0, "both gone: slot 0 is free again");
     }
 
     #[test]
@@ -211,7 +228,7 @@ mod tests {
         let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         assert_eq!(slot.index, 1, "slot 0's motor port is taken by someone else");
         drop(foreign);
-        let next = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
+        let next = acquire_until(0, lock, shift);
         assert_eq!(next.index, 0, "the failed attempt did not keep slot 0's lock");
     }
 
@@ -240,7 +257,7 @@ mod tests {
         let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
         assert_eq!(slot.index, 1, "slot 0's TCP block is held by someone else");
         drop(foreign);
-        let next = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
+        let next = acquire_until(0, lock, shift);
         assert_eq!(next.index, 0, "the skip left slot 0 free for whoever can use it");
     }
 
@@ -249,6 +266,7 @@ mod tests {
     /// session's own address, so a loopback holder — the relay — never pushes a WSL session off its slot. 127.0.0.2
     /// stands in for the WSL gateway address here.
     #[test]
+    #[cfg_attr(target_os = "macos", ignore = "macOS has no 127.0.0.2 on lo0 (a second local address needs `sudo ifconfig lo0 alias 127.0.0.2`)")]
     fn a_loopback_holder_does_not_push_a_session_on_another_address_off_its_slot() {
         let (lock, shift) = space(13);
         let _relay = std::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, MSP_TCP_PORT + shift))).unwrap();
@@ -276,7 +294,17 @@ mod tests {
         let (lock, shift) = space(12);
         let (rx, claim) = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap().into_parts();
         drop(rx);
-        let _thief = UdpSocket::bind(SocketAddr::from((LOOPBACK, PORT_PWM + shift))).unwrap();
+        // The thief takes the port the moment it is free (on macOS that was sometimes a moment after the drop).
+        let thief_addr = SocketAddr::from((LOOPBACK, PORT_PWM + shift));
+        let patience = if cfg!(target_os = "macos") { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+        let deadline = std::time::Instant::now() + patience;
+        let _thief = loop {
+            match UdpSocket::bind(thief_addr) {
+                Ok(socket) => break socket,
+                Err(e) if std::time::Instant::now() >= deadline => panic!("the motor port was not released: {e}"),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
         let err = SitlSlot::from_claim(claim, LOOPBACK).unwrap_err();
         assert!(matches!(err, FcError::PortInUse { port, .. } if port == PORT_PWM + shift), "{err}");
     }

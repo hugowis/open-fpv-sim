@@ -5,6 +5,20 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### M9c: macOS (#68)
+#### Added
+- **macOS survey and support (best effort).** Betaflight SITL builds and runs on macOS with `third_party/betaflight/ofs-sitl-macos.patch`
+  (applied by `scripts/build-sitl.sh` on Darwin; the realtime clock replaces `pthread_condattr_setclock`), the slot cleanup
+  finds stray SITLs with `ps` where there is no `/proc`, `scripts/run-godot-tests.sh` runs the macOS editor, and CI has a
+  `macos` job (Apple silicon: Rust tests, live Betaflight tests, Python, Godot with the game flying Betaflight). The full list of what
+  builds and what does not, with run ids: `docs/research/macos.md`. A manual `macos-survey` workflow reruns the survey on
+  Apple silicon and Intel.
+#### Changed
+- Tests that assumed GNU/Linux no longer do (`touch -d`, a one-shot read of the event stream, a tight timing window); one
+  test that needs a second loopback address and one that needs a held port to stop SITL are skipped on macOS (the second
+  returns early, so it shows as passed); `[dev]` leaves out `rerun-sdk` on Intel Macs, which it has no wheel for.
+- The cleanup of a SITL launched without a slot is a `ps`-based script on macOS, where `pkill -x betaflight_SITL` finds nothing.
+
 ### B5: the small-tails sweep
 #### Fixed
 - **`ofs-validate` reports every `submission.toml` schema problem in one pass** (unknown keys, wrong types, per key),

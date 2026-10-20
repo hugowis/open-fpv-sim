@@ -1,4 +1,6 @@
 """Recording a session's sticks and replaying them (spec §6), open loop: no Betaflight needed."""
+import time
+
 import pytest
 
 import ofs
@@ -32,6 +34,14 @@ def test_the_recording_reports_its_events_and_refuses_misuse(sim):
         sim.record_inputs()
     sim.run(0.1)
     sim.stop_inputs_recording()
-    kinds = [(e.kind, e.message) for e in sim.events() if e.kind.startswith("inputs_recording")]
+    # Events arrive from a background stream thread: wait for both instead of reading once (a slower machine, such as a
+    # macOS runner, reads before the second has landed).
+    kinds = []
+    deadline = time.monotonic() + 5.0
+    while len(kinds) < 2 and time.monotonic() < deadline:
+        kinds += [(e.kind, e.message) for e in sim.events() if e.kind.startswith("inputs_recording")]
+        if len(kinds) < 2:
+            time.sleep(0.02)
+    assert len(kinds) >= 2, f"expected a started and a stopped event, got {kinds}"
     assert kinds[0] == ("inputs_recording_started", path)
     assert kinds[1][0] == "inputs_recording_stopped" and kinds[1][1].startswith(path)

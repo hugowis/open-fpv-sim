@@ -737,7 +737,17 @@ mod tests {
             let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = probe.local_addr().unwrap().port();
             drop(probe);
-            log.lock().unwrap_or_else(|e| e.into_inner()).push(format!("bind port {port} for UART1 failed!!"));
+            {
+                let mut sink = log.lock().unwrap_or_else(|e| e.into_inner());
+                *sink = LogSink::default(); // each attempt on its own
+                sink.push(format!("bind port {port} for UART1 failed!!"));
+                // The test needs the port free at the moment the line arrives. Another test in this process binds
+                // ephemeral ports too and can hold the one just released (CI saw "LISTEN" here once): try another.
+                let free = matches!(sink.bind_holders.last(), Some(Some((_, holders))) if holders.is_empty());
+                if !free {
+                    continue;
+                }
+            }
             match std::net::TcpListener::bind(("127.0.0.1", port)) {
                 Ok(listener) => break (port, listener),
                 Err(_) => continue,

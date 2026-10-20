@@ -4,6 +4,9 @@ Each `ofs.launch()` is a separate `ofs-sim` process. The first takes the stock p
 next takes the following block of ten ports (tcp:5771), and neither one's startup or shutdown touches the other's SITL.
 """
 import os
+import signal
+import subprocess
+import sys
 
 import pytest
 
@@ -72,3 +75,37 @@ def test_closing_one_sim_does_not_disturb_the_other(launcher):
     c.load(QUAD, seed=1)
     assert c.configurator_address == "tcp://127.0.0.1:5761"
     assert b.run(0.2).fc_restarts == 0
+
+
+def _children(pid):
+    """The pids of a process's children (the SITL a simulator started is one), by `pgrep -P`: macOS and Linux."""
+    out = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout
+    return [int(p) for p in out.split()]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="finds the orphan SITL with pgrep -P")
+def test_a_killed_simulators_orphan_sitl_does_not_block_the_next_session(launcher):
+    a, b = launcher("a"), launcher("b")
+    a.load(QUAD, seed=1)
+    b.load(QUAD, seed=1)
+    _boot_and_arm(b)
+    orphans = _children(a._process.pid)
+    assert orphans, "A's simulator started a SITL"
+    # A hard kill gives the simulator no chance to stop its SITL: slot 0's Betaflight is left running, holding that
+    # slot's ports. The next simulator must still load and fly, without disturbing B. Where the probe sees the orphan's
+    # ports as held (Linux) it skips that slot; where it does not (macOS: a loopback probe of a wildcard listener) it
+    # takes slot 0 and its cleanup removes the orphan. Either way it is never B's slot.
+    a._process.kill()
+    a._process.wait()
+    try:
+        c = launcher("c")
+        c.load(QUAD, seed=1)
+        assert c.configurator_address != b.configurator_address, c.configurator_address
+        _boot_and_arm(c)
+        assert b.run(0.5).fc_restarts == 0, "B's Betaflight was disturbed"
+    finally:
+        for pid in orphans:  # leave no SITL behind: it would hold a slot for every later run
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

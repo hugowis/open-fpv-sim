@@ -271,7 +271,11 @@ fn port_holders_finds_a_listener_and_nothing_on_a_free_port() {
     let found = port_holders(port);
     assert!(found.iter().any(|h| h.contains("LISTEN") && h.contains(&format!("pid {}", std::process::id()))), "{found:?}");
     drop(listener);
-    assert!(port_holders(port).iter().all(|h| !h.contains("LISTEN")), "a closed listener is gone");
+    // Not every LISTEN on the port: another test in this process may take the freed ephemeral port at once, or a child
+    // another test thread is forking may hold a copy for the instant before it execs (it failed so once in CI). This
+    // process's own listener is what must be gone.
+    let mine = format!("pid {}", std::process::id());
+    assert!(port_holders(port).iter().all(|h| !(h.contains("LISTEN") && h.contains(&mine))), "a closed listener is gone");
 }
 
 /// SITL creates eeprom.bin at boot, so its existence does not prove the diff was applied: a config run that exits
@@ -428,6 +432,53 @@ fn a_slots_sitl_is_found_when_its_path_has_spaces() {
     ofs_fc::sitl::process::await_cleanup(&launch);
     assert!(!is_alive(&mut slot1), "slot 1's SITL, whose path has spaces, is gone");
     assert!(is_alive(&mut slot0), "slot 0's SITL survives");
+}
+
+/// macOS has no `/proc` (and names a process by its whole executable name): the slot script finds its victims with `ps`
+/// there. Forced on Linux with the script's second argument, the same decoys give the same answers as through `/proc`:
+/// a slot's cleanup takes only that slot's SITL, a SITL without the option is slot 0's, a path with spaces is no trouble.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_slot_script_through_ps_alone_takes_the_same_victims() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::Builder::new().prefix("my sitl ").tempdir().unwrap();
+    let mut stock = spawn_fake_sitl_with(dir.path(), "sleep 30; sleep 30", &[]);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    std::thread::sleep(Duration::from_millis(100)); // let both exec
+    let run = |offset: &str| {
+        std::process::Command::new("sh")
+            .args(["-c", ofs_fc::sitl::net::SLOT_KILL_SCRIPT, "sh", offset, "ps"])
+            .status()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(150)); // let the TERM land
+    };
+    run("20");
+    assert!(is_alive(&mut stock) && is_alive(&mut slot1), "slot 2's cleanup touches neither");
+    run("10");
+    assert!(!is_alive(&mut slot1), "slot 1's SITL, whose path has spaces, is gone");
+    assert!(is_alive(&mut stock), "the SITL without the option is slot 0's, not slot 1's");
+    run("0");
+    assert!(!is_alive(&mut stock), "slot 0's cleanup took the SITL without the option");
+}
+
+/// The unscoped cleanup (a launch without `--port-offset`) is `pkill -x betaflight_SITL` on Linux. BSD's `pkill -x` matches
+/// the kernel's 16-character process name, which for `betaflight_SITL.elf` is `betaflight_SITL.`, so on macOS it
+/// finds nothing: there the cleanup is a script over the same `ps` search as the slot script, shown here on Linux with
+/// its `ps` argument. It takes every SITL of the machine, in any slot, and nothing else.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_unscoped_script_through_ps_kills_every_sitl_and_only_those() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut stock = spawn_fake_sitl_with(dir.path(), "sleep 30; sleep 30", &[]);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), "sleep 30; sleep 30", 10);
+    let bystander = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let mut bystander = FakeSitl(bystander);
+    std::thread::sleep(Duration::from_millis(100)); // let them exec
+    std::process::Command::new("sh").args(["-c", ofs_fc::sitl::net::SITL_KILL_ALL_SCRIPT, "sh", "ps"]).status().unwrap();
+    std::thread::sleep(Duration::from_millis(150)); // let the TERM land
+    assert!(!is_alive(&mut stock) && !is_alive(&mut slot1), "every SITL is gone, whatever its slot");
+    assert!(is_alive(&mut bystander), "a process that is not a SITL is left alone");
 }
 
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.

@@ -142,7 +142,9 @@ mod first_boot_lock {
         let cfg = first_boot(dir.path());
         let lock = cfg.workdir.join("config.lock");
         std::fs::write(&lock, b"").unwrap();
-        assert!(std::process::Command::new("touch").args(["-d", "10 minutes ago"]).arg(&lock).status().unwrap().success());
+        // Ten minutes old (not `touch -d`, which BSD/macOS `touch` does not have).
+        let ten_minutes_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        std::fs::OpenOptions::new().write(true).open(&lock).unwrap().set_modified(ten_minutes_ago).unwrap();
         let _proc = SitlProcess::start(&cfg).unwrap();
         let count = std::fs::read_to_string(dir.path().join("applied-count.txt")).unwrap();
         assert_eq!(count.lines().count(), 1, "the stale lock was removed and the boot went ahead");

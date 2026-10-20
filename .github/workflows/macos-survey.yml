@@ -1,0 +1,60 @@
+name: macos-survey
+
+# What builds and what runs on macOS (issue #68; docs/research/macos.md). Not part of the gating CI: every step is
+# allowed to fail and is reported in the job summary. Run it by hand (Actions, "macos-survey", Run workflow).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  survey:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Summary header
+        run: |
+          {
+            echo "## macOS survey on ${{ matrix.os }}"
+            echo
+            echo "| step | result | time | first error |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - run: bash scripts/macos-survey.sh versions bash -c 'sw_vers; uname -m; rustc -V; cargo -V; python3 -V; clang --version | head -1; make -v | head -1; bash --version | head -1'
+      - run: bash scripts/macos-survey.sh cargo-build-workspace cargo build --workspace --locked
+      - run: bash scripts/macos-survey.sh cargo-build-ofs-sim cargo build -p ofs-sim --locked
+      - run: bash scripts/macos-survey.sh cargo-test-workspace cargo test --workspace --locked --no-fail-fast
+      - run: bash scripts/macos-survey.sh cargo-clippy cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: bash scripts/macos-survey.sh python-install python3 -m pip install -e "python[dev]"
+      - run: bash scripts/macos-survey.sh python-tests python3 -m pytest python/tests -v -rs
+      - run: bash scripts/macos-survey.sh sitl-build-stock env OFS_SITL_PATCH=none BF_DIR="$RUNNER_TEMP/bf-stock" bash scripts/build-sitl.sh
+      - run: bash scripts/macos-survey.sh sitl-build-patched env BF_DIR="$RUNNER_TEMP/bf" bash scripts/build-sitl.sh
+      - name: SITL live tests (only when the patched SITL built)
+        run: |
+          bin="$RUNNER_TEMP/bf/obj/main/betaflight_SITL.elf"
+          if [ -x "$bin" ]; then
+            export OFS_SITL_LAUNCH="$bin"
+            bash scripts/macos-survey.sh sitl-live-ofs-fc cargo test -p ofs-fc --test sitl_live --locked -- --ignored --test-threads=1
+            bash scripts/macos-survey.sh sitl-live-ofs-sim cargo test -p ofs-sim --test sitl_live --locked -- --ignored --test-threads=1
+            bash scripts/macos-survey.sh sitl-live-vtx cargo test -p ofs-video --test vtx_live --locked -- --ignored --test-threads=1
+            bash scripts/macos-survey.sh sitl-python python3 -m pytest python/tests -v -k sitl
+            bash scripts/macos-survey.sh godot-all bash scripts/run-godot-tests.sh all
+            bash scripts/macos-survey.sh benchmark bash -c 'cargo build -p ofs-sim --release --locked && python3 scripts/benchmark.py --binary target/release/ofs-sim --seconds 20'
+          else
+            echo "| sitl-live | skipped | | no patched SITL binary |" >> "$GITHUB_STEP_SUMMARY"
+            bash scripts/macos-survey.sh godot-all bash scripts/run-godot-tests.sh all
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: survey-${{ matrix.os }}
+          path: survey/

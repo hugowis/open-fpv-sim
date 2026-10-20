@@ -54,6 +54,11 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
   (`docs/dev-setup.md`, Ports and parallel sessions): at most 16, claimed per operating system (a Windows simulator and
   one inside WSL do not see each other's claims), and the Rust live tests still run one at a time.
+- macOS is supported best-effort on Apple silicon (#68, `docs/research/macos.md`): the SITL builds with a one-hunk patch,
+  the Rust, Python and Godot suites passed in the survey and CI has a non-blocking job for it. Not done: radio goldens for
+  macOS (the digests are per OS), anything on a physical Mac (window, rendering, gamepad), a native wait and SIGKILL
+  escalation for the cleanup's victims, and Intel Macs beyond the survey (one Godot timing check fails on the slow Intel
+  runner; the error and Betaflight Godot suites were not reached there).
 - SITL runs natively on Windows, without WSL, from an MSYS2 build (`scripts/build-sitl-windows.sh`, #67,
   `docs/research/sitl-native-windows.md`). It is experimental: no CI job builds it, the port needs a stub file for
   hardware-only symbols (`--gc-sections` removes nothing on PE), the executable needs two Cygwin DLLs beside it, and it
