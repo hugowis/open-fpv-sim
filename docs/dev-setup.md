@@ -249,8 +249,9 @@ examples are `quads/opendrone-5f-900mhz.toml` and `quads/opendrone-5f-fixed-link
 shows how to write a part, and `docs/research/serial-radio.md` records why M5 has no real serial radio. Quad files
 written before M5 load unchanged and fly byte-identically: the goldens (`crates/ofs-radio/tests/golden.rs`,
 `crates/ofs-sim/tests/radio_golden.rs`) pin the ELRS link's bytes, one digest file per OS
-(`tests/golden/*.windows.digests`, `*.linux.digests`: `libm` differs between them, so run the goldens on both when you
-touch the radio — the Linux ones in WSL).
+(`tests/golden/*.windows.digests`, `*.linux.digests`, `*.macos-<arch>.digests`: `libm` differs between them, so run the
+goldens on each when you touch the radio — the Linux ones in WSL; the macOS files come from the survey's
+`write_goldens` input).
 
 **Recording a live flight:** `StartInputsRecording` writes the session's sticks to
 `<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick changes, in `play_inputs`' format) and
@@ -317,9 +318,9 @@ beside a live session.
 
 ## macOS
 The Rust core, the Python package and Betaflight SITL build and pass their tests on macOS (issue #68; the survey is
-`docs/research/macos.md`). CI covers Apple silicon (`macos-latest`, not yet a required check); Intel Macs passed the survey
-except one timing check of the Godot suite, and two of the Godot suites were not reached there. Nothing was tried on a
-physical Mac: no window, rendering or game controller.
+`docs/research/macos.md`). CI covers Apple silicon (`macos-latest`, not yet a required check); the Intel survey now runs
+all four Godot suites, and the latest run passed them. Nothing was tried on a physical Mac: no window, rendering or game
+controller.
 
 1. Install the Xcode command line tools (`xcode-select --install`: clang, make, git), Rust (`rustup`) and Python 3.10+.
 2. Rust and Python as everywhere else: `cargo test --workspace`, `python3 -m pip install -e "python[dev]"`,
@@ -331,7 +332,10 @@ physical Mac: no window, rendering or game controller.
 4. Godot: `bash scripts/run-godot-tests.sh all` downloads the macOS editor (checked against a pinned SHA-512) and runs the
    unit and end-to-end suites headless; with `OFS_SITL_LAUNCH` set the game flies Betaflight.
 
-Known differences: the radio goldens are not compared on macOS (none recorded); `replies_from_another_address_are_ignored`
+For a physical-Mac check (window, Metal, gamepad, Gatekeeper), follow `docs/research/macos-manual.md`.
+
+Known differences: the radio goldens are compared per architecture on macOS (`*.macos-<arch>.digests`, recorded by the
+survey's `write_goldens` input); `replies_from_another_address_are_ignored`
 needs `sudo ifconfig lo0 alias 127.0.0.2` and is ignored; a held TCP port does not stop SITL's own bind (the simulator's
 UDP 9003 probe catches a stale SITL instead); a window, rendering and a game controller on a real Mac are untested.
 

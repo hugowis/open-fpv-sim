@@ -1,6 +1,6 @@
 //! The radio inside a whole vehicle: two lockstep flights recorded to MCAP, hashed. The digests are per OS
-//! (`tests/golden/radio-flight.windows.digests`, `radio-flight.linux.digests`) because libm's f64 maths differs
-//! between Windows and Linux. Each was generated from the pre-split code (M5 Task 1); the radio chain (M5 Task 2's
+//! (`radio-flight.windows.digests`, `radio-flight.linux.digests`, and `radio-flight.macos-<arch>.digests`) because
+//! libm's f64 maths differs between platforms. Each was generated from the pre-split code (M5 Task 1); the radio chain (M5 Task 2's
 //! split) must not change a byte of what the vehicle records, on each OS against its own file. Regenerate only on
 //! purpose, on the OS whose file you mean to change: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-sim --test radio_golden`.
 use std::path::{Path, PathBuf};
@@ -46,21 +46,44 @@ fn flight(quad: &str, seed: u64, path: &Path) -> u64 {
 }
 
 /// The golden file for this OS, or None where none was recorded.
+fn golden_file_name(os: &str, arch: &str) -> Option<String> {
+    match (os, arch) {
+        ("windows", _) => Some("radio-flight.windows.digests".into()),
+        ("linux", _) => Some("radio-flight.linux.digests".into()),
+        ("macos", "aarch64") => Some("radio-flight.macos-aarch64.digests".into()),
+        ("macos", "x86_64") => Some("radio-flight.macos-x86_64.digests".into()),
+        _ => None,
+    }
+}
+
 fn golden_path() -> Option<PathBuf> {
-    let name = if cfg!(target_os = "windows") {
-        "radio-flight.windows.digests"
-    } else if cfg!(target_os = "linux") {
-        "radio-flight.linux.digests"
-    } else {
-        return None;
-    };
-    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name))
+    let name = golden_file_name(std::env::consts::OS, std::env::consts::ARCH)?;
+    Some(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(name),
+    )
+}
+
+/// macOS has one file per architecture: their libm builds differ, so a shared file would make the second runner fail
+/// or overwrite the first's digests.
+#[test]
+fn each_macos_architecture_has_its_own_golden_file() {
+    assert_eq!(
+        golden_file_name("macos", "aarch64").as_deref(),
+        Some("radio-flight.macos-aarch64.digests")
+    );
+    assert_eq!(
+        golden_file_name("macos", "x86_64").as_deref(),
+        Some("radio-flight.macos-x86_64.digests")
+    );
+    assert_eq!(golden_file_name("freebsd", "x86_64"), None);
 }
 
 #[test]
 fn a_recorded_vehicle_flight_reproduces_its_digests() {
     let Some(golden) = golden_path() else {
-        println!("radio goldens exist for Windows and Linux only; skipping on this OS");
+        println!("radio goldens exist for Windows, Linux and macOS only; skipping on this OS");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
@@ -83,8 +106,14 @@ fn a_recorded_vehicle_flight_reproduces_its_digests() {
         std::fs::write(&golden, &text).unwrap();
         return;
     }
-    let expected = std::fs::read_to_string(&golden)
-        .expect("tests/golden/radio-flight.<os>.digests (run once with OFS_GOLDEN_WRITE=1)");
+    let expected = std::fs::read_to_string(&golden).unwrap_or_else(|e| {
+        panic!(
+            "cannot read {}: {e}. Generate it on a {} runner with OFS_GOLDEN_WRITE=1 \
+             (see .github/workflows/macos-survey.yml's write_goldens input)",
+            golden.display(),
+            std::env::consts::OS
+        )
+    });
     assert_eq!(
         text,
         expected.replace("\r\n", "\n"),

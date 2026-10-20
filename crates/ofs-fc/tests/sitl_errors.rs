@@ -317,10 +317,10 @@ fn a_config_run_is_judged_on_its_whole_output() {
 
 /// A spawned fake SITL that is killed when dropped: an assertion firing between the spawn and the test's own
 /// cleanup cannot leak the process (the M6d review's deferred minor).
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 struct FakeSitl(std::process::Child);
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl FakeSitl {
     /// The child's pid (a test that kills by hand, before the drop's own kill).
     fn id(&self) -> u32 {
@@ -333,7 +333,7 @@ impl FakeSitl {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl Drop for FakeSitl {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -343,7 +343,7 @@ impl Drop for FakeSitl {
 
 /// Spawns `<dir>/betaflight_SITL -c <script>`: a copy of /bin/sh under the SITL name, so the process's comm is
 /// the name the cleanup waits for, without touching a real SITL.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> FakeSitl {
     let fake = dir.join("betaflight_SITL");
     std::fs::copy("/bin/sh", &fake).unwrap();
@@ -352,14 +352,14 @@ fn spawn_fake_sitl(dir: &std::path::Path, sh_script: &str) -> FakeSitl {
 
 /// As [`spawn_fake_sitl`], launched with SITL's `--port-offset <offset>` after the script (the shell takes the
 /// arguments as its positionals, so its command line reads like a slot's SITL).
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn spawn_fake_sitl_in_slot(dir: &std::path::Path, sh_script: &str, offset: u16) -> FakeSitl {
     spawn_fake_sitl_with(dir, sh_script, &["--port-offset", &offset.to_string()])
 }
 
 /// A fake SITL with `extra` after the script; the binary is copied once per directory (a copy over a running binary
 /// is "text file busy").
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn spawn_fake_sitl_with(dir: &std::path::Path, sh_script: &str, extra: &[&str]) -> FakeSitl {
     let fake = dir.join("betaflight_SITL");
     if !fake.exists() {
@@ -368,7 +368,7 @@ fn spawn_fake_sitl_with(dir: &std::path::Path, sh_script: &str, extra: &[&str]) 
     FakeSitl(std::process::Command::new(&fake).arg("-c").arg(sh_script).args(extra).spawn().unwrap())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn is_alive(child: &mut FakeSitl) -> bool {
     // A killed child stays a zombie until waited for, which holds no ports: try_wait reaps it.
     child.0.try_wait().unwrap().is_none()
@@ -419,7 +419,7 @@ fn a_sitl_without_the_option_belongs_to_slot_zero() {
 /// A SITL binary in a directory with spaces in its path (`C:\Program Files`, a home folder named "My Projects" under
 /// WSL) is still found by its slot: the match is on the process name and the `--port-offset` argument, not on the
 /// shape of the whole command line.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
 fn a_slots_sitl_is_found_when_its_path_has_spaces() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -482,7 +482,7 @@ fn the_unscoped_script_through_ps_kills_every_sitl_and_only_those() {
 }
 
 /// The escalation to SIGKILL is scoped too: slot 1's cleanup SIGKILLs slot 1's TERM-ignoring SITL, not slot 0's.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
 fn the_sigkill_escalation_only_reaches_its_own_slot() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -536,6 +536,37 @@ fn the_wsl_wait_script_is_scoped_to_its_slot_too() {
     assert!(String::from_utf8_lossy(&none.stdout).contains("seen=0"), "no slot-2 victims: {:?}", none.stdout);
 }
 
+/// The wait script macOS runs (there is no `/proc`): the same decoys, forced through the `ps` path on Linux.
+/// It sees a TERM-ignoring slot-1 SITL, escalates to SIGKILL, leaves slot 0 alone, and reports what it did.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_macos_wait_script_escalates_and_is_scoped() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::Builder::new().prefix("my sitl ").tempdir().unwrap();
+    let trap = |ready: &std::path::Path| format!("trap \"\" TERM; : > '{}'; sleep 30; sleep 30", ready.display());
+    let (ready0, ready1) = (dir.path().join("ready0"), dir.path().join("ready1"));
+    let mut slot0 = spawn_fake_sitl_in_slot(dir.path(), &trap(&ready0), 0);
+    let mut slot1 = spawn_fake_sitl_in_slot(dir.path(), &trap(&ready1), 10);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !(ready0.exists() && ready1.exists()) {
+        assert!(std::time::Instant::now() < deadline, "the fake SITLs never installed their traps");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let out = std::process::Command::new("sh")
+        .args(["-c", ofs_fc::sitl::process::UNIX_WAIT_SCRIPT, "sh", "s", "10", "ps"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(text.contains("seen=1 escalated=1"), "slot 1's victim was seen and SIGKILLed: {text:?}");
+    assert!(!is_alive(&mut slot1), "slot 1's SITL is gone");
+    assert!(is_alive(&mut slot0), "slot 0's SITL is left alone");
+    let none = std::process::Command::new("sh")
+        .args(["-c", ofs_fc::sitl::process::UNIX_WAIT_SCRIPT, "sh", "s", "20", "ps"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&none.stdout).contains("seen=0"), "no slot-2 victims: {:?}", none.stdout);
+}
+
 /// A victim that ignores SIGTERM (a SITL in a slow teardown) must not survive the cleanup: the wait escalates to
 /// SIGKILL and returns only when it is gone (or a zombie, which holds no ports).
 #[cfg(target_os = "linux")]
@@ -564,8 +595,30 @@ fn a_victim_that_ignores_sigterm_is_sigkilled() {
     );
 }
 
+/// The unscoped macOS path has no `--port-offset`: the wait must see every SITL through `ps`, SIGKILL a
+/// TERM-ignoring one, and report it. (`a_victim_that_ignores_sigterm_is_sigkilled` keeps the `/proc` assertion.)
+#[cfg(target_os = "macos")]
+#[test]
+fn the_unscoped_wait_sigkills_a_term_ignoring_victim_on_macos() {
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::Builder::new().prefix("my sitl ").tempdir().unwrap();
+    let ready = dir.path().join("ready");
+    let mut victim = spawn_fake_sitl(
+        dir.path(),
+        &format!("trap \"\" TERM; : > '{}'; sleep 30; sleep 30", ready.display()),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(std::time::Instant::now() < deadline, "the victim never installed its trap");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let outcome = ofs_fc::sitl::process::await_cleanup(&[dir.path().join("betaflight_SITL").display().to_string()]);
+    assert!(outcome.escalated && outcome.victims_seen == 1, "{outcome:?}");
+    assert!(victim.0.try_wait().unwrap().is_some(), "the SIGKILLed victim is gone");
+}
+
 /// The common path — the victim is already dying or dead — must fall through fast, not cost every launch.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
 fn the_cleanup_does_not_hang_when_nobody_survives() {
     let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -604,4 +657,36 @@ fn a_bind_that_succeeds_after_retries_starts_the_session() {
         "a bind that landed on a retry starts the session: {:?}",
         started.err().map(|e| e.to_string())
     );
+}
+
+/// A permanent bind failure (the 20 retries are spent) must fail the start and keep the errno on the record.
+/// This is the parser/error-mapping half of the live test, so it runs on macOS where SITL's own BSD bind
+/// check cannot refuse a held port.
+#[test]
+fn a_sitl_that_reports_a_spent_bind_fails_with_the_errno() {
+    use ofs_fc::sitl::process::SitlProcess;
+    let _guard = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let script = "i=1; while [ $i -le 20 ]; do \
+                  echo \"bind port 5761 for UART1 retry $i/20 (errno 48)\" >&2; \
+                  i=$((i+1)); done; \
+                  echo 'bind port 5761 for UART1 failed!! after 20 attempts (errno 48)' >&2; \
+                  sleep 5";
+    let cfg = config(dir.path(), &["sh", "-c", script]);
+    std::fs::create_dir_all(&cfg.launch.workdir).unwrap();
+    std::fs::write(cfg.launch.workdir.join("eeprom.bin"), [0u8; 16]).unwrap();
+    std::fs::copy(
+        &cfg.launch.diff_file,
+        cfg.launch.workdir.join("betaflight.diff"),
+    )
+    .unwrap();
+    let err = SitlProcess::start(&cfg.launch)
+        .err()
+        .expect("a spent bind fails the start");
+    let text = err.to_string();
+    assert!(
+        text.contains("bind port 5761 for UART1 failed!! after 20 attempts"),
+        "the spent retries are on the record: {text}"
+    );
+    assert!(text.contains("errno 48"), "the failure names the errno: {text}");
 }

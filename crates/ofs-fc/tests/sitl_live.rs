@@ -305,15 +305,10 @@ fn esc_telemetry_frames_become_battery_state() {
 /// The port-bind flake (docs/superpowers/history/closeout-evidence.md): serial_tcp.c bound each UART once and
 /// kept booting on failure. The patch retries for about half a second and names the errno, so a port released
 /// within the window self-heals and a permanently held one fails the start with the attempts on the record.
+#[cfg(not(target_os = "macos"))]
 #[test]
 #[ignore]
 fn a_held_serial_port_is_retried_then_refused_with_the_errno() {
-    if cfg!(target_os = "macos") {
-        // Measured (docs/research/macos.md): on macOS a SITL still starts with 5761 held by a listener, so SITL's own bind
-        // check cannot refuse it there; a stale SITL is caught by the simulator's probe of UDP 9003 instead.
-        println!("skipped on macOS: a held TCP port does not stop SITL's bind");
-        return;
-    }
     let launch = argv("OFS_SITL_LAUNCH");
     assert!(!launch.is_empty(), "set OFS_SITL_LAUNCH");
     let dir = tempfile::tempdir().unwrap();
@@ -331,4 +326,33 @@ fn a_held_serial_port_is_retried_then_refused_with_the_errno() {
     let text = err.to_string();
     assert!(text.contains("bind port 5761 for UART1 failed!! after 20 attempts"), "the spent retries are on the record: {text}");
     assert!(text.contains("errno"), "the failure names the errno: {text}");
+}
+
+/// macOS's BSD `SO_REUSEADDR` lets SITL's wildcard bind coexist with a listener on 127.0.0.1:5761; the
+/// documented behaviour is that the real SITL still starts. Pinning that here makes the platform difference
+/// visible instead of returning early and showing a pass. The simulator's own UDP 9003 probe, and the fake
+/// SITL error test, cover a genuinely stale process.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore]
+fn a_held_tcp_port_does_not_stop_sitl_on_macos() {
+    let launch = argv("OFS_SITL_LAUNCH");
+    assert!(!launch.is_empty(), "set OFS_SITL_LAUNCH");
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = LaunchConfig {
+        launch,
+        cleanup: vec![],
+        workdir: dir.path().join("fc"),
+        diff_file: OSD_DIFF.into(),
+        startup_timeout: Duration::from_secs(15),
+    };
+    std::fs::create_dir_all(&cfg.workdir).unwrap();
+    std::fs::copy(OSD_DIFF, cfg.workdir.join("betaflight.diff")).unwrap();
+    let _holder = std::net::TcpListener::bind("127.0.0.1:5761").unwrap();
+    let started = ofs_fc::sitl::process::SitlProcess::start(&cfg);
+    assert!(
+        started.is_ok(),
+        "macOS lets SITL bind alongside the holder: {:?}",
+        started.err().map(|e| e.to_string())
+    );
 }

@@ -171,7 +171,13 @@ mod tests {
         let deadline = std::time::Instant::now() + patience;
         loop {
             let slot = SitlSlot::acquire_in(LOOPBACK, lock, shift).unwrap();
-            if slot.index == index || std::time::Instant::now() >= deadline {
+            let expired = std::time::Instant::now() >= deadline;
+            if slot.index == index || expired {
+                if expired && cfg!(target_os = "macos") {
+                    let _ = std::process::Command::new("lsof")
+                        .args(["-nP", &format!("-iUDP:{}", PORT_PWM + shift)])
+                        .status();
+                }
                 return slot;
             }
             drop(slot);

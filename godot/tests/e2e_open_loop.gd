@@ -211,17 +211,29 @@ func _run() -> void:
 	var started: Array = []
 	app.dvr.started.connect(func(path: String): started.append(path))
 	var t0: float = app.client.get_telemetry()["time_s"]
+	var seen_targets := {}
+	var deadline := Time.get_ticks_msec() + 20_000
 	_press(app, KEY_D)
 	_check(app.dvr.recording, "D starts the DVR")
-	await _wait_for(func(): return float(app.client.get_telemetry()["time_s"]) >= t0 + 2.0, 20.0)
+	while float(app.client.get_telemetry()["time_s"]) < t0 + 2.0:
+		var target := int(app.client.get_fpv_view().get("target_field", -1))
+		if target >= 0:
+			seen_targets[target] = true
+		await process_frame
+		if Time.get_ticks_msec() >= deadline:
+			break
 	var t1: float = app.client.get_telemetry()["time_s"]
 	_press(app, KEY_D)
+	_check(t1 >= t0 + 2.0, "the client advanced two simulated seconds (%.2f)" % (t1 - t0))
 	_check(not app.dvr.recording and started.size() == 1, "D again stops it")
 	if started.size() == 1:
 		var frames := _avi_frames(ProjectSettings.globalize_path(started[0]))
-		var expected := int((t1 - t0) * 50.0)
-		_check(frames.size() >= int(expected * 0.8) and frames.size() <= expected + 3,
-			"%d frames for %.2f simulated seconds at 50 fields a second (about %d)" % [frames.size(), t1 - t0, expected])
+		# The DVR is a screen recorder: it writes one frame per field boundary the client actually renders, not one
+		# per simulated 20 ms. A runner slower than 50 Hz renders fewer boundaries; that is the pilot's picture.
+		var expected := seen_targets.size()
+		_check(expected > 0, "the client rendered at least one field boundary")
+		_check(frames.size() >= expected - 1 and frames.size() <= expected + 3,
+			"%d frames for %d rendered field boundaries (%.2f simulated seconds)" % [frames.size(), expected, t1 - t0])
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")
 

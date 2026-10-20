@@ -613,14 +613,45 @@ echo \"seen=1 escalated=$esc ms=$(( (t1-t0)/1000000 ))\"
 exit 0"
 );
 
+/// The wait for a launch on a Unix host with `ps` instead of `/proc` (macOS). `slot_pids_sh!` supplies the same
+/// candidate/argument/state helpers the cleanup uses; `$1` is `s` for one slot and `x` for every SITL, `$2` is the
+/// slot's `--port-offset` (`0` when unused), and `$3` is `ps`. The loop counts its 10 ms sleeps instead of using
+/// `date +%s%N` (BSD `date` has no `%N`), so the report's `ms` is accurate to one poll.
+pub const UNIX_WAIT_SCRIPT: &str = concat!(
+    net::slot_pids_sh!(),
+    "\
+slot_all() {
+  for p in $(slot_candidates \"$1\"); do
+    [ \"$(slot_state \"$p\" \"$1\")\" = Z ] && continue
+    echo \"$p\"
+  done
+}
+pids() { if [ \"$1\" = s ]; then slot_pids \"$2\" \"$3\"; else slot_all \"$3\"; fi; }
+live() { [ -n \"$(pids \"$@\")\" ]; }
+slay() { p=$(pids \"$@\"); [ -z \"$p\" ] || kill -9 $p 2>/dev/null; }
+live \"$@\" || { echo 'seen=0 escalated=0 ms=0'; exit 0; }
+ms=0
+i=0; while live \"$@\" && [ $i -lt 30 ]; do sleep 0.01; i=$((i+1)); done
+ms=$((ms + i * 10))
+esc=0
+if live \"$@\"; then
+  slay \"$@\"
+  esc=1
+  i=0; while live \"$@\" && [ $i -lt 100 ]; do sleep 0.01; i=$((i+1)); done
+  ms=$((ms + i * 10))
+fi
+echo \"seen=1 escalated=$esc ms=$ms\"
+exit 0"
+);
+
 /// Waits for the cleanup's victims to actually die before a new SITL binds. The `pkill` in the cleanup only
 /// *signals* them, and their sockets close one by one during teardown, so a launch that immediately follows can
 /// fail to bind (`bind port ... failed!!` — the port-bind flake, see
 /// `docs/superpowers/history/closeout-evidence.md`). A victim that ignores SIGTERM is SIGKILLed after
 /// [`CLEANUP_TERM_GRACE`]; the whole wait gives up after [`CLEANUP_KILL_GRACE`] and the launch proceeds — the
 /// startup diagnostics name any holder if the bind still fails. Under WSL the victims live in the VM, so the
-/// wait runs there too; on plain Windows the cleanup command waits for its victims itself (so this reports nothing
-/// there). Returns what was seen, so a recurrence
+/// wait runs there too; macOS runs [`UNIX_WAIT_SCRIPT`] through `sh` and `ps`, and on plain Windows the cleanup
+/// command waits for its victims itself (so this reports nothing there). Returns what was seen, so a recurrence
 /// of the flake says whether a victim existed at launch at all.
 pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
     let scope = net::port_offset_in(launch);
@@ -634,9 +665,26 @@ pub fn await_cleanup(launch: &[String]) -> AwaitCleanup {
         let output = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output();
         return parse_wait_output(output.ok().map(|o| o.stdout).unwrap_or_default());
     }
+    #[cfg(target_os = "macos")]
+    {
+        let mut argv: Vec<String> = ["sh", "-c", UNIX_WAIT_SCRIPT, "sh"].into_iter().map(String::from).collect();
+        match scope {
+            Some(offset) => {
+                argv.push("s".into());
+                argv.push(offset.to_string());
+            }
+            None => {
+                argv.push("x".into());
+                argv.push("0".into());
+            }
+        }
+        argv.push("ps".into());
+        let output = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output();
+        return parse_wait_output(output.ok().map(|o| o.stdout).unwrap_or_default());
+    }
     #[cfg(target_os = "linux")]
     return await_cleanup_native(scope);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
     {
         let _ = scope;
         AwaitCleanup::NONE
