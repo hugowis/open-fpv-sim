@@ -4,6 +4,11 @@ name: macos-survey
 # allowed to fail and is reported in the job summary. Run it by hand (Actions, "macos-survey", Run workflow).
 on:
   workflow_dispatch:
+    inputs:
+      stress_slot:
+        description: "Run the slot-test stress harness on Apple silicon"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +58,8 @@ jobs:
             echo "| sitl-live | skipped | | no patched SITL binary |" >> "$GITHUB_STEP_SUMMARY"
             bash scripts/macos-survey.sh godot-all bash scripts/run-godot-tests.sh all
           fi
+      - if: inputs.stress_slot && matrix.os == 'macos-latest'
+        run: bash scripts/macos-slot-stress.sh 50
       - uses: actions/upload-artifact@v4
         if: always()
         with:

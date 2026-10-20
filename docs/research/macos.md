@@ -82,8 +82,11 @@ macOS path as implemented but unverified on a runner.
 - Slot unit tests failed on macOS in survey runs 39289050136 (three tests, Intel), 39293693518 (two, Intel) and
   39295539454 (one test, **both** runners): after a slot was dropped the same slot was sometimes still taken a moment later.
   The arm64 job passed them in the other runs. The tests now retry for up to 2 s, on macOS only (`acquire_until`), and passed
-  in the one survey run after that. The cause is not established; the likeliest is a child process that another test
-  thread was starting at that instant inheriting the descriptor before it was marked close-on-exec.
+ in the one survey run after that. The cause is not established; the likeliest is a child process that another test
+ thread was starting at that instant inheriting the descriptor before it was marked close-on-exec. The 50-run harness
+ (`scripts/macos-slot-stress.sh`, the survey's `stress_slot` input) is the pending check: it either reproduces the flake
+ (the failure path prints `lsof` for the motor port) or records that the retry is the accepted mitigation. The retry stays
+ until that run happens.
 - `late_duplicate_replies_are_drained_after_a_resend` (a 30 ms thread against a 150 ms window) failed on arm64 in run
   39297354882 (it passed in the runs before and after): the window is 500 ms. It has had one survey run since.
 - `test_the_recording_reports_its_events_and_refuses_misuse` read the event stream once, before its background thread had
