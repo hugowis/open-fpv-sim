@@ -143,4 +143,5 @@ Not done, and why:
 The `macos` job is still not promoted: of the last ten `ci.yml` runs on `main`, only run 39459360292 has the job (the
 earlier nine predate it), and it failed one step, `Run bash scripts/run-godot-tests.sh all`. That step is now split into
 named suites and its DVR check counts rendered field boundaries, so the next ten runs are the new record. It remains
-`continue-on-error` and outside `publish.needs` until that record is clean.
+`continue-on-error` and outside `publish.needs` until that record is clean; `ci.yml` is deliberately unchanged in this
+branch.
