@@ -143,6 +143,12 @@ Not done, and why:
    `docs/research/macos-manual.md` on a real machine and copy its table into this file; the CI runners cannot answer
    these questions.
 
+**Distribution: source build, no notarised binary (decided).** The `ofs` Python package is pure Python and installs
+with `pip install -e "python[dev]"`; `ofs-sim` is built from source with `cargo build -p ofs-sim --locked`. A
+signed and notarised `.app` or universal binary is not planned: it needs an Apple Developer ID, a notarisation
+step in the release workflow, and a decision about the Godot editor download that the current release does not
+have. Reopen this only with an Apple Developer account and a release-workflow owner.
+
 The `macos` job is still not promoted: of the last ten `ci.yml` runs on `main`, only run 39459360292 has the job (the
 earlier nine predate it), and it failed one step, `Run bash scripts/run-godot-tests.sh all`. That step is now split into
 named suites and its DVR check counts rendered field boundaries, so the next ten runs are the new record. It remains
