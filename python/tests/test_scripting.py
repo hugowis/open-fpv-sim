@@ -43,7 +43,7 @@ def test_a_malformed_inputs_file_names_every_problem_with_its_line(sim, tmp_path
     with pytest.raises(ofs.ConfigError) as e:
         sim.play_inputs(path)
     assert str(e.value).splitlines() == [
-        "bad.csv line 1: unknown column 'wobble' (expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4)",
+        "bad.csv line 1: unknown column 'wobble' (expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4, tx, link_loss)",
         "bad.csv line 3: throttle 150 is outside [0, 1]",
     ]
 
