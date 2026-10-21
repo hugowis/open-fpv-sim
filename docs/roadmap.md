@@ -130,7 +130,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
-- A configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
+- DShot extended telemetry and MSP over CRSF.
 - A compass, and the heading mapping it needs.
 
 ### Video and OSD
