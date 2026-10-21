@@ -68,4 +68,4 @@ def test_an_out_of_range_downlink_loss_fraction_is_invalid_argument(sim):
     with pytest.raises(ofs.InvalidArgument, match="downlink loss fraction"):
         sim.inject(ofs.faults.DownlinkLoss(-0.1))
     sim.run(0.05)
-    assert _events(sim, {"fault_injected"}, count=0) == []
+    assert _events(sim, {"fault_injected"}, count=1, timeout_s=0.2) == [], "a refused injection raised an event"
