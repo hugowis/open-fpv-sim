@@ -10,7 +10,7 @@ a developer flies a simulated OpenDrone 5" quad running real Betaflight SITL wit
 ExpressLRS/CRSF link, watching Betaflight's real OSD on a degrading analog picture; the real Betaflight Configurator
 connects, and settings saved over its port persist; and a Python script runs the same quad headless and deterministically, injects
 faults and gets every signal back as a DataFrame. What it does not do — level-2/3 firmware fidelity, real radios,
-digital video, GPS, INAV/ArduPilot, macOS — and what comes next are in `docs/roadmap.md`.
+digital video, GPS, INAV/ArduPilot — and what comes next are in `docs/roadmap.md`.
 
 What is in it:
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
@@ -43,9 +43,12 @@ What is in it:
 - The radio is three swappable parts — a handset, a link and a receiver — so other links can be tried: ExpressLRS on
   2.4 GHz or 900 MHz, or a geometry-free `fixed` link, flown through the same chain; and a live flight's sticks record
   to a CSV that `play_inputs` replays in lockstep (M5, `docs/writing-a-radio-model.md`).
+- macOS is supported best-effort on Apple silicon: the SITL builds with a one-hunk patch, the Rust, Python and Godot
+  suites have passed in the survey, and CI has a non-blocking job (`docs/research/macos.md`; no physical Mac has been
+  tried yet).
 
 Documentation:
-- `docs/dev-setup.md` — building, running and testing on Windows and Linux (and the performance numbers).
+- `docs/dev-setup.md` — building, running and testing on Windows, Linux and macOS (and the performance numbers).
 - `docs/architecture.md` — how the crates, the server and the clients fit together, and how to add a part, a model,
   a fault or a recorded signal.
 - `docs/roadmap.md` — v1's known limitations and what comes next.
