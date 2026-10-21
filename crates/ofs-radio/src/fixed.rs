@@ -37,9 +37,11 @@ pub struct FixedLink {
     params: FixedParams,
     rng: ChaCha8Rng,
     fault_rng: ChaCha8Rng,
+    downlink_fault_rng: ChaCha8Rng,
     faults: FaultSignals,
     pipeline: VecDeque<Channels>,
     history: LqWindow,
+    downlink_history: LqWindow,
     downlink_packets: u32,
 }
 
@@ -59,9 +61,11 @@ impl FixedLink {
         Self {
             rng: model_rng(seed, MODEL_NAME),
             fault_rng: model_rng(seed, "fixed-faults"),
+            downlink_fault_rng: model_rng(seed, "fixed-faults-downlink"),
             faults: FaultSignals::register(bus),
             pipeline: VecDeque::new(),
             history: LqWindow::new(),
+            downlink_history: LqWindow::new(),
             downlink_packets: 0,
             params,
         }
@@ -85,22 +89,25 @@ impl Link for FixedLink {
         self.pipeline.push_back(tx.channels);
         let channels = self.pipeline.pop_front().expect("the pipeline holds at least this sample");
 
-        // Both draws happen every packet, whatever the inputs, so a seeded run's stream never shifts.
+        // All three draws happen every packet, whatever the inputs, so a seeded run's stream never shifts.
         let draw: f64 = self.rng.gen();
         let fault_draw: f64 = self.fault_rng.gen();
+        let downlink_fault_draw: f64 = self.downlink_fault_rng.gen();
         let p = &self.params;
         let in_burst = crate::parts::burst_active(ctx.time_s, p.burst_on_s, p.burst_off_s);
         let transmitting = tx.transmitting && !self.faults.link_cut(bus);
         let received = transmitting && draw >= p.loss_fraction && !in_burst && self.faults.survives(bus, ctx.time_s, fault_draw);
+        let downlink_received = received && self.faults.downlink_survives(bus, downlink_fault_draw);
 
-        // The downlink is heard whenever the uplink was: one packet in `telemetry_slot_divisor` carries a frame.
+        // One packet in `telemetry_slot_divisor` carries a frame, if the downlink was heard.
         let mut downlink_slot = false;
         if transmitting {
             self.downlink_packets += 1;
-            downlink_slot = received && self.downlink_packets % p.telemetry_slot_divisor == 0;
+            downlink_slot = downlink_received && self.downlink_packets % p.telemetry_slot_divisor == 0;
         }
 
         let lq = self.history.push(received);
+        let downlink_lq = self.downlink_history.push(downlink_received);
         let up = lq > 0.0;
         Delivery {
             channels: received.then_some(channels),
@@ -111,7 +118,7 @@ impl Link for FixedLink {
                 rssi_dbm: if up { NOMINAL_RSSI_DBM } else { NO_SIGNAL_RSSI_DBM },
                 snr_db: if up { NOMINAL_SNR_DB } else { NO_SIGNAL_RSSI_DBM - NOISE_FLOOR_DBM },
                 antenna: 0,
-                downlink_lq_pct: lq,
+                downlink_lq_pct: downlink_lq,
                 uplink_rssi_dbm: [NOMINAL_RSSI_DBM; 2],
                 uplink_snr_db: NOMINAL_SNR_DB,
                 downlink_rssi_dbm: NOMINAL_RSSI_DBM,

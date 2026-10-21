@@ -1,12 +1,13 @@
 use glam::DVec3;
 use ofs_core::shape::Shape;
-use ofs_core::{names, Bus, Scheduler, Wire};
+use ofs_core::{names, Bus, Scheduler, StepCtx, Wire};
 use ofs_radio::crsf::{stick_ticks, Decoder, Frame};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{
     packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
     TELEMETRY_SLOT_DIVISOR,
 };
+use ofs_radio::parts::{Delivery, Link, TxFrame};
 use ofs_radio::receiver::ReceiverParams;
 use ofs_radio::telemetry::FcTelemetryHandle;
 use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
@@ -271,6 +272,59 @@ fn half_fraction_drops_about_half() {
     packets(&mut s, 2000);
     let lq = get(&s, names::RADIO_LQ);
     assert!(lq > 35.0 && lq < 65.0, "binomial 3-sigma band around 50: {lq}");
+}
+
+#[test]
+fn downlink_loss_drops_the_downlink_and_leaves_control_alone() {
+    let run = |fraction: Option<f64>| -> (Vec<Delivery>, u32) {
+        let mut bus = Bus::new();
+        let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+        bus.set(tx, 1.0);
+        let mut link = ElrsLink::new(LinkParams::ideal(500), 7, &mut bus);
+        let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+        bus.set(pos, DVec3::new(0.0, 0.0, -1.7));
+        if let Some(fraction) = fraction {
+            let signal = bus.signal::<f64>(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION);
+            bus.set(signal, fraction);
+        }
+        let mut deliveries = Vec::new();
+        let mut slots = 0;
+        for k in 0..300u32 {
+            let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+            let delivery = link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+            slots += u32::from(delivery.downlink_slot);
+            deliveries.push(delivery);
+        }
+        (deliveries, slots)
+    };
+    let (clean, clean_slots) = run(None);
+    assert_eq!(clean_slots, 75, "300 packets at the default 1:4");
+    assert_eq!(run(Some(0.0)), (clean.clone(), clean_slots), "a zero fraction changes nothing");
+
+    let (full, full_slots) = run(Some(1.0));
+    assert_eq!(full_slots, 0, "100 % downlink loss: no telemetry slot flies");
+    assert_eq!(
+        full.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "uplink control is untouched"
+    );
+    assert_eq!(
+        full.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        "uplink LQ is untouched"
+    );
+    assert_eq!(full.last().unwrap().report.downlink_lq_pct, 0.0, "the 100-packet window is all loss");
+
+    let (half, half_slots) = run(Some(0.5));
+    assert_eq!(run(Some(0.5)), (half.clone(), half_slots), "the same seed loses the same downlink packets");
+    assert_eq!(
+        half.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "half downlink loss still leaves every stick packet alone"
+    );
+    assert!(half_slots > 0 && half_slots < clean_slots, "some slots fly: {half_slots} of {clean_slots}");
+    let half_lq = half.last().unwrap().report.downlink_lq_pct;
+    assert!(30.0 < half_lq && half_lq < 70.0, "about half the downlink arrives: {half_lq}");
 }
 
 #[test]

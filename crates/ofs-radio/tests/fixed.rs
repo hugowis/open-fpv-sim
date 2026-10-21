@@ -1,9 +1,10 @@
 use glam::DVec3;
-use ofs_core::{names, Bus, Scheduler, Wire};
+use ofs_core::{names, Bus, Scheduler, StepCtx, Wire};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::crsf::{self, Decoder, Frame};
 use ofs_radio::elrs::{NO_SIGNAL_RSSI_DBM, TELEMETRY_SLOT_DIVISOR};
 use ofs_radio::fixed::{FixedLink, FixedParams, NOMINAL_RSSI_DBM};
+use ofs_radio::parts::{Delivery, Link, TxFrame};
 use ofs_radio::joystick::JoystickHandset;
 use ofs_radio::parts::RfFrontEnd;
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
@@ -133,6 +134,58 @@ fn the_radio_faults_apply_to_a_fixed_link_too() {
     assert!(slots(&mut s, &uart, 50, |_| 0.0).iter().all(Option::is_none), "a loss fraction of 1 loses all");
     set(&mut s, names::FAULT_RADIO_LOSS_FRACTION, 0.0);
     assert!(slots(&mut s, &uart, 50, |_| 0.0).iter().all(Option::is_some), "and clearing the faults restores it");
+}
+
+#[test]
+fn downlink_loss_drops_the_downlink_and_leaves_control_alone() {
+    let run = |fraction: Option<f64>| -> (Vec<Delivery>, u32) {
+        let mut bus = Bus::new();
+        let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+        bus.set(tx, 1.0);
+        let mut link = FixedLink::new(params(), 7, &mut bus);
+        if let Some(fraction) = fraction {
+            let signal = bus.signal::<f64>(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION);
+            bus.set(signal, fraction);
+        }
+        let mut deliveries = Vec::new();
+        let mut slots = 0;
+        for k in 0..300u32 {
+            let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+            let delivery = link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+            slots += u32::from(delivery.downlink_slot);
+            deliveries.push(delivery);
+        }
+        (deliveries, slots)
+    };
+    let (clean, clean_slots) = run(None);
+    assert_eq!(clean_slots, 75, "300 packets at the default 1:4");
+    assert_eq!(clean.last().unwrap().report.downlink_lq_pct, 100.0, "without a fault the downlink hears everything");
+    assert_eq!(run(Some(0.0)), (clean.clone(), clean_slots), "a zero fraction changes nothing");
+
+    let (full, full_slots) = run(Some(1.0));
+    assert_eq!(full_slots, 0, "100 % downlink loss: no telemetry slot flies");
+    assert_eq!(
+        full.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "uplink control is untouched"
+    );
+    assert_eq!(
+        full.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        "uplink LQ is untouched"
+    );
+    assert_eq!(full.last().unwrap().report.downlink_lq_pct, 0.0, "the 100-packet window is all loss");
+
+    let (half, half_slots) = run(Some(0.5));
+    assert_eq!(run(Some(0.5)), (half.clone(), half_slots), "the same seed loses the same downlink packets");
+    assert_eq!(
+        half.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "half downlink loss still leaves every stick packet alone"
+    );
+    assert!(half_slots > 0 && half_slots < clean_slots, "some slots fly: {half_slots} of {clean_slots}");
+    let half_lq = half.last().unwrap().report.downlink_lq_pct;
+    assert!(30.0 < half_lq && half_lq < 70.0, "about half the downlink arrives: {half_lq}");
 }
 
 #[test]

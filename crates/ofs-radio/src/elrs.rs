@@ -125,6 +125,7 @@ pub struct ElrsLink {
     params: LinkParams,
     rng: ChaCha8Rng,
     fault_rng: ChaCha8Rng,
+    downlink_fault_rng: ChaCha8Rng,
     faults: FaultSignals,
     pos: Signal<DVec3>,
     att: Signal<DQuat>,
@@ -159,6 +160,7 @@ impl ElrsLink {
         );
         let mut rng = model_rng(seed, MODEL_NAME);
         let fault_rng = model_rng(seed, "elrs-faults");
+        let downlink_fault_rng = model_rng(seed, "elrs-faults-downlink");
         let mut quad_faders = vec![Fader::default(); params.quad_antennas.len()];
         let mut handset_faders = vec![Fader::default(); params.handset_antennas.len()];
         for f in quad_faders.iter_mut().chain(handset_faders.iter_mut()) {
@@ -169,6 +171,7 @@ impl ElrsLink {
             params,
             rng,
             fault_rng,
+            downlink_fault_rng,
             faults: FaultSignals::register(bus),
             pos: bus.signal(names::BODY_POS_NED),
             att: bus.signal(names::BODY_ATT),
@@ -272,7 +275,12 @@ impl Link for ElrsLink {
         }
         let downlink_active = self.handset_diversity.choose(downlink);
         let downlink_draw: f64 = self.rng.gen();
-        let downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity);
+        // One number per packet from the dedicated downlink-fault stream, fault or not, so toggling the fault never
+        // moves the model's own draws or the uplink fault stream.
+        let downlink_fault_draw: f64 = self.downlink_fault_rng.gen();
+        let downlink_received = transmitting
+            && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity)
+            && self.faults.downlink_survives(bus, downlink_fault_draw);
 
         // One downlink packet in `telemetry_slot_divisor` carries a telemetry frame, if it is heard.
         let mut downlink_slot = false;
