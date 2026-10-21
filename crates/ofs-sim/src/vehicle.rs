@@ -1240,9 +1240,14 @@ impl Vehicle {
 
     /// Transmitter on (pilot or script connected) or off (the receiver hears nothing).
     pub fn set_transmitter(&mut self, on: bool) {
+        let tick = self.scheduler.tick();
         let s = self.h.tx_enabled;
         self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
-        self.journal.push(self.scheduler.tick(), Action::Transmitter(on));
+        let state = self.inputs_state();
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(tick, &state);
+        }
+        self.journal.push(tick, Action::Transmitter(on));
     }
 
     /// Validates a fault against this quad without applying it: what `set_fault` and `schedule_fault` refuse.
@@ -1333,47 +1338,60 @@ impl Vehicle {
     /// `set_fault` without the journal: what a scheduled fault does when its tick comes.
     fn apply_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
         self.check_fault(&fault)?;
-        let b = self.scheduler.bus_mut();
-        match &fault {
-            Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
-            Fault::RadioLoss { fraction } => b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 }),
-            Fault::DownlinkLoss { fraction } => {
-                b.set(self.h.fault_radio_downlink_loss_fraction, if active { *fraction } else { 0.0 })
-            }
-            Fault::BurstLoss { on_s, off_s } => {
-                let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
-                b.set(self.h.fault_burst_on, on);
-                b.set(self.h.fault_burst_off, off);
-            }
-            Fault::MotorFailure { motor, scale } => b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 }),
-            Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
-                b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
-                b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
-            }
-            Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
-                b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
-                b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
-                b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
-            }
-            Fault::GyroFault { bias_radps, noise_scale } => {
-                b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
-                b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
-            }
-            Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
-                self.vtx_interference.set(active.then_some(Emitter {
-                    position: *position_ned_m,
-                    freq_mhz: *freq_mhz,
-                    power_mw: *power_mw,
-                    antenna: Antenna {
-                        kind: AntennaKind::Omni,
-                        gain_dbi: 2.0,
-                        polarization: Polarization::Rhcp,
-                        axis: DVec3::NEG_Z,
-                    },
-                }));
+        {
+            let b = self.scheduler.bus_mut();
+            match &fault {
+                Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
+                Fault::RadioLoss { fraction } => {
+                    b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 })
+                }
+                Fault::DownlinkLoss { fraction } => {
+                    b.set(self.h.fault_radio_downlink_loss_fraction, if active { *fraction } else { 0.0 })
+                }
+                Fault::BurstLoss { on_s, off_s } => {
+                    let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
+                    b.set(self.h.fault_burst_on, on);
+                    b.set(self.h.fault_burst_off, off);
+                }
+                Fault::MotorFailure { motor, scale } => {
+                    b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 })
+                }
+                Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
+                    b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
+                    b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
+                }
+                Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
+                    b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
+                    b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
+                    b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
+                }
+                Fault::GyroFault { bias_radps, noise_scale } => {
+                    b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
+                    b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
+                }
+                Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
+                    self.vtx_interference.set(active.then_some(Emitter {
+                        position: *position_ned_m,
+                        freq_mhz: *freq_mhz,
+                        power_mw: *power_mw,
+                        antenna: Antenna {
+                            kind: AntennaKind::Omni,
+                            gain_dbi: 2.0,
+                            polarization: Polarization::Rhcp,
+                            axis: DVec3::NEG_Z,
+                        },
+                    }));
+                }
             }
         }
         self.record_fault_active(&fault, active); // maintains self.active_faults
+        if matches!(&fault, Fault::RadioLinkLoss) {
+            let tick = self.scheduler.tick();
+            let state = self.inputs_state();
+            if let Some(recorder) = &mut self.inputs_recorder {
+                recorder.record(tick, &state);
+            }
+        }
         Ok(())
     }
 
@@ -1503,20 +1521,27 @@ impl Vehicle {
         self.journal.push(self.scheduler.tick(), Action::ClearFaults);
         let imbalance = self.prop_imbalance_baseline.clone();
         self.init_fault_identities(&imbalance);
-        let h = &self.h;
-        let bus = self.scheduler.bus_mut();
-        bus.set(h.fault_radio_loss, 0.0);
-        bus.set(h.fault_radio_loss_fraction, 0.0);
-        bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
-        bus.set(h.fault_burst_on, 0.0);
-        bus.set(h.fault_burst_off, 0.0);
-        bus.set(h.fault_battery_r_offset, 0.0);
-        bus.set(h.fault_battery_v_offset, 0.0);
-        bus.set(h.fault_battery_weak_cell, 0.0);
-        bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
+        {
+            let h = &self.h;
+            let bus = self.scheduler.bus_mut();
+            bus.set(h.fault_radio_loss, 0.0);
+            bus.set(h.fault_radio_loss_fraction, 0.0);
+            bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
+            bus.set(h.fault_burst_on, 0.0);
+            bus.set(h.fault_burst_off, 0.0);
+            bus.set(h.fault_battery_r_offset, 0.0);
+            bus.set(h.fault_battery_v_offset, 0.0);
+            bus.set(h.fault_battery_weak_cell, 0.0);
+            bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
+        }
         self.vtx_interference.set(None);
         self.active_faults.clear();
         self.pending_faults.clear();
+        let tick = self.scheduler.tick();
+        let state = self.inputs_state();
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(tick, &state);
+        }
     }
 
     pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {

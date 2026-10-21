@@ -6,7 +6,7 @@ use std::path::Path;
 use ofs_config::{load, FcKind, WorldConfig};
 use ofs_log::RecordError;
 use ofs_sim::inputs;
-use ofs_sim::vehicle::{build, BuildOptions, Sticks, Vehicle};
+use ofs_sim::vehicle::{build, BuildOptions, Fault, Sticks, Vehicle};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
 const HEADER: &str = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss";
@@ -99,6 +99,67 @@ fn a_vehicle_dropped_mid_recording_leaves_a_complete_file() {
         v.set_sticks(&sticks(0.7, 0.0)).unwrap(); // the newest row is still pending when the session ends
     }
     assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0", "0.01,0,0,0,0.7,-1,-1,-1,-1,1,0"]);
+}
+
+#[test]
+fn a_transmitter_or_link_change_writes_a_row_even_when_no_stick_moves() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_transmitter(false);
+    v.set_transmitter(false); // the same state again: no second row
+    v.run_for(0.01).unwrap();
+    v.set_transmitter(true);
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, false).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.run_for(0.01).unwrap();
+    v.clear_faults();
+    v.run_for(0.01).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(
+        lines(&path),
+        [
+            HEADER,
+            "0,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.01,0,0,0,0,-1,-1,-1,-1,0,0",
+            "0.02,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.03,0,0,0,0,-1,-1,-1,-1,1,1",
+            "0.04,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.05,0,0,0,0,-1,-1,-1,-1,1,1",
+            "0.06,0,0,0,0,-1,-1,-1,-1,1,0",
+        ],
+        "one row per real change, including a clear_faults K restore"
+    );
+}
+
+#[test]
+fn a_scheduled_link_cut_is_recorded_on_its_tick() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scheduled.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.schedule_fault(Fault::RadioLinkLoss, 0.02).unwrap();
+    v.run_for(0.03).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0", "0.02,0,0,0,0,-1,-1,-1,-1,1,1"]);
+}
+
+#[test]
+fn other_faults_add_no_inputs_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("motor.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.set_fault(Fault::MotorFailure { motor: 0, scale: 0.0 }, true).unwrap();
+    v.run_for(0.02).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0"], "the inputs file is not a generic fault log");
 }
 
 #[test]
