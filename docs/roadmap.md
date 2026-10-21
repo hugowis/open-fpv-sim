@@ -28,7 +28,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
 - Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one
   ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model.
-- The `RadioLoss` fault acts on the uplink only.
+- The `RadioLoss` fault acts on the uplink; `DownlinkLoss` cuts the downlink telemetry while leaving control untouched.
 - Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
   noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).
 - The radio is three swappable parts (`docs/writing-a-radio-model.md`), but only one handset (`joystick`), one
@@ -127,7 +127,6 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Plugin loading for radio models from outside the tree.
 
 ### Modelling
-- `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
 - DShot extended telemetry and MSP over CRSF.
