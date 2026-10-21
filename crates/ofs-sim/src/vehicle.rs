@@ -1757,8 +1757,8 @@ impl Vehicle {
         }
     }
 
-    /// Starts recording the sticks to a new CSV at `path` (the server names it): a row whenever they change, in
-    /// `play_inputs`' format. One at a time; an existing file is never truncated.
+    /// Starts recording the sticks and link state to a new CSV at `path` (the server names it): a row whenever any
+    /// of it changes, in `play_inputs`' format. One at a time; an existing file is never truncated.
     pub fn start_inputs_recording(&mut self, path: &Path) -> Result<(), RecordError> {
         if self.inputs_recorder.is_some() {
             return Err(RecordError::AlreadyRecording);

@@ -232,7 +232,9 @@ protocol 13).
   view (`rerun-sdk` 0.39.x, pinned by the extra).
 - **Scripted inputs** (`sim.play_inputs(path)`): the client sends the CSV's text (the server accepts requests up
   to 64 MiB, `MAX_REQUEST_BYTES`, so a long flight's file fits); the server validates it once
-  (`crates/ofs-sim/src/inputs.rs`) and applies each row on the first tick at or after its time. Faults with `at=`
+  (`crates/ofs-sim/src/inputs.rs`) and applies each row on the first tick at or after its time. The columns are
+  `t_s`, any of the eight sticks, and the optional `tx` and `link_loss` (0/1); at least one input column is required,
+  a column a file leaves out keeps its current value, and the last row holds after playback. Faults with `at=`
   use the same tick rule. Both apply right after the step that reaches their time, so a `run` that ends there
   already shows them.
 - **Worlds by name:** `load(world="flat")` reads `worlds/flat.toml` beside the quad's directory, as parts resolve
@@ -261,15 +263,15 @@ to every band and packet rate. It changes only the telemetry slot cadence — pa
 LQ stay the same.
 The default 4 keeps 0.2.0 recordings and the radio goldens byte-identical.
 
-**Recording a live flight:** `StartInputsRecording` writes the session's sticks to
-`<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick changes, in `play_inputs`' format) and
-`StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and
+**Recording a live flight:** `StartInputsRecording` writes the session's sticks and link state to
+`<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick, `tx` or `link_loss` changes, in `play_inputs`'
+format) and `StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and
 `sim.stop_inputs_recording()`. In the game: the **I** key toggles it (a toast names the file, and `REC STICKS` shows
 in the status line while it runs). A lockstep session replays the file with `sim.play_inputs(path)`; two lockstep
-replays of one file write byte-identical MCAP. A replay is not the real-time flight (timing, the SITL schedule and the
-link's seeded draws differ), and the K link cut is not in the file. Load and Unload stop the recording and publish
-`inputs_recording_stopped`; a session that vanishes (its last watcher left, the server shut down) finishes the file
-without an event.
+replays of one file write byte-identical MCAP. Files written before 0.3.0 have no `tx` or `link_loss` column and still
+play. A replay is not the real-time flight (timing, the SITL schedule and the link's seeded draws differ). Load and
+Unload stop the recording and publish `inputs_recording_stopped`; a session that vanishes (its last watcher left, the
+server shut down) finishes the file without an event.
 
 M5 manual check (needs a controller; the maintainer's TX15 in USB joystick mode is the reference):
 1. `godot --path godot`, bind the sticks in F2, fly with Betaflight, press **I**, fly 20 s, press **I**.

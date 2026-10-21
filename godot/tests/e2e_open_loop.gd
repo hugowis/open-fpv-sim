@@ -105,7 +105,12 @@ func _run() -> void:
 	_check(recording, "I starts recording the sticks")
 	await _wait_for(func(): return app.hud.sim_text().contains("REC STICKS"), 2.0)  # the HUD refreshes on the next frame
 	_check(app.hud.sim_text().contains("REC STICKS"), "and the status line says so: %s" % app.hud.sim_text())
-	await _wait_for(func(): return false, 0.3)
+	await _wait_for(func(): return false, 0.1)
+	app.sticks_override = {"roll": 0.25, "pitch": 0.0, "yaw": 0.0, "throttle": 0.6, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	await _wait_for(func(): return false, 0.2)
+	_press(app, KEY_K)
+	_check(app.radio_cut, "the recording includes a K cut")
+	await _wait_for(func(): return false, 0.2)
 	_press(app, KEY_I)
 	var recorded: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
 	_check(recorded, "I again stops it")
@@ -116,8 +121,17 @@ func _run() -> void:
 	_check(csv_files.size() == 1, "one inputs CSV in the logs directory: %s" % str(csv_files))
 	if csv_files.size() == 1:
 		var text := FileAccess.get_file_as_string(logs.path_join(csv_files[0]))
-		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n"), "it has the play_inputs header: %s" % text.left(80))
-		_check(text.split("\n", false).size() >= 2, "and at least the first row")
+		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss\n"), "it has the play_inputs header: %s" % text.left(80))
+		var lines := text.split("\n", false)
+		_check(lines.size() >= 3, "the first row, the stick move and the cut: %s" % text)
+		var cut_row := ""
+		for line in lines.slice(1):
+			var cells := line.split(",")
+			if cells.size() == 11 and cells[10] == "1":
+				cut_row = line
+		_check(cut_row != "", "the K cut is a link_loss=1 row: %s" % text)
+	_press(app, KEY_K)
+	_check(not app.radio_cut, "K restores the link after the recording")
 
 	_press(app, KEY_P)
 	var paused: bool = await _wait_for(func(): return app.client.get_phase() == "paused" and not app.client.get_telemetry()["running"], 5.0)

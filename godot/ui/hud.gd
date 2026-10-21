@@ -22,7 +22,7 @@ const HELP_LINES := [
 	"C  switch between FPV and chase camera",
 	"D  record the FPV view (DVR)",
 	"K  cut / restore the radio link (failsafe test)",
-	"I  record the sticks to a CSV (replay with play_inputs)",
+	"I  record the sticks and link state to a CSV (replay with play_inputs)",
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",

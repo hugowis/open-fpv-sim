@@ -97,9 +97,9 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
     godot --path godot                             # Godot 4.7; see docs/dev-setup.md for the binary
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** record the
-FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks to a replayable CSV, **H** show/hide
-the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc** closes the screens. Arm with the aux 1
-switch; aux 2 selects Angle mode.
+FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks and link state to a replayable CSV,
+**H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc** closes the screens. Arm with
+the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
 command-line flags after `--`. By default the game starts `ofs-sim` itself (from `target/release`, else
@@ -129,7 +129,9 @@ The radio between the handset and Betaflight is three swappable parts (a handset
 `[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a telemetry frame when heard.
 It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no off value, and one value covers every band and packet
 rate. It changes telemetry cadence, not loss. The default keeps 0.2.0 recordings and goldens byte-identical. Press **I** to record the
-sticks of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them.
+sticks and link state of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them. The
+`tx` and `link_loss` columns capture a transmitter switch and the **K** cut; files written before 0.3.0 have neither
+column and still play.
 
 ## Component library
 
@@ -206,9 +208,11 @@ The spec's sandbox example (`python/examples/sandbox.py`): run it from the repos
   slower signal has no record. `.to_csv(path)` and `.to_parquet(path)` export; `ofs.reader.to_dataframe(path)`
   reads any recording. Patterns: `*` matches any run of characters, `?` one; a pattern matching nothing names
   the signals it probably meant.
-- **Scripted sticks.** `sim.play_inputs("flips.csv")` plays a CSV with a `t_s` column (seconds from the call) and any
-  of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, sample-and-hold on the simulator's ticks; `set_sticks`
-  is refused while it plays, and a malformed file raises `ConfigError` naming each problem's line.
+- **Scripted sticks.** `sim.play_inputs("flips.csv")` plays a CSV with a `t_s` column (seconds from the
+  call) and any of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, plus optional `tx` and `link_loss` (0/1),
+  sample-and-hold on the simulator's ticks. At least one input column is required; a column a file leaves out keeps
+  its current value, and the last row holds after playback. `set_sticks` is refused while it plays, and a malformed
+  file raises `ConfigError` naming each problem's line.
 - **Betaflight's Blackbox.** The shipped quads log to SITL's virtual Blackbox; when a session ends its logs are
   copied into the logs directory (`sim.blackbox_files()`), ready for Blackbox Explorer. Disarm before the session
   ends for a complete log. (Enabling it changed the shipped diffs: an EEPROM made before M4c is refused at load

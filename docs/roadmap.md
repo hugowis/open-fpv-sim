@@ -37,7 +37,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 
 ### Inputs recording (`docs/superpowers/specs/2026-10-15-m5-radio-components-design.md` §6)
 - A replay is not the real-time flight: real-time timing, the SITL schedule and the link's seeded draws differ. The
-  CSV has no transmitter column, so a link cut (**K**) is not captured.
+  CSV's optional `tx` and `link_loss` columns carry the transmitter state and a **K** cut; a file written before
+  0.3.0 has neither column and still plays.
 - `Load` and `Unload` stop a running inputs recording and publish `inputs_recording_stopped`. A session that vanishes
   (its last watcher left, the server shut down) finishes the file without an event, so a client that tracks the
   recording state still resets it on a lost session, as the Godot game does.
