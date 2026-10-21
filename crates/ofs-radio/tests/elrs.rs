@@ -4,7 +4,8 @@ use ofs_core::{names, Bus, Scheduler, Wire};
 use ofs_radio::crsf::{stick_ticks, Decoder, Frame};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{
-    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
+    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
+    TELEMETRY_SLOT_DIVISOR,
 };
 use ofs_radio::receiver::ReceiverParams;
 use ofs_radio::telemetry::FcTelemetryHandle;
@@ -299,6 +300,29 @@ fn a_long_burst_failsafes_and_recovers() {
 }
 
 #[test]
+fn the_divisor_changes_only_the_slot_cadence() {
+    let run = |divisor| {
+        let mut params = LinkParams::ideal(500);
+        params.telemetry_slot_divisor = divisor;
+        let (mut s, uart, _telemetry_in, _fc) = rig(params, 7);
+        packets(&mut s, 100);
+        (rc(&frames(&uart)).len(), get(&s, names::RADIO_LQ), get(&s, names::RADIO_DOWNLINK_LQ))
+    };
+    let at_four = run(TELEMETRY_SLOT_DIVISOR);
+    assert_eq!(at_four, (100, 100.0, 100.0), "no loss: every uplink packet arrives and the downlink hears them all");
+    assert_eq!(run(8), at_four, "a slower telemetry ratio leaves control and both LQ figures alone");
+}
+
+#[test]
+#[should_panic(expected = "telemetry_slot_divisor")]
+fn the_elrs_constructor_refuses_an_invalid_divisor() {
+    let mut params = LinkParams::ideal(500);
+    params.telemetry_slot_divisor = 3;
+    let mut bus = Bus::new();
+    let _ = ElrsLink::new(params, 1, &mut bus);
+}
+
+#[test]
 fn the_sticks_reach_the_receiver_after_latency_packets() {
     let (mut s, uart, _telemetry_in, _fc) = rig(LinkParams { latency_packets: 5, ..LinkParams::ideal(500) }, 1);
     packets(&mut s, 2); // prime the pipeline with the neutral sticks
@@ -356,19 +380,22 @@ mod fc_telemetry {
     }
 
     #[test]
-    fn a_frame_flies_every_fourth_downlink_packet_and_updates_the_handle() {
-        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
-        telemetry_in.write(&battery_frame(24.6, 3.2, 0, 7));
-        packets(&mut s, 3);
-        assert_eq!(fc.latest().frame_count, 0, "no slot before the 4th packet");
-        packets(&mut s, 1);
-        let t = fc.latest();
-        assert_eq!(t.frame_count, 1);
-        assert!((t.battery_v - 24.6).abs() < 1e-9, "{:?}", t);
-        assert!((t.battery_a - 3.2).abs() < 1e-9, "{:?}", t);
-        assert_eq!(t.battery_mah, 7.0, "the u24's low byte rode through: {:?}", t);
-        packets(&mut s, 4);
-        assert_eq!(fc.latest().frame_count, 1, "the FIFO is empty: later slots fly idle");
+    fn a_frame_flies_on_every_configured_slot_and_updates_the_handle() {
+        for divisor in [1, 4, 8] {
+            let mut params = LinkParams::ideal(500);
+            params.telemetry_slot_divisor = divisor;
+            let (mut s, _uart, telemetry_in, fc) = rig(params, 1);
+            for i in 0..8 {
+                telemetry_in.write(&battery_frame(24.6, 3.2, 0, i));
+            }
+            packets(&mut s, 8);
+            let slots = 8 / divisor;
+            let t = fc.latest();
+            assert_eq!(t.frame_count, u64::from(slots), "8 heard packets, one slot every {divisor}: {:?}", t);
+            assert!((t.battery_v - 24.6).abs() < 1e-9, "{:?}", t);
+            assert!((t.battery_a - 3.2).abs() < 1e-9, "{:?}", t);
+            assert_eq!(t.battery_mah, f64::from(slots - 1), "the u24's low byte rode through: {:?}", t);
+        }
     }
 
     #[test]

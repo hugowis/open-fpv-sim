@@ -2,7 +2,7 @@ use glam::DVec3;
 use ofs_core::{names, Bus, Scheduler, Wire};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::crsf::{self, Decoder, Frame};
-use ofs_radio::elrs::NO_SIGNAL_RSSI_DBM;
+use ofs_radio::elrs::{NO_SIGNAL_RSSI_DBM, TELEMETRY_SLOT_DIVISOR};
 use ofs_radio::fixed::{FixedLink, FixedParams, NOMINAL_RSSI_DBM};
 use ofs_radio::joystick::JoystickHandset;
 use ofs_radio::parts::RfFrontEnd;
@@ -13,7 +13,14 @@ const BASE_HZ: u32 = 8000;
 const TICKS_PER_PACKET: u32 = BASE_HZ / 500;
 
 fn params() -> FixedParams {
-    FixedParams { packet_rate_hz: 500, latency_packets: 1, loss_fraction: 0.0, burst_on_s: 0.0, burst_off_s: 0.0 }
+    FixedParams {
+        packet_rate_hz: 500,
+        latency_packets: 1,
+        telemetry_slot_divisor: TELEMETRY_SLOT_DIVISOR,
+        loss_fraction: 0.0,
+        burst_on_s: 0.0,
+        burst_off_s: 0.0,
+    }
 }
 
 /// The scheduler, the receiver's UART output, the flight controller's telemetry input and the handset's telemetry.
@@ -129,20 +136,31 @@ fn the_radio_faults_apply_to_a_fixed_link_too() {
 }
 
 #[test]
-fn a_telemetry_slot_flies_every_fourth_heard_packet() {
-    let (mut s, _uart, telemetry_in, handle) = rig_full(params(), 1);
+fn a_telemetry_slot_flies_on_every_configured_slot() {
     // A CRSF battery frame: 24.6 V, 3.2 A, the mAh bytes carrying an index, 100 % remaining.
     let mut battery = vec![0xC8, 10, crsf::FRAMETYPE_BATTERY_SENSOR, 0, 246, 0, 32, 0, 0, 7, 100];
     battery.push(crsf::crc8_dvb_s2(&battery[2..]));
-    for _ in 0..8 {
-        telemetry_in.write(&battery);
+    let mut counts = Vec::new();
+    for divisor in [1, 4, 8] {
+        let (mut s, _uart, telemetry_in, handle) = rig_full(FixedParams { telemetry_slot_divisor: divisor, ..params() }, 1);
+        for _ in 0..8 {
+            telemetry_in.write(&battery);
+        }
+        for _ in 0..(8 * TICKS_PER_PACKET) {
+            s.step().unwrap();
+        }
+        let t = handle.latest();
+        counts.push(t.frame_count);
+        assert!((t.battery_v - 24.6).abs() < 1e-9 && (t.battery_a - 3.2).abs() < 1e-9, "{t:?}");
     }
-    for _ in 0..(8 * TICKS_PER_PACKET) {
-        s.step().unwrap();
-    }
-    let t = handle.latest();
-    assert_eq!(t.frame_count, 2, "8 heard packets: slots on the 4th and 8th");
-    assert!((t.battery_v - 24.6).abs() < 1e-9 && (t.battery_a - 3.2).abs() < 1e-9, "{t:?}");
+    assert_eq!(counts, vec![8, 2, 1], "8 heard packets: a slot every 1, 4 and 8 packets; 8 halves 4 exactly");
+}
+
+#[test]
+#[should_panic(expected = "telemetry_slot_divisor")]
+fn the_fixed_constructor_refuses_an_invalid_divisor() {
+    let mut bus = Bus::new();
+    let _ = FixedLink::new(FixedParams { telemetry_slot_divisor: 3, ..params() }, 1, &mut bus);
 }
 
 #[test]

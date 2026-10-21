@@ -8,7 +8,7 @@ use ofs_core::{Bus, StepCtx};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::elrs::{NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM, TELEMETRY_SLOT_DIVISOR};
+use crate::elrs::{valid_telemetry_slot_divisor, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM};
 use crate::parts::{Channels, Delivery, FaultSignals, Link, LinkReport, LqWindow, TxFrame};
 
 pub const MODEL_NAME: &str = "radio.fixed";
@@ -22,6 +22,9 @@ pub struct FixedParams {
     pub packet_rate_hz: u32,
     /// Packets between the handset sampling the sticks and the receiver outputting them.
     pub latency_packets: u32,
+    /// One downlink packet in this many carries a telemetry frame; see
+    /// [`TELEMETRY_SLOT_DIVISOR`](crate::elrs::TELEMETRY_SLOT_DIVISOR).
+    pub telemetry_slot_divisor: u32,
     /// The share of packets lost, in [0, 1].
     pub loss_fraction: f64,
     /// Every packet is lost for `burst_on_s`, then delivered (subject to `loss_fraction`) for `burst_off_s`,
@@ -42,6 +45,11 @@ pub struct FixedLink {
 
 impl FixedLink {
     pub fn new(params: FixedParams, seed: u64, bus: &mut Bus) -> Self {
+        debug_assert!(
+            valid_telemetry_slot_divisor(params.telemetry_slot_divisor),
+            "telemetry_slot_divisor must be one of 1, 2, 4, 8, 16, 32, 64, 128 (got {})",
+            params.telemetry_slot_divisor
+        );
         assert!(params.packet_rate_hz > 0, "packet_rate_hz must be positive");
         assert!((0.0..=1.0).contains(&params.loss_fraction), "loss_fraction must be in [0, 1]");
         assert!(
@@ -85,11 +93,11 @@ impl Link for FixedLink {
         let transmitting = tx.transmitting && !self.faults.link_cut(bus);
         let received = transmitting && draw >= p.loss_fraction && !in_burst && self.faults.survives(bus, ctx.time_s, fault_draw);
 
-        // The downlink is heard whenever the uplink was: one packet in TELEMETRY_SLOT_DIVISOR carries a frame.
+        // The downlink is heard whenever the uplink was: one packet in `telemetry_slot_divisor` carries a frame.
         let mut downlink_slot = false;
         if transmitting {
             self.downlink_packets += 1;
-            downlink_slot = received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0;
+            downlink_slot = received && self.downlink_packets % p.telemetry_slot_divisor == 0;
         }
 
         let lq = self.history.push(received);

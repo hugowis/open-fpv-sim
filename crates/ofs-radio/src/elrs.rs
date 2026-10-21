@@ -37,6 +37,11 @@ pub const PER_SLOPE_DB: f64 = 1.0;
 /// estimate: 125 slots/s at the 500 Hz packet rate).
 pub const TELEMETRY_SLOT_DIVISOR: u32 = 4;
 
+/// The telemetry ratios a link accepts: 1, 2, 4, ..., 128. `0` (off) is not modelled.
+pub(crate) fn valid_telemetry_slot_divisor(divisor: u32) -> bool {
+    matches!(divisor, 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128)
+}
+
 /// The RSSI at which half the packets decode, by packet rate: ExpressLRS's published sensitivities for its
 /// 2.4 GHz LoRa modes.
 pub fn sensitivity_dbm(packet_rate_hz: u32) -> Option<f64> {
@@ -71,6 +76,8 @@ pub fn packet_error_rate(rssi_dbm: f64, sensitivity_dbm: f64) -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkParams {
     pub packet_rate_hz: u32,
+    /// One downlink packet in this many carries a telemetry frame; see [`TELEMETRY_SLOT_DIVISOR`].
+    pub telemetry_slot_divisor: u32,
     /// The ExpressLRS band: carrier, noise floor and the packet rates and sensitivities of its modes.
     pub band: Band,
     /// Packets between the handset sampling the sticks and the receiver outputting them.
@@ -96,6 +103,7 @@ impl LinkParams {
         let dipole = Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization: Polarization::Linear, axis: DVec3::NEG_Z };
         Self {
             packet_rate_hz,
+            telemetry_slot_divisor: TELEMETRY_SLOT_DIVISOR,
             band: Band::G2_4,
             latency_packets: 1,
             tx_power_mw: 250.0,
@@ -136,6 +144,11 @@ pub struct ElrsLink {
 
 impl ElrsLink {
     pub fn new(params: LinkParams, seed: u64, bus: &mut Bus) -> Self {
+        debug_assert!(
+            valid_telemetry_slot_divisor(params.telemetry_slot_divisor),
+            "telemetry_slot_divisor must be one of 1, 2, 4, 8, 16, 32, 64, 128 (got {})",
+            params.telemetry_slot_divisor
+        );
         assert!(!params.quad_antennas.is_empty() && !params.handset_antennas.is_empty(), "both ends need at least one antenna");
         assert!(
             params.band.sensitivity_dbm(params.packet_rate_hz).is_some(),
@@ -261,11 +274,11 @@ impl Link for ElrsLink {
         let downlink_draw: f64 = self.rng.gen();
         let downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink[downlink_active], sensitivity);
 
-        // One downlink packet in TELEMETRY_SLOT_DIVISOR carries a telemetry frame, if it is heard.
+        // One downlink packet in `telemetry_slot_divisor` carries a telemetry frame, if it is heard.
         let mut downlink_slot = false;
         if transmitting {
             self.downlink_packets += 1;
-            downlink_slot = downlink_received && self.downlink_packets % TELEMETRY_SLOT_DIVISOR == 0;
+            downlink_slot = downlink_received && self.downlink_packets % self.params.telemetry_slot_divisor == 0;
         }
 
         // Link quality over the last 100 packets, per direction; silence on loss; Betaflight fails safe.
