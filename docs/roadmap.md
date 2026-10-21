@@ -26,8 +26,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 ### Radio (`docs/research/elrs-link.md`)
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
   a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
-- Telemetry slots are a fixed 1:4 ratio of the downlink (`TELEMETRY_SLOT_DIVISOR`), and the shared RC/telemetry
-  UART has no contention model.
+- Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one
+  ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model.
 - The `RadioLoss` fault acts on the uplink only.
 - Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
   noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).

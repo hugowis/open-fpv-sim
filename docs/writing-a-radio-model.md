@@ -34,6 +34,12 @@ pub trait Link: Send {
   `radio_link_loss`, `radio_loss` and `burst_loss` work on your link for free. `LqWindow` gives the last-100-packets
   link quality ExpressLRS reports.
 
+Both shipped links take `[radio] telemetry_slot_divisor`: one downlink packet in that many carries a telemetry frame
+when heard. It accepts 1, 2, 4, 8, 16, 32, 64 or 128, defaults to 4, and applies one value to every band and packet
+rate — there is no off value and no per-mode ratio. It changes only the telemetry slot cadence, not packet loss,
+uplink delivery or downlink LQ. A new link should take the same field (the vehicle passes it in) and use it for
+`downlink_slot`. The default 4 keeps 0.2.0 recordings and the radio goldens byte-identical.
+
 ## Wiring it in
 
 1. Add a module (`crates/ofs-radio/src/yours.rs`) and `pub mod yours;` in `crates/ofs-radio/src/lib.rs`.

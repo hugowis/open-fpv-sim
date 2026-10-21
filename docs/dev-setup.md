@@ -253,6 +253,12 @@ written before M5 load unchanged and fly byte-identically: the goldens (`crates/
 goldens on each when you touch the radio — the Linux ones in WSL; the macOS files come from the survey's
 `write_goldens` input).
 
+Both link kinds share `[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a
+telemetry frame when heard. It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no 0 (off), and one value applies
+to every band and packet rate. It changes only the telemetry slot cadence — packet loss, uplink delivery and downlink
+LQ stay the same.
+The default 4 keeps 0.2.0 recordings and the radio goldens byte-identical.
+
 **Recording a live flight:** `StartInputsRecording` writes the session's sticks to
 `<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick changes, in `play_inputs`' format) and
 `StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and

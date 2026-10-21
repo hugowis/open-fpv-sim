@@ -26,8 +26,8 @@ Every constant below carries its provenance: **ExpressLRS published**, **physics
    `link_stats_interval_packets` received packets (default 50). When packets stop the receiver goes silent, as
    ExpressLRS does by default, and Betaflight's own failsafe takes over.
 5. The downlink is the same path reversed, the receiver transmitting at 100 mW with its own fader and its own
-   100-packet window; it feeds the LINK_STATISTICS downlink fields, and every 4th downlink packet carries one
-   of the flight controller's telemetry frames (see Downlink telemetry below).
+   100-packet window; it feeds the LINK_STATISTICS downlink fields, and every `telemetry_slot_divisor`th downlink
+   packet (default 4) carries one of the flight controller's telemetry frames (see Downlink telemetry below).
 
 ## What the 2.4 GHz link shares with the 5.8 GHz video link
 
@@ -107,13 +107,14 @@ the receiver's UART (CRSF is half-duplex: one UART, one wire) is tapped on its w
 offered to the downlink; the receiver flies the frames to the handset in slots, and the decoded values reach clients
 as `State.fc_telemetry` and the game's HUD battery line.
 
-- **Slots.** Every 4th downlink packet carries one telemetry frame (`TELEMETRY_SLOT_DIVISOR` = 4 in
-  `crates/ofs-radio/src/elrs.rs`), so 125 slots/s at the 500 Hz packet rate (**estimated**: real ExpressLRS
-  negotiates its telemetry ratio; the fixed 1:4 stands in for it — nothing is measured). Frames offered while no
-  slot is due wait in a 16-frame FIFO (`TELEMETRY_FIFO_LEN`); when it is full the **oldest frame is dropped**, stale
-  data yielding to fresh like a radio that cannot retransmit. The scheduling draws no new random numbers — the
-  queue is a pure function of the frames offered and the slots flown, so lockstep runs stay bit-identical. With the
-  link down no slots fly and the values age out; an open-loop quad produces no frames at all.
+- **Slots.** Every `[radio] telemetry_slot_divisor`th downlink packet carries one telemetry frame (default 4;
+  `TELEMETRY_SLOT_DIVISOR` in `crates/ofs-radio/src/elrs.rs`), so the default gives 125 slots/s at the 500 Hz packet
+  rate (**estimated**: real ExpressLRS negotiates its telemetry ratio; this one value stands in for it — nothing is
+  measured). It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no off value and no per-band or per-mode ratio.
+  Frames offered while no slot is due wait in a 16-frame FIFO (`TELEMETRY_FIFO_LEN`); when it is full the **oldest
+  frame is dropped**, stale data yielding to fresh like a radio that cannot retransmit. The scheduling draws no new
+  random numbers — the queue is a pure function of the frames offered and the slots flown, so lockstep runs stay
+  bit-identical. With the link down no slots fly and the values age out; an open-loop quad produces no frames at all.
 - **Payload encodings** (pinned against Betaflight's `telemetry/crsf.c`, whose units win over the CRSF
   specification's):
 

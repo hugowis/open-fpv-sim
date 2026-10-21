@@ -125,8 +125,11 @@ With `OFS_SITL_LAUNCH` set (see "With real Betaflight" above), the game starts B
 simulated radio link.
 
 The radio between the handset and Betaflight is three swappable parts (a handset, a link, a receiver): the quad file's
-`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Press **I** to record
-the sticks of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them.
+`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Both link kinds read
+`[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a telemetry frame when heard.
+It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no off value, and one value covers every band and packet
+rate. It changes telemetry cadence, not loss. The default keeps 0.2.0 recordings and goldens byte-identical. Press **I** to record the
+sticks of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them.
 
 ## Component library
 
