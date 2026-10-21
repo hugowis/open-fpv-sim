@@ -16,7 +16,7 @@ use ofs_fc::open_loop::OpenLoopFc;
 use ofs_fc::stabilizer::Stabilizer;
 use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
-use crate::inputs::{tick_at, Inputs, Stick};
+use crate::inputs::{tick_at, Column, Inputs, Stick};
 use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
 use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
@@ -1438,13 +1438,15 @@ impl Vehicle {
         let Some(p) = self.playback.as_mut() else { return };
         let bus = self.scheduler.bus_mut();
         while p.next < p.ticks.len() && p.ticks[p.next] <= now {
-            for (stick, v) in p.inputs.columns.iter().zip(&p.inputs.rows[p.next].1) {
-                let signal = match stick {
-                    Stick::Roll => self.h.roll,
-                    Stick::Pitch => self.h.pitch,
-                    Stick::Yaw => self.h.yaw,
-                    Stick::Throttle => self.h.throttle,
-                    Stick::Aux(i) => self.h.aux[*i],
+            for (column, v) in p.inputs.columns.iter().zip(&p.inputs.rows[p.next].1) {
+                let signal = match column {
+                    Column::Stick(Stick::Roll) => self.h.roll,
+                    Column::Stick(Stick::Pitch) => self.h.pitch,
+                    Column::Stick(Stick::Yaw) => self.h.yaw,
+                    Column::Stick(Stick::Throttle) => self.h.throttle,
+                    Column::Stick(Stick::Aux(i)) => self.h.aux[*i],
+                    // Playback of `tx` and `link_loss` lands in task 4.4.
+                    Column::Transmitter | Column::LinkLoss => continue,
                 };
                 bus.set(signal, *v);
             }
