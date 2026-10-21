@@ -56,6 +56,7 @@ fn reference_quad_loads_and_validates() {
     assert_eq!(cfg.schema_version, 5);
     assert_eq!(cfg.radio.kind, RadioKind::Elrs);
     assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
+    assert_eq!(cfg.radio.telemetry_slot_divisor, 4);
     assert_eq!(cfg.frame.motor_positions_frd_m.len(), 4);
     assert_eq!(cfg.motors.len(), 4, "the single motor part broadcasts to every motor");
     assert_eq!(cfg.motors[0].pole_pairs, 7);
@@ -717,6 +718,37 @@ fn tx_power_must_be_a_real_handset_power() {
     let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 300")).unwrap_err();
     assert!(err.to_string().contains("radio.tx_power_mw"), "{err}");
     assert!(shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 10")).is_ok());
+}
+
+#[test]
+fn telemetry_slot_divisor_defaults_to_four_and_accepts_the_listed_ratios() {
+    assert_eq!(shipped_with(|_| {}).unwrap().radio.telemetry_slot_divisor, 4);
+    for kind in ["elrs", "fixed"] {
+        let cfg = shipped_with(|t| {
+            *t = t.replace("kind = \"elrs\"", &format!("kind = \"{kind}\"\ntelemetry_slot_divisor = 8"));
+        })
+        .unwrap();
+        assert_eq!(cfg.radio.telemetry_slot_divisor, 8, "{kind}");
+    }
+}
+
+#[test]
+fn telemetry_slot_divisor_must_be_a_listed_ratio() {
+    for value in [3, 0, 256, 129] {
+        let err = shipped_with(|t| {
+            *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\ntelemetry_slot_divisor = {value}"));
+        })
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("radio.telemetry_slot_divisor"), "{value}: {message}");
+        assert!(message.contains("1, 2, 4, 8, 16, 32, 64 or 128"), "{value}: {message}");
+        assert!(message.contains(&format!("(got {value})")), "{value}: {message}");
+    }
+    let err = shipped_with(|t| {
+        *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"\ntelemetry_slot_divisor = 3");
+    })
+    .unwrap_err();
+    assert!(err.to_string().contains("radio.telemetry_slot_divisor"), "the fixed link validates it too: {err}");
 }
 
 #[test]

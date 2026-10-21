@@ -430,6 +430,10 @@ pub struct RadioSection {
     /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second
     /// (`kind = "fixed"`: any rate that divides the base rate).
     pub packet_rate_hz: u32,
+    /// One downlink packet in this many carries a telemetry frame (an ExpressLRS telemetry ratio); 1, 2, 4, ..., 128.
+    /// Off is not modelled.
+    #[serde(default = "default_telemetry_slot_divisor")]
+    pub telemetry_slot_divisor: u32,
     /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
     pub uart: u8,
     /// `kind = "elrs"` only: the ExpressLRS band, `"2g4"` (default) or `"900"`; it fixes which packet rates are valid.
@@ -452,6 +456,10 @@ pub struct RadioSection {
 
 fn default_latency_packets() -> u32 {
     1
+}
+
+fn default_telemetry_slot_divisor() -> u32 {
+    4
 }
 
 fn default_tx_power_mw() -> u32 {
@@ -1146,6 +1154,14 @@ impl QuadConfig {
             }
         }
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
+        c.check(
+            [1, 2, 4, 8, 16, 32, 64, 128].contains(&r.telemetry_slot_divisor),
+            "radio.telemetry_slot_divisor",
+            format!(
+                "must be one of 1, 2, 4, 8, 16, 32, 64 or 128 (got {})",
+                r.telemetry_slot_divisor
+            ),
+        );
         c.check(
             matches!(r.tx_power_mw, 10 | 25 | 50 | 100 | 250 | 500 | 1000),
             "radio.tx_power_mw",
