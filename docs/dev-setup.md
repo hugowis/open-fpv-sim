@@ -206,17 +206,19 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 8**: the faults' wire shapes live in the `Fault` oneof of
-`proto/ofs/v1/sim.proto`, the injectable Python dataclasses in `python/ofs/faults.py` (`sim.inject(...)` /
-`sim.clear_faults()`), and the models, constants and their estimate status in `docs/research/faults.md` —
+The client and server speak **protocol 13**. The fault catalog arrived in protocol 8, and its wire shapes live in
+the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
+(`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
+`docs/research/faults.md` —
 regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 12**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 13**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
-`HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), and the stabilizer flags
-`LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b).
+`HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
+`LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), and the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
+protocol 13).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

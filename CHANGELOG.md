@@ -5,6 +5,13 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Downlink telemetry loss
+#### Added
+- **`DownlinkLoss(fraction)`** drops `fraction` of the handset's telemetry packets while leaving the uplink, sticks
+  and failsafe untouched. Protocol 13 adds `Fault.downlink_loss` (oneof field 10, `at_s` stays 9) and
+  `ofs.faults.DownlinkLoss`; default MCAP recordings leave the new control signal out, so a 0.2.0 no-fault
+  recording stays byte-identical.
+
 ### M9c: macOS (#68)
 #### Added
 - **macOS survey and support (best effort).** Betaflight SITL builds and runs on macOS with `third_party/betaflight/ofs-sitl-macos.patch`

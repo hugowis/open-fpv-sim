@@ -162,15 +162,16 @@ are the worked example of the migration.
 
 ## The fault catalog
 
-Scripts can break the aircraft in the ways real aircraft break: eight faults, injectable mid-flight from Python
+Scripts can break the aircraft in the ways real aircraft break: nine faults, injectable mid-flight from Python
 or gRPC, each raising `fault_injected` / `fault_cleared` events and all cleared by `clear_faults()`. Fault
-randomness draws from its own stream, so a fault-inactive run stays bit-identical to a fault-free one. The
+randomness draws from dedicated streams, so a fault-inactive run stays bit-identical to a fault-free one. The
 mechanisms, constants and their estimate status are in `docs/research/faults.md`.
 
 | Fault | Meaning |
 |---|---|
 | `RadioLinkLoss()` | every uplink packet is lost: the receiver goes silent, Betaflight fails safe |
 | `RadioLoss(fraction)` | an extra per-packet uplink loss probability on top of the link model's own |
+| `DownlinkLoss(fraction)` | an extra per-packet downlink loss probability: the handset loses telemetry, the uplink and sticks are untouched |
 | `BurstLoss(on_ms, off_ms)` | the uplink dies for `on_ms`, delivers for `off_ms`, repeating from session start |
 | `MotorFailure(motor, scale)` | motor `motor` makes `scale` of its torque and current; 0 = dead, coasting down through prop drag |
 | `PropDamage(prop, thrust_scale, imbalance_kgm)` | the prop loses thrust and torque and gains `imbalance_kgm` of airframe vibration |
