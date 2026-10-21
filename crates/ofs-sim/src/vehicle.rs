@@ -1457,31 +1457,55 @@ impl Vehicle {
             let (_, fault) = self.pending_faults.remove(0);
             self.apply_fault(fault, true).expect("validated when scheduled");
         }
-        let Some(p) = self.playback.as_mut() else { return };
-        let bus = self.scheduler.bus_mut();
-        while p.next < p.ticks.len() && p.ticks[p.next] <= now {
-            for (column, v) in p.inputs.columns.iter().zip(&p.inputs.rows[p.next].1) {
-                let signal = match column {
-                    Column::Stick(Stick::Roll) => self.h.roll,
-                    Column::Stick(Stick::Pitch) => self.h.pitch,
-                    Column::Stick(Stick::Yaw) => self.h.yaw,
-                    Column::Stick(Stick::Throttle) => self.h.throttle,
-                    Column::Stick(Stick::Aux(i)) => self.h.aux[*i],
-                    // Playback of `tx` and `link_loss` lands in task 4.4.
-                    Column::Transmitter | Column::LinkLoss => continue,
-                };
-                bus.set(signal, *v);
+        while let Some((columns, values)) = self.playback.as_ref().and_then(|p| {
+            (p.next < p.ticks.len() && p.ticks[p.next] <= now)
+                .then(|| (p.inputs.columns.clone(), p.inputs.rows[p.next].1.clone()))
+        }) {
+            let mut transmitter = None;
+            let mut link_loss = None;
+            {
+                let h = &self.h;
+                let bus = self.scheduler.bus_mut();
+                for (column, v) in columns.iter().zip(&values) {
+                    match column {
+                        Column::Stick(stick) => {
+                            let signal = match stick {
+                                Stick::Roll => h.roll,
+                                Stick::Pitch => h.pitch,
+                                Stick::Yaw => h.yaw,
+                                Stick::Throttle => h.throttle,
+                                Stick::Aux(i) => h.aux[*i],
+                            };
+                            bus.set(signal, *v);
+                        }
+                        Column::Transmitter => transmitter = Some(*v > 0.5),
+                        Column::LinkLoss => link_loss = Some(*v > 0.5),
+                    }
+                }
+                // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the
+                // bus's now, or the next `set_sticks` to the values from before the file would look like no change.
+                let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
+                for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
+                    *slot = bus.get(signal).to_bits();
+                }
             }
-            p.next += 1;
-            // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the bus's
-            // now, or the next `set_sticks` to the values from before the file would look like no change.
-            let h = &self.h;
-            let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
-            for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
-                *slot = bus.get(signal).to_bits();
+            if let Some(p) = self.playback.as_mut() {
+                p.next += 1;
+            }
+            // The actions go through their own setters after the bus and playback borrows are gone. A row that
+            // repeats the bus state adds nothing (and, for `tx`, no journal entry).
+            if let Some(on) = transmitter {
+                if (self.scheduler.bus().get(self.h.tx_enabled) > 0.5) != on {
+                    self.set_transmitter(on);
+                }
+            }
+            if let Some(loss) = link_loss {
+                if (self.scheduler.bus().get(self.h.fault_radio_loss) > 0.5) != loss {
+                    self.apply_fault(Fault::RadioLinkLoss, loss).expect("RadioLinkLoss is always valid");
+                }
             }
         }
-        if p.next == p.ticks.len() {
+        if self.playback.as_ref().is_some_and(|p| p.next == p.ticks.len()) {
             self.finished_inputs = self.playback.take().map(|p| p.inputs.name);
         }
     }

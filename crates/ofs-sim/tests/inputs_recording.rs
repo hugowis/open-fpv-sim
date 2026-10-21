@@ -163,6 +163,43 @@ fn other_faults_add_no_inputs_rows() {
 }
 
 #[test]
+fn a_recorded_flight_replays_its_transmitter_and_link_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flight.csv");
+    let signals = |v: &Vehicle| {
+        (
+            v.signal("rc.roll"),
+            v.signal("rc.throttle"),
+            v.signal("radio.tx_enabled"),
+            v.signal("fault.radio.link_loss"),
+        )
+    };
+    let mut original = vehicle();
+    original.start_inputs_recording(&path).unwrap();
+    original.set_sticks(&sticks(0.4, 0.2)).unwrap();
+    original.run_for(0.1).unwrap();
+    original.set_transmitter(false);
+    let at_tx_off = signals(&original);
+    original.run_for(0.1).unwrap();
+    original.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    let at_cut = signals(&original);
+    original.run_for(0.1).unwrap();
+    let expected_digest = original.digest();
+    original.stop_inputs_recording().unwrap();
+
+    let csv = std::fs::read_to_string(&path).unwrap();
+    let mut replay = vehicle();
+    replay.play_inputs(inputs::parse("recorded.csv", &csv).unwrap()).unwrap();
+    replay.run_for(0.1).unwrap();
+    assert_eq!(signals(&replay), at_tx_off, "the transmitter row lands on its tick");
+    replay.run_for(0.1).unwrap();
+    assert_eq!(signals(&replay), at_cut, "the link cut lands on its tick");
+    assert_eq!(replay.active_fault_names(), ["radio_link_loss"]);
+    replay.run_for(0.1).unwrap();
+    assert_eq!(replay.digest(), expected_digest, "the whole bus matches at the end");
+}
+
+#[test]
 fn recordings_start_once_stop_once_and_refuse_an_existing_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sticks.csv");
