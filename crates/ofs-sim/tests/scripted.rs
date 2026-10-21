@@ -62,6 +62,23 @@ fn a_scheduled_fault_is_validated_now_and_a_passed_time_is_refused() {
 }
 
 #[test]
+fn a_scheduled_downlink_loss_lands_on_its_tick_and_names_itself() {
+    let mut v = vehicle();
+    v.schedule_fault(Fault::DownlinkLoss { fraction: 1.0 }, 0.05).unwrap();
+    v.run_for(0.049_875).unwrap(); // tick 399
+    assert!(v.active_fault_names().is_empty(), "not yet");
+    v.step_ticks(1).unwrap(); // 0.05 s: the fault is on
+    assert_eq!(v.active_fault_names(), ["downlink_loss"]);
+    v.run_for(0.25).unwrap();
+    assert_eq!(v.state().radio.downlink_lq_pct, 0.0);
+    assert_eq!(v.state().radio.lq_pct, 100.0);
+    v.clear_faults();
+    v.run_for(0.25).unwrap();
+    assert!(v.active_fault_names().is_empty());
+    assert_eq!(v.state().radio.downlink_lq_pct, 100.0);
+}
+
+#[test]
 fn clearing_faults_drops_the_scheduled_ones() {
     let mut v = vehicle();
     v.schedule_fault(dead_motor_2(), 0.2).unwrap();

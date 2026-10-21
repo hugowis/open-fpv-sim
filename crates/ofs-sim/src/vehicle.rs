@@ -212,6 +212,10 @@ pub enum Fault {
     RadioLoss {
         fraction: f64,
     },
+    /// The handset loses `fraction` of the downlink packets, `fraction` in [0, 1]; uplink control is untouched.
+    DownlinkLoss {
+        fraction: f64,
+    },
     /// Every uplink packet is lost for `on_s`, then the link delivers normally for `off_s`, repeating.
     BurstLoss {
         on_s: f64,
@@ -253,6 +257,7 @@ impl Fault {
         match self {
             Fault::RadioLinkLoss => "radio_link_loss",
             Fault::RadioLoss { .. } => "radio_loss",
+            Fault::DownlinkLoss { .. } => "downlink_loss",
             Fault::BurstLoss { .. } => "burst_loss",
             Fault::MotorFailure { .. } => "motor_failure",
             Fault::PropDamage { .. } => "prop_damage",
@@ -384,6 +389,8 @@ struct Handles {
     fault_radio_loss: Signal<f64>,
     /// Uplink loss fraction 0..1 — written by set_fault's RadioLoss arm; the ELRS model reads it per packet.
     fault_radio_loss_fraction: Signal<f64>,
+    /// Downlink loss fraction 0..1 — written by set_fault's DownlinkLoss arm; the radio models read it per packet.
+    fault_radio_downlink_loss_fraction: Signal<f64>,
     /// Burst window edges, s — written by set_fault's BurstLoss arm (Task 4 consumes).
     fault_burst_on: Signal<f64>,
     fault_burst_off: Signal<f64>,
@@ -441,6 +448,7 @@ impl Handles {
             rssi: bus.signal(names::RADIO_RSSI),
             fault_radio_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
             fault_radio_loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
+            fault_radio_downlink_loss_fraction: bus.signal(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION),
             fault_burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
             fault_burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
             fault_battery_r_offset: bus.signal(names::FAULT_BATTERY_R_OFFSET_OHM),
@@ -1197,6 +1205,7 @@ impl Vehicle {
         bus.set(h.tx_enabled, 1.0);
         bus.set(h.fault_radio_loss, 0.0);
         bus.set(h.fault_radio_loss_fraction, 0.0);
+        bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
         bus.set(h.fault_burst_on, 0.0);
         for _ in 0..30 {
             if self.run_for(0.1).is_err() || !self.firmware_armed() {
@@ -1239,6 +1248,13 @@ impl Vehicle {
             Fault::RadioLoss { fraction } => {
                 if !(0.0..=1.0).contains(fraction) {
                     return Err(SimError::InvalidArgument(format!("radio loss fraction must be in [0, 1], got {fraction}")));
+                }
+            }
+            Fault::DownlinkLoss { fraction } => {
+                if !(0.0..=1.0).contains(fraction) {
+                    return Err(SimError::InvalidArgument(format!(
+                        "downlink loss fraction must be in [0, 1], got {fraction}"
+                    )));
                 }
             }
             Fault::BurstLoss { on_s, off_s } => {
@@ -1317,6 +1333,9 @@ impl Vehicle {
         match &fault {
             Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
             Fault::RadioLoss { fraction } => b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 }),
+            Fault::DownlinkLoss { fraction } => {
+                b.set(self.h.fault_radio_downlink_loss_fraction, if active { *fraction } else { 0.0 })
+            }
             Fault::BurstLoss { on_s, off_s } => {
                 let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
                 b.set(self.h.fault_burst_on, on);
@@ -1456,8 +1475,17 @@ impl Vehicle {
     /// The active faults' names, in the spec table's order: the event stream is deterministic regardless of
     /// injection order.
     pub fn active_fault_names(&self) -> Vec<String> {
-        const ORDER: [&str; 8] =
-            ["radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference"];
+        const ORDER: [&str; 9] = [
+            "radio_link_loss",
+            "radio_loss",
+            "downlink_loss",
+            "burst_loss",
+            "motor_failure",
+            "prop_damage",
+            "weak_cell",
+            "gyro_fault",
+            "vtx_interference",
+        ];
         let mut names = self.active_faults.clone();
         names.sort_by_key(|n| ORDER.iter().position(|o| o == n).unwrap_or(ORDER.len()));
         names
@@ -1473,6 +1501,7 @@ impl Vehicle {
         let bus = self.scheduler.bus_mut();
         bus.set(h.fault_radio_loss, 0.0);
         bus.set(h.fault_radio_loss_fraction, 0.0);
+        bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
         bus.set(h.fault_burst_on, 0.0);
         bus.set(h.fault_burst_off, 0.0);
         bus.set(h.fault_battery_r_offset, 0.0);
@@ -1881,6 +1910,7 @@ mod tests {
         }
         assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
         assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
         assert_eq!(b.get(vehicle.h.fault_battery_weak_cell), 0.0);
     }
 
@@ -1900,6 +1930,42 @@ mod tests {
     }
 
     #[test]
+    fn downlink_loss_drops_telemetry_but_not_the_control_link() {
+        let mut clean = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let mut faulted = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let sticks = Sticks { throttle: 0.5, ..Sticks::default() };
+        clean.set_sticks(&sticks).unwrap();
+        faulted.set_sticks(&sticks).unwrap();
+        clean.run_for(0.05).unwrap();
+        faulted.run_for(0.05).unwrap();
+        assert_eq!(clean.state().radio.downlink_lq_pct, 100.0);
+        faulted.set_fault(Fault::DownlinkLoss { fraction: 1.0 }, true).unwrap();
+        assert_eq!(faulted.scheduler.bus().get(faulted.h.fault_radio_downlink_loss_fraction), 1.0);
+        clean.run_for(0.25).unwrap();
+        faulted.run_for(0.25).unwrap();
+        assert_eq!(faulted.state().radio.downlink_lq_pct, 0.0, "the handset hears no telemetry");
+        assert_eq!(faulted.state().radio.lq_pct, 100.0, "the uplink is untouched");
+        assert_eq!(faulted.state().pos_ned_m, clean.state().pos_ned_m, "the sticks still fly the quad");
+        assert_eq!(faulted.state().motor_cmd, clean.state().motor_cmd);
+        faulted.clear_faults();
+        clean.run_for(0.25).unwrap();
+        faulted.run_for(0.25).unwrap();
+        assert_eq!(faulted.state().radio.downlink_lq_pct, 100.0, "clearing restores the downlink");
+        assert_eq!(faulted.state().pos_ned_m, clean.state().pos_ned_m);
+    }
+
+    #[test]
+    fn a_downlink_loss_fraction_outside_the_unit_interval_is_refused() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for fraction in [1.5, -0.1, f64::NAN] {
+            let err = vehicle.set_fault(Fault::DownlinkLoss { fraction }, true).unwrap_err();
+            assert!(err.to_string().contains("downlink loss fraction"), "{fraction}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+            assert_eq!(vehicle.scheduler.bus().get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
+        }
+    }
+
+    #[test]
     fn clear_faults_returns_every_fault_signal_to_its_identity() {
         // The honest re-join pin: a physically diverged trajectory cannot re-join a clean run's
         // digest, so the pin is exhaustive over the fault signals instead — every one of them.
@@ -1907,6 +1973,7 @@ mod tests {
         vehicle.set_fault(Fault::MotorFailure { motor: 1, scale: 0.0 }, true).unwrap();
         vehicle.set_fault(Fault::PropDamage { prop: 2, thrust_scale: 0.8, imbalance_kgm: 3.0e-4 }, true).unwrap();
         vehicle.set_fault(Fault::RadioLoss { fraction: 0.7 }, true).unwrap();
+        vehicle.set_fault(Fault::DownlinkLoss { fraction: 0.7 }, true).unwrap();
         vehicle.set_fault(Fault::BurstLoss { on_s: 1.0, off_s: 0.5 }, true).unwrap();
         vehicle.set_fault(Fault::GyroFault { bias_radps: DVec3::new(0.1, 0.0, 0.0), noise_scale: 2.0 }, true).unwrap();
         vehicle.set_fault(Fault::WeakCell { cell: 3, r_offset_ohm: 0.01, v_offset_v: 0.1 }, true).unwrap();
@@ -1920,6 +1987,7 @@ mod tests {
         }
         assert_eq!(b.get(vehicle.h.fault_radio_loss), 0.0);
         assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
         assert_eq!(b.get(vehicle.h.fault_burst_on), 0.0);
         assert_eq!(b.get(vehicle.h.fault_burst_off), 0.0);
         assert_eq!(b.get(vehicle.h.fault_battery_r_offset), 0.0);
@@ -2059,6 +2127,7 @@ mod tests {
         for fault in [
             Fault::GyroFault { bias_radps: DVec3::ZERO, noise_scale: 2.0 },
             Fault::RadioLinkLoss,
+            Fault::DownlinkLoss { fraction: 0.5 },
             Fault::WeakCell { cell: 2, r_offset_ohm: 0.01, v_offset_v: 0.05 },
         ] {
             vehicle.set_fault(fault, true).unwrap();
@@ -2066,14 +2135,17 @@ mod tests {
         // ...the names still come back in the spec table's order.
         assert_eq!(
             vehicle.active_fault_names(),
-            ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string)
+            ["radio_link_loss", "downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string)
         );
         // A re-inject updates the entry instead of duplicating it.
         vehicle.set_fault(Fault::RadioLinkLoss, true).unwrap();
-        assert_eq!(vehicle.active_fault_names(), ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string));
+        assert_eq!(
+            vehicle.active_fault_names(),
+            ["radio_link_loss", "downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string)
+        );
         // Deactivating removes the name.
         vehicle.set_fault(Fault::RadioLinkLoss, false).unwrap();
-        assert_eq!(vehicle.active_fault_names(), ["weak_cell", "gyro_fault"].map(str::to_string));
+        assert_eq!(vehicle.active_fault_names(), ["downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string));
     }
 
     #[test]

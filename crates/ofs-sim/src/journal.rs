@@ -151,6 +151,7 @@ fn fault_tokens(f: &Fault) -> String {
     let args = match f {
         Fault::RadioLinkLoss => String::new(),
         Fault::RadioLoss { fraction } => format!(" fraction={fraction}"),
+        Fault::DownlinkLoss { fraction } => format!(" fraction={fraction}"),
         Fault::BurstLoss { on_s, off_s } => format!(" on_s={on_s} off_s={off_s}"),
         Fault::MotorFailure { motor, scale } => format!(" motor={motor} scale={scale}"),
         Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
@@ -196,6 +197,13 @@ fn parse_fault(name: &str, args: &[&str]) -> Result<Fault, String> {
     let fault = match name {
         "radio_link_loss" => Fault::RadioLinkLoss,
         "radio_loss" => Fault::RadioLoss { fraction: number(take("fraction")?)? },
+        "downlink_loss" => {
+            let fraction = number(take("fraction")?)?;
+            if !(0.0..=1.0).contains(&fraction) {
+                return Err(format!("downlink_loss fraction must be in [0, 1], got {fraction}"));
+            }
+            Fault::DownlinkLoss { fraction }
+        }
         "burst_loss" => Fault::BurstLoss { on_s: number(take("on_s")?)?, off_s: number(take("off_s")?)? },
         "motor_failure" => Fault::MotorFailure { motor: index(take("motor")?)?, scale: number(take("scale")?)? },
         "prop_damage" => Fault::PropDamage {
@@ -280,6 +288,7 @@ mod tests {
         vec![
             Fault::RadioLinkLoss,
             Fault::RadioLoss { fraction: 0.1 },
+            Fault::DownlinkLoss { fraction: 0.3 },
             Fault::BurstLoss { on_s: 1e-300, off_s: f64::MAX },
             Fault::MotorFailure { motor: 2, scale: -0.0 },
             Fault::PropDamage { prop: 3, thrust_scale: 0.1, imbalance_kgm: 1e305 },
@@ -321,6 +330,26 @@ mod tests {
                 (x, y) => assert_eq!(x, y),
             }
         }
+    }
+
+    #[test]
+    fn the_downlink_loss_text_reads_back_and_rejects_a_bad_fraction() {
+        let mut j = Journal::new();
+        j.push(7, Action::Fault { fault: Fault::DownlinkLoss { fraction: 0.25 }, active: true });
+        j.push(8, Action::Fault { fault: Fault::DownlinkLoss { fraction: 1.0 }, active: false });
+        let dir = tempfile::tempdir().unwrap();
+        j.write(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("journal.txt")).unwrap();
+        assert!(text.contains("7 fault on downlink_loss fraction=0.25"), "{text}");
+        assert!(text.contains("8 fault off downlink_loss fraction=1"), "{text}");
+        let back = Journal::read(dir.path()).unwrap();
+        assert_eq!(back.entries()[0].action, j.entries()[0].action);
+        assert_eq!(back.entries()[1].action, j.entries()[1].action);
+
+        let missing = read_text("# ofs-journal 1\n1 fault on downlink_loss\n").unwrap_err();
+        assert!(missing.contains("downlink_loss needs fraction="), "{missing}");
+        let nan = read_text("# ofs-journal 1\n1 fault on downlink_loss fraction=NaN\n").unwrap_err();
+        assert!(nan.contains("downlink_loss fraction"), "{nan}");
     }
 
     #[test]
