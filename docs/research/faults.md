@@ -49,7 +49,8 @@ the dedicated draw are the same.)
 - **`RadioLoss(fraction)`** — one extra Bernoulli per uplink packet from the fault stream: a packet is lost when
   `fault_draw < fraction`, on top of the link model's own packet error rate. `fraction = 0.0` is a legal no-op
   (bit-identical digests); `fraction = 1.0` loses every packet with the same timing as `RadioLinkLoss`.
-  The downlink is untouched; `DownlinkLoss` is the other direction.
+  The downlink is untouched on ELRS; the fixed link's telemetry rides received uplink packets, so uplink loss
+  starves it there. `DownlinkLoss` cuts the downlink independently.
 - **`DownlinkLoss(fraction)`** — one extra Bernoulli per downlink packet from the link's dedicated downlink-fault
   stream (`elrs-faults-downlink` / `fixed-faults-downlink`). It changes what the handset hears
   (`State.radio.downlink_lq_pct`) and nothing on the control path: the uplink LQ, sticks, Betaflight's failsafe

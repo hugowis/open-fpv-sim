@@ -26,12 +26,14 @@ pub trait Link: Send {
   to the handset this slot; `report` (a `LinkReport`) carries the numbers the HUD and Betaflight's LINK_STATISTICS show.
 - **Only a link draws random numbers.** Seed a stream with `ofs_core::rng::model_rng(seed, "radio.yours")`, and draw
   the same count of numbers every packet whatever the inputs, so a seeded run never shifts when a fault toggles.
-  `FixedLink` keeps a second stream (`"fixed-faults"`) just for the fault draw it hands to `FaultSignals::survives`,
-  so the loss draws never move when a fault is injected.
+  `FixedLink` keeps separate streams (`"fixed-faults"` for the uplink loss draw it hands to `FaultSignals::survives`
+  and `"fixed-faults-downlink"` for the downlink draw it hands to `FaultSignals::downlink_survives`), so the loss
+  draws never move when a fault is injected.
 - Register the bus handles you read in your constructor. A link that depends on where the quad is (the ELRS link does)
   reads the pose, for example `bus.signal(names::BODY_POS_NED)`; `FixedLink` has no geometry and reads none. Every
-  link should call `FaultSignals::register(bus)` and use `link_cut` and `survives`, so the fault catalog's
-  `radio_link_loss`, `radio_loss` and `burst_loss` work on your link for free. `LqWindow` gives the last-100-packets
+  link should call `FaultSignals::register(bus)` and use `link_cut`, `survives` and `downlink_survives`, so the fault
+  catalog's `radio_link_loss`, `radio_loss`, `downlink_loss` and `burst_loss` work on your link for free. `LqWindow`
+  gives the last-100-packets
   link quality ExpressLRS reports.
 
 Both shipped links take `[radio] telemetry_slot_divisor`: one downlink packet in that many carries a telemetry frame
