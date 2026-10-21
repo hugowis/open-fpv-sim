@@ -234,7 +234,7 @@ The client and server speak **protocol 12**: `StartRecording`/`StopRecording`, `
   use the same tick rule. Both apply right after the step that reaches their time, so a `run` that ends there
   already shows them.
 - **Worlds by name:** `load(world="flat")` reads `worlds/flat.toml` beside the quad's directory, as parts resolve
-  against `library/`.
+  against `library/` (or every root in `OFS_LIBRARY`, first match per part id).
 - **Blackbox:** the shipped diffs set `blackbox_device = VIRTUAL`; SITL writes `LOGnnnnn.BFL` into the quad's
   firmware directory, and the session copies the logs it wrote into the logs directory when it ends.
 - **Packaging:** the PyPI distribution is `open-fpv-sim` (import `ofs`), pure Python; `launch()` still needs an

@@ -23,7 +23,7 @@ skipped). If the bundle cannot be written
 |---|---|
 | `bundle.toml` | Format version, the error (`reason`, `failure_kind`), the tick and time it happened at, the seed, mode (`lockstep` or `realtime`), `base_hz`, whether the flight controller was the open-loop stand-in (`open_loop_fc`) and whether that had the built-in stabilizer (`stabilize`; a bundle without the key was never stabilized), the quad, world and tail window, the bus digest at the failure, the journal size, and `exact` (below). |
 | `quads/` | The quad file and its Betaflight diff, as the session read them at `Load` (editing the files afterwards changes nothing in the bundle). A diff given as an absolute path or with `..` is stored by its file name and the bundled quad says so. |
-| `library/` | The whole component library the session used, as read at `Load` (the `OFS_LIBRARY` override, else the one beside the quads). |
+| `library/` | The merged component library the session used, as read at `Load`: every relative path from the first `OFS_LIBRARY` root that has it, else the library beside the quads. |
 | `worlds/` | The world file, when the session had one. |
 | `journal.txt`, `inputs-<n>.csv` | Everything that steered the run, by tick: stick changes, transmitter on/off, faults (immediate and scheduled), `clear_faults`, and each `play_inputs` file. |
 | `tail.mcap` | The last 10 simulated seconds of the default channel table, from a recorder every session runs in memory (about 15 MB for the shipped quad). Opens in Foxglove or `ofs.reader`. |
@@ -40,7 +40,9 @@ or
     result = ofs.repro.replay_bundle("path/to/quad-1.repro")
     print(result.reproduced, result.exact, result.failure)
 
-The replay builds the bundle's own quad and library (the replayer's `OFS_LIBRARY` is ignored), starts Betaflight from
+The bundle records the roots resolved at `Load` and merges them into `library/` first-match-wins; a root added to
+`OFS_LIBRARY` after `Load` is not in the bundle. The replay builds the bundle's own quad and library (the replayer's
+`OFS_LIBRARY` is ignored), starts Betaflight from
 the bundle's EEPROM if it was a Betaflight session, applies the journal tick for tick in lockstep, and stops where the
 original failed. **Reproduced** means the replay failed with the same error at the same tick *and* ended on the same
 bus digest. `ofs-sim --replay` prints `key=value` lines (`reproduced`, `exact`, `reached_tick`, `expected_tick`,

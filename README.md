@@ -139,8 +139,11 @@ The quad file is schema 5: it references parts and keeps only its own wiring, an
 
 A part's id is its file stem, and the quad references it — `motors = ["opendrone-openmotor-2207"]` in
 `quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part. The library is resolved against
-`<quad dir>/../library`; set `OFS_LIBRARY` to fly another part set without touching `quads/`. Every parameter
-of a part must carry a `[provenance]` entry or the part is refused at load:
+`<quad dir>/../library`; set `OFS_LIBRARY` to a list of roots to fly another part set without touching `quads/`.
+The first root that has a part id wins, so a later root fills the parts the earlier ones lack. Separate roots with
+`;` on Windows and `:` elsewhere: `OFS_LIBRARY="C:\shared\ofs-library;library"` or
+`OFS_LIBRARY=/shared/one:/shared/two`. Every parameter of a part must carry a `[provenance]` entry or the part is
+refused at load:
 
     [provenance."motor.kv_rpm_per_v"]
     source = "estimated"     # datasheet | measured | estimated
