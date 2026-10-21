@@ -11,6 +11,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Channel;
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
+const FRAME: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/frames/opendrone-5f.toml");
 
 async fn start() -> (SimClient<Channel>, SimService) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -99,6 +100,25 @@ async fn a_bundle_without_the_stabilize_key_replays_as_before() {
     std::fs::write(&path, old).unwrap();
     let outcome = replay(&bundle, &scratch("old")).unwrap();
     assert!(outcome.reproduced, "{outcome:?}");
+}
+
+#[tokio::test]
+async fn a_replayer_cannot_point_the_bundle_at_another_library() {
+    let (bundle, _, _) = fail_a_session(Mode::Lockstep).await;
+    let hostile = scratch("hostile-library");
+    std::fs::create_dir_all(hostile.join("frames")).unwrap();
+    let frame = std::fs::read_to_string(FRAME).unwrap().replace("mass_kg = 0.65", "mass_kg = 9.99");
+    std::fs::write(hostile.join("frames/opendrone-5f.toml"), frame).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_ofs-sim"))
+        .arg("--replay")
+        .arg(&bundle)
+        .env("OFS_LIBRARY", &hostile)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.lines().any(|l| l == "reproduced=true"), "{text}");
 }
 
 #[tokio::test]

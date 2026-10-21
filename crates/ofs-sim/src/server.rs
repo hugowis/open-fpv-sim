@@ -298,10 +298,12 @@ impl Sim for SimService {
         // What a repro bundle needs to run this session again. A SITL session's firmware directory depends on the
         // slot it takes, which the build decides: it is filled in below.
         let world_file = (!req.world_path.is_empty()).then(|| ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path)));
+        let library_env = std::env::var("OFS_LIBRARY").ok();
+        let library_roots = ofs_config::library_roots(library_env.as_deref(), cfg.source_dir());
         let mut repro = BundleSource::new(
             &cfg,
             world_file.as_deref(),
-            std::env::var("OFS_LIBRARY").ok().as_deref(),
+            &library_roots,
             req.seed,
             req.open_loop_fc,
             mode == RunMode::Realtime,

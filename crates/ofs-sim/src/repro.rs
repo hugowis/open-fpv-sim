@@ -1,6 +1,7 @@
 //! The repro bundle (parent spec §7): when a session fails, a folder with everything needed to run it again — the
 //! quad, the library it used, the world, the seed, the journal of what steered it, the firmware's state at load and
 //! the last seconds of its channels — and the replay that runs the folder and says whether the failure came back.
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ofs_config::FcKind;
@@ -49,6 +50,20 @@ pub struct BundleSource {
     pub world_rel: Option<String>,
 }
 
+/// Appends the bundle's `library/` snapshot: every relative path from the first root that has it, merged across
+/// `roots`. The first root wins a path that several roots hold.
+fn snapshot_library(roots: &[PathBuf], dest: &mut Vec<(PathBuf, Vec<u8>)>) -> Result<(), String> {
+    let mut merged = BTreeMap::new();
+    for root in roots {
+        let files = read_tree(root).map_err(|e| format!("reading the library {}: {e}", root.display()))?;
+        for (rel, bytes) in files {
+            merged.entry(rel).or_insert(bytes);
+        }
+    }
+    dest.extend(merged.into_iter().map(|(rel, bytes)| (Path::new("library").join(rel), bytes)));
+    Ok(())
+}
+
 /// Every regular file under `root`, in sorted order, as (path relative to `root`, bytes).
 fn read_tree(root: &Path) -> std::io::Result<Vec<(PathBuf, Vec<u8>)>> {
     fn walk(base: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) -> std::io::Result<()> {
@@ -78,7 +93,7 @@ impl BundleSource {
     pub fn new(
         cfg: &ofs_config::QuadConfig,
         world_path: Option<&Path>,
-        library_env: Option<&str>,
+        library_roots: &[PathBuf],
         seed: u64,
         open_loop_fc: bool,
         realtime: bool,
@@ -113,10 +128,7 @@ impl BundleSource {
             }
             None => None,
         };
-        let library = ofs_config::library_root(library_env, cfg.source_dir());
-        for (rel, bytes) in read_tree(&library).map_err(|e| format!("reading the library {}: {e}", library.display()))? {
-            files.push((Path::new("library").join(rel), bytes));
-        }
+        snapshot_library(library_roots, &mut files)?;
         Ok(Self {
             quad_path: cfg.source_path.clone(),
             seed,
@@ -349,7 +361,8 @@ pub(crate) fn test_source(logs_dir: &Path) -> BundleSource {
 pub(crate) fn test_source_for(logs_dir: &Path, quad: &Path, world: Option<&Path>, library_env: Option<&str>) -> BundleSource {
     let quad = std::path::absolute(quad).unwrap();
     let cfg = ofs_config::load_with_library_env(&quad, library_env).unwrap();
-    BundleSource::new(&cfg, world, library_env, 1, true, false, logs_dir.to_path_buf(), None).unwrap()
+    let roots = ofs_config::library_roots(library_env, cfg.source_dir());
+    BundleSource::new(&cfg, world, &roots, 1, true, false, logs_dir.to_path_buf(), None).unwrap()
 }
 
 #[cfg(test)]
@@ -475,6 +488,10 @@ mod tests {
         }
     }
 
+    fn roots_env(roots: &[&Path]) -> String {
+        roots.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join(if cfg!(windows) { ";" } else { ":" })
+    }
+
     /// A copy of `quads/` (the shipped quad and its diff) and `library/` under `root`, the library's motor part
     /// changed to 2100 KV.
     fn private_tree(root: &Path) -> PathBuf {
@@ -498,7 +515,9 @@ mod tests {
         let elsewhere = work.path().join("elsewhere");
         copy_dir(&work.path().join("my tree/library"), &elsewhere);
         std::fs::remove_dir_all(work.path().join("my tree/library")).unwrap();
-        let library_env = elsewhere.to_string_lossy().into_owned();
+        let spare = work.path().join("spare");
+        std::fs::create_dir_all(&spare).unwrap();
+        let library_env = roots_env(&[&elsewhere, &spare]);
         let src = test_source_for(logs.path(), &quad, None, Some(&library_env));
         let cfg = ofs_config::load_with_library_env(&quad, Some(&library_env)).unwrap();
         assert_eq!(cfg.motors[0].kv_rpm_per_v, 2100.0, "the private library is in effect");
@@ -510,6 +529,49 @@ mod tests {
         let outcome = replay(&dir, &work.path().join("data")).unwrap();
         assert!(outcome.reproduced, "{outcome:?}");
         assert!(outcome.exact);
+    }
+
+    #[test]
+    fn a_bundle_merges_every_library_root_first_match_wins() {
+        let work = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let root_a = work.path().join("root-a");
+        let root_b = work.path().join("root-b");
+        copy_dir(&repo("library"), &root_a);
+        copy_dir(&repo("library"), &root_b);
+
+        // Root A has the frame and no motors; root B has a different frame and the only motor.
+        std::fs::remove_dir_all(root_a.join("motors")).unwrap();
+        let frame_a = std::fs::read_to_string(root_a.join("frames/opendrone-5f.toml"))
+            .unwrap()
+            .replace("mass_kg = 0.65", "mass_kg = 0.70");
+        let frame_b = std::fs::read_to_string(root_b.join("frames/opendrone-5f.toml"))
+            .unwrap()
+            .replace("mass_kg = 0.65", "mass_kg = 0.80");
+        std::fs::write(root_a.join("frames/opendrone-5f.toml"), frame_a).unwrap();
+        std::fs::write(root_b.join("frames/opendrone-5f.toml"), frame_b).unwrap();
+
+        let library_env = roots_env(&[&root_a, &root_b]);
+        let quad = repo("quads/opendrone-5f-freestyle.toml");
+        let src = test_source_for(logs.path(), &quad, None, Some(&library_env));
+        let cfg = ofs_config::load_with_library_env(&quad, Some(&library_env)).unwrap();
+        assert_eq!(cfg.frame.mass_kg, 0.70, "the frame comes from the first root");
+        let mut v = vehicle_from(&cfg);
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+
+        let bundled_frame = std::fs::read_to_string(dir.join("library/frames/opendrone-5f.toml")).unwrap();
+        assert!(bundled_frame.contains("mass_kg = 0.70"), "the first root's frame: {bundled_frame}");
+        assert!(!bundled_frame.contains("mass_kg = 0.80"), "not the later root's frame: {bundled_frame}");
+        assert!(
+            dir.join("library/motors/opendrone-openmotor-2207.toml").is_file(),
+            "the motor that only the second root has is in the bundle"
+        );
+        let bundled = ofs_config::load_with_library_env(&dir.join("quads/opendrone-5f-freestyle.toml"), None).unwrap();
+        assert_eq!(bundled.frame.mass_kg, 0.70);
+        assert_eq!(bundled.motors[0].kv_rpm_per_v, 1950.0);
+        let outcome = replay(&dir, &work.path().join("data")).unwrap();
+        assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
     }
 
     #[test]
