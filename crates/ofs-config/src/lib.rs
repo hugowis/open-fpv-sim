@@ -735,29 +735,45 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         None => return Err(parse_err("missing integer schema_version".into())),
     }
     let file: QuadFile = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
-    let root = library_root(library_env, path.parent().unwrap_or(Path::new(".")));
+    let roots = library_roots(library_env, path.parent().unwrap_or(Path::new(".")));
     let mut problems = Vec::new();
     let resolve = |kind: &str, id: &str, field: &str, problems: &mut Vec<Problem>| -> Option<PathBuf> {
-        let dir = root.join(kind);
-        let path = dir.join(format!("{id}.toml"));
-        if path.is_file() {
-            return Some(path);
+        let mut searched = Vec::with_capacity(roots.len());
+        for root in &roots {
+            let dir = root.join(kind);
+            let path = dir.join(format!("{id}.toml"));
+            if path.is_file() {
+                return Some(path);
+            }
+            let have = dir.is_dir().then(|| {
+                fs::read_dir(&dir)
+                    .map(|entries| {
+                        entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+                            .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            searched.push((dir, have));
         }
-        let message = if dir.is_dir() {
-            let mut have: Vec<String> = fs::read_dir(&dir)
-                .map(|entries| {
-                    entries
-                        .filter_map(|e| e.ok())
-                        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
-                        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            have.sort();
-            format!("part '{id}' not found in {} (have: {})", dir.display(), have.join(", "))
-        } else {
-            format!("library kind directory not found: {} (library root {}; set OFS_LIBRARY to override)", dir.display(), root.display())
-        };
+        let details = searched
+            .into_iter()
+            .map(|(dir, have)| match have {
+                Some(mut have) => {
+                    have.sort();
+                    if have.is_empty() {
+                        format!("{} (no parts)", dir.display())
+                    } else {
+                        format!("{} (have: {})", dir.display(), have.join(", "))
+                    }
+                }
+                None => format!("{} (kind directory not found)", dir.display()),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let message = format!("part '{id}' not found in any library root: {details}; set OFS_LIBRARY to override");
         problems.push(Problem { field: field.to_string(), message });
         None
     };

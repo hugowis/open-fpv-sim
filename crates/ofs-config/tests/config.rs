@@ -26,6 +26,14 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+fn search_path(roots: &[&Path]) -> String {
+    roots.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join(if cfg!(windows) { ";" } else { ":" })
+}
+
+fn write_root_part(root: &Path, kind: &str, id: &str, text: &str) {
+    fs::write(root.join(kind).join(format!("{id}.toml")), text).unwrap();
+}
+
 /// The quad at {dir}/quads/quad.toml, its diff beside it, the shipped library at {dir}/library/.
 /// Re-copies the library every call — mutate parts with `write_part` only AFTER this, never before.
 fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
@@ -125,6 +133,68 @@ fn library_roots_drops_empty_entries() {
         let roots = ofs_config::library_roots(Some("/one::/two:"), quad_dir);
         assert_eq!(roots, vec![PathBuf::from("/one"), PathBuf::from("/two")]);
     }
+}
+
+#[test]
+fn parts_layer_across_roots_and_the_first_root_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let root_a = dir.path().join("library");
+    let root_b = dir.path().join("library-b");
+    copy_dir(&root_a, &root_b);
+
+    // Root A has no frames or motors; root B supplies both. The prop exists in both: root A must win.
+    fs::remove_dir_all(root_a.join("frames")).unwrap();
+    fs::remove_dir_all(root_a.join("motors")).unwrap();
+    write_root_part(
+        &root_b,
+        "frames",
+        "opendrone-5f",
+        &part_text("frames", "opendrone-5f").replace("mass_kg = 0.65", "mass_kg = 0.75"),
+    );
+    write_root_part(
+        &root_a,
+        "props",
+        "opendrone-5in-prop",
+        &part_text("props", "opendrone-5in-prop").replace("diameter_m = 0.127", "diameter_m = 0.2"),
+    );
+    write_root_part(
+        &root_b,
+        "props",
+        "opendrone-5in-prop",
+        &part_text("props", "opendrone-5in-prop").replace("diameter_m = 0.127", "diameter_m = 0.3"),
+    );
+
+    let env = search_path(&[&root_a, &root_b]);
+    let cfg = ofs_config::load_with_library_env(&path, Some(&env)).unwrap();
+    assert_eq!(cfg.frame.mass_kg, 0.75, "the frame comes from the second root");
+    assert_eq!(cfg.props[0].diameter_m, 0.2, "the first root's copy of a part wins");
+    assert_eq!(cfg.motors[0].pole_pairs, 7, "the motor comes from the second root");
+}
+
+#[test]
+fn a_missing_part_names_every_root_and_the_ids_each_has() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("motors = [\"opendrone-openmotor-2207\"]", "motors = [\"no-such-motor\"]");
+    let path = write_quad(dir.path(), &text);
+    let root_a = dir.path().join("library");
+    let root_b = dir.path().join("library-b");
+    copy_dir(&root_a, &root_b);
+
+    let motor = part_text("motors", "opendrone-openmotor-2207");
+    fs::remove_file(root_a.join("motors/opendrone-openmotor-2207.toml")).unwrap();
+    fs::remove_file(root_b.join("motors/opendrone-openmotor-2207.toml")).unwrap();
+    write_root_part(&root_a, "motors", "root-a-only", &motor);
+    write_root_part(&root_b, "motors", "root-b-only", &motor);
+
+    let env = search_path(&[&root_a, &root_b]);
+    let err = ofs_config::load_with_library_env(&path, Some(&env)).unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("no-such-motor"), "{message}");
+    assert!(message.contains(&root_a.join("motors").display().to_string()), "names root A: {message}");
+    assert!(message.contains(&root_b.join("motors").display().to_string()), "names root B: {message}");
+    assert!(message.contains("root-a-only"), "lists root A's ids: {message}");
+    assert!(message.contains("root-b-only"), "lists root B's ids: {message}");
 }
 
 #[test]
