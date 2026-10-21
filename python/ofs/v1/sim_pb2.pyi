@@ -383,6 +383,12 @@ class RadioLoss(_message.Message):
     fraction: float
     def __init__(self, fraction: _Optional[float] = ...) -> None: ...
 
+class DownlinkLoss(_message.Message):
+    __slots__ = ("fraction",)
+    FRACTION_FIELD_NUMBER: _ClassVar[int]
+    fraction: float
+    def __init__(self, fraction: _Optional[float] = ...) -> None: ...
+
 class BurstLoss(_message.Message):
     __slots__ = ("on_ms", "off_ms")
     ON_MS_FIELD_NUMBER: _ClassVar[int]
@@ -438,7 +444,7 @@ class VtxInterference(_message.Message):
     def __init__(self, freq_mhz: _Optional[float] = ..., power_mw: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ...) -> None: ...
 
 class Fault(_message.Message):
-    __slots__ = ("radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference", "at_s")
+    __slots__ = ("radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference", "downlink_loss", "at_s")
     RADIO_LINK_LOSS_FIELD_NUMBER: _ClassVar[int]
     RADIO_LOSS_FIELD_NUMBER: _ClassVar[int]
     BURST_LOSS_FIELD_NUMBER: _ClassVar[int]
@@ -447,6 +453,7 @@ class Fault(_message.Message):
     WEAK_CELL_FIELD_NUMBER: _ClassVar[int]
     GYRO_FAULT_FIELD_NUMBER: _ClassVar[int]
     VTX_INTERFERENCE_FIELD_NUMBER: _ClassVar[int]
+    DOWNLINK_LOSS_FIELD_NUMBER: _ClassVar[int]
     AT_S_FIELD_NUMBER: _ClassVar[int]
     radio_link_loss: RadioLinkLoss
     radio_loss: RadioLoss
@@ -456,8 +463,9 @@ class Fault(_message.Message):
     weak_cell: WeakCell
     gyro_fault: GyroFault
     vtx_interference: VtxInterference
+    downlink_loss: DownlinkLoss
     at_s: float
-    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ..., radio_loss: _Optional[_Union[RadioLoss, _Mapping]] = ..., burst_loss: _Optional[_Union[BurstLoss, _Mapping]] = ..., motor_failure: _Optional[_Union[MotorFailure, _Mapping]] = ..., prop_damage: _Optional[_Union[PropDamage, _Mapping]] = ..., weak_cell: _Optional[_Union[WeakCell, _Mapping]] = ..., gyro_fault: _Optional[_Union[GyroFault, _Mapping]] = ..., vtx_interference: _Optional[_Union[VtxInterference, _Mapping]] = ..., at_s: _Optional[float] = ...) -> None: ...
+    def __init__(self, radio_link_loss: _Optional[_Union[RadioLinkLoss, _Mapping]] = ..., radio_loss: _Optional[_Union[RadioLoss, _Mapping]] = ..., burst_loss: _Optional[_Union[BurstLoss, _Mapping]] = ..., motor_failure: _Optional[_Union[MotorFailure, _Mapping]] = ..., prop_damage: _Optional[_Union[PropDamage, _Mapping]] = ..., weak_cell: _Optional[_Union[WeakCell, _Mapping]] = ..., gyro_fault: _Optional[_Union[GyroFault, _Mapping]] = ..., vtx_interference: _Optional[_Union[VtxInterference, _Mapping]] = ..., downlink_loss: _Optional[_Union[DownlinkLoss, _Mapping]] = ..., at_s: _Optional[float] = ...) -> None: ...
 
 class RecordingSignal(_message.Message):
     __slots__ = ("pattern", "rate_hz")

@@ -497,6 +497,7 @@ impl Sim for SimService {
         let fault = match req.kind {
             Some(pb::fault::Kind::RadioLinkLoss(_)) => Fault::RadioLinkLoss,
             Some(pb::fault::Kind::RadioLoss(m)) => Fault::RadioLoss { fraction: m.fraction },
+            Some(pb::fault::Kind::DownlinkLoss(m)) => Fault::DownlinkLoss { fraction: m.fraction },
             Some(pb::fault::Kind::BurstLoss(m)) => {
                 Fault::BurstLoss { on_s: f64::from(m.on_ms) / 1000.0, off_s: f64::from(m.off_ms) / 1000.0 }
             }

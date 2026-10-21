@@ -37,6 +37,20 @@ class RadioLoss:
 
 
 @dataclass(frozen=True)
+class DownlinkLoss:
+    """Extra per-packet downlink loss while active: `fraction` of the handset's telemetry packets are dropped.
+
+    The uplink is untouched: the sticks still control the quad, and the link does not failsafe.
+    """
+
+    fraction: float
+    at: float | None = field(default=None, kw_only=True)
+
+    def _to_pb(self):
+        return _fault(self.at, downlink_loss=pb.DownlinkLoss(fraction=self.fraction))
+
+
+@dataclass(frozen=True)
 class BurstLoss:
     """Every uplink packet is lost for `on_ms`, then the link delivers normally for `off_ms`, repeating from t=0."""
 

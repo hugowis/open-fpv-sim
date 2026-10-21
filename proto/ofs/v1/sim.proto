@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 12: protocol 11 plus the open-loop stabilizer on Load (M8b).
+// Simulator control, protocol version 13: protocol 12 plus the downlink-loss fault.
+// Protocol 12 added the open-loop stabilizer on Load (M8b).
 // Protocol 11 added gates, lap timing and the race state (M8a).
 // Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
 // Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
@@ -276,6 +277,10 @@ message RadioLoss {
   double fraction = 1;  // extra per-packet loss probability, [0, 1]
 }
 
+message DownlinkLoss {
+  double fraction = 1;  // downlink packet-loss probability, [0, 1]
+}
+
 message BurstLoss {
   uint32 on_ms = 1;   // the window loses every uplink packet
   uint32 off_ms = 2;  // then delivers normally; both > 0
@@ -319,6 +324,7 @@ message Fault {
     WeakCell weak_cell = 6;
     GyroFault gyro_fault = 7;
     VtxInterference vtx_interference = 8;
+    DownlinkLoss downlink_loss = 10;
   }
   optional double at_s = 9;  // activate at this simulated time (absent: now); refused once that time has passed
 }
