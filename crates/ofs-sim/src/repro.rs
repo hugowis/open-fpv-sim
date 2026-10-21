@@ -55,6 +55,10 @@ pub struct BundleSource {
 fn snapshot_library(roots: &[PathBuf], dest: &mut Vec<(PathBuf, Vec<u8>)>) -> Result<(), String> {
     let mut merged = BTreeMap::new();
     for root in roots {
+        // A root that does not exist is not a part source; the loader skips it too.
+        if !root.is_dir() {
+            continue;
+        }
         let files = read_tree(root).map_err(|e| format!("reading the library {}: {e}", root.display()))?;
         for (rel, bytes) in files {
             merged.entry(rel).or_insert(bytes);
@@ -570,6 +574,24 @@ mod tests {
         let bundled = ofs_config::load_with_library_env(&dir.join("quads/opendrone-5f-freestyle.toml"), None).unwrap();
         assert_eq!(bundled.frame.mass_kg, 0.70);
         assert_eq!(bundled.motors[0].kv_rpm_per_v, 1950.0);
+        let outcome = replay(&dir, &work.path().join("data")).unwrap();
+        assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
+    }
+
+    #[test]
+    fn a_bundle_ignores_a_missing_library_root() {
+        let work = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let missing = work.path().join("not-created");
+        let full = std::path::absolute(repo("library")).unwrap();
+        let library_env = roots_env(&[&missing, &full]);
+        let quad = repo("quads/opendrone-5f-freestyle.toml");
+        let src = test_source_for(logs.path(), &quad, None, Some(&library_env));
+        let cfg = ofs_config::load_with_library_env(&quad, Some(&library_env)).unwrap();
+        let mut v = vehicle_from(&cfg);
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+        assert!(dir.join("library/motors/opendrone-openmotor-2207.toml").is_file(), "the second root supplies the library");
         let outcome = replay(&dir, &work.path().join("data")).unwrap();
         assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
     }

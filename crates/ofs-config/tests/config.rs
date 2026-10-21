@@ -92,8 +92,10 @@ fn a_missing_kind_directory_names_the_library_root() {
     let path = write_quad(dir.path(), &quad_text());
     fs::remove_dir_all(dir.path().join("library/frames")).unwrap();
     let err = load(&path).unwrap_err();
-    assert!(err.to_string().contains("frames"), "{err}");
-    assert!(err.to_string().contains("OFS_LIBRARY"), "{err}");
+    let message = err.to_string();
+    assert!(message.contains("frames"), "{message}");
+    assert!(message.contains("kind directory not found"), "{message}");
+    assert!(message.contains("OFS_LIBRARY"), "{message}");
 }
 
 #[test]
@@ -110,7 +112,7 @@ fn a_wrong_length_part_list_is_refused() {
 fn the_library_root_honours_the_override() {
     let quad_dir = Path::new("C:/anywhere/quads");
     assert_eq!(ofs_config::library_root(None, quad_dir), Path::new("C:/anywhere/library"));
-    assert_eq!(ofs_config::library_root(Some("C:/my-library"), quad_dir), Path::new("C:/my-library"));
+    assert_eq!(ofs_config::library_root(Some("my-library"), quad_dir), Path::new("my-library"));
 }
 
 #[test]

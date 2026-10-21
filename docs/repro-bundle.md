@@ -40,9 +40,9 @@ or
     result = ofs.repro.replay_bundle("path/to/quad-1.repro")
     print(result.reproduced, result.exact, result.failure)
 
-The bundle records the roots resolved at `Load` and merges them into `library/` first-match-wins; a root added to
-`OFS_LIBRARY` after `Load` is not in the bundle. The replay builds the bundle's own quad and library (the replayer's
-`OFS_LIBRARY` is ignored), starts Betaflight from
+The bundle merges the roots resolved at `Load` into `library/` first-match-wins; a root added to `OFS_LIBRARY` after
+`Load` is not in the bundle. The replay builds the bundle's own quad and library (the replayer's `OFS_LIBRARY` is
+ignored), starts Betaflight from
 the bundle's EEPROM if it was a Betaflight session, applies the journal tick for tick in lockstep, and stops where the
 original failed. **Reproduced** means the replay failed with the same error at the same tick *and* ended on the same
 bus digest. `ofs-sim --replay` prints `key=value` lines (`reproduced`, `exact`, `reached_tick`, `expected_tick`,
