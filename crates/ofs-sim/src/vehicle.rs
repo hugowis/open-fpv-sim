@@ -17,7 +17,7 @@ use ofs_fc::stabilizer::Stabilizer;
 use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
 use crate::inputs::{tick_at, Column, Inputs, Stick};
-use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
+use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary, InputsState};
 use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
@@ -1157,22 +1157,26 @@ impl Vehicle {
             return Err(SimError::InvalidArgument(format!("stick {field} must be finite")));
         }
         let s = &s.clamped();
-        let h = &self.h;
-        let bus = self.scheduler.bus_mut();
-        bus.set(h.roll, s.roll);
-        bus.set(h.pitch, s.pitch);
-        bus.set(h.yaw, s.yaw);
-        bus.set(h.throttle, s.throttle);
-        for (sig, v) in h.aux.iter().zip(s.aux) {
-            bus.set(*sig, v);
+        let tick = self.scheduler.tick();
+        {
+            let h = &self.h;
+            let bus = self.scheduler.bus_mut();
+            bus.set(h.roll, s.roll);
+            bus.set(h.pitch, s.pitch);
+            bus.set(h.yaw, s.yaw);
+            bus.set(h.throttle, s.throttle);
+            for (sig, v) in h.aux.iter().zip(s.aux) {
+                bus.set(*sig, v);
+            }
         }
+        let state = self.inputs_state();
         if let Some(recorder) = &mut self.inputs_recorder {
-            recorder.record(self.scheduler.tick(), s);
+            recorder.record(tick, &state);
         }
         let bits = sticks_bits(s);
         if bits != self.journaled_sticks {
             self.journaled_sticks = bits;
-            self.journal.push(self.scheduler.tick(), Action::Sticks(sticks_values(s)));
+            self.journal.push(tick, Action::Sticks(sticks_values(s)));
         }
         Ok(())
     }
@@ -1694,14 +1698,24 @@ impl Vehicle {
         Sticks { roll: bus.get(h.roll), pitch: bus.get(h.pitch), yaw: bus.get(h.yaw), throttle: bus.get(h.throttle), aux }
     }
 
+    /// Everything an inputs recording row holds: the sticks and the two link booleans, as the bus holds them now.
+    fn inputs_state(&self) -> InputsState {
+        let bus = self.scheduler.bus();
+        InputsState {
+            sticks: self.sticks_now(),
+            transmitter: bus.get(self.h.tx_enabled) > 0.5,
+            link_loss: bus.get(self.h.fault_radio_loss) > 0.5,
+        }
+    }
+
     /// Starts recording the sticks to a new CSV at `path` (the server names it): a row whenever they change, in
     /// `play_inputs`' format. One at a time; an existing file is never truncated.
     pub fn start_inputs_recording(&mut self, path: &Path) -> Result<(), RecordError> {
         if self.inputs_recorder.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        let now = self.sticks_now();
-        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &now)?);
+        let state = self.inputs_state();
+        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &state)?);
         Ok(())
     }
 

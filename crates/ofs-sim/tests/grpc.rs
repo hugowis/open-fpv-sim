@@ -547,7 +547,7 @@ async fn the_server_records_a_sessions_sticks_names_the_file_and_reports_it() {
     let text = std::fs::read_to_string(&started.path).unwrap();
     assert_eq!(
         text.lines().collect::<Vec<_>>(),
-        ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4", "0,0,0,0,0.5,-1,-1,-1,-1", "0.5,0.25,0,0,0.8,-1,-1,-1,-1"]
+        ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss", "0,0,0,0,0.5,-1,-1,-1,-1,1,0", "0.5,0.25,0,0,0.8,-1,-1,-1,-1,1,0"]
     );
     let next = c.start_inputs_recording(Empty {}).await.unwrap().into_inner();
     assert!(next.path.ends_with("opendrone-5f-freestyle-inputs-2.csv"), "{}", next.path);
@@ -600,7 +600,7 @@ async fn unloading_mid_recording_leaves_a_complete_file() {
     c.run(RunRequest { seconds: 0.1 }).await.unwrap();
     c.unload(Empty {}).await.unwrap();
     let text = std::fs::read_to_string(&started.path).unwrap();
-    assert_eq!(text.lines().collect::<Vec<_>>(), ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4", "0,0,0,0,0.3,-1,-1,-1,-1"]);
+    assert_eq!(text.lines().collect::<Vec<_>>(), ["t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss", "0,0,0,0,0.3,-1,-1,-1,-1,1,0"]);
     let _ = service;
 }
 

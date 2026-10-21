@@ -735,7 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failure_at_the_end_of_an_inputs_recording_still_publishes_its_stop_event() {
-        use crate::inputs_recorder::{tests::Faulty, InputsRecorder};
+        use crate::inputs_recorder::{tests::Faulty, InputsRecorder, InputsState};
         let svc = service_with(open_loop_session(RunMode::Lockstep));
         let mut events = svc.subscribe();
         {
@@ -743,7 +743,8 @@ mod tests {
             let s = slot.as_mut().unwrap();
             // Writes reach the buffer; the flush at the end fails.
             let out = Faulty { budget: usize::MAX, flush_fails: true };
-            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &Sticks::default()).unwrap();
+            let state = InputsState { sticks: Sticks::default(), transmitter: true, link_loss: false };
+            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &state).unwrap();
             s.vehicle.set_inputs_recorder(recorder);
         }
         let err = svc.stop_inputs_recording(Request::new(pb::Empty {})).await.unwrap_err();
