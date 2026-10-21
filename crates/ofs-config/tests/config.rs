@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ofs_config::{load, ConfigError, FcKind, RadioKind, VtxKind};
 
@@ -103,6 +103,28 @@ fn the_library_root_honours_the_override() {
     let quad_dir = Path::new("C:/anywhere/quads");
     assert_eq!(ofs_config::library_root(None, quad_dir), Path::new("C:/anywhere/library"));
     assert_eq!(ofs_config::library_root(Some("C:/my-library"), quad_dir), Path::new("C:/my-library"));
+}
+
+#[test]
+fn library_roots_defaults_beside_the_quads_and_ignores_a_blank_override() {
+    let quad_dir = Path::new("C:/anywhere/quads");
+    assert_eq!(ofs_config::library_roots(None, quad_dir), vec![Path::new("C:/anywhere/library")]);
+    assert_eq!(ofs_config::library_roots(Some("  "), quad_dir), vec![Path::new("C:/anywhere/library")]);
+}
+
+#[test]
+fn library_roots_drops_empty_entries() {
+    let quad_dir = Path::new("C:/anywhere/quads");
+    #[cfg(windows)]
+    {
+        let roots = ofs_config::library_roots(Some("C:/one;;C:/two;"), quad_dir);
+        assert_eq!(roots, vec![PathBuf::from("C:/one"), PathBuf::from("C:/two")]);
+    }
+    #[cfg(not(windows))]
+    {
+        let roots = ofs_config::library_roots(Some("/one::/two:"), quad_dir);
+        assert_eq!(roots, vec![PathBuf::from("/one"), PathBuf::from("/two")]);
+    }
 }
 
 #[test]

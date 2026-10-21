@@ -113,12 +113,26 @@ pub struct PartRefs {
     pub vtx: Option<String>,
 }
 
-/// The library root: the `OFS_LIBRARY` override when given, else `library/` beside the quads.
-pub fn library_root(env: Option<&str>, quad_dir: &Path) -> PathBuf {
-    match env.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(root) => PathBuf::from(root),
-        None => quad_dir.parent().unwrap_or_else(|| Path::new(".")).join("library"),
+/// The library roots: the `OFS_LIBRARY` search path when given, else `library/` beside the quads.
+/// Empty entries are dropped; a blank override means the default.
+pub fn library_roots(env: Option<&str>, quad_dir: &Path) -> Vec<PathBuf> {
+    let default = || vec![quad_dir.parent().unwrap_or_else(|| Path::new(".")).join("library")];
+    let Some(env) = env else { return default() };
+    let roots = split_roots(env, if cfg!(windows) { ';' } else { ':' });
+    if roots.is_empty() {
+        default()
+    } else {
+        roots
     }
+}
+
+/// The first library root: kept for callers that only need one. See [`library_roots`].
+pub fn library_root(env: Option<&str>, quad_dir: &Path) -> PathBuf {
+    library_roots(env, quad_dir).into_iter().next().expect("library_roots always returns at least one root")
+}
+
+fn split_roots(env: &str, separator: char) -> Vec<PathBuf> {
+    env.split(separator).map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from).collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1339,4 +1353,25 @@ fn serial_functions(diff: &str) -> Vec<(u8, u32)> {
             Some((index, functions))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod roots_tests {
+    use super::split_roots;
+    use std::path::PathBuf;
+
+    #[test]
+    fn split_roots_accepts_semicolons_and_drops_empty_entries() {
+        assert_eq!(split_roots("a;; b ; ", ';'), vec![PathBuf::from("a"), PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn split_roots_accepts_colons_and_drops_empty_entries() {
+        assert_eq!(split_roots("/a:/b:c", ':'), vec![PathBuf::from("/a"), PathBuf::from("/b"), PathBuf::from("c")]);
+    }
+
+    #[test]
+    fn split_roots_keeps_windows_drive_letters_when_the_separator_is_semicolon() {
+        assert_eq!(split_roots(r"C:\a;D:\b", ';'), vec![PathBuf::from(r"C:\a"), PathBuf::from(r"D:\b")]);
+    }
 }
