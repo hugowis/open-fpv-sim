@@ -11,6 +11,13 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Channel;
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
+const LIBRARY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library");
+const FRAME: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/frames/opendrone-5f.toml");
+const PROP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library/props/opendrone-5in-prop.toml");
+
+fn roots_env(roots: &[&Path]) -> String {
+    roots.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join(if cfg!(windows) { ";" } else { ":" })
+}
 
 async fn start() -> (SimClient<Channel>, SimService) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -99,6 +106,41 @@ async fn a_bundle_without_the_stabilize_key_replays_as_before() {
     std::fs::write(&path, old).unwrap();
     let outcome = replay(&bundle, &scratch("old")).unwrap();
     assert!(outcome.reproduced, "{outcome:?}");
+}
+
+#[tokio::test]
+async fn a_replayer_cannot_point_the_bundle_at_another_library() {
+    let (bundle, _, _) = fail_a_session(Mode::Lockstep).await;
+    let hostile = scratch("hostile-library");
+    std::fs::create_dir_all(hostile.join("frames")).unwrap();
+    std::fs::create_dir_all(hostile.join("props")).unwrap();
+    let frame = std::fs::read_to_string(FRAME).unwrap().replace("mass_kg = 0.65", "mass_kg = 9.99");
+    std::fs::write(hostile.join("frames/opendrone-5f.toml"), frame).unwrap();
+    std::fs::copy(PROP, hostile.join("props/opendrone-5in-prop.toml")).unwrap();
+    let library_env = roots_env(&[&hostile, Path::new(LIBRARY)]);
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_ofs-sim"))
+            .arg("--replay")
+            .arg(&bundle)
+            .env("OFS_LIBRARY", &library_env)
+            .output()
+            .unwrap()
+    };
+
+    let out = run();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.lines().any(|l| l == "reproduced=true"), "{text}");
+
+    // Remove two parts the hostile roots can supply: a replay that fell back to OFS_LIBRARY would load, one that
+    // owns its merged library must fail to load the bundle's quad.
+    std::fs::remove_file(bundle.join("library/frames/opendrone-5f.toml")).unwrap();
+    std::fs::remove_file(bundle.join("library/props/opendrone-5in-prop.toml")).unwrap();
+    let out = run();
+    assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("loading the bundle's quad"), "{stderr}");
+    assert!(stderr.contains("frame") || stderr.contains("prop"), "{stderr}");
 }
 
 #[tokio::test]

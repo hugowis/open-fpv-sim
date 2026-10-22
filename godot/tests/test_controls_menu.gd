@@ -124,6 +124,26 @@ func test_the_video_effects_box_reports_changes_but_not_its_setup() -> void:
 	menu.queue_free()
 
 
+func test_the_dvr_toggle_reports_changes_but_not_its_setup() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	ok(menu._dvr is CheckBox, "the DVR control exists")
+	eq(menu._dvr.text, "DVR: record the FPV view", "its label")
+	var seen := []
+	menu.dvr_toggled.connect(func(on: bool) -> void: seen.append(on))
+	menu.set_dvr(true)
+	ok(menu.dvr_on(), "set from the DVR state")
+	eq(seen, [], "without a signal")
+	menu._dvr.button_pressed = false
+	eq(seen, [false], "a click off is reported once")
+	menu._dvr.button_pressed = true
+	eq(seen, [false, true], "a click on is reported once")
+	menu.set_dvr(false)
+	ok(not menu.dvr_on(), "set off")
+	eq(seen, [false, true], "set_dvr never emits")
+	menu.queue_free()
+
+
 func test_the_aspect_button_cycles_from_the_set_value() -> void:
 	var m := await _menu()
 	var menu = m[0]

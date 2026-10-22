@@ -62,6 +62,21 @@ fn a_recording_carries_each_channel_at_its_rate_stamped_with_the_state_time() {
 }
 
 #[test]
+fn the_downlink_loss_control_signal_is_explicit_only() {
+    // Added in 0.3.0: left out of a default recording so a no-fault run stays byte-identical to 0.2.0; naming it
+    // (or a pattern that matches it) still records it.
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, h) = rig();
+    s.bus_mut().signal::<f64>("fault.radio.downlink_loss_fraction");
+    let names = h.start(s.bus(), 8000, &[], &dir.path().join("default.mcap")).unwrap();
+    assert!(!names.iter().any(|n| n == "fault.radio.downlink_loss_fraction"), "{names:?}");
+    h.stop().unwrap();
+    let names = h.start(s.bus(), 8000, &[req("fault.*", None)], &dir.path().join("explicit.mcap")).unwrap();
+    assert_eq!(names, ["fault.radio.downlink_loss_fraction"]);
+    h.stop().unwrap();
+}
+
+#[test]
 fn recording_never_changes_the_run() {
     let dir = tempfile::tempdir().unwrap();
     let (mut with, h) = rig();

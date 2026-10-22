@@ -1,11 +1,13 @@
 use glam::DVec3;
 use ofs_core::shape::Shape;
-use ofs_core::{names, Bus, Scheduler, Wire};
+use ofs_core::{names, Bus, Scheduler, StepCtx, Wire};
 use ofs_radio::crsf::{stick_ticks, Decoder, Frame};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{
-    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
+    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
+    TELEMETRY_SLOT_DIVISOR,
 };
+use ofs_radio::parts::{Delivery, Link, TxFrame};
 use ofs_radio::receiver::ReceiverParams;
 use ofs_radio::telemetry::FcTelemetryHandle;
 use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
@@ -273,6 +275,59 @@ fn half_fraction_drops_about_half() {
 }
 
 #[test]
+fn downlink_loss_drops_the_downlink_and_leaves_control_alone() {
+    let run = |fraction: Option<f64>| -> (Vec<Delivery>, u32) {
+        let mut bus = Bus::new();
+        let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+        bus.set(tx, 1.0);
+        let mut link = ElrsLink::new(LinkParams::ideal(500), 7, &mut bus);
+        let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+        bus.set(pos, DVec3::new(0.0, 0.0, -1.7));
+        if let Some(fraction) = fraction {
+            let signal = bus.signal::<f64>(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION);
+            bus.set(signal, fraction);
+        }
+        let mut deliveries = Vec::new();
+        let mut slots = 0;
+        for k in 0..300u32 {
+            let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+            let delivery = link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+            slots += u32::from(delivery.downlink_slot);
+            deliveries.push(delivery);
+        }
+        (deliveries, slots)
+    };
+    let (clean, clean_slots) = run(None);
+    assert_eq!(clean_slots, 75, "300 packets at the default 1:4");
+    assert_eq!(run(Some(0.0)), (clean.clone(), clean_slots), "a zero fraction changes nothing");
+
+    let (full, full_slots) = run(Some(1.0));
+    assert_eq!(full_slots, 0, "100 % downlink loss: no telemetry slot flies");
+    assert_eq!(
+        full.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "uplink control is untouched"
+    );
+    assert_eq!(
+        full.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        "uplink LQ is untouched"
+    );
+    assert_eq!(full.last().unwrap().report.downlink_lq_pct, 0.0, "the 100-packet window is all loss");
+
+    let (half, half_slots) = run(Some(0.5));
+    assert_eq!(run(Some(0.5)), (half.clone(), half_slots), "the same seed loses the same downlink packets");
+    assert_eq!(
+        half.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "half downlink loss still leaves every stick packet alone"
+    );
+    assert!(half_slots > 0 && half_slots < clean_slots, "some slots fly: {half_slots} of {clean_slots}");
+    let half_lq = half.last().unwrap().report.downlink_lq_pct;
+    assert!(30.0 < half_lq && half_lq < 70.0, "about half the downlink arrives: {half_lq}");
+}
+
+#[test]
 fn burst_window_boundaries_are_deterministic() {
     // 100 ms on / 300 ms off at 500 Hz: 50 lost packets per on-phase, 150 delivered per off-phase.
     // LQ is the last 100 packets, so the off-phase's tail reads a full clean window.
@@ -296,6 +351,29 @@ fn a_long_burst_failsafes_and_recovers() {
     assert_eq!(get(&s, names::RADIO_LINK_UP), 0.0, "LQ hit zero during the burst");
     packets(&mut s, 500); // 1.0 s more: 2.8 s, inside the off-window
     assert_eq!(get(&s, names::RADIO_LINK_UP), 1.0, "the off-window delivered again");
+}
+
+#[test]
+fn the_divisor_changes_only_the_slot_cadence() {
+    let run = |divisor| {
+        let mut params = LinkParams::ideal(500);
+        params.telemetry_slot_divisor = divisor;
+        let (mut s, uart, _telemetry_in, _fc) = rig(params, 7);
+        packets(&mut s, 100);
+        (rc(&frames(&uart)).len(), get(&s, names::RADIO_LQ), get(&s, names::RADIO_DOWNLINK_LQ))
+    };
+    let at_four = run(TELEMETRY_SLOT_DIVISOR);
+    assert_eq!(at_four, (100, 100.0, 100.0), "no loss: every uplink packet arrives and the downlink hears them all");
+    assert_eq!(run(8), at_four, "a slower telemetry ratio leaves control and both LQ figures alone");
+}
+
+#[test]
+#[should_panic(expected = "telemetry_slot_divisor")]
+fn the_elrs_constructor_refuses_an_invalid_divisor() {
+    let mut params = LinkParams::ideal(500);
+    params.telemetry_slot_divisor = 3;
+    let mut bus = Bus::new();
+    let _ = ElrsLink::new(params, 1, &mut bus);
 }
 
 #[test]
@@ -356,19 +434,22 @@ mod fc_telemetry {
     }
 
     #[test]
-    fn a_frame_flies_every_fourth_downlink_packet_and_updates_the_handle() {
-        let (mut s, _uart, telemetry_in, fc) = rig(LinkParams::ideal(500), 1);
-        telemetry_in.write(&battery_frame(24.6, 3.2, 0, 7));
-        packets(&mut s, 3);
-        assert_eq!(fc.latest().frame_count, 0, "no slot before the 4th packet");
-        packets(&mut s, 1);
-        let t = fc.latest();
-        assert_eq!(t.frame_count, 1);
-        assert!((t.battery_v - 24.6).abs() < 1e-9, "{:?}", t);
-        assert!((t.battery_a - 3.2).abs() < 1e-9, "{:?}", t);
-        assert_eq!(t.battery_mah, 7.0, "the u24's low byte rode through: {:?}", t);
-        packets(&mut s, 4);
-        assert_eq!(fc.latest().frame_count, 1, "the FIFO is empty: later slots fly idle");
+    fn a_frame_flies_on_every_configured_slot_and_updates_the_handle() {
+        for divisor in [1, 4, 8] {
+            let mut params = LinkParams::ideal(500);
+            params.telemetry_slot_divisor = divisor;
+            let (mut s, _uart, telemetry_in, fc) = rig(params, 1);
+            for i in 0..8 {
+                telemetry_in.write(&battery_frame(24.6, 3.2, 0, i));
+            }
+            packets(&mut s, 8);
+            let slots = 8 / divisor;
+            let t = fc.latest();
+            assert_eq!(t.frame_count, u64::from(slots), "8 heard packets, one slot every {divisor}: {:?}", t);
+            assert!((t.battery_v - 24.6).abs() < 1e-9, "{:?}", t);
+            assert!((t.battery_a - 3.2).abs() < 1e-9, "{:?}", t);
+            assert_eq!(t.battery_mah, f64::from(slots - 1), "the u24's low byte rode through: {:?}", t);
+        }
     }
 
     #[test]

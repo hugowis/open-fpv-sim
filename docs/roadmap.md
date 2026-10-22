@@ -26,9 +26,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 ### Radio (`docs/research/elrs-link.md`)
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
   a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
-- Telemetry slots are a fixed 1:4 ratio of the downlink (`TELEMETRY_SLOT_DIVISOR`), and the shared RC/telemetry
-  UART has no contention model.
-- The `RadioLoss` fault acts on the uplink only.
+- Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one
+  ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model.
+- The `RadioLoss` fault acts on the uplink; `DownlinkLoss` cuts the downlink telemetry while leaving control untouched.
 - Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
   noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).
 - The radio is three swappable parts (`docs/writing-a-radio-model.md`), but only one handset (`joystick`), one
@@ -37,7 +37,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 
 ### Inputs recording (`docs/superpowers/specs/2026-10-15-m5-radio-components-design.md` §6)
 - A replay is not the real-time flight: real-time timing, the SITL schedule and the link's seeded draws differ. The
-  CSV has no transmitter column, so a link cut (**K**) is not captured.
+  CSV's optional `tx` and `link_loss` columns carry the transmitter state and a **K** cut; a file written before
+  0.3.0 has neither column and still plays.
 - `Load` and `Unload` stop a running inputs recording and publish `inputs_recording_stopped`. A session that vanishes
   (its last watcher left, the server shut down) finishes the file without an event, so a client that tracks the
   recording state still resets it on a lost session, as the Godot game does.
@@ -55,10 +56,11 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   (`docs/dev-setup.md`, Ports and parallel sessions): at most 16, claimed per operating system (a Windows simulator and
   one inside WSL do not see each other's claims), and the Rust live tests still run one at a time.
 - macOS is supported best-effort on Apple silicon (#68, `docs/research/macos.md`): the SITL builds with a one-hunk patch,
-  the Rust, Python and Godot suites passed in the survey and CI has a non-blocking job for it. Not done: radio goldens for
-  macOS (the digests are per OS), anything on a physical Mac (window, rendering, gamepad), a native wait and SIGKILL
-  escalation for the cleanup's victims, and Intel Macs beyond the survey (one Godot timing check fails on the slow Intel
-  runner; the error and Betaflight Godot suites were not reached there).
+  the Rust, Python and Godot suites pass (the radio goldens are recorded per architecture), the slot cleanup waits for
+  its victims and escalates to SIGKILL as it does on Linux, and CI has a non-blocking job for it. Not done: anything on
+  a physical Mac (window, rendering, gamepad), Intel Macs beyond the manual survey (their real-time Godot checks are
+  paced by the wall clock and flaked once), and promoting the macOS job into `publish.needs` after a record of clean
+  `ci.yml` runs.
 - SITL runs natively on Windows, without WSL, from an MSYS2 build (`scripts/build-sitl-windows.sh`, #67,
   `docs/research/sitl-native-windows.md`). It is experimental: no CI job builds it, the port needs a stub file for
   hardware-only symbols (`--gc-sections` removes nothing on PE), the executable needs two Cygwin DLLs beside it, and it
@@ -85,7 +87,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   `rate_hz` metadata says so).
 - A recording stopped by a write error has no summary section, so indexed readers refuse it; the
   `recording_stopped` event names the error.
-- Opening a recording in Foxglove while it is still being written is untested.
+- Opening a recording while it is still being written: the file has no summary until `stop()`, so indexed
+  readers refuse it and a streaming reader gets only the flushed chunks (`docs/research/mcap-determinism.md`).
+  Foxglove itself was not installed on the evidence machine, so its behavior on a live file remains to be checked.
 
 ### Race timing (`docs/race-timing.md`)
 - A gate is a trigger on the quad's centre: no margin for its size, no tilt. There is no lap limit and no reset (a
@@ -126,24 +130,21 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Plugin loading for radio models from outside the tree.
 
 ### Modelling
-- `RadioLoss` on the downlink.
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
-- A configurable telemetry slot ratio; DShot extended telemetry and MSP over CRSF.
+- DShot extended telemetry and MSP over CRSF.
 - A compass, and the heading mapping it needs.
 
 ### Video and OSD
 - OSD font pages 2–3 (warnings, criticals) and the full HD/digital OSD element set.
 - Digital video systems (parent spec §2).
-- A DVR that survives a resize; a clean-feed DVR; audio; image-sequence and ffmpeg export; a DVR toggle on the F2
-  controls screen (v1 ships the **D** key).
+- A DVR that survives a resize; a clean-feed DVR; audio; image-sequence and ffmpeg export.
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
 - The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`), and a Configurator's EEPROM
   changes made after `Load`.
-- `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API;
-  `OFS_LIBRARY` as a search path.
+- `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API.
 
 ### Tooling
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries

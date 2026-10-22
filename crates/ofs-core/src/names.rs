@@ -111,6 +111,8 @@ pub const RADIO_DOWNLINK_LQ: &str = "radio.downlink_lq";
 pub const FAULT_RADIO_LINK_LOSS: &str = "fault.radio.link_loss";
 /// Fault seams (M4b): the vehicle writes them once per set_fault; models read them each step.
 pub const FAULT_RADIO_LOSS_FRACTION: &str = "fault.radio.loss_fraction";
+/// Fault: the share of downlink packets the handset loses, in [0, 1]. The uplink is untouched.
+pub const FAULT_RADIO_DOWNLINK_LOSS_FRACTION: &str = "fault.radio.downlink_loss_fraction";
 pub const FAULT_RADIO_BURST_ON_S: &str = "fault.radio.burst_on_s";
 pub const FAULT_RADIO_BURST_OFF_S: &str = "fault.radio.burst_off_s";
 

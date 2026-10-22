@@ -3,14 +3,16 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; release 0.2.0 adds phases 2 and 3, see `CHANGELOG.md`).
+**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; releases 0.2.0 and 0.3.0 followed — 0.3.0 adds the
+`OFS_LIBRARY` search path, `radio.telemetry_slot_divisor`, the `DownlinkLoss` fault, `tx`/`link_loss` columns in the
+recorded-sticks CSV, the game's F2 DVR toggle and the mid-write-recording note, see `CHANGELOG.md`).
 v1 does what its design set out to
 (`docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md` §1.4, with the evidence for each point):
 a developer flies a simulated OpenDrone 5" quad running real Betaflight SITL with a joystick, through a simulated
 ExpressLRS/CRSF link, watching Betaflight's real OSD on a degrading analog picture; the real Betaflight Configurator
 connects, and settings saved over its port persist; and a Python script runs the same quad headless and deterministically, injects
 faults and gets every signal back as a DataFrame. What it does not do — level-2/3 firmware fidelity, real radios,
-digital video, GPS, INAV/ArduPilot, macOS — and what comes next are in `docs/roadmap.md`.
+digital video, GPS, INAV/ArduPilot — and what comes next are in `docs/roadmap.md`.
 
 What is in it:
 - Betaflight flies through a simulated ExpressLRS/CRSF link and fails safe on link loss.
@@ -43,9 +45,12 @@ What is in it:
 - The radio is three swappable parts — a handset, a link and a receiver — so other links can be tried: ExpressLRS on
   2.4 GHz or 900 MHz, or a geometry-free `fixed` link, flown through the same chain; and a live flight's sticks record
   to a CSV that `play_inputs` replays in lockstep (M5, `docs/writing-a-radio-model.md`).
+- macOS is supported best-effort on Apple silicon: the SITL builds with a one-hunk patch, the Rust, Python and Godot
+  suites have passed in the survey, and CI has a non-blocking job (`docs/research/macos.md`; no physical Mac has been
+  tried yet).
 
 Documentation:
-- `docs/dev-setup.md` — building, running and testing on Windows and Linux (and the performance numbers).
+- `docs/dev-setup.md` — building, running and testing on Windows, Linux and macOS (and the performance numbers).
 - `docs/architecture.md` — how the crates, the server and the clients fit together, and how to add a part, a model,
   a fault or a recorded signal.
 - `docs/roadmap.md` — v1's known limitations and what comes next.
@@ -93,10 +98,10 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
     cargo build -p ofs-sim -p ofs-godot
     godot --path godot                             # Godot 4.7; see docs/dev-setup.md for the binary
 
-Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** record the
-FPV view (DVR), **K** cut the radio link (failsafe test), **I** record the sticks to a replayable CSV, **H** show/hide
-the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc** closes the screens. Arm with the aux 1
-switch; aux 2 selects Angle mode.
+Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** or the F2
+DVR toggle record the FPV view, **K** cut the radio link (failsafe test), **I** record the sticks and link state
+to a replayable CSV, **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
+closes the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
 command-line flags after `--`. By default the game starts `ofs-sim` itself (from `target/release`, else
@@ -122,8 +127,13 @@ With `OFS_SITL_LAUNCH` set (see "With real Betaflight" above), the game starts B
 simulated radio link.
 
 The radio between the handset and Betaflight is three swappable parts (a handset, a link, a receiver): the quad file's
-`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Press **I** to record
-the sticks of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them.
+`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Both link kinds read
+`[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a telemetry frame when heard.
+It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no off value, and one value covers every band and packet
+rate. It changes telemetry cadence, not loss. The default keeps 0.2.0 recordings and goldens byte-identical. Press **I** to record the
+sticks and link state of a flight to a CSV; `sim.play_inputs(path)` in a lockstep Python session replays them. The
+`tx` and `link_loss` columns capture a transmitter switch and the **K** cut; files written before 0.3.0 have neither
+column and still play.
 
 ## Component library
 
@@ -136,8 +146,11 @@ The quad file is schema 5: it references parts and keeps only its own wiring, an
 
 A part's id is its file stem, and the quad references it — `motors = ["opendrone-openmotor-2207"]` in
 `quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part. The library is resolved against
-`<quad dir>/../library`; set `OFS_LIBRARY` to fly another part set without touching `quads/`. Every parameter
-of a part must carry a `[provenance]` entry or the part is refused at load:
+`<quad dir>/../library`; set `OFS_LIBRARY` to a list of roots to fly another part set without touching `quads/`.
+The first root that has a part id wins, so a later root fills the parts the earlier ones lack. Separate roots with
+`;` on Windows and `:` elsewhere: `OFS_LIBRARY="C:\shared\ofs-library;library"` or
+`OFS_LIBRARY=/shared/one:/shared/two`. Every parameter of a part must carry a `[provenance]` entry or the part is
+refused at load:
 
     [provenance."motor.kv_rpm_per_v"]
     source = "estimated"     # datasheet | measured | estimated
@@ -153,15 +166,16 @@ are the worked example of the migration.
 
 ## The fault catalog
 
-Scripts can break the aircraft in the ways real aircraft break: eight faults, injectable mid-flight from Python
+Scripts can break the aircraft in the ways real aircraft break: nine faults, injectable mid-flight from Python
 or gRPC, each raising `fault_injected` / `fault_cleared` events and all cleared by `clear_faults()`. Fault
-randomness draws from its own stream, so a fault-inactive run stays bit-identical to a fault-free one. The
+randomness draws from dedicated streams, so a fault-inactive run stays bit-identical to a fault-free one. The
 mechanisms, constants and their estimate status are in `docs/research/faults.md`.
 
 | Fault | Meaning |
 |---|---|
 | `RadioLinkLoss()` | every uplink packet is lost: the receiver goes silent, Betaflight fails safe |
 | `RadioLoss(fraction)` | an extra per-packet uplink loss probability on top of the link model's own |
+| `DownlinkLoss(fraction)` | an extra per-packet downlink loss probability: the handset loses telemetry, the uplink and sticks are untouched |
 | `BurstLoss(on_ms, off_ms)` | the uplink dies for `on_ms`, delivers for `off_ms`, repeating from session start |
 | `MotorFailure(motor, scale)` | motor `motor` makes `scale` of its torque and current; 0 = dead, coasting down through prop drag |
 | `PropDamage(prop, thrust_scale, imbalance_kgm)` | the prop loses thrust and torque and gains `imbalance_kgm` of airframe vibration |
@@ -190,15 +204,20 @@ The spec's sandbox example (`python/examples/sandbox.py`): run it from the repos
   motors/ESCs/props 240 Hz except their temperatures at 100 Hz, battery 10 Hz, everything else 50 Hz) into `<data_dir>/logs/<quad>-<n>.mcap`;
   `load(record=False)` does not, and real-time sessions record only when asked. `sim.recording.start(["imu.*",
   ("motor.*.omega_radps", 1000)])` picks signals and rates, `sim.recording.stop()` finishes the file. Recordings
-  open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files.
+  open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files. While the
+  session is still writing, the file has no summary yet — `ofs.reader` refuses it and no indexed reader can build its
+  index, so call `stop()` (or `sim.log`, which stops and returns it) before opening one
+  (`docs/research/mcap-determinism.md`).
 - **Reading.** `sim.log` stops the running recording and returns it; `.to_dataframe(patterns)` gives one row per
   recorded time and one column per signal component (`imu.gyro_frd_radps.x`), indexed by `time_s`, NaN where a
   slower signal has no record. `.to_csv(path)` and `.to_parquet(path)` export; `ofs.reader.to_dataframe(path)`
   reads any recording. Patterns: `*` matches any run of characters, `?` one; a pattern matching nothing names
   the signals it probably meant.
-- **Scripted sticks.** `sim.play_inputs("flips.csv")` plays a CSV with a `t_s` column (seconds from the call) and any
-  of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, sample-and-hold on the simulator's ticks; `set_sticks`
-  is refused while it plays, and a malformed file raises `ConfigError` naming each problem's line.
+- **Scripted sticks.** `sim.play_inputs("flips.csv")` plays a CSV with a `t_s` column (seconds from the
+  call) and any of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, plus optional `tx` and `link_loss` (0/1),
+  sample-and-hold on the simulator's ticks. At least one input column is required; a column a file leaves out keeps
+  its current value, and the last row holds after playback. `set_sticks` is refused while it plays, and a malformed
+  file raises `ConfigError` naming each problem's line.
 - **Betaflight's Blackbox.** The shipped quads log to SITL's virtual Blackbox; when a session ends its logs are
   copied into the logs directory (`sim.blackbox_files()`), ready for Blackbox Explorer. Disarm before the session
   ends for a complete log. (Enabling it changed the shipped diffs: an EEPROM made before M4c is refused at load

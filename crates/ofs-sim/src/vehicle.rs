@@ -15,8 +15,8 @@ use ofs_fc::open_loop::OpenLoopFc;
 use ofs_fc::stabilizer::Stabilizer;
 use ofs_log::tail::{TailHandle, TailRecorder, DEFAULT_WINDOW_S};
 use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRate};
-use crate::inputs::{tick_at, Inputs, Stick};
-use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary};
+use crate::inputs::{tick_at, Column, Inputs, Stick};
+use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary, InputsState};
 use crate::journal::{Action, Journal};
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
@@ -211,6 +211,10 @@ pub enum Fault {
     RadioLoss {
         fraction: f64,
     },
+    /// The handset loses `fraction` of the downlink packets, `fraction` in [0, 1]; uplink control is untouched.
+    DownlinkLoss {
+        fraction: f64,
+    },
     /// Every uplink packet is lost for `on_s`, then the link delivers normally for `off_s`, repeating.
     BurstLoss {
         on_s: f64,
@@ -252,6 +256,7 @@ impl Fault {
         match self {
             Fault::RadioLinkLoss => "radio_link_loss",
             Fault::RadioLoss { .. } => "radio_loss",
+            Fault::DownlinkLoss { .. } => "downlink_loss",
             Fault::BurstLoss { .. } => "burst_loss",
             Fault::MotorFailure { .. } => "motor_failure",
             Fault::PropDamage { .. } => "prop_damage",
@@ -383,6 +388,8 @@ struct Handles {
     fault_radio_loss: Signal<f64>,
     /// Uplink loss fraction 0..1 — written by set_fault's RadioLoss arm; the ELRS model reads it per packet.
     fault_radio_loss_fraction: Signal<f64>,
+    /// Downlink loss fraction 0..1 — written by set_fault's DownlinkLoss arm; the radio models read it per packet.
+    fault_radio_downlink_loss_fraction: Signal<f64>,
     /// Burst window edges, s — written by set_fault's BurstLoss arm (Task 4 consumes).
     fault_burst_on: Signal<f64>,
     fault_burst_off: Signal<f64>,
@@ -440,6 +447,7 @@ impl Handles {
             rssi: bus.signal(names::RADIO_RSSI),
             fault_radio_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
             fault_radio_loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
+            fault_radio_downlink_loss_fraction: bus.signal(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION),
             fault_burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
             fault_burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
             fault_battery_r_offset: bus.signal(names::FAULT_BATTERY_R_OFFSET_OHM),
@@ -667,6 +675,7 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
             BandKind::Mhz900 => Band::Mhz900,
         },
         packet_rate_hz: r.packet_rate_hz,
+        telemetry_slot_divisor: r.telemetry_slot_divisor,
         latency_packets: r.latency_packets,
         tx_power_mw: front_end.tx_power_mw,
         handset_position: front_end.position,
@@ -696,6 +705,7 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
                 FixedParams {
                     packet_rate_hz: r.packet_rate_hz,
                     latency_packets: r.latency_packets,
+                    telemetry_slot_divisor: r.telemetry_slot_divisor,
                     loss_fraction: f.loss_fraction,
                     burst_on_s: f.burst_on_s,
                     burst_off_s: f.burst_off_s,
@@ -1147,22 +1157,26 @@ impl Vehicle {
             return Err(SimError::InvalidArgument(format!("stick {field} must be finite")));
         }
         let s = &s.clamped();
-        let h = &self.h;
-        let bus = self.scheduler.bus_mut();
-        bus.set(h.roll, s.roll);
-        bus.set(h.pitch, s.pitch);
-        bus.set(h.yaw, s.yaw);
-        bus.set(h.throttle, s.throttle);
-        for (sig, v) in h.aux.iter().zip(s.aux) {
-            bus.set(*sig, v);
+        let tick = self.scheduler.tick();
+        {
+            let h = &self.h;
+            let bus = self.scheduler.bus_mut();
+            bus.set(h.roll, s.roll);
+            bus.set(h.pitch, s.pitch);
+            bus.set(h.yaw, s.yaw);
+            bus.set(h.throttle, s.throttle);
+            for (sig, v) in h.aux.iter().zip(s.aux) {
+                bus.set(*sig, v);
+            }
         }
+        let state = self.inputs_state();
         if let Some(recorder) = &mut self.inputs_recorder {
-            recorder.record(self.scheduler.tick(), s);
+            recorder.record(tick, &state);
         }
         let bits = sticks_bits(s);
         if bits != self.journaled_sticks {
             self.journaled_sticks = bits;
-            self.journal.push(self.scheduler.tick(), Action::Sticks(sticks_values(s)));
+            self.journal.push(tick, Action::Sticks(sticks_values(s)));
         }
         Ok(())
     }
@@ -1195,6 +1209,7 @@ impl Vehicle {
         bus.set(h.tx_enabled, 1.0);
         bus.set(h.fault_radio_loss, 0.0);
         bus.set(h.fault_radio_loss_fraction, 0.0);
+        bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
         bus.set(h.fault_burst_on, 0.0);
         for _ in 0..30 {
             if self.run_for(0.1).is_err() || !self.firmware_armed() {
@@ -1225,9 +1240,14 @@ impl Vehicle {
 
     /// Transmitter on (pilot or script connected) or off (the receiver hears nothing).
     pub fn set_transmitter(&mut self, on: bool) {
+        let tick = self.scheduler.tick();
         let s = self.h.tx_enabled;
         self.scheduler.bus_mut().set(s, if on { 1.0 } else { 0.0 });
-        self.journal.push(self.scheduler.tick(), Action::Transmitter(on));
+        let state = self.inputs_state();
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(tick, &state);
+        }
+        self.journal.push(tick, Action::Transmitter(on));
     }
 
     /// Validates a fault against this quad without applying it: what `set_fault` and `schedule_fault` refuse.
@@ -1237,6 +1257,13 @@ impl Vehicle {
             Fault::RadioLoss { fraction } => {
                 if !(0.0..=1.0).contains(fraction) {
                     return Err(SimError::InvalidArgument(format!("radio loss fraction must be in [0, 1], got {fraction}")));
+                }
+            }
+            Fault::DownlinkLoss { fraction } => {
+                if !(0.0..=1.0).contains(fraction) {
+                    return Err(SimError::InvalidArgument(format!(
+                        "downlink loss fraction must be in [0, 1], got {fraction}"
+                    )));
                 }
             }
             Fault::BurstLoss { on_s, off_s } => {
@@ -1311,44 +1338,60 @@ impl Vehicle {
     /// `set_fault` without the journal: what a scheduled fault does when its tick comes.
     fn apply_fault(&mut self, fault: Fault, active: bool) -> Result<(), SimError> {
         self.check_fault(&fault)?;
-        let b = self.scheduler.bus_mut();
-        match &fault {
-            Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
-            Fault::RadioLoss { fraction } => b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 }),
-            Fault::BurstLoss { on_s, off_s } => {
-                let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
-                b.set(self.h.fault_burst_on, on);
-                b.set(self.h.fault_burst_off, off);
-            }
-            Fault::MotorFailure { motor, scale } => b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 }),
-            Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
-                b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
-                b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
-            }
-            Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
-                b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
-                b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
-                b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
-            }
-            Fault::GyroFault { bias_radps, noise_scale } => {
-                b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
-                b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
-            }
-            Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
-                self.vtx_interference.set(active.then_some(Emitter {
-                    position: *position_ned_m,
-                    freq_mhz: *freq_mhz,
-                    power_mw: *power_mw,
-                    antenna: Antenna {
-                        kind: AntennaKind::Omni,
-                        gain_dbi: 2.0,
-                        polarization: Polarization::Rhcp,
-                        axis: DVec3::NEG_Z,
-                    },
-                }));
+        {
+            let b = self.scheduler.bus_mut();
+            match &fault {
+                Fault::RadioLinkLoss => b.set(self.h.fault_radio_loss, if active { 1.0 } else { 0.0 }),
+                Fault::RadioLoss { fraction } => {
+                    b.set(self.h.fault_radio_loss_fraction, if active { *fraction } else { 0.0 })
+                }
+                Fault::DownlinkLoss { fraction } => {
+                    b.set(self.h.fault_radio_downlink_loss_fraction, if active { *fraction } else { 0.0 })
+                }
+                Fault::BurstLoss { on_s, off_s } => {
+                    let (on, off) = if active { (*on_s, *off_s) } else { (0.0, 0.0) };
+                    b.set(self.h.fault_burst_on, on);
+                    b.set(self.h.fault_burst_off, off);
+                }
+                Fault::MotorFailure { motor, scale } => {
+                    b.set(self.h.fault_motor_scale[*motor], if active { *scale } else { 1.0 })
+                }
+                Fault::PropDamage { prop, thrust_scale, imbalance_kgm } => {
+                    b.set(self.h.fault_prop_thrust_scale[*prop], if active { *thrust_scale } else { 1.0 });
+                    b.set(self.h.prop_imbalance[*prop], if active { *imbalance_kgm } else { self.prop_imbalance_baseline[*prop] });
+                }
+                Fault::WeakCell { cell, r_offset_ohm, v_offset_v } => {
+                    b.set(self.h.fault_battery_weak_cell, if active { *cell as f64 + 1.0 } else { 0.0 });
+                    b.set(self.h.fault_battery_r_offset, if active { *r_offset_ohm } else { 0.0 });
+                    b.set(self.h.fault_battery_v_offset, if active { *v_offset_v } else { 0.0 });
+                }
+                Fault::GyroFault { bias_radps, noise_scale } => {
+                    b.set(self.h.fault_imu_gyro_bias, if active { *bias_radps } else { DVec3::ZERO });
+                    b.set(self.h.fault_imu_noise_scale, if active { *noise_scale } else { 1.0 });
+                }
+                Fault::VtxInterference { freq_mhz, power_mw, position_ned_m } => {
+                    self.vtx_interference.set(active.then_some(Emitter {
+                        position: *position_ned_m,
+                        freq_mhz: *freq_mhz,
+                        power_mw: *power_mw,
+                        antenna: Antenna {
+                            kind: AntennaKind::Omni,
+                            gain_dbi: 2.0,
+                            polarization: Polarization::Rhcp,
+                            axis: DVec3::NEG_Z,
+                        },
+                    }));
+                }
             }
         }
         self.record_fault_active(&fault, active); // maintains self.active_faults
+        if matches!(&fault, Fault::RadioLinkLoss) {
+            let tick = self.scheduler.tick();
+            let state = self.inputs_state();
+            if let Some(recorder) = &mut self.inputs_recorder {
+                recorder.record(tick, &state);
+            }
+        }
         Ok(())
     }
 
@@ -1414,29 +1457,55 @@ impl Vehicle {
             let (_, fault) = self.pending_faults.remove(0);
             self.apply_fault(fault, true).expect("validated when scheduled");
         }
-        let Some(p) = self.playback.as_mut() else { return };
-        let bus = self.scheduler.bus_mut();
-        while p.next < p.ticks.len() && p.ticks[p.next] <= now {
-            for (stick, v) in p.inputs.columns.iter().zip(&p.inputs.rows[p.next].1) {
-                let signal = match stick {
-                    Stick::Roll => self.h.roll,
-                    Stick::Pitch => self.h.pitch,
-                    Stick::Yaw => self.h.yaw,
-                    Stick::Throttle => self.h.throttle,
-                    Stick::Aux(i) => self.h.aux[*i],
-                };
-                bus.set(signal, *v);
+        while let Some((columns, values)) = self.playback.as_ref().and_then(|p| {
+            (p.next < p.ticks.len() && p.ticks[p.next] <= now)
+                .then(|| (p.inputs.columns.clone(), p.inputs.rows[p.next].1.clone()))
+        }) {
+            let mut transmitter = None;
+            let mut link_loss = None;
+            {
+                let h = &self.h;
+                let bus = self.scheduler.bus_mut();
+                for (column, v) in columns.iter().zip(&values) {
+                    match column {
+                        Column::Stick(stick) => {
+                            let signal = match stick {
+                                Stick::Roll => h.roll,
+                                Stick::Pitch => h.pitch,
+                                Stick::Yaw => h.yaw,
+                                Stick::Throttle => h.throttle,
+                                Stick::Aux(i) => h.aux[*i],
+                            };
+                            bus.set(signal, *v);
+                        }
+                        Column::Transmitter => transmitter = Some(*v > 0.5),
+                        Column::LinkLoss => link_loss = Some(*v > 0.5),
+                    }
+                }
+                // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the
+                // bus's now, or the next `set_sticks` to the values from before the file would look like no change.
+                let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
+                for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
+                    *slot = bus.get(signal).to_bits();
+                }
             }
-            p.next += 1;
-            // The row moved the sticks without a `set_sticks`: the journal's idea of "the last sticks" is the bus's
-            // now, or the next `set_sticks` to the values from before the file would look like no change.
-            let h = &self.h;
-            let values = [h.roll, h.pitch, h.yaw, h.throttle, h.aux[0], h.aux[1], h.aux[2], h.aux[3]];
-            for (slot, signal) in self.journaled_sticks.iter_mut().zip(values) {
-                *slot = bus.get(signal).to_bits();
+            if let Some(p) = self.playback.as_mut() {
+                p.next += 1;
+            }
+            // The actions go through their own setters after the bus and playback borrows are gone. A row that
+            // repeats the bus state adds nothing (and, for `tx`, no journal entry).
+            if let Some(on) = transmitter {
+                if (self.scheduler.bus().get(self.h.tx_enabled) > 0.5) != on {
+                    self.set_transmitter(on);
+                }
+            }
+            if let Some(loss) = link_loss {
+                if (self.scheduler.bus().get(self.h.fault_radio_loss) > 0.5) != loss {
+                    self.apply_fault(Fault::RadioLinkLoss, loss).expect("RadioLinkLoss is always valid");
+                }
             }
         }
-        if p.next == p.ticks.len() {
+        if self.playback.as_ref().is_some_and(|p| p.next == p.ticks.len()) {
             self.finished_inputs = self.playback.take().map(|p| p.inputs.name);
         }
     }
@@ -1454,8 +1523,17 @@ impl Vehicle {
     /// The active faults' names, in the spec table's order: the event stream is deterministic regardless of
     /// injection order.
     pub fn active_fault_names(&self) -> Vec<String> {
-        const ORDER: [&str; 8] =
-            ["radio_link_loss", "radio_loss", "burst_loss", "motor_failure", "prop_damage", "weak_cell", "gyro_fault", "vtx_interference"];
+        const ORDER: [&str; 9] = [
+            "radio_link_loss",
+            "radio_loss",
+            "downlink_loss",
+            "burst_loss",
+            "motor_failure",
+            "prop_damage",
+            "weak_cell",
+            "gyro_fault",
+            "vtx_interference",
+        ];
         let mut names = self.active_faults.clone();
         names.sort_by_key(|n| ORDER.iter().position(|o| o == n).unwrap_or(ORDER.len()));
         names
@@ -1467,19 +1545,27 @@ impl Vehicle {
         self.journal.push(self.scheduler.tick(), Action::ClearFaults);
         let imbalance = self.prop_imbalance_baseline.clone();
         self.init_fault_identities(&imbalance);
-        let h = &self.h;
-        let bus = self.scheduler.bus_mut();
-        bus.set(h.fault_radio_loss, 0.0);
-        bus.set(h.fault_radio_loss_fraction, 0.0);
-        bus.set(h.fault_burst_on, 0.0);
-        bus.set(h.fault_burst_off, 0.0);
-        bus.set(h.fault_battery_r_offset, 0.0);
-        bus.set(h.fault_battery_v_offset, 0.0);
-        bus.set(h.fault_battery_weak_cell, 0.0);
-        bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
+        {
+            let h = &self.h;
+            let bus = self.scheduler.bus_mut();
+            bus.set(h.fault_radio_loss, 0.0);
+            bus.set(h.fault_radio_loss_fraction, 0.0);
+            bus.set(h.fault_radio_downlink_loss_fraction, 0.0);
+            bus.set(h.fault_burst_on, 0.0);
+            bus.set(h.fault_burst_off, 0.0);
+            bus.set(h.fault_battery_r_offset, 0.0);
+            bus.set(h.fault_battery_v_offset, 0.0);
+            bus.set(h.fault_battery_weak_cell, 0.0);
+            bus.set(h.fault_imu_gyro_bias, DVec3::ZERO);
+        }
         self.vtx_interference.set(None);
         self.active_faults.clear();
         self.pending_faults.clear();
+        let tick = self.scheduler.tick();
+        let state = self.inputs_state();
+        if let Some(recorder) = &mut self.inputs_recorder {
+            recorder.record(tick, &state);
+        }
     }
 
     pub fn run_for(&mut self, seconds: f64) -> Result<(), SimError> {
@@ -1661,14 +1747,24 @@ impl Vehicle {
         Sticks { roll: bus.get(h.roll), pitch: bus.get(h.pitch), yaw: bus.get(h.yaw), throttle: bus.get(h.throttle), aux }
     }
 
-    /// Starts recording the sticks to a new CSV at `path` (the server names it): a row whenever they change, in
-    /// `play_inputs`' format. One at a time; an existing file is never truncated.
+    /// Everything an inputs recording row holds: the sticks and the two link booleans, as the bus holds them now.
+    fn inputs_state(&self) -> InputsState {
+        let bus = self.scheduler.bus();
+        InputsState {
+            sticks: self.sticks_now(),
+            transmitter: bus.get(self.h.tx_enabled) > 0.5,
+            link_loss: bus.get(self.h.fault_radio_loss) > 0.5,
+        }
+    }
+
+    /// Starts recording the sticks and link state to a new CSV at `path` (the server names it): a row whenever any
+    /// of it changes, in `play_inputs`' format. One at a time; an existing file is never truncated.
     pub fn start_inputs_recording(&mut self, path: &Path) -> Result<(), RecordError> {
         if self.inputs_recorder.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        let now = self.sticks_now();
-        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &now)?);
+        let state = self.inputs_state();
+        self.inputs_recorder = Some(InputsRecorder::start(path, self.scheduler.base_hz(), self.scheduler.tick(), &state)?);
         Ok(())
     }
 
@@ -1832,6 +1928,7 @@ mod tests {
         }
         assert_eq!(b.get(vehicle.h.fault_imu_noise_scale), 1.0);
         assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
         assert_eq!(b.get(vehicle.h.fault_battery_weak_cell), 0.0);
     }
 
@@ -1851,6 +1948,42 @@ mod tests {
     }
 
     #[test]
+    fn downlink_loss_drops_telemetry_but_not_the_control_link() {
+        let mut clean = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let mut faulted = open_loop(&shipped_quad(), WorldConfig::open_field());
+        let sticks = Sticks { throttle: 0.5, ..Sticks::default() };
+        clean.set_sticks(&sticks).unwrap();
+        faulted.set_sticks(&sticks).unwrap();
+        clean.run_for(0.05).unwrap();
+        faulted.run_for(0.05).unwrap();
+        assert_eq!(clean.state().radio.downlink_lq_pct, 100.0);
+        faulted.set_fault(Fault::DownlinkLoss { fraction: 1.0 }, true).unwrap();
+        assert_eq!(faulted.scheduler.bus().get(faulted.h.fault_radio_downlink_loss_fraction), 1.0);
+        clean.run_for(0.25).unwrap();
+        faulted.run_for(0.25).unwrap();
+        assert_eq!(faulted.state().radio.downlink_lq_pct, 0.0, "the handset hears no telemetry");
+        assert_eq!(faulted.state().radio.lq_pct, 100.0, "the uplink is untouched");
+        assert_eq!(faulted.state().pos_ned_m, clean.state().pos_ned_m, "the sticks still fly the quad");
+        assert_eq!(faulted.state().motor_cmd, clean.state().motor_cmd);
+        faulted.clear_faults();
+        clean.run_for(0.25).unwrap();
+        faulted.run_for(0.25).unwrap();
+        assert_eq!(faulted.state().radio.downlink_lq_pct, 100.0, "clearing restores the downlink");
+        assert_eq!(faulted.state().pos_ned_m, clean.state().pos_ned_m);
+    }
+
+    #[test]
+    fn a_downlink_loss_fraction_outside_the_unit_interval_is_refused() {
+        let mut vehicle = open_loop(&shipped_quad(), WorldConfig::open_field());
+        for fraction in [1.5, -0.1, f64::NAN] {
+            let err = vehicle.set_fault(Fault::DownlinkLoss { fraction }, true).unwrap_err();
+            assert!(err.to_string().contains("downlink loss fraction"), "{fraction}: {err}");
+            assert_eq!(vehicle.active_fault_names(), Vec::<String>::new(), "a rejected fault is not recorded");
+            assert_eq!(vehicle.scheduler.bus().get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
+        }
+    }
+
+    #[test]
     fn clear_faults_returns_every_fault_signal_to_its_identity() {
         // The honest re-join pin: a physically diverged trajectory cannot re-join a clean run's
         // digest, so the pin is exhaustive over the fault signals instead — every one of them.
@@ -1858,6 +1991,7 @@ mod tests {
         vehicle.set_fault(Fault::MotorFailure { motor: 1, scale: 0.0 }, true).unwrap();
         vehicle.set_fault(Fault::PropDamage { prop: 2, thrust_scale: 0.8, imbalance_kgm: 3.0e-4 }, true).unwrap();
         vehicle.set_fault(Fault::RadioLoss { fraction: 0.7 }, true).unwrap();
+        vehicle.set_fault(Fault::DownlinkLoss { fraction: 0.7 }, true).unwrap();
         vehicle.set_fault(Fault::BurstLoss { on_s: 1.0, off_s: 0.5 }, true).unwrap();
         vehicle.set_fault(Fault::GyroFault { bias_radps: DVec3::new(0.1, 0.0, 0.0), noise_scale: 2.0 }, true).unwrap();
         vehicle.set_fault(Fault::WeakCell { cell: 3, r_offset_ohm: 0.01, v_offset_v: 0.1 }, true).unwrap();
@@ -1871,6 +2005,7 @@ mod tests {
         }
         assert_eq!(b.get(vehicle.h.fault_radio_loss), 0.0);
         assert_eq!(b.get(vehicle.h.fault_radio_loss_fraction), 0.0);
+        assert_eq!(b.get(vehicle.h.fault_radio_downlink_loss_fraction), 0.0);
         assert_eq!(b.get(vehicle.h.fault_burst_on), 0.0);
         assert_eq!(b.get(vehicle.h.fault_burst_off), 0.0);
         assert_eq!(b.get(vehicle.h.fault_battery_r_offset), 0.0);
@@ -2010,6 +2145,7 @@ mod tests {
         for fault in [
             Fault::GyroFault { bias_radps: DVec3::ZERO, noise_scale: 2.0 },
             Fault::RadioLinkLoss,
+            Fault::DownlinkLoss { fraction: 0.5 },
             Fault::WeakCell { cell: 2, r_offset_ohm: 0.01, v_offset_v: 0.05 },
         ] {
             vehicle.set_fault(fault, true).unwrap();
@@ -2017,14 +2153,17 @@ mod tests {
         // ...the names still come back in the spec table's order.
         assert_eq!(
             vehicle.active_fault_names(),
-            ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string)
+            ["radio_link_loss", "downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string)
         );
         // A re-inject updates the entry instead of duplicating it.
         vehicle.set_fault(Fault::RadioLinkLoss, true).unwrap();
-        assert_eq!(vehicle.active_fault_names(), ["radio_link_loss", "weak_cell", "gyro_fault"].map(str::to_string));
+        assert_eq!(
+            vehicle.active_fault_names(),
+            ["radio_link_loss", "downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string)
+        );
         // Deactivating removes the name.
         vehicle.set_fault(Fault::RadioLinkLoss, false).unwrap();
-        assert_eq!(vehicle.active_fault_names(), ["weak_cell", "gyro_fault"].map(str::to_string));
+        assert_eq!(vehicle.active_fault_names(), ["downlink_loss", "weak_cell", "gyro_fault"].map(str::to_string));
     }
 
     #[test]

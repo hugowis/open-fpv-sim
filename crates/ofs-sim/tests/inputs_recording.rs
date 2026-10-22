@@ -1,15 +1,15 @@
-//! Recording a live flight's sticks to a `play_inputs` CSV (spec §6): rows only on change, one row per tick, only
-//! playable values, a file that is complete however the session ends, and a lockstep replay that reproduces the
-//! flight.
+//! Recording a live flight's sticks, transmitter and link state to a `play_inputs` CSV (spec §6): rows only on
+//! change, one row per tick, only playable values, a file that is complete however the session ends, and a lockstep
+//! replay that reproduces the flight.
 use std::path::Path;
 
 use ofs_config::{load, FcKind, WorldConfig};
 use ofs_log::RecordError;
 use ofs_sim::inputs;
-use ofs_sim::vehicle::{build, BuildOptions, Sticks, Vehicle};
+use ofs_sim::vehicle::{build, BuildOptions, Fault, Sticks, Vehicle};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
-const HEADER: &str = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4";
+const HEADER: &str = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss";
 
 fn vehicle() -> Vehicle {
     let cfg = load(Path::new(QUAD)).unwrap();
@@ -40,7 +40,7 @@ fn rows_are_written_only_when_a_stick_changes_and_the_first_row_is_complete() {
     let summary = v.stop_inputs_recording().unwrap();
     assert_eq!(
         lines(&path),
-        [HEADER, "0,0,0,0,0.5,-1,-1,-1,-1", "0.04,0.25,0,0,0.5,-1,-1,-1,-1"],
+        [HEADER, "0,0,0,0,0.5,-1,-1,-1,-1,1,0", "0.04,0.25,0,0,0.5,-1,-1,-1,-1,1,0"],
         "the initial sticks, then the change at tick 320 (0.04 s)"
     );
     assert_eq!((summary.rows, summary.duration_s, summary.path), (2, 0.04, path));
@@ -57,7 +57,7 @@ fn two_changes_in_one_tick_leave_the_later_one() {
     v.set_sticks(&sticks(0.2, 0.0)).unwrap();
     v.set_sticks(&sticks(0.3, 0.0)).unwrap();
     v.stop_inputs_recording().unwrap();
-    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0.3,-1,-1,-1,-1"], "t_s counts from the start of the recording");
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0.3,-1,-1,-1,-1,1,0"], "t_s counts from the start of the recording");
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn a_non_finite_stick_adds_no_row_and_an_out_of_range_one_is_clamped_so_the_file
     v.set_sticks(&Sticks { roll: 3.0, throttle: -2.0, ..Sticks::default() }).unwrap();
     v.run_for(0.01).unwrap();
     v.stop_inputs_recording().unwrap();
-    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1", "0.02,1,0,0,0,-1,-1,-1,-1"]);
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0", "0.02,1,0,0,0,-1,-1,-1,-1,1,0"]);
     inputs::parse("sticks.csv", &std::fs::read_to_string(&path).unwrap()).expect("every value is inside the playable ranges");
 }
 
@@ -98,7 +98,105 @@ fn a_vehicle_dropped_mid_recording_leaves_a_complete_file() {
         v.run_for(0.01).unwrap();
         v.set_sticks(&sticks(0.7, 0.0)).unwrap(); // the newest row is still pending when the session ends
     }
-    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1", "0.01,0,0,0,0.7,-1,-1,-1,-1"]);
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0", "0.01,0,0,0,0.7,-1,-1,-1,-1,1,0"]);
+}
+
+#[test]
+fn a_transmitter_or_link_change_writes_a_row_even_when_no_stick_moves() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_transmitter(false);
+    v.set_transmitter(false); // the same state again: no second row
+    v.run_for(0.01).unwrap();
+    v.set_transmitter(true);
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, false).unwrap();
+    v.run_for(0.01).unwrap();
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.run_for(0.01).unwrap();
+    v.clear_faults();
+    v.run_for(0.01).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(
+        lines(&path),
+        [
+            HEADER,
+            "0,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.01,0,0,0,0,-1,-1,-1,-1,0,0",
+            "0.02,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.03,0,0,0,0,-1,-1,-1,-1,1,1",
+            "0.04,0,0,0,0,-1,-1,-1,-1,1,0",
+            "0.05,0,0,0,0,-1,-1,-1,-1,1,1",
+            "0.06,0,0,0,0,-1,-1,-1,-1,1,0",
+        ],
+        "one row per real change, including a clear_faults K restore"
+    );
+}
+
+#[test]
+fn a_scheduled_link_cut_is_recorded_on_its_tick() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scheduled.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.schedule_fault(Fault::RadioLinkLoss, 0.02).unwrap();
+    v.run_for(0.03).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0", "0.02,0,0,0,0,-1,-1,-1,-1,1,1"]);
+}
+
+#[test]
+fn other_faults_add_no_inputs_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("motor.csv");
+    let mut v = vehicle();
+    v.start_inputs_recording(&path).unwrap();
+    v.set_fault(Fault::MotorFailure { motor: 0, scale: 0.0 }, true).unwrap();
+    v.run_for(0.02).unwrap();
+    v.stop_inputs_recording().unwrap();
+    assert_eq!(lines(&path), [HEADER, "0,0,0,0,0,-1,-1,-1,-1,1,0"], "the inputs file is not a generic fault log");
+}
+
+#[test]
+fn a_recorded_flight_replays_its_transmitter_and_link_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flight.csv");
+    let signals = |v: &Vehicle| {
+        (
+            v.signal("rc.roll"),
+            v.signal("rc.throttle"),
+            v.signal("radio.tx_enabled"),
+            v.signal("fault.radio.link_loss"),
+        )
+    };
+    let mut original = vehicle();
+    original.start_inputs_recording(&path).unwrap();
+    original.set_sticks(&sticks(0.4, 0.2)).unwrap();
+    original.run_for(0.1).unwrap();
+    original.set_transmitter(false);
+    let at_tx_off = signals(&original);
+    original.run_for(0.1).unwrap();
+    original.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    let at_cut = signals(&original);
+    original.run_for(0.1).unwrap();
+    let expected_digest = original.digest();
+    original.stop_inputs_recording().unwrap();
+
+    let csv = std::fs::read_to_string(&path).unwrap();
+    let mut replay = vehicle();
+    replay.play_inputs(inputs::parse("recorded.csv", &csv).unwrap()).unwrap();
+    replay.run_for(0.1).unwrap();
+    assert_eq!(signals(&replay), at_tx_off, "the transmitter row lands on its tick");
+    replay.run_for(0.1).unwrap();
+    assert_eq!(signals(&replay), at_cut, "the link cut lands on its tick");
+    assert_eq!(replay.active_fault_names(), ["radio_link_loss"]);
+    replay.run_for(0.1).unwrap();
+    assert_eq!(replay.digest(), expected_digest, "the whole bus matches at the end");
 }
 
 #[test]

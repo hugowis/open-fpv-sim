@@ -113,12 +113,26 @@ pub struct PartRefs {
     pub vtx: Option<String>,
 }
 
-/// The library root: the `OFS_LIBRARY` override when given, else `library/` beside the quads.
-pub fn library_root(env: Option<&str>, quad_dir: &Path) -> PathBuf {
-    match env.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(root) => PathBuf::from(root),
-        None => quad_dir.parent().unwrap_or_else(|| Path::new(".")).join("library"),
+/// The library roots: the `OFS_LIBRARY` search path when given, else `library/` beside the quads.
+/// Empty entries are dropped; a blank override means the default.
+pub fn library_roots(env: Option<&str>, quad_dir: &Path) -> Vec<PathBuf> {
+    let default = || vec![quad_dir.parent().unwrap_or_else(|| Path::new(".")).join("library")];
+    let Some(env) = env else { return default() };
+    let roots = split_roots(env, if cfg!(windows) { ';' } else { ':' });
+    if roots.is_empty() {
+        default()
+    } else {
+        roots
     }
+}
+
+/// The first library root: kept for callers that only need one. See [`library_roots`].
+pub fn library_root(env: Option<&str>, quad_dir: &Path) -> PathBuf {
+    library_roots(env, quad_dir).into_iter().next().expect("library_roots always returns at least one root")
+}
+
+fn split_roots(env: &str, separator: char) -> Vec<PathBuf> {
+    env.split(separator).map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from).collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -416,6 +430,10 @@ pub struct RadioSection {
     /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second
     /// (`kind = "fixed"`: any rate that divides the base rate).
     pub packet_rate_hz: u32,
+    /// One downlink packet in this many carries a telemetry frame (an ExpressLRS telemetry ratio); 1, 2, 4, ..., 128.
+    /// Off is not modelled.
+    #[serde(default = "default_telemetry_slot_divisor")]
+    pub telemetry_slot_divisor: u32,
     /// Betaflight UART number the receiver is wired to (1-based, as in the Configurator's Ports tab).
     pub uart: u8,
     /// `kind = "elrs"` only: the ExpressLRS band, `"2g4"` (default) or `"900"`; it fixes which packet rates are valid.
@@ -438,6 +456,10 @@ pub struct RadioSection {
 
 fn default_latency_packets() -> u32 {
     1
+}
+
+fn default_telemetry_slot_divisor() -> u32 {
+    4
 }
 
 fn default_tx_power_mw() -> u32 {
@@ -721,29 +743,45 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         None => return Err(parse_err("missing integer schema_version".into())),
     }
     let file: QuadFile = toml::from_str(&text).map_err(|e| parse_err(e.to_string()))?;
-    let root = library_root(library_env, path.parent().unwrap_or(Path::new(".")));
+    let roots = library_roots(library_env, path.parent().unwrap_or(Path::new(".")));
     let mut problems = Vec::new();
     let resolve = |kind: &str, id: &str, field: &str, problems: &mut Vec<Problem>| -> Option<PathBuf> {
-        let dir = root.join(kind);
-        let path = dir.join(format!("{id}.toml"));
-        if path.is_file() {
-            return Some(path);
+        let mut searched = Vec::with_capacity(roots.len());
+        for root in &roots {
+            let dir = root.join(kind);
+            let path = dir.join(format!("{id}.toml"));
+            if path.is_file() {
+                return Some(path);
+            }
+            let have = dir.is_dir().then(|| {
+                fs::read_dir(&dir)
+                    .map(|entries| {
+                        entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+                            .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            searched.push((dir, have));
         }
-        let message = if dir.is_dir() {
-            let mut have: Vec<String> = fs::read_dir(&dir)
-                .map(|entries| {
-                    entries
-                        .filter_map(|e| e.ok())
-                        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
-                        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            have.sort();
-            format!("part '{id}' not found in {} (have: {})", dir.display(), have.join(", "))
-        } else {
-            format!("library kind directory not found: {} (library root {}; set OFS_LIBRARY to override)", dir.display(), root.display())
-        };
+        let details = searched
+            .into_iter()
+            .map(|(dir, have)| match have {
+                Some(mut have) => {
+                    have.sort();
+                    if have.is_empty() {
+                        format!("{} (no parts)", dir.display())
+                    } else {
+                        format!("{} (have: {})", dir.display(), have.join(", "))
+                    }
+                }
+                None => format!("{} (kind directory not found)", dir.display()),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let message = format!("part '{id}' not found in any library root: {details}; set OFS_LIBRARY to override");
         problems.push(Problem { field: field.to_string(), message });
         None
     };
@@ -1117,6 +1155,14 @@ impl QuadConfig {
         }
         c.divides(self.sim.base_hz, r.packet_rate_hz, "radio.packet_rate_hz");
         c.check(
+            [1, 2, 4, 8, 16, 32, 64, 128].contains(&r.telemetry_slot_divisor),
+            "radio.telemetry_slot_divisor",
+            format!(
+                "must be one of 1, 2, 4, 8, 16, 32, 64 or 128 (got {})",
+                r.telemetry_slot_divisor
+            ),
+        );
+        c.check(
             matches!(r.tx_power_mw, 10 | 25 | 50 | 100 | 250 | 500 | 1000),
             "radio.tx_power_mw",
             format!("must be one of 10, 25, 50, 100, 250, 500 or 1000 mW (got {})", r.tx_power_mw),
@@ -1339,4 +1385,25 @@ fn serial_functions(diff: &str) -> Vec<(u8, u32)> {
             Some((index, functions))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod roots_tests {
+    use super::split_roots;
+    use std::path::PathBuf;
+
+    #[test]
+    fn split_roots_accepts_semicolons_and_drops_empty_entries() {
+        assert_eq!(split_roots("a;; b ; ", ';'), vec![PathBuf::from("a"), PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn split_roots_accepts_colons_and_drops_empty_entries() {
+        assert_eq!(split_roots("/a:/b:c", ':'), vec![PathBuf::from("/a"), PathBuf::from("/b"), PathBuf::from("c")]);
+    }
+
+    #[test]
+    fn split_roots_keeps_windows_drive_letters_when_the_separator_is_semicolon() {
+        assert_eq!(split_roots(r"C:\a;D:\b", ';'), vec![PathBuf::from(r"C:\a"), PathBuf::from(r"D:\b")]);
+    }
 }

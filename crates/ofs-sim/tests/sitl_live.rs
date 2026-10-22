@@ -448,7 +448,9 @@ fn a_bundle_of_a_flown_session() -> (std::path::PathBuf, tempfile::TempDir) {
     let quad = std::path::absolute(QUAD).unwrap();
     let firmware = ofs_sim::vehicle::firmware_dir(&data_dir, &quad);
     let cfg = load(&quad).unwrap();
-    let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    let roots = ofs_config::library_roots(std::env::var("OFS_LIBRARY").ok().as_deref(), cfg.source_dir());
+    let mut source =
+        BundleSource::new(&cfg, None, &roots, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
     source.firmware_initial = snapshot_firmware(&firmware);
     assert!(source.firmware_initial.iter().any(|(n, _)| n == "eeprom.bin"), "the first boot saved an EEPROM");
     rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
@@ -528,7 +530,9 @@ fn a_bundle_from_a_session_in_slot_n_replays() {
     let cfg = load(&quad).unwrap();
     let firmware = rig.v.firmware_dir().unwrap();
     assert!(firmware.file_name().unwrap().to_string_lossy().ends_with("-s1"), "{firmware:?}");
-    let mut source = BundleSource::new(&cfg, None, None, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    let roots = ofs_config::library_roots(std::env::var("OFS_LIBRARY").ok().as_deref(), cfg.source_dir());
+    let mut source =
+        BundleSource::new(&cfg, None, &roots, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
     source.firmware_initial = snapshot_firmware(&firmware);
     rig.v.set_sticks(&Sticks { aux: ARM_AND_ANGLE, ..Sticks::default() }).unwrap();
     rig.v.run_for(2.0).unwrap();

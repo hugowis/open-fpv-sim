@@ -105,7 +105,12 @@ func _run() -> void:
 	_check(recording, "I starts recording the sticks")
 	await _wait_for(func(): return app.hud.sim_text().contains("REC STICKS"), 2.0)  # the HUD refreshes on the next frame
 	_check(app.hud.sim_text().contains("REC STICKS"), "and the status line says so: %s" % app.hud.sim_text())
-	await _wait_for(func(): return false, 0.3)
+	await _wait_for(func(): return false, 0.1)
+	app.sticks_override = {"roll": 0.25, "pitch": 0.0, "yaw": 0.0, "throttle": 0.6, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	await _wait_for(func(): return false, 0.2)
+	_press(app, KEY_K)
+	_check(app.radio_cut, "the recording includes a K cut")
+	await _wait_for(func(): return false, 0.2)
 	_press(app, KEY_I)
 	var recorded: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
 	_check(recorded, "I again stops it")
@@ -116,8 +121,24 @@ func _run() -> void:
 	_check(csv_files.size() == 1, "one inputs CSV in the logs directory: %s" % str(csv_files))
 	if csv_files.size() == 1:
 		var text := FileAccess.get_file_as_string(logs.path_join(csv_files[0]))
-		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n"), "it has the play_inputs header: %s" % text.left(80))
-		_check(text.split("\n", false).size() >= 2, "and at least the first row")
+		_check(text.begins_with("t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss\n"), "it has the play_inputs header: %s" % text.left(80))
+		var lines := text.split("\n", false)
+		_check(lines.size() >= 3, "the first row, the stick move and the cut: %s" % text)
+		var cut_row := ""
+		var previous := ""
+		for line in lines.slice(1):
+			var cells := line.split(",")
+			if cells.size() == 11 and cells[10] == "1":
+				cut_row = line
+				var previous_cells := previous.split(",")
+				_check(previous_cells.size() == 11, "a data row precedes the cut: %s" % text)
+				_check(cells.slice(1, 9) == previous_cells.slice(1, 9), "the cut changes only link_loss: %s" % text)
+				_check(cells[9] == "1", "the K cut leaves the transmitter on: %s" % line)
+				break
+			previous = line
+		_check(cut_row != "", "the K cut is a link_loss=1 row: %s" % text)
+	_press(app, KEY_K)
+	_check(not app.radio_cut, "K restores the link after the recording")
 
 	_press(app, KEY_P)
 	var paused: bool = await _wait_for(func(): return app.client.get_phase() == "paused" and not app.client.get_telemetry()["running"], 5.0)
@@ -236,6 +257,36 @@ func _run() -> void:
 			"%d frames for %d rendered field boundaries (%.2f simulated seconds)" % [frames.size(), expected, t1 - t0])
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")
+
+	# The F2 DVR toggle (i38): the checkbox drives the same start/stop path as D, and D moves the checkbox. The
+	# synthetic image source set above still feeds the recorder.
+	var menu_started: Array = []
+	app.dvr.started.connect(func(path: String): menu_started.append(path))
+	_press(app, KEY_F2)
+	_check(app.controls_menu.is_open(), "F2 opens the controls screen")
+	app.controls_menu._dvr.button_pressed = true  # a click on the box, not a call into the DVR
+	_check(app.dvr.recording and app.controls_menu.dvr_on(), "the DVR box starts the recording")
+	_check(app.hud._rec.visible, "and the HUD shows REC")
+	_check(app.hud.toast_texts()[app.hud.toast_texts().size() - 1].begins_with("DVR: recording to"), "through the app's one start path (the toast): %s" % str(app.hud.toast_texts()))
+	var menu_t0: float = app.client.get_telemetry()["time_s"]
+	var menu_deadline := Time.get_ticks_msec() + 20_000
+	while float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 and Time.get_ticks_msec() < menu_deadline:
+		await process_frame
+	app.controls_menu._dvr.button_pressed = false
+	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "unchecking the box stops it")
+	_check(not app.hud._rec.visible, "and the REC marker goes away")
+	_check(app.hud.toast_texts()[app.hud.toast_texts().size() - 1].begins_with("DVR:") and app.hud.toast_texts()[app.hud.toast_texts().size() - 1].contains("frames saved"), "through the app's one stop path (the toast): %s" % str(app.hud.toast_texts()))
+	if menu_started.size() == 1:
+		var menu_frames := _avi_frames(ProjectSettings.globalize_path(menu_started[0]))
+		_check(menu_frames.size() >= 1, "the toggled recording captured frames: %d" % menu_frames.size())
+	else:
+		_check(false, "the box started exactly one recording: %s" % str(menu_started))
+	_press(app, KEY_D)
+	_check(app.dvr.recording and app.controls_menu.dvr_on(), "D starts it with the screen open")
+	_press(app, KEY_D)
+	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "D stops it and the box follows")
+	_press(app, KEY_ESCAPE)
+	_check(not app.controls_menu.is_open(), "Escape closes the controls screen")
 
 	# A reload drops the recorder without an event: the indicator must go with it (the sticks recording is last so a
 	# reload here disturbs nothing above).

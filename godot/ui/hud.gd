@@ -22,7 +22,7 @@ const HELP_LINES := [
 	"C  switch between FPV and chase camera",
 	"D  record the FPV view (DVR)",
 	"K  cut / restore the radio link (failsafe test)",
-	"I  record the sticks to a CSV (replay with play_inputs)",
+	"I  record the sticks and link state to a CSV (replay with play_inputs)",
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",
@@ -37,6 +37,7 @@ var _video := Label.new()
 var _race := Label.new()
 var _flight := Label.new()
 var _configurator := Label.new()
+var _rec := Label.new()
 var _banner := Label.new()
 var _help := Label.new()
 var _toasts := VBoxContainer.new()
@@ -44,6 +45,7 @@ var _sticks_view: Control = SticksView.new()
 var _toast_items: Array = []  # of {label, age}
 var _fatal := ""
 var _shown := true
+var _dvr_recording := false
 
 
 ## Betaflight's telemetry is shown while younger than this; past it the line dashes out (goggles
@@ -64,6 +66,7 @@ func _ready() -> void:
 	_place(root, _vtx, 1.0, 0.0, 14.0, 74.0, true)
 	_place(root, _video, 1.0, 0.0, 14.0, 104.0, true)
 	_place(root, _race, 1.0, 0.0, 14.0, 134.0, true)
+	_place(root, _rec, 1.0, 0.0, 14.0, 164.0, true)
 	_place(root, _flight, 0.0, 1.0, 14.0, 14.0, false)
 	_place(root, _configurator, 1.0, 1.0, 14.0, 14.0, true)
 	_place(root, _toasts, 1.0, 0.5, 14.0, 0.0, true)
@@ -87,6 +90,10 @@ func _ready() -> void:
 	_help.grow_vertical = Control.GROW_DIRECTION_BOTH
 	for label in [_status, _sim, _link, _battery, _vtx, _video, _race, _flight, _configurator]:
 		_style(label, 18)
+	_style(_rec, 18)
+	_rec.text = "REC"
+	_rec.add_theme_color_override("font_color", RED)
+	_rec.visible = false
 
 
 func _process(delta: float) -> void:
@@ -140,6 +147,13 @@ func set_hud_visible(visible_now: bool) -> void:
 	_shown = visible_now
 	for node in [_status, _sim, _link, _battery, _vtx, _video, _race, _flight, _configurator, _sticks_view, _toasts]:
 		node.visible = visible_now
+	_rec.visible = visible_now and _dvr_recording
+
+
+## Shows or hides the DVR's REC marker. It is a HUD element, outside the recorded OSD.
+func set_dvr_recording(on: bool) -> void:
+	_dvr_recording = on
+	_rec.visible = on and _shown
 
 
 func toggle_hud() -> void:

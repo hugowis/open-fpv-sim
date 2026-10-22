@@ -142,8 +142,8 @@ impl OfsClient {
         self.send(Command::SetRadioLoss(on));
     }
 
-    /// Starts (true) or stops (false) recording the sticks to a replayable CSV the server names; the
-    /// `inputs_recording_started` / `inputs_recording_stopped` events say where it went.
+    /// Starts (true) or stops (false) recording the sticks and link state to a replayable CSV the server names;
+    /// the `inputs_recording_started` / `inputs_recording_stopped` events say where it went.
     #[func]
     fn set_inputs_recording(&self, on: bool) {
         self.send(Command::SetInputsRecording(on));

@@ -1,12 +1,12 @@
 # The fault catalog
 
-How the simulator breaks the aircraft: eight faults, injectable from Python (`ofs.faults`) or gRPC, each one
+How the simulator breaks the aircraft: nine faults, injectable from Python (`ofs.faults`) or gRPC, each one
 written once by `Vehicle::set_fault` as `fault.*` bus signals (or, for the one non-scalar fault, a shared handle)
 and read by its owning model every step. Injecting and clearing raise `fault_injected` / `fault_cleared` events;
 `clear_faults()` returns every signal to its identity, and the prop imbalance to its part data. A fault the quad
 cannot carry (`MotorFailure(motor=7)` on a four-motor quad, `VtxInterference` without a `[vtx]`) is refused at
 inject with `InvalidArgument`, never a no-op. The design is
-`docs/superpowers/specs/2026-10-11-m4-sandbox-design.md` §3; the wire shapes are protocol 8
+`docs/superpowers/specs/2026-10-11-m4-sandbox-design.md` §3; the wire shapes are protocol 13
 (`proto/ofs/v1/sim.proto`), the Python dataclasses live in `python/ofs/faults.py`, and the underlying link and
 video models are the ones `docs/research/elrs-link.md` and `docs/research/video-link.md` describe.
 
@@ -17,22 +17,31 @@ behaviour do carry provenance, and the standing rule from the m3c and m3b notes 
 
 ## Determinism (spec decision 7, refined)
 
-The catalog adds exactly one source of simulator randomness: `RadioLoss`'s per-packet Bernoulli, drawn from a
-**dedicated fault RNG stream** in the ELRS link (`model_rng(seed, "elrs-faults")`, one ChaCha8 stream beside the
-model's own). The draw sits in a fixed per-packet position whatever the fault state, so even *fault-active* runs
-differ from fault-free ones only in the loss decisions themselves — the model's own stream (fades, uplink and
-downlink error draws) never shifts. `BurstLoss` is a pure function of simulated time and draws nothing; the IMU's
-vibration and the gyro fault are deterministic; the pack and video faults draw nothing at all. Multiplicative
-fault signals start at their identity (1.0, written once at vehicle build), additive ones at the bus's zero, so a
-fault-inactive run is bit-identical to a no-fault run.
+The catalog adds two sources of simulator randomness, one per loss direction. `RadioLoss`'s per-packet uplink
+Bernoulli draws from a **dedicated uplink fault stream** (`model_rng(seed, "elrs-faults")` in the ELRS link,
+`"fixed-faults"` in the fixed link), and `DownlinkLoss`'s per-packet downlink Bernoulli from its own stream
+(`"elrs-faults-downlink"` / `"fixed-faults-downlink"`). Each draw sits in a fixed per-packet position whatever
+the fault state, so even *fault-active* runs differ from fault-free ones only in the loss decisions themselves —
+the model's own stream (fades, uplink and downlink error draws) never shifts. `BurstLoss` is a pure function of
+simulated time and draws nothing; the IMU's vibration and the gyro fault are deterministic; the pack and video
+faults draw nothing at all. Multiplicative fault signals start at their identity (1.0, written once at vehicle
+build), additive ones at the bus's zero, so a fault-inactive run is bit-identical to a no-fault run.
 
 ## The radio faults
 
-All three fold into the ELRS receiver's one receive decision
+The three uplink faults fold into the receiver's one receive decision
 (`crates/ofs-radio/src/elrs.rs`):
 
     received = transmitting && draw >= packet_error_rate(rssi, sensitivity)
                             && fault_draw >= fraction && !in_burst
+
+The downlink fault is a separate per-packet decision, so it never touches `received`:
+
+    downlink_received = transmitting && downlink_draw >= packet_error_rate(downlink_rssi, sensitivity)
+                                     && downlink_fault_draw >= downlink_fraction
+
+(The fixed link carries telemetry on received uplink packets, so its downlink is `received && ...`; the signals and
+the dedicated draw are the same.)
 
 - **`RadioLinkLoss`** — the M2 original the catalog grew around. While active the receiver's transmitter gate is
   false: every uplink packet is lost, the receiver goes silent as ExpressLRS does by default, and Betaflight's own
@@ -40,7 +49,15 @@ All three fold into the ELRS receiver's one receive decision
 - **`RadioLoss(fraction)`** — one extra Bernoulli per uplink packet from the fault stream: a packet is lost when
   `fault_draw < fraction`, on top of the link model's own packet error rate. `fraction = 0.0` is a legal no-op
   (bit-identical digests); `fraction = 1.0` loses every packet with the same timing as `RadioLinkLoss`.
-  The downlink is untouched (see the carried debt).
+  The downlink is untouched on ELRS; the fixed link's telemetry rides received uplink packets, so uplink loss
+  starves it there. `DownlinkLoss` cuts the downlink independently.
+- **`DownlinkLoss(fraction)`** — one extra Bernoulli per downlink packet from the link's dedicated downlink-fault
+  stream (`elrs-faults-downlink` / `fixed-faults-downlink`). It changes what the handset hears
+  (`State.radio.downlink_lq_pct`) and nothing on the control path: the uplink LQ, sticks, Betaflight's failsafe
+  and the physics stay exactly as a fault-free run. `fraction = 0.0` is a legal no-op (bit-identical digests);
+  `fraction = 1.0` loses every downlink packet. The bus signal is `fault.radio.downlink_loss_fraction`; the proto
+  oneof field is **10** (`at_s` already uses 9). Python:
+  `sim.inject(ofs.faults.DownlinkLoss(1.0))`.
 - **`BurstLoss(on_ms, off_ms)`** — the uplink loses every packet while
   `in_burst = on_s > 0 && time_s % (on_s + off_s) < on_s`: a deterministic square wave anchored at session start,
   no randomness anywhere. An on-window longer than Betaflight's failsafe timeout drives a real failsafe (stage 1
@@ -49,7 +66,8 @@ All three fold into the ELRS receiver's one receive decision
 
 | Fault | Constant | Value | Provenance |
 |---|---|---|---|
-| `RadioLoss` | `fraction` | per-packet loss probability, [0, 1] | user input (the scenario) |
+| `RadioLoss` | `fraction` | per-packet uplink loss probability, [0, 1] | user input (the scenario) |
+| `DownlinkLoss` | `fraction` | per-packet downlink loss probability, [0, 1] | user input (the scenario) |
 | `BurstLoss` | `on_ms`, `off_ms` | the window's two legs, seconds on the bus | user input |
 
 ## Motor failure
@@ -176,12 +194,12 @@ live burst test asserts both flags during the burst and the `FAILSAFE` bit's cle
 
 - Bus signals: the `fault.*` seams above, `prop.{i}.imbalance_kgm` and `motor.{i}.theta_rad` (state, read by the
   vibration model).
-- The state stream: `State.battery_cell_voltages` (protocol 8); the radio faults show through `State.radio`
-  (LQ, `link_up`), the video fault through `State.video` (SNR, `interference_dbm`), the pack fault through
-  `State.battery_voltage_v` and Betaflight's own telemetry.
+- The state stream: `State.battery_cell_voltages` (protocol 8); the uplink radio faults show through `State.radio`
+  (LQ, `link_up`), the downlink fault through `State.radio.downlink_lq_pct`, the video fault through `State.video`
+  (SNR, `interference_dbm`), the pack fault through `State.battery_voltage_v` and Betaflight's own telemetry.
 - Events: `fault_injected` / `fault_cleared` with the fault's name (deterministic order, the spec table's);
   the radio faults raise `LINK_DOWN` / `LINK_UP` through the link's own edge detector.
 - The game: the HUD renders the fault events among its toasts; the **K** key injects and clears exactly this
   fault (`RadioLinkLoss`).
-- Python: `ofs.faults.{RadioLinkLoss, RadioLoss, BurstLoss, MotorFailure, PropDamage, WeakCell, GyroFault,
-  VtxInterference}`, `sim.inject(fault)` / `sim.clear_faults()`.
+- Python: `ofs.faults.{RadioLinkLoss, RadioLoss, DownlinkLoss, BurstLoss, MotorFailure, PropDamage, WeakCell,
+  GyroFault, VtxInterference}`, `sim.inject(fault)` / `sim.clear_faults()`.

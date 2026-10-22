@@ -169,15 +169,18 @@ picture lags the world and judders at the field rate, like real analog glass. In
 6 dB and 3 dB) the receiver fails to complete fields — a dropped field holds the previous picture (pose, OSD
 and quality all freeze) for one field. The model and its constants are in `docs/research/video-link.md`.
 
-The **DVR** (keybind **D**) records the FPV view — exactly what the pilot sees — as an MJPEG AVI into
-`user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
+The **DVR** (keybind **D**, or its checkbox on the F2 controls screen — the same switch) records the FPV view —
+exactly what the pilot sees — as an MJPEG AVI into `user://recordings/`
+(`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
 `~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a
-dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again stops
-it, and it stops on its own (with a toast counting the saved frames) when the picture's INTERNAL size changes:
-an aspect switch or a chase-camera toggle, and — because the window aspect renders at the window's own size —
-a plain window resize with the window aspect. With a boxed aspect the internal resolution is fixed (960×720 or
-1280×720), so a plain window resize does not stop it. It
-records only the FPV view: press C first if the chase camera is up.
+dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again (or
+unchecking the box) stops it, and it stops on its own (with a toast counting the saved frames) when the
+picture's INTERNAL size changes: an aspect switch or a chase-camera toggle, and — because the window aspect
+renders at the window's own size — a plain window resize with the window aspect. With a boxed aspect the
+internal resolution is fixed (960×720 or 1280×720), so a plain window resize does not stop it. It records only
+the FPV view: press C first if the chase camera is up. The checkbox always shows the state that actually
+happened: D checks and unchecks it, and so does an automatic stop; a refused start (the chase camera up, or no
+simulator) leaves it unchecked.
 
 The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of
 the SmartAudio one: `[vtx] kind = "tramp"` on UART6 (Betaflight serial 5, function mask 8192 = `VTX_TRAMP`).
@@ -206,17 +209,19 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 8**: the faults' wire shapes live in the `Fault` oneof of
-`proto/ofs/v1/sim.proto`, the injectable Python dataclasses in `python/ofs/faults.py` (`sim.inject(...)` /
-`sim.clear_faults()`), and the models, constants and their estimate status in `docs/research/faults.md` —
+The client and server speak **protocol 13**. The fault catalog arrived in protocol 8, and its wire shapes live in
+the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
+(`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
+`docs/research/faults.md` —
 regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 12**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 13**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
-`HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), and the stabilizer flags
-`LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b).
+`HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
+`LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), and the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
+protocol 13).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A
@@ -224,17 +229,21 @@ The client and server speak **protocol 12**: `StartRecording`/`StopRecording`, `
   "z"}` JSON with a JSON schema); the default rates are `ofs_log::DEFAULT_RATES`. The files are deterministic:
   the `mcap` crate is pinned to an upstream revision that writes its summary in id order
   (`docs/research/mcap-determinism.md`), and the writer pins its library string and single-threaded zstd. It keeps
-  the per-message index records: Foxglove refuses a file without them.
+  the per-message index records: Foxglove refuses a file without them. The summary section and footer are
+  written only when the recording stops; `ofs.reader` refuses an in-progress file (Foxglove untested), and a
+  streaming reader sees only its flushed chunks (`docs/research/mcap-determinism.md`).
 - **Python:** a lockstep `load` starts a recording (`record=False` does not), `sim.log` stops and returns it,
   `ofs.reader` reads any recording (`mcap` + `pandas`; Parquet also `pyarrow`), `ofs.rerun.view(sim)` is the live
   view (`rerun-sdk` 0.39.x, pinned by the extra).
 - **Scripted inputs** (`sim.play_inputs(path)`): the client sends the CSV's text (the server accepts requests up
   to 64 MiB, `MAX_REQUEST_BYTES`, so a long flight's file fits); the server validates it once
-  (`crates/ofs-sim/src/inputs.rs`) and applies each row on the first tick at or after its time. Faults with `at=`
+  (`crates/ofs-sim/src/inputs.rs`) and applies each row on the first tick at or after its time. The columns are
+  `t_s`, any of the eight sticks, and the optional `tx` and `link_loss` (0/1); at least one input column is required,
+  a column a file leaves out keeps its current value, and the last row holds after playback. Faults with `at=`
   use the same tick rule. Both apply right after the step that reaches their time, so a `run` that ends there
   already shows them.
 - **Worlds by name:** `load(world="flat")` reads `worlds/flat.toml` beside the quad's directory, as parts resolve
-  against `library/`.
+  against `library/` (or every root in `OFS_LIBRARY`, first match per part id).
 - **Blackbox:** the shipped diffs set `blackbox_device = VIRTUAL`; SITL writes `LOGnnnnn.BFL` into the quad's
   firmware directory, and the session copies the logs it wrote into the logs directory when it ends.
 - **Packaging:** the PyPI distribution is `open-fpv-sim` (import `ofs`), pure Python; `launch()` still needs an
@@ -253,15 +262,21 @@ written before M5 load unchanged and fly byte-identically: the goldens (`crates/
 goldens on each when you touch the radio — the Linux ones in WSL; the macOS files come from the survey's
 `write_goldens` input).
 
-**Recording a live flight:** `StartInputsRecording` writes the session's sticks to
-`<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick changes, in `play_inputs`' format) and
-`StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and
+Both link kinds share `[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a
+telemetry frame when heard. It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no 0 (off), and one value applies
+to every band and packet rate. It changes only the telemetry slot cadence — packet loss, uplink delivery and downlink
+LQ stay the same.
+The default 4 keeps 0.2.0 recordings and the radio goldens byte-identical.
+
+**Recording a live flight:** `StartInputsRecording` writes the session's sticks and link state to
+`<data_dir>/logs/<quad stem>-inputs-<n>.csv` (a row whenever a stick, `tx` or `link_loss` changes, in `play_inputs`'
+format) and `StopInputsRecording` returns `{path, rows, duration_s}`. From Python: `path = sim.record_inputs()` and
 `sim.stop_inputs_recording()`. In the game: the **I** key toggles it (a toast names the file, and `REC STICKS` shows
 in the status line while it runs). A lockstep session replays the file with `sim.play_inputs(path)`; two lockstep
-replays of one file write byte-identical MCAP. A replay is not the real-time flight (timing, the SITL schedule and the
-link's seeded draws differ), and the K link cut is not in the file. Load and Unload stop the recording and publish
-`inputs_recording_stopped`; a session that vanishes (its last watcher left, the server shut down) finishes the file
-without an event.
+replays of one file write byte-identical MCAP. Files written before 0.3.0 have no `tx` or `link_loss` column and still
+play. A replay is not the real-time flight (timing, the SITL schedule and the link's seeded draws differ). Load and
+Unload stop the recording and publish `inputs_recording_stopped`; a session that vanishes (its last watcher left, the
+server shut down) finishes the file without an event.
 
 M5 manual check (needs a controller; the maintainer's TX15 in USB joystick mode is the reference):
 1. `godot --path godot`, bind the sticks in F2, fly with Betaflight, press **I**, fly 20 s, press **I**.

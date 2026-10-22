@@ -147,6 +147,7 @@ pub fn burst_active(time_s: f64, on_s: f64, off_s: f64) -> bool {
 pub struct FaultSignals {
     link_loss: Signal<f64>,
     loss_fraction: Signal<f64>,
+    downlink_loss_fraction: Signal<f64>,
     burst_on: Signal<f64>,
     burst_off: Signal<f64>,
 }
@@ -156,6 +157,7 @@ impl FaultSignals {
         Self {
             link_loss: bus.signal(names::FAULT_RADIO_LINK_LOSS),
             loss_fraction: bus.signal(names::FAULT_RADIO_LOSS_FRACTION),
+            downlink_loss_fraction: bus.signal(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION),
             burst_on: bus.signal(names::FAULT_RADIO_BURST_ON_S),
             burst_off: bus.signal(names::FAULT_RADIO_BURST_OFF_S),
         }
@@ -175,6 +177,12 @@ impl FaultSignals {
         let burst_on = bus.get(self.burst_on);
         let burst_off = bus.get(self.burst_off);
         fault_draw >= fraction && !burst_active(time_s, burst_on, burst_off)
+    }
+
+    /// The downlink packet survives the downlink-loss fault. `fault_draw` comes from the link's dedicated downlink
+    /// fault stream, so this decision never moves the uplink or the model's own draws.
+    pub fn downlink_survives(&self, bus: &Bus, fault_draw: f64) -> bool {
+        fault_draw >= bus.get(self.downlink_loss_fraction)
     }
 }
 

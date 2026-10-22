@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ofs_config::{load, ConfigError, FcKind, RadioKind, VtxKind};
 
@@ -26,6 +26,14 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+fn search_path(roots: &[&Path]) -> String {
+    roots.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join(if cfg!(windows) { ";" } else { ":" })
+}
+
+fn write_root_part(root: &Path, kind: &str, id: &str, text: &str) {
+    fs::write(root.join(kind).join(format!("{id}.toml")), text).unwrap();
+}
+
 /// The quad at {dir}/quads/quad.toml, its diff beside it, the shipped library at {dir}/library/.
 /// Re-copies the library every call — mutate parts with `write_part` only AFTER this, never before.
 fn write_quad(dir: &Path, text: &str) -> std::path::PathBuf {
@@ -48,6 +56,7 @@ fn reference_quad_loads_and_validates() {
     assert_eq!(cfg.schema_version, 5);
     assert_eq!(cfg.radio.kind, RadioKind::Elrs);
     assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
+    assert_eq!(cfg.radio.telemetry_slot_divisor, 4);
     assert_eq!(cfg.frame.motor_positions_frd_m.len(), 4);
     assert_eq!(cfg.motors.len(), 4, "the single motor part broadcasts to every motor");
     assert_eq!(cfg.motors[0].pole_pairs, 7);
@@ -84,8 +93,10 @@ fn a_missing_kind_directory_names_the_library_root() {
     let path = write_quad(dir.path(), &quad_text());
     fs::remove_dir_all(dir.path().join("library/frames")).unwrap();
     let err = load(&path).unwrap_err();
-    assert!(err.to_string().contains("frames"), "{err}");
-    assert!(err.to_string().contains("OFS_LIBRARY"), "{err}");
+    let message = err.to_string();
+    assert!(message.contains("frames"), "{message}");
+    assert!(message.contains("kind directory not found"), "{message}");
+    assert!(message.contains("OFS_LIBRARY"), "{message}");
 }
 
 #[test]
@@ -102,7 +113,91 @@ fn a_wrong_length_part_list_is_refused() {
 fn the_library_root_honours_the_override() {
     let quad_dir = Path::new("C:/anywhere/quads");
     assert_eq!(ofs_config::library_root(None, quad_dir), Path::new("C:/anywhere/library"));
-    assert_eq!(ofs_config::library_root(Some("C:/my-library"), quad_dir), Path::new("C:/my-library"));
+    assert_eq!(ofs_config::library_root(Some("my-library"), quad_dir), Path::new("my-library"));
+}
+
+#[test]
+fn library_roots_defaults_beside_the_quads_and_ignores_a_blank_override() {
+    let quad_dir = Path::new("C:/anywhere/quads");
+    assert_eq!(ofs_config::library_roots(None, quad_dir), vec![Path::new("C:/anywhere/library")]);
+    assert_eq!(ofs_config::library_roots(Some("  "), quad_dir), vec![Path::new("C:/anywhere/library")]);
+}
+
+#[test]
+fn library_roots_drops_empty_entries() {
+    let quad_dir = Path::new("C:/anywhere/quads");
+    #[cfg(windows)]
+    {
+        let roots = ofs_config::library_roots(Some("C:/one;;C:/two;"), quad_dir);
+        assert_eq!(roots, vec![PathBuf::from("C:/one"), PathBuf::from("C:/two")]);
+    }
+    #[cfg(not(windows))]
+    {
+        let roots = ofs_config::library_roots(Some("/one::/two:"), quad_dir);
+        assert_eq!(roots, vec![PathBuf::from("/one"), PathBuf::from("/two")]);
+    }
+}
+
+#[test]
+fn parts_layer_across_roots_and_the_first_root_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &quad_text());
+    let root_a = dir.path().join("library");
+    let root_b = dir.path().join("library-b");
+    copy_dir(&root_a, &root_b);
+
+    // Root A has no frames or motors; root B supplies both. The prop exists in both: root A must win.
+    fs::remove_dir_all(root_a.join("frames")).unwrap();
+    fs::remove_dir_all(root_a.join("motors")).unwrap();
+    write_root_part(
+        &root_b,
+        "frames",
+        "opendrone-5f",
+        &part_text("frames", "opendrone-5f").replace("mass_kg = 0.65", "mass_kg = 0.75"),
+    );
+    write_root_part(
+        &root_a,
+        "props",
+        "opendrone-5in-prop",
+        &part_text("props", "opendrone-5in-prop").replace("diameter_m = 0.127", "diameter_m = 0.2"),
+    );
+    write_root_part(
+        &root_b,
+        "props",
+        "opendrone-5in-prop",
+        &part_text("props", "opendrone-5in-prop").replace("diameter_m = 0.127", "diameter_m = 0.3"),
+    );
+
+    let env = search_path(&[&root_a, &root_b]);
+    let cfg = ofs_config::load_with_library_env(&path, Some(&env)).unwrap();
+    assert_eq!(cfg.frame.mass_kg, 0.75, "the frame comes from the second root");
+    assert_eq!(cfg.props[0].diameter_m, 0.2, "the first root's copy of a part wins");
+    assert_eq!(cfg.motors[0].pole_pairs, 7, "the motor comes from the second root");
+}
+
+#[test]
+fn a_missing_part_names_every_root_and_the_ids_each_has() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("motors = [\"opendrone-openmotor-2207\"]", "motors = [\"no-such-motor\"]");
+    let path = write_quad(dir.path(), &text);
+    let root_a = dir.path().join("library");
+    let root_b = dir.path().join("library-b");
+    copy_dir(&root_a, &root_b);
+
+    let motor = part_text("motors", "opendrone-openmotor-2207");
+    fs::remove_file(root_a.join("motors/opendrone-openmotor-2207.toml")).unwrap();
+    fs::remove_file(root_b.join("motors/opendrone-openmotor-2207.toml")).unwrap();
+    write_root_part(&root_a, "motors", "root-a-only", &motor);
+    write_root_part(&root_b, "motors", "root-b-only", &motor);
+
+    let env = search_path(&[&root_a, &root_b]);
+    let err = ofs_config::load_with_library_env(&path, Some(&env)).unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("no-such-motor"), "{message}");
+    assert!(message.contains(&root_a.join("motors").display().to_string()), "names root A: {message}");
+    assert!(message.contains(&root_b.join("motors").display().to_string()), "names root B: {message}");
+    assert!(message.contains("root-a-only"), "lists root A's ids: {message}");
+    assert!(message.contains("root-b-only"), "lists root B's ids: {message}");
 }
 
 #[test]
@@ -623,6 +718,37 @@ fn tx_power_must_be_a_real_handset_power() {
     let err = shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 300")).unwrap_err();
     assert!(err.to_string().contains("radio.tx_power_mw"), "{err}");
     assert!(shipped_with(|t| *t = t.replace("tx_power_mw = 250", "tx_power_mw = 10")).is_ok());
+}
+
+#[test]
+fn telemetry_slot_divisor_defaults_to_four_and_accepts_the_listed_ratios() {
+    assert_eq!(shipped_with(|_| {}).unwrap().radio.telemetry_slot_divisor, 4);
+    for kind in ["elrs", "fixed"] {
+        let cfg = shipped_with(|t| {
+            *t = t.replace("kind = \"elrs\"", &format!("kind = \"{kind}\"\ntelemetry_slot_divisor = 8"));
+        })
+        .unwrap();
+        assert_eq!(cfg.radio.telemetry_slot_divisor, 8, "{kind}");
+    }
+}
+
+#[test]
+fn telemetry_slot_divisor_must_be_a_listed_ratio() {
+    for value in [3, 0, 256, 129] {
+        let err = shipped_with(|t| {
+            *t = t.replace("tx_power_mw = 250", &format!("tx_power_mw = 250\ntelemetry_slot_divisor = {value}"));
+        })
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("radio.telemetry_slot_divisor"), "{value}: {message}");
+        assert!(message.contains("1, 2, 4, 8, 16, 32, 64 or 128"), "{value}: {message}");
+        assert!(message.contains(&format!("(got {value})")), "{value}: {message}");
+    }
+    let err = shipped_with(|t| {
+        *t = t.replace("kind = \"elrs\"", "kind = \"fixed\"\ntelemetry_slot_divisor = 3");
+    })
+    .unwrap_err();
+    assert!(err.to_string().contains("radio.telemetry_slot_divisor"), "the fixed link validates it too: {err}");
 }
 
 #[test]

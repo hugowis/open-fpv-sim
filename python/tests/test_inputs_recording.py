@@ -6,7 +6,7 @@ import pytest
 import ofs
 from conftest import QUAD
 
-HEADER = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4"
+HEADER = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss"
 
 
 def test_a_recorded_flight_replays_to_the_same_motor_commands(sim):
@@ -18,11 +18,36 @@ def test_a_recorded_flight_replays_to_the_same_motor_commands(sim):
     second = sim.run(0.5).motor_cmd
     assert sim.stop_inputs_recording() == path
     with open(path, encoding="utf-8") as f:
-        assert f.read().splitlines() == [HEADER, "0,0,0,0,0.3,-1,-1,-1,-1", "0.5,0.2,0,0,0.9,-1,-1,-1,-1"]
+        assert f.read().splitlines() == [
+            HEADER,
+            "0,0,0,0,0.3,-1,-1,-1,-1,1,0",
+            "0.5,0.2,0,0,0.9,-1,-1,-1,-1,1,0",
+        ]
     sim.load(QUAD, open_loop_fc=True)
     sim.play_inputs(path)
     assert sim.run(0.5).motor_cmd == first
     assert sim.run(0.5).motor_cmd == second
+
+
+def test_a_0_2_0_style_csv_still_plays(sim, tmp_path):
+    """The two link columns are optional: a file written before 0.3.0 has no tx or link_loss column."""
+    old = tmp_path / "old-inputs.csv"
+    old.write_text(
+        "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n"
+        "0,0,0,0,0.3,-1,-1,-1,-1\n"
+        "0.5,0.2,0,0,0.9,-1,-1,-1,-1\n",
+        encoding="utf-8",
+    )
+    sim.load(QUAD, open_loop_fc=True)
+    sim.play_inputs(str(old))
+    first = sim.run(0.5).motor_cmd
+    second = sim.run(0.5).motor_cmd
+
+    sim.load(QUAD, open_loop_fc=True)
+    sim.set_sticks(throttle=0.3)
+    assert first == sim.run(0.5).motor_cmd
+    sim.set_sticks(throttle=0.9, roll=0.2)
+    assert second == sim.run(0.5).motor_cmd
 
 
 def test_the_recording_reports_its_events_and_refuses_misuse(sim):

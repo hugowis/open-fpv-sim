@@ -1,9 +1,10 @@
-//! Scripted stick inputs (spec §5): a CSV of `t_s` and stick columns, validated once, played back
-//! sample-and-hold at tick boundaries.
+//! Scripted stick and link inputs (spec §5): a CSV of `t_s`, stick columns, `tx` and `link_loss`, validated once,
+//! played back sample-and-hold at tick boundaries.
 use ofs_core::names::RC_AUX_COUNT;
 
-/// The columns an inputs file may have; `t_s` is required, the sticks are any non-empty subset.
-pub const COLUMNS: [&str; 9] = ["t_s", "roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4"];
+/// The columns an inputs file may have; `t_s` is required and at least one input column is required.
+pub const COLUMNS: [&str; 11] =
+    ["t_s", "roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4", "tx", "link_loss"];
 
 /// Problems listed in one error before the rest are counted.
 const MAX_PROBLEMS: usize = 20;
@@ -55,12 +56,47 @@ impl Stick {
     }
 }
 
-/// A validated inputs file: the stick columns it sets and, per row, the time (s after playback starts) and one
-/// value per column.
+/// A column an inputs file can set: a stick, the transmitter, or the radio-link cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    Stick(Stick),
+    Transmitter,
+    LinkLoss,
+}
+
+impl Column {
+    fn from_column(name: &str) -> Option<Column> {
+        Some(match name {
+            "tx" => Column::Transmitter,
+            "link_loss" => Column::LinkLoss,
+            _ => Column::Stick(Stick::from_column(name)?),
+        })
+    }
+
+    /// The column name in an inputs file.
+    pub fn column(self) -> String {
+        match self {
+            Column::Stick(stick) => stick.column(),
+            Column::Transmitter => "tx".into(),
+            Column::LinkLoss => "link_loss".into(),
+        }
+    }
+
+    /// The documented range: `tx` and `link_loss` are booleans [0, 1]; sticks keep their own range.
+    fn range(self) -> (f64, f64) {
+        match self {
+            Column::Stick(stick) => stick.range(),
+            Column::Transmitter | Column::LinkLoss => (0.0, 1.0),
+        }
+    }
+}
+
+/// A validated inputs file: the columns it sets and, per row, the time (s after playback starts) and one value per
+/// column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Inputs {
     pub name: String,
-    pub columns: Vec<Stick>,
+    pub columns: Vec<Column>,
     pub rows: Vec<(f64, Vec<f64>)>,
 }
 
@@ -99,21 +135,21 @@ pub fn parse(name: &str, text: &str) -> Result<Inputs, String> {
     let mut problems = Vec::new();
     let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l.trim())).filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
     let Some((header_line, header)) = lines.next() else {
-        return Err(format!("{name}: no header line (expected t_s and stick columns from {})", COLUMNS.join(", ")));
+        return Err(format!("{name}: no header line (expected t_s and input columns from {})", COLUMNS.join(", ")));
     };
     let fields: Vec<&str> = header.split(',').map(str::trim).collect();
     let mut time_index = None;
-    let mut columns: Vec<(usize, Stick)> = Vec::new();
+    let mut columns: Vec<(usize, Column)> = Vec::new();
     for (i, f) in fields.iter().enumerate() {
         if *f == "t_s" {
             if time_index.replace(i).is_some() {
                 problems.push(format!("{name} line {header_line}: column t_s appears twice"));
             }
-        } else if let Some(stick) = Stick::from_column(f) {
-            if columns.iter().any(|(_, s)| *s == stick) {
+        } else if let Some(column) = Column::from_column(f) {
+            if columns.iter().any(|(_, c)| *c == column) {
                 problems.push(format!("{name} line {header_line}: column {f} appears twice"));
             }
-            columns.push((i, stick));
+            columns.push((i, column));
         } else {
             problems.push(format!("{name} line {header_line}: unknown column '{f}' (expected {})", COLUMNS.join(", ")));
         }
@@ -122,7 +158,7 @@ pub fn parse(name: &str, text: &str) -> Result<Inputs, String> {
         problems.push(format!("{name} line {header_line}: the header needs a t_s column"));
     }
     if columns.is_empty() {
-        problems.push(format!("{name} line {header_line}: the header needs at least one stick column"));
+        problems.push(format!("{name} line {header_line}: the header needs at least one input column"));
     }
     let mut rows = Vec::new();
     let mut last_t: Option<f64> = None;
@@ -150,9 +186,9 @@ pub fn parse(name: &str, text: &str) -> Result<Inputs, String> {
         }
         last_t = Some(t);
         let mut row = Vec::with_capacity(columns.len());
-        for (i, stick) in &columns {
+        for (i, column) in &columns {
             let Some(v) = parsed[*i] else { continue };
-            let (lo, hi) = stick.range();
+            let (lo, hi) = column.range();
             if !(lo..=hi).contains(&v) {
                 problems.push(format!("{name} line {line}: {} {v} is outside [{lo}, {hi}]", fields[*i]));
             }
@@ -194,9 +230,59 @@ mod tests {
     fn a_subset_of_columns_parses_in_file_order() {
         let text = "# flips\n\nt_s, throttle, aux1\n0.0, 0.0, -1\n1.0, 0.0, 1\n\n1.5, 0.6, 1\n";
         let inputs = parse("flips.csv", text).unwrap();
-        assert_eq!(inputs.columns, [Stick::Throttle, Stick::Aux(0)]);
+        assert_eq!(inputs.columns, [Column::Stick(Stick::Throttle), Column::Stick(Stick::Aux(0))]);
         assert_eq!(inputs.rows, [(0.0, vec![0.0, -1.0]), (1.0, vec![0.0, 1.0]), (1.5, vec![0.6, 1.0])]);
         assert_eq!(inputs.duration_s(), 1.5);
+    }
+
+    #[test]
+    fn tx_and_link_loss_parse_on_their_own_and_write_back_unchanged() {
+        let text = "t_s,tx,link_loss\n0,0,0\n0.1,1,1\n";
+        let inputs = parse("actions.csv", text).unwrap();
+        assert_eq!(inputs.columns, [Column::Transmitter, Column::LinkLoss]);
+        assert_eq!(inputs.rows, [(0.0, vec![0.0, 0.0]), (0.1, vec![1.0, 1.0])]);
+        assert_eq!(inputs.to_csv(), text);
+    }
+
+    #[test]
+    fn every_column_round_trips_together() {
+        let text = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss\n0,0.1,-0.2,0.3,0.4,1,-1,0.5,-0.5,0,1\n1,-1,1,-1,0.9,0.5,-0.5,0,0,1,0\n";
+        let inputs = parse("mixed.csv", text).unwrap();
+        assert_eq!(inputs.to_csv(), text);
+    }
+
+    #[test]
+    fn the_old_nine_column_file_still_parses_to_stick_columns() {
+        let text = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n0,0,0,0,0.5,-1,-1,-1,-1\n1,0.25,0,0,0.6,1,1,-1,-1\n";
+        let inputs = parse("old.csv", text).unwrap();
+        assert_eq!(
+            inputs.columns,
+            [
+                Column::Stick(Stick::Roll),
+                Column::Stick(Stick::Pitch),
+                Column::Stick(Stick::Yaw),
+                Column::Stick(Stick::Throttle),
+                Column::Stick(Stick::Aux(0)),
+                Column::Stick(Stick::Aux(1)),
+                Column::Stick(Stick::Aux(2)),
+                Column::Stick(Stick::Aux(3)),
+            ]
+        );
+        assert_eq!(inputs.to_csv(), text);
+    }
+
+    #[test]
+    fn the_input_columns_have_their_own_ranges_and_the_header_lists_them_all() {
+        let ranges = parse("actions.csv", "t_s,tx,link_loss\n0,2,-1\n").unwrap_err();
+        assert!(ranges.contains("tx 2 is outside [0, 1]"), "{ranges}");
+        assert!(ranges.contains("link_loss -1 is outside [0, 1]"), "{ranges}");
+        assert!(parse("actions.csv", "t_s,tx,tx\n0,0,0\n").unwrap_err().contains("column tx appears twice"));
+        assert!(parse("actions.csv", "t_s\n0\n").unwrap_err().contains("at least one input column"));
+        let unknown = parse("actions.csv", "t_s,wobble\n0,0\n").unwrap_err();
+        assert!(
+            unknown.contains("expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4, tx, link_loss"),
+            "{unknown}"
+        );
     }
 
     #[test]
@@ -206,7 +292,7 @@ mod tests {
         assert_eq!(
             err.lines().collect::<Vec<_>>(),
             [
-                "bad.csv line 1: unknown column 'wobble' (expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4)",
+                "bad.csv line 1: unknown column 'wobble' (expected t_s, roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4, tx, link_loss)",
                 "bad.csv line 3: 3 values for 4 columns",
                 "bad.csv line 4: 'x' is not a finite number",
                 "bad.csv line 5: t_s 0.2 does not increase (previous row 0.5)",
@@ -216,10 +302,10 @@ mod tests {
     }
 
     #[test]
-    fn the_header_needs_time_and_a_stick_and_the_file_needs_rows() {
+    fn the_header_needs_time_and_an_input_column_and_the_file_needs_rows() {
         assert!(parse("e.csv", "").unwrap_err().contains("e.csv: no header line"));
         assert!(parse("e.csv", "throttle\n0.5\n").unwrap_err().contains("the header needs a t_s column"));
-        assert!(parse("e.csv", "t_s\n0\n").unwrap_err().contains("at least one stick column"));
+        assert!(parse("e.csv", "t_s\n0\n").unwrap_err().contains("at least one input column"));
         assert_eq!(parse("e.csv", "t_s,yaw\n").unwrap_err(), "e.csv: no rows after the header");
         assert!(parse("e.csv", "t_s,aux5\n0,0\n").unwrap_err().contains("unknown column 'aux5'"));
         assert!(parse("e.csv", "t_s,yaw,yaw\n0,0,0\n").unwrap_err().contains("column yaw appears twice"));

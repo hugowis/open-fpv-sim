@@ -1,9 +1,10 @@
 use glam::DVec3;
-use ofs_core::{names, Bus, Scheduler, Wire};
+use ofs_core::{names, Bus, Scheduler, StepCtx, Wire};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::crsf::{self, Decoder, Frame};
-use ofs_radio::elrs::NO_SIGNAL_RSSI_DBM;
+use ofs_radio::elrs::{NO_SIGNAL_RSSI_DBM, TELEMETRY_SLOT_DIVISOR};
 use ofs_radio::fixed::{FixedLink, FixedParams, NOMINAL_RSSI_DBM};
+use ofs_radio::parts::{Delivery, Link, TxFrame};
 use ofs_radio::joystick::JoystickHandset;
 use ofs_radio::parts::RfFrontEnd;
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
@@ -13,7 +14,14 @@ const BASE_HZ: u32 = 8000;
 const TICKS_PER_PACKET: u32 = BASE_HZ / 500;
 
 fn params() -> FixedParams {
-    FixedParams { packet_rate_hz: 500, latency_packets: 1, loss_fraction: 0.0, burst_on_s: 0.0, burst_off_s: 0.0 }
+    FixedParams {
+        packet_rate_hz: 500,
+        latency_packets: 1,
+        telemetry_slot_divisor: TELEMETRY_SLOT_DIVISOR,
+        loss_fraction: 0.0,
+        burst_on_s: 0.0,
+        burst_off_s: 0.0,
+    }
 }
 
 /// The scheduler, the receiver's UART output, the flight controller's telemetry input and the handset's telemetry.
@@ -129,20 +137,83 @@ fn the_radio_faults_apply_to_a_fixed_link_too() {
 }
 
 #[test]
-fn a_telemetry_slot_flies_every_fourth_heard_packet() {
-    let (mut s, _uart, telemetry_in, handle) = rig_full(params(), 1);
+fn downlink_loss_drops_the_downlink_and_leaves_control_alone() {
+    let run = |fraction: Option<f64>| -> (Vec<Delivery>, u32) {
+        let mut bus = Bus::new();
+        let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+        bus.set(tx, 1.0);
+        let mut link = FixedLink::new(params(), 7, &mut bus);
+        if let Some(fraction) = fraction {
+            let signal = bus.signal::<f64>(names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION);
+            bus.set(signal, fraction);
+        }
+        let mut deliveries = Vec::new();
+        let mut slots = 0;
+        for k in 0..300u32 {
+            let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+            let delivery = link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+            slots += u32::from(delivery.downlink_slot);
+            deliveries.push(delivery);
+        }
+        (deliveries, slots)
+    };
+    let (clean, clean_slots) = run(None);
+    assert_eq!(clean_slots, 75, "300 packets at the default 1:4");
+    assert_eq!(clean.last().unwrap().report.downlink_lq_pct, 100.0, "without a fault the downlink hears everything");
+    assert_eq!(run(Some(0.0)), (clean.clone(), clean_slots), "a zero fraction changes nothing");
+
+    let (full, full_slots) = run(Some(1.0));
+    assert_eq!(full_slots, 0, "100 % downlink loss: no telemetry slot flies");
+    assert_eq!(
+        full.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "uplink control is untouched"
+    );
+    assert_eq!(
+        full.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.report.lq_pct).collect::<Vec<_>>(),
+        "uplink LQ is untouched"
+    );
+    assert_eq!(full.last().unwrap().report.downlink_lq_pct, 0.0, "the 100-packet window is all loss");
+
+    let (half, half_slots) = run(Some(0.5));
+    assert_eq!(run(Some(0.5)), (half.clone(), half_slots), "the same seed loses the same downlink packets");
+    assert_eq!(
+        half.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        clean.iter().map(|d| d.channels).collect::<Vec<_>>(),
+        "half downlink loss still leaves every stick packet alone"
+    );
+    assert!(half_slots > 0 && half_slots < clean_slots, "some slots fly: {half_slots} of {clean_slots}");
+    let half_lq = half.last().unwrap().report.downlink_lq_pct;
+    assert!(30.0 < half_lq && half_lq < 70.0, "about half the downlink arrives: {half_lq}");
+}
+
+#[test]
+fn a_telemetry_slot_flies_on_every_configured_slot() {
     // A CRSF battery frame: 24.6 V, 3.2 A, the mAh bytes carrying an index, 100 % remaining.
     let mut battery = vec![0xC8, 10, crsf::FRAMETYPE_BATTERY_SENSOR, 0, 246, 0, 32, 0, 0, 7, 100];
     battery.push(crsf::crc8_dvb_s2(&battery[2..]));
-    for _ in 0..8 {
-        telemetry_in.write(&battery);
+    let mut counts = Vec::new();
+    for divisor in [1, 4, 8] {
+        let (mut s, _uart, telemetry_in, handle) = rig_full(FixedParams { telemetry_slot_divisor: divisor, ..params() }, 1);
+        for _ in 0..8 {
+            telemetry_in.write(&battery);
+        }
+        for _ in 0..(8 * TICKS_PER_PACKET) {
+            s.step().unwrap();
+        }
+        let t = handle.latest();
+        counts.push(t.frame_count);
+        assert!((t.battery_v - 24.6).abs() < 1e-9 && (t.battery_a - 3.2).abs() < 1e-9, "{t:?}");
     }
-    for _ in 0..(8 * TICKS_PER_PACKET) {
-        s.step().unwrap();
-    }
-    let t = handle.latest();
-    assert_eq!(t.frame_count, 2, "8 heard packets: slots on the 4th and 8th");
-    assert!((t.battery_v - 24.6).abs() < 1e-9 && (t.battery_a - 3.2).abs() < 1e-9, "{t:?}");
+    assert_eq!(counts, vec![8, 2, 1], "8 heard packets: a slot every 1, 4 and 8 packets; 8 halves 4 exactly");
+}
+
+#[test]
+#[should_panic(expected = "telemetry_slot_divisor")]
+fn the_fixed_constructor_refuses_an_invalid_divisor() {
+    let mut bus = Bus::new();
+    let _ = FixedLink::new(FixedParams { telemetry_slot_divisor: 3, ..params() }, 1, &mut bus);
 }
 
 #[test]

@@ -304,10 +304,12 @@ impl Sim for SimService {
         // What a repro bundle needs to run this session again. A SITL session's firmware directory depends on the
         // slot it takes, which the build decides: it is filled in below.
         let world_file = (!req.world_path.is_empty()).then(|| ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path)));
+        let library_env = std::env::var("OFS_LIBRARY").ok();
+        let library_roots = ofs_config::library_roots(library_env.as_deref(), cfg.source_dir());
         let mut repro = BundleSource::new(
             &cfg,
             world_file.as_deref(),
-            std::env::var("OFS_LIBRARY").ok().as_deref(),
+            &library_roots,
             req.seed,
             req.open_loop_fc,
             mode == RunMode::Realtime,
@@ -501,6 +503,7 @@ impl Sim for SimService {
         let fault = match req.kind {
             Some(pb::fault::Kind::RadioLinkLoss(_)) => Fault::RadioLinkLoss,
             Some(pb::fault::Kind::RadioLoss(m)) => Fault::RadioLoss { fraction: m.fraction },
+            Some(pb::fault::Kind::DownlinkLoss(m)) => Fault::DownlinkLoss { fraction: m.fraction },
             Some(pb::fault::Kind::BurstLoss(m)) => {
                 Fault::BurstLoss { on_s: f64::from(m.on_ms) / 1000.0, off_s: f64::from(m.off_ms) / 1000.0 }
             }
@@ -737,7 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failure_at_the_end_of_an_inputs_recording_still_publishes_its_stop_event() {
-        use crate::inputs_recorder::{tests::Faulty, InputsRecorder};
+        use crate::inputs_recorder::{tests::Faulty, InputsRecorder, InputsState};
         let svc = service_with(open_loop_session(RunMode::Lockstep));
         let mut events = svc.subscribe();
         {
@@ -745,7 +748,8 @@ mod tests {
             let s = slot.as_mut().unwrap();
             // Writes reach the buffer; the flush at the end fails.
             let out = Faulty { budget: usize::MAX, flush_fails: true };
-            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &Sticks::default()).unwrap();
+            let state = InputsState { sticks: Sticks::default(), transmitter: true, link_loss: false };
+            let recorder = InputsRecorder::over(Box::new(out), 8192, 500, 0, &state).unwrap();
             s.vehicle.set_inputs_recorder(recorder);
         }
         let err = svc.stop_inputs_recording(Request::new(pb::Empty {})).await.unwrap_err();

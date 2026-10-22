@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 12: protocol 11 plus the open-loop stabilizer on Load (M8b).
+    """Simulator control, protocol version 13: protocol 12 plus the downlink-loss fault.
+    Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
     Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
     Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
@@ -154,7 +155,8 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 12: protocol 11 plus the open-loop stabilizer on Load (M8b).
+    """Simulator control, protocol version 13: protocol 12 plus the downlink-loss fault.
+    Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
     Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
     Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world
@@ -437,7 +439,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 12: protocol 11 plus the open-loop stabilizer on Load (M8b).
+    """Simulator control, protocol version 13: protocol 12 plus the downlink-loss fault.
+    Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
     Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
     Protocol 9 added recording the bus to MCAP, scripted stick inputs, faults scheduled at a simulated time and world

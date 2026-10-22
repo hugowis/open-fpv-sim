@@ -77,6 +77,74 @@ selected signals' records out of each decompressed chunk (open-loop minute, 148 
 2.2 s for every signal, against 3.3 s and 9.8 s; `scripts/bench_reader.py`). Files without message indexes, or with
 lz4 chunks, are still read through the iterator.
 
+## Reading a recording while it is being written
+
+Can a file be opened while the session is still recording it? Probed on 2026-10-22 (Windows 11,
+Python 3.11, `mcap` 1.5.0, `pandas` 3.0.6, a debug server built from this repository) with a lockstep
+open-loop session recording every signal at the default rates. **Foxglove is not installed on that
+machine — desktop and web were not run, and nothing here claims what Foxglove does.** The `mcap` CLI
+was not available either (no `mcap` on `PATH`; `pip install mcap-cli` found no distribution), so the
+readers below are the Python `mcap` library and `ofs.reader` — the exact tools `to_dataframe` is
+built on. The answer has two parts, both structural rather than tool-specific:
+
+1. **Complete chunks reach the disk as the session runs.** The writer closes each chunk when it
+   reaches the crate's default 1 MiB uncompressed, so the file grows steadily (probe run:
+   163,420 B at 1 simulated second, 2,042,143 B at 5 s, 4,393,796 B just before `stop()`).
+2. **The summary section, footer and tail magic are written only by `stop()`.** No reader that
+   builds its view from the footer — every indexed reader, `ofs.reader` included — can read the file
+   until then. Mid-recording the file ends inside an open chunk: the writer pre-writes each chunk's
+   record header with a placeholder length of `u64::MAX` and patches it when the chunk closes
+   (`write.rs`: `op_and_len(&mut sink, op::CHUNK, !0)`), so the last record on disk never terminates.
+
+| Reader | Open file | Copied file | Closed file |
+|---|---|---|---|
+| `ofs.reader.read`/`to_dataframe` | refuses: `ValueError: …: unfinished recording (it was stopped by a write error such as a full disk, or the server was killed while recording)` — neither the fast nor the iterator path engages; the refusal happens at the summary | same refusal (the copy has no summary either) | reads fully, message-index fast path |
+| `mcap` 1.5.0 `get_summary()` (any indexed reader's first step) | `RecordLengthLimitExceeded: unknown (opcode 184) record has length 893077043047549237 that exceeds limit 4294967296` (the opcode and length vary — the reader seeks to EOF−footer and parses compressed bytes there) | same | OK: 130 channels, 10 chunk indexes, 173,952 messages |
+| `mcap` 1.5.0 `StreamReader` (streaming, no index) | reads every flushed chunk — 0 messages at 1 s (the first chunk is still open), 71,763 of the eventual 173,952 at 5 s, 161,762 just before `stop()` — then `RecordLengthLimitExceeded: CHUNK record has length 18446744073709551615 that exceeds limit 4294967296` at the open chunk | identical bytes, identical result | all 173,952 messages, footer, no error |
+| Foxglove desktop/web | **not tested** (not installed on the evidence machine) | **not tested** | not re-tested here; the message-index check above ran finished sandbox recordings through app.foxglove.dev |
+
+Copying the file mid-recording does not make an indexed read possible — the copy is exactly as
+unfinished — and it is unnecessary for access: reading the live path itself works on Windows (no
+sharing violation; the server's `File` opens with share read/write). A copy only helps a reader you
+do not want touching the live path, and only a streaming one can make anything of it, up to the last
+flushed chunk.
+
+**The workaround is to finish the file first:** `sim.recording.stop()` (or `sim.log`, which stops the
+running recording and returns it) writes the summary and the footer; every reader then reads the
+whole thing. There is nothing to fix in the writer: an MCAP file has one footer, at the end, so no
+mid-recording flush can make an indexed reader accept a live file. One gap the probe did find: the
+refusal's text names a write error or a killed server but not the third cause, a recording that is
+still running — #117.
+
+To re-run the evidence against a built server (`cargo build -p ofs-sim`), from the repository root:
+
+```python
+import pathlib, sys, tempfile
+sys.path.insert(0, "python")
+import ofs
+from mcap.reader import make_reader
+from mcap.records import Message
+from mcap.stream_reader import StreamReader
+
+sim = ofs.launch(binary=str(pathlib.Path("target/debug/ofs-sim.exe").resolve()),  # Windows wants it absolute
+                 data_dir=tempfile.mkdtemp())
+sim.load("quads/opendrone-5f-freestyle.toml", seed=1, open_loop_fc=True)
+sim.set_sticks(throttle=0.6); sim.run(5.0)
+live = pathlib.Path(sim.recording.path)
+print(live.stat().st_size)                                # grows while the session runs
+try: ofs.reader.read(live, ["battery.voltage_v"])
+except Exception as e: print(type(e).__name__, e)         # the unfinished-recording refusal
+with open(live, "rb") as f:                               # any indexed reader's first step
+    try: print(make_reader(f).get_summary())
+    except Exception as e: print(type(e).__name__, e)
+n = 0
+try:
+    with open(live, "rb") as f:
+        for r in StreamReader(f).records: n += isinstance(r, Message)  # MessageIndex has channel_id too
+except Exception as e: print(n, "messages, then", type(e).__name__, e)
+sim.recording.stop()                                      # then repeat the three probes
+```
+
 ## Test data must avoid platform libm
 
 The Windows and Linux files first differed at byte 40 — the first chunk's length. The spike's test signal

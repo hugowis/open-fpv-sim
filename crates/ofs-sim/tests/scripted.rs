@@ -62,6 +62,23 @@ fn a_scheduled_fault_is_validated_now_and_a_passed_time_is_refused() {
 }
 
 #[test]
+fn a_scheduled_downlink_loss_lands_on_its_tick_and_names_itself() {
+    let mut v = vehicle();
+    v.schedule_fault(Fault::DownlinkLoss { fraction: 1.0 }, 0.05).unwrap();
+    v.run_for(0.049_875).unwrap(); // tick 399
+    assert!(v.active_fault_names().is_empty(), "not yet");
+    v.step_ticks(1).unwrap(); // 0.05 s: the fault is on
+    assert_eq!(v.active_fault_names(), ["downlink_loss"]);
+    v.run_for(0.25).unwrap();
+    assert_eq!(v.state().radio.downlink_lq_pct, 0.0);
+    assert_eq!(v.state().radio.lq_pct, 100.0);
+    v.clear_faults();
+    v.run_for(0.25).unwrap();
+    assert!(v.active_fault_names().is_empty());
+    assert_eq!(v.state().radio.downlink_lq_pct, 100.0);
+}
+
+#[test]
 fn clearing_faults_drops_the_scheduled_ones() {
     let mut v = vehicle();
     v.schedule_fault(dead_motor_2(), 0.2).unwrap();
@@ -123,6 +140,89 @@ fn columns_the_file_leaves_out_keep_their_value() {
     by_hand.set_sticks(&Sticks { throttle: 0.5, ..armed }).unwrap();
     by_hand.run_for(0.3).unwrap();
     assert_eq!(played.digest(), by_hand.digest());
+}
+
+#[test]
+fn tx_and_link_loss_columns_drive_the_state_at_their_ticks() {
+    let mut v = vehicle();
+    v.play_inputs(csv("t_s,tx,link_loss\n0,0,0\n0.1,1,0\n0.2,1,1\n")).unwrap();
+    assert!(!v.state().radio.tx_enabled, "row 0 applies at once");
+    assert!(v.active_fault_names().is_empty());
+    v.run_for(0.1).unwrap();
+    assert!(v.state().radio.tx_enabled, "row 0.1");
+    assert!(v.active_fault_names().is_empty());
+    v.run_for(0.1).unwrap();
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"], "row 0.2");
+    v.run_for(0.05).unwrap();
+    assert_eq!(v.inputs_playing(), None);
+    v.run_for(0.5).unwrap();
+    assert!(!v.state().radio.link_up, "the cut reaches the link");
+    assert!(v.state().radio.tx_enabled);
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"], "the last row holds");
+}
+
+#[test]
+fn a_tx_only_file_leaves_the_link_fault_alone() {
+    let mut v = vehicle();
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.play_inputs(csv("t_s,tx\n0,0\n0.1,1\n")).unwrap();
+    v.run_for(0.05).unwrap();
+    assert!(!v.state().radio.tx_enabled);
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"]);
+    v.run_for(0.06).unwrap();
+    assert!(v.state().radio.tx_enabled);
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"], "the file never names the fault");
+}
+
+#[test]
+fn a_sticks_only_file_leaves_the_transmitter_and_link_alone() {
+    let mut v = vehicle();
+    v.set_transmitter(false);
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    v.play_inputs(csv("t_s,roll\n0,0.4\n0.1,-0.2\n")).unwrap();
+    assert_eq!(v.signal("rc.roll"), Some(0.4));
+    v.run_for(0.1).unwrap();
+    assert_eq!(v.signal("rc.roll"), Some(-0.2));
+    assert!(!v.state().radio.tx_enabled);
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"]);
+}
+
+#[test]
+fn stopping_inputs_keeps_the_last_tx_and_link_state() {
+    let mut v = vehicle();
+    v.play_inputs(csv("t_s,tx,link_loss\n0,0,1\n1,1,0\n")).unwrap();
+    v.run_for(0.1).unwrap();
+    assert_eq!(v.stop_inputs().as_deref(), Some("test.csv"));
+    v.run_for(0.5).unwrap();
+    assert!(!v.state().radio.tx_enabled);
+    assert_eq!(v.active_fault_names(), ["radio_link_loss"], "stop does not restore");
+}
+
+#[test]
+fn a_repeated_initial_state_adds_no_action_to_the_journal() {
+    let mut v = vehicle();
+    v.set_transmitter(false);
+    v.set_fault(Fault::RadioLinkLoss, true).unwrap();
+    let before = v.journal().entries().len();
+    v.play_inputs(csv("t_s,tx,link_loss\n0,0,1\n")).unwrap();
+    assert_eq!(v.journal().entries().len(), before + 1, "only PlayInputs: the state was already there");
+}
+
+#[test]
+fn replaying_the_actions_file_twice_ends_in_the_same_state() {
+    let text = "t_s,tx,link_loss\n0,0,0\n0.1,1,0\n0.2,1,1\n";
+    let mut once = vehicle();
+    once.play_inputs(csv(text)).unwrap();
+    once.run_for(0.3).unwrap();
+    let mut twice = vehicle();
+    for _ in 0..2 {
+        twice.play_inputs(csv(text)).unwrap();
+        twice.run_for(0.3).unwrap();
+    }
+    assert_eq!(twice.state().radio.tx_enabled, once.state().radio.tx_enabled);
+    assert_eq!(twice.active_fault_names(), once.active_fault_names());
+    assert_eq!(twice.signal("rc.roll"), once.signal("rc.roll"));
+    assert_eq!(twice.signal("fault.radio.link_loss"), once.signal("fault.radio.link_loss"));
 }
 
 #[test]

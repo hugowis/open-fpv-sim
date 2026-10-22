@@ -12,6 +12,17 @@ use crate::sink::{quat_json, scalar_json, vec3_json, McapSink};
 use crate::spec::Channel;
 use crate::spec::{resolve, SignalRate};
 
+/// Bus signals added after 0.2.0 that a default recording leaves out so a no-fault run keeps the 0.2.0 recording
+/// layout byte for byte. A caller that names one (or a pattern that matches it) still records it.
+const DEFAULT_RECORDING_EXCLUDED: &[&str] = &[ofs_core::names::FAULT_RADIO_DOWNLINK_LOSS_FRACTION];
+
+fn recorded_signals(bus: &Bus, requests: &[SignalRate]) -> Vec<(String, SignalKind)> {
+    bus.signals()
+        .filter(|(name, _)| !(requests.is_empty() && DEFAULT_RECORDING_EXCLUDED.contains(name)))
+        .map(|(name, kind)| (name.to_string(), kind))
+        .collect()
+}
+
 /// Anything a recording can be written to: a file in the server, a failing writer in tests.
 pub trait WriteSeek: Write + Seek + Send {}
 impl<T: Write + Seek + Send> WriteSeek for T {}
@@ -195,7 +206,7 @@ impl RecorderHandle {
             return Err(RecordError::AlreadyRecording);
         }
         // Validate before creating the file: a refused request leaves nothing behind.
-        let signals: Vec<(String, SignalKind)> = bus.signals().map(|(n, k)| (n.to_string(), k)).collect();
+        let signals = recorded_signals(bus, requests);
         resolve(requests, &signals, base_hz).map_err(RecordError::Spec)?;
         let file = File::create_new(path).map_err(|e| RecordError::from_create(path, &e))?;
         self.start_with(bus, base_hz, requests, Box::new(BufWriter::new(file)), path)
@@ -214,7 +225,7 @@ impl RecorderHandle {
         if state.active.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        let signals: Vec<(String, SignalKind)> = bus.signals().map(|(n, k)| (n.to_string(), k)).collect();
+        let signals = recorded_signals(bus, requests);
         let channels = resolve(requests, &signals, base_hz).map_err(RecordError::Spec)?;
         let sources = channels
             .iter()
