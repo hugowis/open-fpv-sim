@@ -25,13 +25,17 @@ struct Args {
     /// `key=value` lines and exit: 0 reproduced, 1 not reproduced, 2 the bundle could not be run.
     #[arg(long, value_name = "BUNDLE")]
     replay: Option<PathBuf>,
+    /// With `--replay`: also run the programs the bundle's quad file names (`fc.launch`, `fc.cleanup`). Without it a
+    /// Betaflight bundle replays only with `OFS_SITL_LAUNCH` set, so a bundle from someone else cannot run its own program.
+    #[arg(long, requires = "replay")]
+    trust_bundle: bool,
 }
 
 /// `--replay`: the exit code.
-fn replay(bundle: &std::path::Path, data_dir: Option<PathBuf>) -> i32 {
+fn replay(bundle: &std::path::Path, data_dir: Option<PathBuf>, trust_bundle: bool) -> i32 {
     let scratch = data_dir.is_none();
     let data_dir = data_dir.unwrap_or_else(|| std::env::temp_dir().join(format!("ofs-replay-{}", std::process::id())));
-    let outcome = ofs_sim::repro::replay(bundle, &data_dir);
+    let outcome = ofs_sim::repro::replay_trusting(bundle, &data_dir, trust_bundle);
     if scratch {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
@@ -82,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let args = Args::parse();
     if let Some(bundle) = &args.replay {
-        std::process::exit(replay(bundle, args.data_dir.clone()));
+        std::process::exit(replay(bundle, args.data_dir.clone(), args.trust_bundle));
     }
     if let Err(message) = ofs_sim::listen::check_listen(args.listen, args.allow_remote) {
         eprintln!("ofs-sim: {message}");

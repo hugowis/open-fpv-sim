@@ -55,6 +55,17 @@ def test_a_changed_journal_replays_as_not_reproduced(sim, sim_bin):
     assert result.digest != result.expected_digest
 
 
+def test_a_betaflight_bundle_does_not_run_its_own_launch_program(sim, sim_bin, monkeypatch):
+    """A bundle is whatever someone attached to an issue: its quad file's `fc.launch` is not run by a replay."""
+    _fail(sim)
+    bundle = ofs.repro.find_bundles(sim.logs_dir)[0]
+    toml_path = bundle / "bundle.toml"
+    toml_path.write_text(toml_path.read_text().replace("open_loop_fc = true", "open_loop_fc = false"))
+    monkeypatch.delenv("OFS_SITL_LAUNCH", raising=False)
+    with pytest.raises(ofs.ConfigError, match="trust-bundle"):
+        ofs.repro.replay_bundle(bundle, binary=sim_bin)
+
+
 def test_replay_of_a_missing_folder_is_a_config_error(tmp_path, sim_bin):
     with pytest.raises(ofs.ConfigError, match="bundle.toml"):
         ofs.repro.replay_bundle(tmp_path / "nowhere.repro", binary=sim_bin)

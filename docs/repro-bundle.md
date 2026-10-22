@@ -40,6 +40,13 @@ or
     result = ofs.repro.replay_bundle("path/to/quad-1.repro")
     print(result.reproduced, result.exact, result.failure)
 
+**A bundle is not safe to replay just because it replays.** Its quad file names the program that starts Betaflight
+(`fc.launch`) and the one that cleans up after it (`fc.cleanup`), and a bundle comes from whoever attached it. So a
+replay does not run them: a Betaflight bundle replays with `OFS_SITL_LAUNCH` set to your own `betaflight_SITL`
+(`fc.cleanup` is then ignored too), and is refused without it. `--trust-bundle` (Python: `trust_bundle=True`) runs the
+bundle's own programs, for a bundle you wrote or fully trust. Open-loop bundles start no program. A replay also refuses
+a bundle that asks for more than a simulated day of ticks.
+
 The replay builds the bundle's own quad and library (the replayer's `OFS_LIBRARY` is ignored), starts Betaflight from
 the bundle's EEPROM if it was a Betaflight session, applies the journal tick for tick in lockstep, and stops where the
 original failed. **Reproduced** means the replay failed with the same error at the same tick *and* ended on the same

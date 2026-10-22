@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use ofs_config::FcKind;
+use ofs_core::scheduler::MAX_RUN_FOR_S;
 use ofs_core::SimError;
+use ofs_fc::sitl::net;
 use ofs_log::recorder::{create_numbered, RecordError};
 use ofs_log::tail::DEFAULT_WINDOW_S;
 
@@ -242,6 +244,8 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
 const README: &str = "An Open FPV Sim repro bundle: a failed session, with everything needed to run it again.\n\
 Replay it:   ofs-sim --replay <this folder>\n\
 or, from Python:   import ofs; ofs.repro.replay_bundle(\"<this folder>\")\n\
+A Betaflight bundle replays with OFS_SITL_LAUNCH set to your own betaflight_SITL. The program this bundle's quad file\n\
+names runs only with --trust-bundle (trust_bundle=True in Python): replay a bundle someone sent you only if you trust it.\n\
 bundle.toml says what failed and whether the replay is exact. See docs/repro-bundle.md in the repository.\n";
 
 /// What running a bundle again showed.
@@ -280,8 +284,16 @@ fn flag_of(t: &toml::Table, key: &str) -> Result<bool, String> {
 }
 
 /// Runs the bundle at `bundle` again in lockstep, under `data_dir` (firmware state goes there), and compares the
-/// result with what `bundle.toml` recorded.
+/// result with what `bundle.toml` recorded. The programs the bundle's quad file names (`fc.launch`, `fc.cleanup`) are
+/// not run: a bundle comes from whoever attached it to an issue. A Betaflight bundle needs `OFS_SITL_LAUNCH`; see
+/// [`replay_trusting`].
 pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
+    replay_trusting(bundle, data_dir, false)
+}
+
+/// [`replay`], and with `trust_bundle` the bundle's own `fc.launch` and `fc.cleanup` run too: only for a bundle the
+/// caller wrote or fully trusts.
+pub fn replay_trusting(bundle: &Path, data_dir: &Path, trust_bundle: bool) -> Result<ReplayOutcome, String> {
     let text = std::fs::read_to_string(bundle.join("bundle.toml")).map_err(|e| format!("{}: {e}", bundle.join("bundle.toml").display()))?;
     let t: toml::Table = toml::from_str(&text).map_err(|e| format!("bundle.toml: {e}"))?;
     let format = int_of(&t, "format_version")?;
@@ -300,14 +312,28 @@ pub fn replay(bundle: &Path, data_dir: &Path) -> Result<ReplayOutcome, String> {
 
     let quad_path = bundle.join(text_of(&t, "quad")?);
     // The bundle's own library: the replayer's OFS_LIBRARY must not reach it.
-    let cfg = ofs_config::load_with_library_env(&quad_path, None).map_err(|e| format!("loading the bundle's quad: {e}"))?;
+    let mut cfg = ofs_config::load_with_library_env(&quad_path, None).map_err(|e| format!("loading the bundle's quad: {e}"))?;
+    let fc_override = open_loop.then_some(if stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
+    if !trust_bundle && fc_override.unwrap_or(cfg.fc.kind) == FcKind::Sitl {
+        if net::env_argv("OFS_SITL_LAUNCH").is_none() {
+            return Err("this bundle flew Betaflight, and its quad file names the program that starts it (fc.launch): a bundle                         from someone else could name any program, so it is not run. Set OFS_SITL_LAUNCH to your own                         betaflight_SITL, or pass --trust-bundle (Python: trust_bundle=True) for a bundle you trust"
+                .into());
+        }
+        cfg.fc.cleanup.clear(); // the default cleanup (or OFS_SITL_CLEANUP) stops the slot's own SITL
+    }
+    let max_tick = (MAX_RUN_FOR_S * f64::from(cfg.sim.base_hz)) as u64;
+    if expected_tick > max_tick {
+        return Err(format!("bundle.toml: failed_tick {expected_tick} is beyond one simulated day ({max_tick} ticks)"));
+    }
     let world = match t.get("world").and_then(toml::Value::as_str) {
         Some(w) => ofs_config::world::load(&bundle.join(w)).map_err(|e| format!("loading the bundle's world: {e}"))?,
         None => ofs_config::WorldConfig::open_field(),
     };
     let journal = Journal::read(bundle)?;
+    if let Some(e) = journal.entries().iter().find(|e| e.tick > max_tick) {
+        return Err(format!("journal.txt: an entry at tick {} is beyond one simulated day ({max_tick} ticks)", e.tick));
+    }
 
-    let fc_override = open_loop.then_some(if stabilize { FcKind::OpenLoopStabilized } else { FcKind::OpenLoop });
     let opts = BuildOptions { seed, data_dir: data_dir.to_path_buf(), fc_override, world };
     // The bundle's firmware state goes into the directory of the SITL slot the build takes (not necessarily slot 0).
     let mut vehicle =
@@ -623,6 +649,59 @@ mod tests {
         assert_eq!(effective_fc_flags(FcKind::OpenLoop, Some(FcKind::OpenLoop)), (true, false));
         assert_eq!(effective_fc_flags(FcKind::Sitl, None), (false, false));
         assert_eq!(effective_fc_flags(FcKind::Sitl, Some(FcKind::OpenLoop)), (true, false), "a SITL quad overridden to open loop");
+    }
+
+    /// A bundle that says it flew Betaflight, whose quad file names `program` as the SITL to start and to clean up with.
+    fn betaflight_bundle_naming(program: &Path, logs: &Path) -> PathBuf {
+        let src = test_source(logs);
+        let mut v = vehicle_from(&ofs_config::load(&src.quad_path).unwrap());
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+        let text = std::fs::read_to_string(dir.join("bundle.toml")).unwrap();
+        std::fs::write(dir.join("bundle.toml"), text.replace("open_loop_fc = true", "open_loop_fc = false")).unwrap();
+        let quad_path = dir.join(bundle_toml(&dir)["quad"].as_str().unwrap());
+        let mut quad: toml::Table = std::fs::read_to_string(&quad_path).unwrap().parse().unwrap();
+        let fc = quad.get_mut("fc").and_then(toml::Value::as_table_mut).unwrap();
+        let argv = toml::Value::Array(vec![toml::Value::String(program.display().to_string())]);
+        fc.insert("launch".into(), argv.clone());
+        fc.insert("cleanup".into(), argv);
+        std::fs::write(&quad_path, toml::to_string(&quad).unwrap()).unwrap();
+        dir
+    }
+
+    /// A bundle is data from whoever attached it to an issue: replaying it must not run the program its quad file
+    /// names, unless the caller says the bundle is trusted.
+    #[test]
+    fn a_bundles_own_launch_program_is_not_run_unless_trusted() {
+        std::env::remove_var("OFS_SITL_LAUNCH"); // CI's SITL job sets it; this test is about its absence
+        let logs = tempfile::tempdir().unwrap();
+        let program = logs.path().join("evil-program");
+        let dir = betaflight_bundle_naming(&program, logs.path());
+        let refused = replay(&dir, &logs.path().join("data")).unwrap_err();
+        assert!(refused.contains("OFS_SITL_LAUNCH") && refused.contains("--trust-bundle"), "{refused}");
+        assert!(!refused.contains("evil-program"), "the program was reached: {refused}");
+        let trusted = replay_trusting(&dir, &logs.path().join("data"), true).unwrap_err();
+        assert!(trusted.contains("evil-program"), "--trust-bundle starts the bundle's own program: {trusted}");
+    }
+
+    #[test]
+    fn a_bundle_cannot_ask_for_a_replay_beyond_a_simulated_day() {
+        let logs = tempfile::tempdir().unwrap();
+        let src = test_source(logs.path());
+        let mut v = vehicle_from(&ofs_config::load(&src.quad_path).unwrap());
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+        let tick = bundle_toml(&dir)["failed_tick"].as_integer().unwrap();
+        let text = std::fs::read_to_string(dir.join("bundle.toml")).unwrap();
+        std::fs::write(dir.join("bundle.toml"), text.replace(&format!("failed_tick = {tick}"), "failed_tick = 9000000000000000000")).unwrap();
+        let message = replay(&dir, &logs.path().join("data")).unwrap_err();
+        assert!(message.contains("failed_tick") && message.contains("one simulated day"), "{message}");
+
+        std::fs::write(dir.join("bundle.toml"), text).unwrap(); // the real tick again, a journal entry far beyond it
+        let journal = std::fs::read_to_string(dir.join("journal.txt")).unwrap();
+        std::fs::write(dir.join("journal.txt"), format!("{journal}9000000000000000000 tx 1\n")).unwrap();
+        let message = replay(&dir, &logs.path().join("data")).unwrap_err();
+        assert!(message.contains("journal.txt") && message.contains("one simulated day"), "{message}");
     }
 
     /// A bundle written by a build that still said `format_version = 1` (0.2.0 and earlier, before stabilized
