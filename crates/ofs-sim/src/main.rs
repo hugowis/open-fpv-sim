@@ -14,6 +14,10 @@ struct Args {
     /// defaults to a temporary directory it removes afterwards).
     #[arg(long)]
     data_dir: Option<PathBuf>,
+    /// Write the port the server bound to this file once it listens (atomically, so a reader sees all of it or
+    /// nothing). With `--listen 127.0.0.1:0` the OS picks the port: a launcher cannot lose a race for it.
+    #[arg(long, value_name = "FILE")]
+    port_file: Option<PathBuf>,
     /// Allow listening on a non-loopback address. Any client that can connect can make this machine run programs.
     #[arg(long)]
     allow_remote: bool,
@@ -87,11 +91,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.listen.ip().is_loopback() {
         eprintln!("ofs-sim: warning: listening on {} (--allow-remote): every client that can connect can run programs here", args.listen);
     }
-    eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), args.listen);
+    let listener = tokio::net::TcpListener::bind(args.listen).await?;
+    let bound = listener.local_addr()?;
+    eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), bound);
+    if let Some(file) = &args.port_file {
+        let partial = PathBuf::from(format!("{}.partial", file.display()));
+        std::fs::write(&partial, bound.port().to_string())?;
+        let _ = std::fs::remove_file(file); // Windows refuses to rename over a file
+        std::fs::rename(&partial, file)?;
+    }
     let service = SimService::new(args.data_dir.unwrap_or_else(|| PathBuf::from(".ofs-data")));
     let (signalled, on_signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_shutdown(
-        args.listen,
+    let server = tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_incoming_shutdown(
+        tokio_stream::wrappers::TcpListenerStream::new(listener),
         async move {
             shutdown_signal().await;
             eprintln!("ofs-sim: shutting down");

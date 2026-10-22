@@ -7,8 +7,8 @@ import math
 import os
 import pathlib
 import shutil
-import socket
 import subprocess
+import tempfile
 import threading
 import time
 import weakref
@@ -593,12 +593,6 @@ def _stop_server(stub, channel, process) -> None:
                 process.kill()
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def find_binary(binary: str | None = None) -> str:
     """The `ofs-sim` to run: `binary`, else `OFS_SIM_BIN`, else the one on PATH."""
     binary = binary or os.environ.get("OFS_SIM_BIN") or shutil.which("ofs-sim")
@@ -619,9 +613,25 @@ def launch(binary: str | None = None, headless: bool = True, data_dir: str = ".o
     if not headless:
         raise NotImplementedError("the Godot pilot client arrives with M2b; only headless=True is available")
     binary = find_binary(binary)
-    address = f"127.0.0.1:{_free_port()}"
-    proc = subprocess.Popen([binary, "--listen", address, "--data-dir", data_dir])
     deadline = time.monotonic() + timeout_s
+    with tempfile.TemporaryDirectory(prefix="ofs-launch-") as scratch:
+        # Port 0 and a port file: the server binds first and reports the port it got, so no other process can take a
+        # port this function picked between choosing it and the server listening on it.
+        port_file = os.path.join(scratch, "port")
+        proc = subprocess.Popen([binary, "--listen", "127.0.0.1:0", "--data-dir", data_dir, "--port-file", port_file])
+        while True:
+            if proc.poll() is not None:
+                raise RuntimeError(f"ofs-sim exited with code {proc.returncode} during startup")
+            try:
+                with open(port_file, encoding="ascii") as f:
+                    address = f"127.0.0.1:{int(f.read())}"
+                break
+            except (FileNotFoundError, PermissionError, ValueError):  # not there yet (the server renames it into place)
+                pass
+            if time.monotonic() > deadline:
+                proc.kill()
+                raise RuntimeError(f"ofs-sim did not start listening within {timeout_s} s")
+            time.sleep(0.02)
     channel = grpc.insecure_channel(address)
     try:
         while True:

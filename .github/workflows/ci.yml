@@ -177,9 +177,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # The actions here are pinned to commit SHAs: this job can publish to PyPI, so a moved tag must not change what
+    # runs in it. Dependabot (.github/dependabot.yml) proposes the updates.
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: The tag names the package version
@@ -188,4 +190,4 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version" || { echo "tag $GITHUB_REF_NAME does not match the package version $version"; exit 1; }
       - run: python -m pip install build
       - run: python -m build python --outdir dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

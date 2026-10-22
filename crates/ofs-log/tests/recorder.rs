@@ -81,7 +81,7 @@ fn start_and_stop_refuse_the_wrong_state_and_an_existing_file() {
     h.start(s.bus(), 8000, &[], &path).unwrap();
     assert_eq!(h.start(s.bus(), 8000, &[], &dir.path().join("other.mcap")).unwrap_err(), RecordError::AlreadyRecording);
     h.stop().unwrap();
-    assert!(matches!(h.start(s.bus(), 8000, &[], &path), Err(RecordError::Io(m)) if m.contains("r.mcap")), "never overwrites");
+    assert!(matches!(h.start(s.bus(), 8000, &[], &path), Err(RecordError::Taken(m)) if m.contains("r.mcap")), "never overwrites");
     match h.start(s.bus(), 8000, &[req("gyro.*", None)], &dir.path().join("x.mcap")) {
         Err(RecordError::Spec(m)) => assert_eq!(m, "pattern 'gyro.*' matches no signal"),
         other => panic!("{other:?}"),
@@ -199,4 +199,35 @@ fn numbered_paths_count_only_their_own_stem_and_extension() {
     }
     assert_eq!(next_numbered_path(&logs, "quad-inputs", "csv").unwrap(), logs.join("quad-inputs-4.csv"));
     assert_eq!(next_log_path(&logs, "quad-inputs").unwrap(), logs.join("quad-inputs-8.mcap"));
+}
+
+#[test]
+fn a_number_another_process_took_in_between_gives_the_next_one() {
+    use ofs_log::recorder::create_numbered;
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("logs");
+    let mut calls = 0;
+    let (path, ()) = create_numbered(&logs, "quad", "mcap", |p| {
+        calls += 1;
+        if calls == 1 {
+            std::fs::write(p, b"another simulator's").unwrap(); // it won the race for quad-1
+        }
+        std::fs::File::create_new(p).map(drop).map_err(|e| RecordError::from_create(p, &e))
+    })
+    .unwrap();
+    assert_eq!((path, calls), (logs.join("quad-2.mcap"), 2));
+    assert_eq!(std::fs::read(logs.join("quad-1.mcap")).unwrap(), b"another simulator's", "the other file is untouched");
+}
+
+#[test]
+fn a_failure_that_is_not_a_taken_name_is_not_retried() {
+    use ofs_log::recorder::create_numbered;
+    let dir = tempfile::tempdir().unwrap();
+    let mut calls = 0;
+    let err = create_numbered(dir.path(), "quad", "mcap", |_| -> Result<(), RecordError> {
+        calls += 1;
+        Err(RecordError::Io("disk full".into()))
+    })
+    .unwrap_err();
+    assert_eq!((err, calls), (RecordError::Io("disk full".into()), 1));
 }

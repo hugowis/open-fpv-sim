@@ -26,6 +26,20 @@ pub enum RecordError {
     Spec(String),
     /// Creating, writing or finishing the file failed.
     Io(String),
+    /// The file (or folder) to create already exists: another process took the number first ([`create_numbered`]
+    /// then tries the next one).
+    Taken(String),
+}
+
+impl RecordError {
+    /// The error for `path` that could not be created with `create_new`: `Taken` if it exists, else `Io`.
+    pub fn from_create(path: &Path, e: &std::io::Error) -> RecordError {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            RecordError::Taken(path.display().to_string())
+        } else {
+            RecordError::Io(format!("{}: {e}", path.display()))
+        }
+    }
 }
 
 impl std::fmt::Display for RecordError {
@@ -35,6 +49,7 @@ impl std::fmt::Display for RecordError {
             RecordError::NotRecording => write!(f, "no recording is running"),
             RecordError::Spec(m) => write!(f, "{m}"),
             RecordError::Io(m) => write!(f, "recording I/O failed: {m}"),
+            RecordError::Taken(p) => write!(f, "{p} already exists"),
         }
     }
 }
@@ -143,6 +158,28 @@ pub fn next_numbered_path(dir: &Path, stem: &str, ext: &str) -> std::io::Result<
     Ok(dir.join(format!("{stem}-{}{suffix}", largest + 1)))
 }
 
+/// How many numbers [`create_numbered`] tries before it gives up (another process would have to win every one).
+const NUMBERED_TRIES: u32 = 100;
+
+/// Runs `create` on [`next_numbered_path`] and returns the path with what `create` made there. If `create` says the
+/// name is [`RecordError::Taken`] (another simulator sharing the folder chose the same number in between), the next
+/// number is tried.
+pub fn create_numbered<T>(
+    dir: &Path,
+    stem: &str,
+    ext: &str,
+    mut create: impl FnMut(&Path) -> Result<T, RecordError>,
+) -> Result<(PathBuf, T), RecordError> {
+    for _ in 0..NUMBERED_TRIES {
+        let path = next_numbered_path(dir, stem, ext).map_err(|e| RecordError::Io(format!("{}: {e}", dir.display())))?;
+        match create(&path) {
+            Err(RecordError::Taken(_)) => {}
+            made => return made.map(|t| (path, t)),
+        }
+    }
+    Err(RecordError::Io(format!("{}: every {stem}-<n>.{ext} number tried was taken by another process", dir.display())))
+}
+
 fn time_ns(tick_end: u64, base_hz: u32) -> u64 {
     (u128::from(tick_end) * 1_000_000_000 / u128::from(base_hz)) as u64
 }
@@ -160,7 +197,7 @@ impl RecorderHandle {
         // Validate before creating the file: a refused request leaves nothing behind.
         let signals: Vec<(String, SignalKind)> = bus.signals().map(|(n, k)| (n.to_string(), k)).collect();
         resolve(requests, &signals, base_hz).map_err(RecordError::Spec)?;
-        let file = File::create_new(path).map_err(|e| RecordError::Io(format!("{}: {e}", path.display())))?;
+        let file = File::create_new(path).map_err(|e| RecordError::from_create(path, &e))?;
         self.start_with(bus, base_hz, requests, Box::new(BufWriter::new(file)), path)
     }
 
