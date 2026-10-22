@@ -498,23 +498,24 @@ class Sim:
         self._call(self._stub.ClearFaults, pb.Empty())
 
     def play_inputs(self, path) -> None:
-        """Plays a stick-inputs CSV from now (spec §5): a `t_s` column (seconds after this call, increasing) and any
-        of `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`. Each row holds until the next; columns the file
-        leaves out keep their value; the last row holds after it ends. `set_sticks` is refused while it plays. A
-        malformed file raises `ConfigError` naming every problem with its line."""
+        """Plays an inputs CSV from now (spec §5): a `t_s` column (seconds after this call, increasing) and any of
+        `roll`, `pitch`, `yaw`, `throttle`, `aux1`..`aux4`, plus optional `tx` and `link_loss` (0/1) for the
+        transmitter and the K link cut. Each row holds until the next; columns the file leaves out keep their value;
+        the last row holds after it ends. `set_sticks` is refused while it plays. A malformed file raises
+        `ConfigError` naming every problem with its line."""
         p = pathlib.Path(path)
         self._call(self._stub.PlayInputs, pb.InputsFile(name=p.name, csv=p.read_text(encoding="utf-8")))
 
     def stop_inputs(self) -> None:
-        """Stops the playing inputs file, if any (the sticks keep their last values)."""
+        """Stops the playing inputs file, if any (the sticks and link state keep their last values)."""
         self._call(self._stub.StopInputs, pb.Empty())
 
     def record_inputs(self) -> str:
-        """Starts recording this session's sticks to a CSV the server names under `logs_dir` (one row whenever a
-        stick changes, in `play_inputs`' format) and returns its path. Fly the session (the Godot game's sticks, or
-        `set_sticks` calls) and finish with `stop_inputs_recording()`; `play_inputs(path)` then replays the sticks in
-        a lockstep session. One recording at a time; refused while an inputs file plays, and `play_inputs` is refused
-        while it runs."""
+        """Starts recording this session's sticks and link state to a CSV the server names under `logs_dir` (one row
+        whenever a stick, `tx` or `link_loss` changes, in `play_inputs`' format) and returns its path. Fly the session
+        (the Godot game's sticks, or `set_sticks` calls) and finish with `stop_inputs_recording()`;
+        `play_inputs(path)` then replays the sticks and link state in a lockstep session. One recording at a time;
+        refused while an inputs file plays, and `play_inputs` is refused while it runs."""
         return self._call(self._stub.StartInputsRecording, pb.Empty()).path
 
     def stop_inputs_recording(self) -> str:
