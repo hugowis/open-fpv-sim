@@ -17,6 +17,9 @@ signal video_effects_toggled(on: bool)
 ## The "Picture" button changed the aspect setting (the game applies and saves it).
 signal aspect_changed(value: String)
 
+## The "DVR" box changed (the game starts or stops the recording).
+signal dvr_toggled(on: bool)
+
 var controls = null  # Controls
 var save_path := ""
 
@@ -26,6 +29,7 @@ var _deadzone := HSlider.new()
 var _deadzone_label := Label.new()
 var _hint := Label.new()
 var _video_effects := CheckBox.new()
+var _dvr := CheckBox.new()
 var _aspect: Button = Button.new()
 var _aspect_index := 0
 var _rows := {}  # channel -> {description, bind, invert, live}
@@ -109,6 +113,10 @@ func _ready() -> void:
 	_video_effects.toggled.connect(func(on: bool) -> void: video_effects_toggled.emit(on))
 	box.add_child(_video_effects)
 
+	_dvr.text = "DVR: record the FPV view"
+	_dvr.toggled.connect(func(on: bool) -> void: dvr_toggled.emit(on))
+	box.add_child(_dvr)
+
 	_aspect.text = "Picture: 4:3"
 	_aspect.pressed.connect(func(): _aspect_index = (_aspect_index + 1) % ASPECTS.size(); _aspect.text = "Picture: %s" % ASPECTS[_aspect_index]; aspect_changed.emit(ASPECTS[_aspect_index]))
 	box.add_child(_aspect)
@@ -143,6 +151,15 @@ func set_video_effects(on: bool) -> void:
 
 func video_effects_checked() -> bool:
 	return _video_effects.button_pressed
+
+
+## Shows the DVR's state without emitting `dvr_toggled`.
+func set_dvr(on: bool) -> void:
+	_dvr.set_pressed_no_signal(on)
+
+
+func dvr_on() -> bool:
+	return _dvr.button_pressed
 
 
 ## Shows the aspect setting without emitting `aspect_changed`.
