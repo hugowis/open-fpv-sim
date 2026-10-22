@@ -1,6 +1,5 @@
 //! Assembles a quad from its config into a scheduler and exposes sticks in, state out.
 use std::f64::consts::PI;
-use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -1016,7 +1015,8 @@ pub fn build_seeded(
         }
         FcKind::Sitl => {
             let video = video_devices(cfg, n, fc_divisor, &mut bus)?;
-            let mut launch_argv = env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
+            let mut launch_argv = net::env_argv("OFS_SITL_LAUNCH").unwrap_or_else(|| cfg.fc.launch.clone());
+            let env_ip = |var| net::env_ip(var).map_err(SimError::InvalidArgument);
             let sitl_net = net::resolve(&launch_argv, env_ip("OFS_SITL_HOST")?, env_ip("OFS_SITL_REPLY_IP")?)
                 .map_err(|e| SimError::Firmware(e.to_string()))?;
             // The slot of this session: the first free one, or — for a rebuild whose claim never left this process —
@@ -1028,7 +1028,7 @@ pub fn build_seeded(
             .map_err(|e| SimError::Firmware(e.to_string()))?;
             ports = slot.ports;
             launch_argv = net::with_port_offset(&launch_argv, ports.offset); // whatever the user wrote is the slot's to set
-            let mut cleanup = env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
+            let mut cleanup = net::env_argv("OFS_SITL_CLEANUP").unwrap_or_else(|| cfg.fc.cleanup.clone());
             if cleanup.is_empty() {
                 cleanup = net::default_cleanup(&launch_argv); // required under WSL (M0 §6); only this slot's SITL
             }
@@ -1796,56 +1796,9 @@ impl Vehicle {
     }
 }
 
-/// Space-separated argv from an environment variable, if set and non-empty.
-fn env_argv(var: &str) -> Option<Vec<String>> {
-    std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| split_argv(&s))
-}
-
-/// Splits a command line on whitespace; `"..."` or `'...'` keeps a path with spaces in one argument. Backslashes are
-/// ordinary characters (Windows paths).
-fn split_argv(line: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current: Option<String> = None;
-    let mut quote = None;
-    for c in line.chars() {
-        match quote {
-            Some(q) if c == q => quote = None,
-            Some(_) => current.get_or_insert_with(String::new).push(c),
-            None if c == '"' || c == '\'' => {
-                quote = Some(c);
-                current.get_or_insert_with(String::new);
-            }
-            None if c.is_whitespace() => args.extend(current.take()),
-            None => current.get_or_insert_with(String::new).push(c),
-        }
-    }
-    args.extend(current);
-    args
-}
-
-/// IPv4 address from an environment variable, if set and non-empty.
-fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, SimError> {
-    match std::env::var(var) {
-        Ok(v) if !v.trim().is_empty() => v
-            .trim()
-            .parse()
-            .map(Some)
-            .map_err(|_| SimError::InvalidArgument(format!("{var}={v} is not an IPv4 address"))),
-        _ => Ok(None),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn launch_argv_from_the_environment_keeps_quoted_paths_whole() {
-        let argv = split_argv(r#"wsl.exe -d Ubuntu -e "/home/me/my builds/betaflight_SITL.elf" --x 'a b'"#);
-        assert_eq!(argv, ["wsl.exe", "-d", "Ubuntu", "-e", "/home/me/my builds/betaflight_SITL.elf", "--x", "a b"]);
-        assert_eq!(split_argv("  plain   words "), ["plain", "words"]);
-        assert_eq!(split_argv(r#"C:\tools\sitl.exe "#), [r"C:\tools\sitl.exe"], "backslashes are kept (Windows paths)");
-    }
 
     #[test]
     fn the_goggles_latency_is_reported_without_a_transmitting_vtx() {

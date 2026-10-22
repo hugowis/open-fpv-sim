@@ -12,6 +12,13 @@ repository). The format follows Keep a Changelog.
   `ofs.faults.DownlinkLoss`; default MCAP recordings leave the new control signal out, so a 0.2.0 no-fault
   recording stays byte-identical.
 
+### Replaying a bundle no longer runs its programs (#108)
+#### Security
+- **`ofs-sim --replay` and `ofs.repro.replay_bundle` do not run the programs a bundle's quad file names** (`fc.launch`,
+  `fc.cleanup`): a repro bundle is whatever someone attached to an issue. A Betaflight bundle replays with
+  `OFS_SITL_LAUNCH` set to your own SITL, and is refused without it; `--trust-bundle` (Python `trust_bundle=True`) runs
+  the bundle's own programs. A bundle that asks for more than a simulated day of ticks is refused instead of spinning.
+
 ### M9c: macOS (#68)
 #### Added
 - **macOS survey and support (best effort).** Betaflight SITL builds and runs on macOS with `third_party/betaflight/ofs-sitl-macos.patch`
@@ -25,6 +32,17 @@ repository). The format follows Keep a Changelog.
   test that needs a second loopback address and one that needs a held port to stop SITL are skipped on macOS (the second
   returns early, so it shows as passed); `[dev]` leaves out `rerun-sdk` on Intel Macs, which it has no wheel for.
 - The cleanup of a SITL launched without a slot is a `ps`-based script on macOS, where `pkill -x betaflight_SITL` finds nothing.
+
+### Audit follow-ups (2026-10-22, `docs/superpowers/plans/2026-10-22-audit-smaller-fixes.md`)
+#### Fixed
+- **Two simulators sharing a data folder can no longer collide on a log name**: an MCAP recording, an inputs CSV or a
+  repro folder whose number another process took first is created under the next number.
+- **`ofs.launch()` no longer picks a port and hopes**: the server binds first (`--listen 127.0.0.1:0`) and reports its
+  port through the new `--port-file FILE` option, so a launch cannot end up on another process's server.
+- SITL output is read in lines of at most 64 KiB, so a child that prints without newlines cannot grow memory.
+#### Added
+- A test that the committed Python stubs match `proto/ofs/v1/sim.proto`; Dependabot for the workflows' actions, and the
+  publish job's actions pinned to commit SHAs.
 
 ### B5: the small-tails sweep
 #### Fixed

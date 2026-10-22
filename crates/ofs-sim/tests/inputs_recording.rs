@@ -210,7 +210,7 @@ fn recordings_start_once_stop_once_and_refuse_an_existing_file() {
     assert_eq!(v.start_inputs_recording(&dir.path().join("other.csv")).unwrap_err(), RecordError::AlreadyRecording);
     v.stop_inputs_recording().unwrap();
     assert!(!v.is_recording_inputs());
-    assert!(matches!(v.start_inputs_recording(&path), Err(RecordError::Io(_))), "it never truncates an earlier file");
+    assert!(matches!(v.start_inputs_recording(&path), Err(RecordError::Taken(_))), "it never truncates an earlier file");
     assert!(v.take_inputs_recording_failure().is_none());
 }
 

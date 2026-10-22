@@ -14,6 +14,10 @@ struct Args {
     /// defaults to a temporary directory it removes afterwards).
     #[arg(long)]
     data_dir: Option<PathBuf>,
+    /// Write the port the server bound to this file once it listens (atomically, so a reader sees all of it or
+    /// nothing). With `--listen 127.0.0.1:0` the OS picks the port: a launcher cannot lose a race for it.
+    #[arg(long, value_name = "FILE")]
+    port_file: Option<PathBuf>,
     /// Allow listening on a non-loopback address. Any client that can connect can make this machine run programs.
     #[arg(long)]
     allow_remote: bool,
@@ -21,13 +25,17 @@ struct Args {
     /// `key=value` lines and exit: 0 reproduced, 1 not reproduced, 2 the bundle could not be run.
     #[arg(long, value_name = "BUNDLE")]
     replay: Option<PathBuf>,
+    /// With `--replay`: also run the programs the bundle's quad file names (`fc.launch`, `fc.cleanup`). Without it a
+    /// Betaflight bundle replays only with `OFS_SITL_LAUNCH` set, so a bundle from someone else cannot run its own program.
+    #[arg(long, requires = "replay")]
+    trust_bundle: bool,
 }
 
 /// `--replay`: the exit code.
-fn replay(bundle: &std::path::Path, data_dir: Option<PathBuf>) -> i32 {
+fn replay(bundle: &std::path::Path, data_dir: Option<PathBuf>, trust_bundle: bool) -> i32 {
     let scratch = data_dir.is_none();
     let data_dir = data_dir.unwrap_or_else(|| std::env::temp_dir().join(format!("ofs-replay-{}", std::process::id())));
-    let outcome = ofs_sim::repro::replay(bundle, &data_dir);
+    let outcome = ofs_sim::repro::replay_trusting(bundle, &data_dir, trust_bundle);
     if scratch {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
@@ -78,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let args = Args::parse();
     if let Some(bundle) = &args.replay {
-        std::process::exit(replay(bundle, args.data_dir.clone()));
+        std::process::exit(replay(bundle, args.data_dir.clone(), args.trust_bundle));
     }
     if let Err(message) = ofs_sim::listen::check_listen(args.listen, args.allow_remote) {
         eprintln!("ofs-sim: {message}");
@@ -87,11 +95,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.listen.ip().is_loopback() {
         eprintln!("ofs-sim: warning: listening on {} (--allow-remote): every client that can connect can run programs here", args.listen);
     }
-    eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), args.listen);
+    let listener = tokio::net::TcpListener::bind(args.listen).await?;
+    let bound = listener.local_addr()?;
+    eprintln!("ofs-sim {} listening on {}", env!("CARGO_PKG_VERSION"), bound);
+    if let Some(file) = &args.port_file {
+        let partial = PathBuf::from(format!("{}.partial", file.display()));
+        std::fs::write(&partial, bound.port().to_string())?;
+        let _ = std::fs::remove_file(file); // Windows refuses to rename over a file
+        std::fs::rename(&partial, file)?;
+    }
     let service = SimService::new(args.data_dir.unwrap_or_else(|| PathBuf::from(".ofs-data")));
     let (signalled, on_signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_shutdown(
-        args.listen,
+    let server = tonic::transport::Server::builder().add_service(sim_server(service.clone())).serve_with_incoming_shutdown(
+        tokio_stream::wrappers::TcpListenerStream::new(listener),
         async move {
             shutdown_signal().await;
             eprintln!("ofs-sim: shutting down");

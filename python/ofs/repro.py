@@ -43,14 +43,18 @@ def find_bundles(logs_dir) -> list[pathlib.Path]:
     return sorted(whole, key=order)
 
 
-def replay_bundle(path, binary: str | None = None) -> ReplayResult:
+def replay_bundle(path, binary: str | None = None, trust_bundle: bool = False) -> ReplayResult:
     """Runs a repro bundle again (`ofs-sim --replay`) and says whether the failure came back.
 
-    Raises `ConfigError` when the folder cannot be run (missing files, an unknown format)."""
+    A bundle's quad file names the program that starts Betaflight, and a bundle comes from whoever sent it: it is not
+    run. A Betaflight bundle replays with `OFS_SITL_LAUNCH` set to your own `betaflight_SITL`; `trust_bundle=True` runs
+    the bundle's own program, for a bundle you trust.
+
+    Raises `ConfigError` when the folder cannot be run (missing files, an unknown format, a Betaflight bundle with
+    neither `OFS_SITL_LAUNCH` nor `trust_bundle`)."""
+    command = [find_binary(binary), "--replay", str(path)] + (["--trust-bundle"] if trust_bundle else [])
     # ofs-sim writes UTF-8; the default text mode would read it with the locale codepage on Windows.
-    done = subprocess.run(
-        [find_binary(binary), "--replay", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if done.returncode == 2:
         raise ConfigError(done.stderr.strip() or f"{path} cannot be replayed")
     if done.returncode not in (0, 1):

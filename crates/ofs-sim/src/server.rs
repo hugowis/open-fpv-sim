@@ -22,7 +22,7 @@ use crate::runner;
 use crate::session::{event, panic_message, world_msg, RunMode, Session, Shared, Slot};
 use crate::streams;
 use crate::vehicle::{self, BuildOptions, Fault, Sticks};
-use ofs_log::recorder::{next_log_path, next_numbered_path};
+use ofs_log::recorder::create_numbered;
 use ofs_log::{RecordError, SignalRate};
 
 pub use ofs_proto::PROTOCOL_VERSION;
@@ -76,7 +76,7 @@ fn record_error(e: RecordError) -> Status {
     match e {
         RecordError::AlreadyRecording | RecordError::NotRecording => invalid_state(&e.to_string()),
         RecordError::Spec(m) => error("invalid_argument", Code::InvalidArgument, m),
-        RecordError::Io(_) => error("internal", Code::Internal, e.to_string()),
+        RecordError::Io(_) | RecordError::Taken(_) => error("internal", Code::Internal, e.to_string()),
     }
 }
 
@@ -85,7 +85,7 @@ fn inputs_record_error(e: RecordError) -> Status {
         RecordError::AlreadyRecording => invalid_state("an inputs recording is already running; stop it first"),
         RecordError::NotRecording => invalid_state("no inputs recording is running"),
         RecordError::Spec(m) => error("invalid_argument", Code::InvalidArgument, m),
-        RecordError::Io(_) => error("internal", Code::Internal, e.to_string()),
+        RecordError::Io(_) | RecordError::Taken(_) => error("internal", Code::Internal, e.to_string()),
     }
 }
 
@@ -109,6 +109,24 @@ pub(crate) fn parse_sticks(s: pb::Sticks) -> Result<Sticks, Status> {
         return Err(error("invalid_argument", Code::InvalidArgument, "stick values must be finite"));
     }
     Ok(sticks)
+}
+
+/// The run mode and overrun policy a `Load` asks for (the unspecified values are lockstep and warn).
+fn load_mode_and_policy(req: &pb::LoadRequest) -> Result<(RunMode, OverrunPolicy), Status> {
+    let mode = match pb::Mode::try_from(req.mode) {
+        Ok(pb::Mode::Unspecified | pb::Mode::Lockstep) => RunMode::Lockstep,
+        Ok(pb::Mode::Realtime) => RunMode::Realtime,
+        Err(_) => return Err(error("invalid_argument", Code::InvalidArgument, format!("unknown mode {}", req.mode))),
+    };
+    let policy = match pb::OverrunPolicy::try_from(req.overrun_policy) {
+        Ok(pb::OverrunPolicy::Unspecified | pb::OverrunPolicy::Warn) => OverrunPolicy::Warn,
+        Ok(pb::OverrunPolicy::Slow) => OverrunPolicy::Slow,
+        Err(_) => {
+            let message = format!("unknown overrun policy {}", req.overrun_policy);
+            return Err(error("invalid_argument", Code::InvalidArgument, message));
+        }
+    };
+    Ok((mode, policy))
 }
 
 /// Ends the loaded session, if any. A running recording (MCAP or inputs) is stopped first, so its file is complete and the
@@ -258,19 +276,7 @@ impl Sim for SimService {
 
     async fn load(&self, req: Request<pb::LoadRequest>) -> Result<Response<pb::LoadReply>, Status> {
         let req = req.into_inner();
-        let mode = match pb::Mode::try_from(req.mode) {
-            Ok(pb::Mode::Unspecified | pb::Mode::Lockstep) => RunMode::Lockstep,
-            Ok(pb::Mode::Realtime) => RunMode::Realtime,
-            Err(_) => return Err(error("invalid_argument", Code::InvalidArgument, format!("unknown mode {}", req.mode))),
-        };
-        let policy = match pb::OverrunPolicy::try_from(req.overrun_policy) {
-            Ok(pb::OverrunPolicy::Unspecified | pb::OverrunPolicy::Warn) => OverrunPolicy::Warn,
-            Ok(pb::OverrunPolicy::Slow) => OverrunPolicy::Slow,
-            Err(_) => {
-                let message = format!("unknown overrun policy {}", req.overrun_policy);
-                return Err(error("invalid_argument", Code::InvalidArgument, message));
-            }
-        };
+        let (mode, policy) = load_mode_and_policy(&req)?;
         let cfg = ofs_config::load(Path::new(&req.quad_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?;
         let world = if req.world_path.is_empty() {
             WorldConfig::open_field()
@@ -547,8 +553,8 @@ impl Sim for SimService {
             if s.vehicle.is_recording() {
                 return Err(record_error(RecordError::AlreadyRecording));
             }
-            let path = next_log_path(&logs, &s.quad_stem).map_err(|e| record_error(RecordError::Io(format!("{}: {e}", logs.display()))))?;
-            let signals = s.vehicle.start_recording(&requests, &path).map_err(record_error)?;
+            let (path, signals) =
+                create_numbered(&logs, &s.quad_stem, "mcap", |p| s.vehicle.start_recording(&requests, p)).map_err(record_error)?;
             let path = path.display().to_string();
             shared.publish([event(s.vehicle.time_s(), pb::EventKind::RecordingStarted, path.clone())]);
             Ok(pb::RecordingStarted { path, signals })
@@ -616,9 +622,8 @@ impl Sim for SimService {
                 return Err(invalid_state(&format!("{playing} is playing scripted inputs: there are no live sticks to record")));
             }
             let stem = format!("{}-inputs", s.quad_stem);
-            let path = next_numbered_path(&logs, &stem, "csv")
-                .map_err(|e| inputs_record_error(RecordError::Io(format!("{}: {e}", logs.display()))))?;
-            s.vehicle.start_inputs_recording(&path).map_err(inputs_record_error)?;
+            let (path, ()) =
+                create_numbered(&logs, &stem, "csv", |p| s.vehicle.start_inputs_recording(p)).map_err(inputs_record_error)?;
             let path = path.display().to_string();
             shared.publish([event(s.vehicle.time_s(), pb::EventKind::InputsRecordingStarted, path.clone())]);
             Ok(pb::InputsRecordingStarted { path })

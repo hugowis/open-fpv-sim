@@ -278,9 +278,54 @@ pub fn resolve(launch: &[String], send_override: Option<Ipv4Addr>, reply_overrid
     Ok(net)
 }
 
+/// Space-separated argv from an environment variable, if set and non-empty.
+pub fn env_argv(var: &str) -> Option<Vec<String>> {
+    std::env::var(var).ok().filter(|s| !s.trim().is_empty()).map(|s| split_argv(&s))
+}
+
+/// Splits a command line on whitespace; `"..."` or `'...'` keeps a path with spaces in one argument. Backslashes are
+/// ordinary characters (Windows paths).
+fn split_argv(line: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current: Option<String> = None;
+    let mut quote = None;
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.get_or_insert_with(String::new).push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                current.get_or_insert_with(String::new);
+            }
+            None if c.is_whitespace() => args.extend(current.take()),
+            None => current.get_or_insert_with(String::new).push(c),
+        }
+    }
+    args.extend(current);
+    args
+}
+
+/// IPv4 address from an environment variable, if set and non-empty; the error says which variable is wrong.
+pub fn env_ip(var: &str) -> Result<Option<Ipv4Addr>, String> {
+    match std::env::var(var) {
+        Ok(v) if !v.trim().is_empty() => {
+            v.trim().parse().map(Some).map_err(|_| format!("{var}={v} is not an IPv4 address"))
+        }
+        _ => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_argv_from_the_environment_keeps_quoted_paths_whole() {
+        let argv = split_argv(r#"wsl.exe -d Ubuntu -e "/home/me/my builds/betaflight_SITL.elf" --x 'a b'"#);
+        assert_eq!(argv, ["wsl.exe", "-d", "Ubuntu", "-e", "/home/me/my builds/betaflight_SITL.elf", "--x", "a b"]);
+        assert_eq!(split_argv("  plain   words "), ["plain", "words"]);
+        assert_eq!(split_argv(r#"C:\tools\sitl.exe "#), [r"C:\tools\sitl.exe"], "backslashes are kept (Windows paths)");
+    }
 
     fn sleeper() -> Vec<String> {
         if cfg!(windows) {

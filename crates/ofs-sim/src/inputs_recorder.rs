@@ -99,8 +99,7 @@ impl InputsRecorder {
     /// Creates `path` (never truncating an existing file), writes the header and the first row: the state as it
     /// stands at `tick`.
     pub fn start(path: &Path, base_hz: u32, tick: u64, state: &InputsState) -> Result<Self, RecordError> {
-        let io = |e: std::io::Error| RecordError::Io(format!("{}: {e}", path.display()));
-        let file = OpenOptions::new().write(true).create_new(true).open(path).map_err(io)?;
+        let file = OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| RecordError::from_create(path, &e))?;
         Self::with_writer(BufWriter::new(Box::new(file)), path, base_hz, tick, state)
     }
 

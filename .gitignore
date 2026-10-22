@@ -10,3 +10,6 @@ __pycache__/
 /.worktrees/
 /python/build/
 /dist/
+/graphify-out/
+/.zcodeignore
+/sticks-sites.txt
