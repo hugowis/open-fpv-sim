@@ -14,7 +14,7 @@ jobs:
   core:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -36,7 +36,7 @@ jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
       # ofs-godot alone needs a newer Rust (godot-rust 0.5.5); the stable jobs cover it.
@@ -45,7 +45,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -70,7 +70,7 @@ jobs:
       BF_DIR: ${{ github.workspace }}/../betaflight
       OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -79,7 +79,7 @@ jobs:
           cache: pip
           cache-dependency-path: python/pyproject.toml
       - id: sitl-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
           key: sitl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sitl.sh', 'third_party/betaflight/**') }}
@@ -94,7 +94,7 @@ jobs:
       - run: python -m pip install -e "python[dev]"
       # OFS_SITL_LAUNCH is set, so the Betaflight tests run too.
       - run: python -m pytest python/tests -v
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/godot-dl
           key: godot-${{ runner.os }}-${{ hashFiles('scripts/run-godot-tests.sh') }}
@@ -103,10 +103,10 @@ jobs:
   godot:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/godot-dl
           key: godot-${{ runner.os }}-${{ hashFiles('scripts/run-godot-tests.sh') }}
@@ -120,7 +120,7 @@ jobs:
       BF_DIR: ${{ github.workspace }}/../betaflight
       OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -130,7 +130,7 @@ jobs:
           cache-dependency-path: python/pyproject.toml
       # The SITL binary only changes with the build script or the patch: reuse it instead of rebuilding Betaflight.
       - id: sitl-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
           key: sitl-${{ runner.os }}-${{ hashFiles('scripts/build-sitl.sh', 'third_party/betaflight/**') }}
@@ -158,7 +158,7 @@ jobs:
       - run: python scripts/benchmark.py --binary target/release/ofs-sim --summary --floor 1 --repeat 2 --baseline scripts/benchmark-baseline.json --runner ci-linux
         env:
           OFS_BENCH_ACCEPT_SLOWER: ${{ vars.OFS_BENCH_ACCEPT_SLOWER }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/godot-dl
           key: godot-${{ runner.os }}-${{ hashFiles('scripts/run-godot-tests.sh') }}
@@ -180,7 +180,7 @@ jobs:
     # The actions here are pinned to commit SHAs: this job can publish to PyPI, so a moved tag must not change what
     # runs in it. Dependabot (.github/dependabot.yml) proposes the updates.
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
