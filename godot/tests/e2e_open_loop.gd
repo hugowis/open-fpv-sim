@@ -125,10 +125,17 @@ func _run() -> void:
 		var lines := text.split("\n", false)
 		_check(lines.size() >= 3, "the first row, the stick move and the cut: %s" % text)
 		var cut_row := ""
+		var previous := ""
 		for line in lines.slice(1):
 			var cells := line.split(",")
 			if cells.size() == 11 and cells[10] == "1":
 				cut_row = line
+				var previous_cells := previous.split(",")
+				_check(previous_cells.size() == 11, "a data row precedes the cut: %s" % text)
+				_check(cells.slice(1, 9) == previous_cells.slice(1, 9), "the cut changes only link_loss: %s" % text)
+				_check(cells[9] == "1", "the K cut leaves the transmitter on: %s" % line)
+				break
+			previous = line
 		_check(cut_row != "", "the K cut is a link_loss=1 row: %s" % text)
 	_press(app, KEY_K)
 	_check(not app.radio_cut, "K restores the link after the recording")

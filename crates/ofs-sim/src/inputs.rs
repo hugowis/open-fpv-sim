@@ -245,6 +245,13 @@ mod tests {
     }
 
     #[test]
+    fn every_column_round_trips_together() {
+        let text = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4,tx,link_loss\n0,0.1,-0.2,0.3,0.4,1,-1,0.5,-0.5,0,1\n1,-1,1,-1,0.9,0.5,-0.5,0,0,1,0\n";
+        let inputs = parse("mixed.csv", text).unwrap();
+        assert_eq!(inputs.to_csv(), text);
+    }
+
+    #[test]
     fn the_old_nine_column_file_still_parses_to_stick_columns() {
         let text = "t_s,roll,pitch,yaw,throttle,aux1,aux2,aux3,aux4\n0,0,0,0,0.5,-1,-1,-1,-1\n1,0.25,0,0,0.6,1,1,-1,-1\n";
         let inputs = parse("old.csv", text).unwrap();
