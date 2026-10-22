@@ -5,6 +5,13 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Replaying a bundle no longer runs its programs (#108)
+#### Security
+- **`ofs-sim --replay` and `ofs.repro.replay_bundle` do not run the programs a bundle's quad file names** (`fc.launch`,
+  `fc.cleanup`): a repro bundle is whatever someone attached to an issue. A Betaflight bundle replays with
+  `OFS_SITL_LAUNCH` set to your own SITL, and is refused without it; `--trust-bundle` (Python `trust_bundle=True`) runs
+  the bundle's own programs. A bundle that asks for more than a simulated day of ticks is refused instead of spinning.
+
 ### M9c: macOS (#68)
 #### Added
 - **macOS survey and support (best effort).** Betaflight SITL builds and runs on macOS with `third_party/betaflight/ofs-sitl-macos.patch`
