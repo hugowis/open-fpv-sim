@@ -3,7 +3,30 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
-## Unreleased
+## 0.3.0 — 2026-10-22
+
+**Upgrade:** protocol 13 (rebuild/reinstall the client and server together); `OFS_LIBRARY` may now be a list; the
+inputs CSV gains optional `tx`/`link_loss` columns; `radio.telemetry_slot_divisor` defaults to 4; a new
+`DownlinkLoss` fault; the F2 DVR toggle.
+
+The release also carries the work that landed while it was open — parallel SITL sessions (M9a), the experimental
+native Windows SITL (M9b), macOS support (M9c), the stabilized-session and hardening sweeps (B2 to B5), and the
+audit follow-ups — the detail by item follows.
+
+### The component library is a search path (#44)
+#### Changed
+- **`OFS_LIBRARY` may list several roots**, `;`-separated on Windows and `:`-separated elsewhere (empty entries are
+  dropped; a blank value means the default, the library beside the quads). Each part id resolves against the first
+  root that has it, and a part no root has is refused naming every root searched. A repro bundle merges the roots
+  the session read at `Load` into its `library/` first-match-wins (a root that has gone missing is skipped), and a
+  replay builds the bundle's own library — the replayer's `OFS_LIBRARY` never reaches it.
+
+### A configurable telemetry slot ratio (#22)
+#### Added
+- **`[radio] telemetry_slot_divisor`** (both link kinds, default 4): one downlink packet in that many carries a
+  telemetry frame when heard. It accepts 1, 2, 4, 8, 16, 32, 64 or 128 — there is no off value — and one value
+  covers every band and packet rate. It changes the telemetry cadence only: packet loss, uplink delivery and
+  downlink LQ are the link model's own. The default 4 keeps 0.2.0 recordings and the radio goldens byte-identical.
 
 ### Downlink telemetry loss
 #### Added
@@ -11,6 +34,28 @@ repository). The format follows Keep a Changelog.
   and failsafe untouched. Protocol 13 adds `Fault.downlink_loss` (oneof field 10, `at_s` stays 9) and
   `ofs.faults.DownlinkLoss`; default MCAP recordings leave the new control signal out, so a 0.2.0 no-fault
   recording stays byte-identical.
+
+### Link state in the recorded sticks (#56)
+#### Changed
+- **The inputs CSV gains optional `tx` and `link_loss` columns** (0/1; with `t_s` and the eight sticks, eleven
+  columns in all). A recording writes a row whenever a stick, the transmitter or the link changes — a **K** cut with
+  the sticks still is recorded — and `play_inputs` applies both through the same setters a live session uses, so the
+  recorded flight round-trips its bus at each tick. A 0.2.0 stick-only file still plays unchanged; a file with the
+  new columns is refused by a 0.2.0 server (an unknown column is a header error).
+
+### A DVR toggle in the game (#38)
+#### Added
+- **The F2 controls screen has a DVR checkbox**, one start/stop path with the **D** key: either one moves the other,
+  an automatic stop (a picture-size change, such as a resize) unchecks the box, and the HUD shows `REC` while a
+  recording runs.
+
+### Reading a recording while it is written (#48)
+#### Added
+- The answer, probed and written down (`docs/research/mcap-determinism.md`): a recording's summary section, footer
+  and tail magic are written only by `stop()`, so `ofs.reader` refuses the live file ("unfinished recording") and no
+  indexed reader can build its view until then — a streaming reader sees only the flushed chunks. Call
+  `recording.stop()` (or `sim.log`, which stops and returns it) first. Foxglove itself was not installed on the
+  evidence machine, so its behaviour on a live file is unchecked — #117.
 
 ### Replaying a bundle no longer runs its programs (#108)
 #### Security

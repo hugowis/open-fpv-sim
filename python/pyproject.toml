@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-fpv-sim"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python client for Open FPV Sim: an FPV drone simulator that runs real Betaflight"
 readme = "README.md"
 license = "GPL-3.0-or-later"
