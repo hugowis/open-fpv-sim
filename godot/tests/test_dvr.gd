@@ -4,14 +4,19 @@ extends "res://tests/testing.gd"
 ## the encode path itself is checked by eye and by shots.gd; test_dvr.gd drives the bytes and the timing).
 
 const Dvr = preload("res://ui/dvr.gd")
+const App = preload("res://scripts/app.gd")
+const Menu = preload("res://ui/controls_menu.gd")
+const Hud = preload("res://ui/hud.gd")
 const QUAD := "res://../quads/opendrone-5f-freestyle.toml"
 
 
 ## A stand-in for OfsClient: records what the DVR feeds it.
 class MockClient:
 	var frames: Array = []
+	var starts := 0
 
 	func dvr_start(_path: String, _width: int, _height: int) -> String:
+		starts += 1
 		return ""
 
 	func dvr_write_frame(jpeg: PackedByteArray) -> void:
@@ -19,6 +24,42 @@ class MockClient:
 
 	func dvr_stop() -> Dictionary:
 		return {"frames": frames.size(), "dropped_frames": 0, "bytes": 0}
+
+
+class MockOsd extends CanvasLayer:
+	func set_frame(_frame: Dictionary) -> void:
+		pass
+
+
+## The app's DVR coordination, without its `_ready` (which would start a session): the real menu, HUD and DVR, and
+## a stand-in client. The menu signal is wired as `_ready` does it.
+func _app_shell(client = MockClient.new()) -> Dictionary:
+	var app := App.new()
+	var dvr := Dvr.new()
+	var menu := Menu.new()
+	var hud := Hud.new()
+	var viewport := SubViewport.new()
+	var box := Control.new()
+	var texture := TextureRect.new()
+	var osd := MockOsd.new()
+	await add_to_tree(dvr)
+	await add_to_tree(menu)
+	await add_to_tree(hud)
+	app.add_child(viewport)
+	app.add_child(box)
+	app.add_child(texture)
+	app.add_child(osd)
+	app.dvr = dvr
+	app.controls_menu = menu
+	app.hud = hud
+	app.fpv_viewport = viewport
+	app.fpv_box = box
+	app.fpv_texture = texture
+	app.osd = osd
+	app.settings = {"fpv_aspect": "4:3"}
+	app.client = client
+	menu.dvr_toggled.connect(app._set_dvr)
+	return {"app": app, "dvr": dvr, "menu": menu, "hud": hud, "viewport": viewport, "box": box, "client": client}
 
 
 func _client() -> Object:
@@ -97,6 +138,94 @@ func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	eq(dvr._last_target, 5, "the dedup key is the integer field the client renders for")
 	eq(dvr.stop()["frames"], 2, "the stand-in reports what was fed")
 	dvr.queue_free()
+
+
+func test_the_menu_d_and_a_resize_keep_the_dvr_views_in_sync() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var dvr = s["dvr"]
+	var menu = s["menu"]
+	var hud = s["hud"]
+	var client = s["client"]
+	menu._dvr.button_pressed = true
+	ok(dvr.recording, "the menu toggle starts the DVR")
+	ok(menu.dvr_on(), "and leaves the menu checked")
+	ok(hud._rec.visible, "and shows REC")
+	eq(client.starts, 1, "one start")
+	app._set_dvr(true)
+	eq(client.starts, 1, "starting again does not restart")
+	menu.toggle()
+	ok(menu.is_open(), "F2 opens")
+	menu.toggle()
+	ok(not menu.is_open(), "F2 closes without touching the DVR")
+	ok(dvr.recording, "which keeps recording")
+	app._toggle_dvr()
+	ok(not dvr.recording, "D stops it")
+	ok(not menu.dvr_on(), "D unchecks the menu")
+	ok(not hud._rec.visible, "and hides REC")
+	app._toggle_dvr()
+	ok(dvr.recording, "D starts it again")
+	ok(menu.dvr_on() and hud._rec.visible, "and both views follow")
+	s["box"].size = Vector2(960, 720)
+	s["viewport"].size = Vector2i(1, 1)
+	app._layout_fpv()
+	ok(not dvr.recording, "a picture size change stops the DVR")
+	ok(not menu.dvr_on(), "the menu unchecks")
+	ok(not hud._rec.visible, "REC hides")
+	ok("picture size changed" in " ".join(hud.toast_texts()), "with its own toast: %s" % str(hud.toast_texts()))
+	eq(s["viewport"].size, Vector2i(960, 720), "and the viewport takes the new size")
+	app.free()
+	menu.queue_free()
+	hud.queue_free()
+	dvr.queue_free()
+
+
+func test_a_reload_stops_the_dvr_and_syncs_the_views() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var menu = s["menu"]
+	var hud = s["hud"]
+	menu._dvr.button_pressed = true
+	ok(s["dvr"].recording, "recording before the reload")
+	app._on_phase_changed("loading", "", "")
+	ok(not s["dvr"].recording, "the reload stops the DVR")
+	ok(not menu.dvr_on(), "the menu unchecks")
+	ok(not hud._rec.visible, "REC hides")
+	app.free()
+	menu.queue_free()
+	hud.queue_free()
+	s["dvr"].queue_free()
+
+
+func test_a_failed_dvr_start_leaves_the_menu_and_hud_off() -> void:
+	var s := await _app_shell(null)
+	var app = s["app"]
+	var menu = s["menu"]
+	var hud = s["hud"]
+	menu._dvr.button_pressed = true
+	ok(not app.dvr.recording, "no client: no recording")
+	ok(not menu.dvr_on(), "the checkbox goes back off")
+	ok(not hud._rec.visible, "REC stays hidden")
+	ok("DVR failed" in " ".join(hud.toast_texts()), "the failure is toasted: %s" % str(hud.toast_texts()))
+	app.free()
+	menu.queue_free()
+	hud.queue_free()
+	s["dvr"].queue_free()
+
+
+func test_the_chase_view_refuses_a_dvr_start_and_clears_the_toggle() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	app.chase_view = true
+	s["menu"]._dvr.button_pressed = true
+	ok(not app.dvr.recording, "the chase view does not record")
+	ok(not s["menu"].dvr_on(), "the checkbox goes back off")
+	ok(not s["hud"]._rec.visible, "REC stays hidden")
+	ok("switch with C first" in " ".join(s["hud"].toast_texts()), "with the chase-view toast")
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
 
 
 func _synthetic_image() -> Image:

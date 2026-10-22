@@ -57,6 +57,7 @@ func _ready() -> void:
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
 	controls_menu.set_aspect(settings["fpv_aspect"])
 	controls_menu.aspect_changed.connect(_on_aspect_changed)
+	controls_menu.dvr_toggled.connect(_set_dvr)
 	fpv_texture.texture = fpv_viewport.get_texture()
 	get_viewport().size_changed.connect(_layout_fpv)
 	_layout_fpv()
@@ -109,6 +110,7 @@ func _layout_fpv() -> void:
 	var internal: Vector2i = layout["internal"]
 	if dvr != null and dvr.recording and fpv_viewport.size != internal:
 		var summary: Dictionary = dvr.stop()
+		_sync_dvr()
 		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
 	fpv_texture.position = (layout["box"] as Rect2).position
 	fpv_texture.size = (layout["box"] as Rect2).size
@@ -204,20 +206,43 @@ func set_chase_view(chase: bool) -> void:
 
 
 func _toggle_dvr() -> void:
-	if chase_view:
-		hud.add_toast("DVR records the FPV view - switch with C first", "warn")
+	_set_dvr(not dvr.recording)
+
+
+## The one start/stop path: the D key and the F2 toggle both land here. It changes the recording only when needed,
+## then makes the menu checkbox and the HUD marker show the state that actually happened (a refused or failed
+## start leaves both off).
+func _set_dvr(on: bool) -> void:
+	if on == dvr.recording:
+		_sync_dvr()
 		return
-	if dvr.recording:
+	if on:
+		if chase_view:
+			hud.add_toast("DVR records the FPV view - switch with C first", "warn")
+			_sync_dvr()
+			return
+		if client == null:
+			hud.add_toast("DVR failed: the simulator is not connected", "error")
+			_sync_dvr()
+			return
+		var error: String = dvr.start(client, fpv_viewport)
+		if error != "":
+			hud.add_toast("DVR failed: %s" % error, "error")
+			_sync_dvr()
+			return
+		hud.add_toast("DVR: recording to user://recordings")
+	else:
 		var summary: Dictionary = dvr.stop()
 		if summary.is_empty():
 			hud.add_toast("DVR failed: the writer stopped abnormally", "error")
 		else:
 			hud.add_toast("DVR: %d frames saved%s" % [summary.get("frames", 0), _dvr_drop_note(summary)])
-	else:
-		var error: String = dvr.start(client, fpv_viewport)
-		hud.add_toast("DVR: recording to user://recordings" if error == "" else "DVR failed: %s" % error, "info" if error == "" else "error")
-		if error != "":
-			return
+	_sync_dvr()
+
+
+func _sync_dvr() -> void:
+	controls_menu.set_dvr(dvr.recording)
+	hud.set_dvr_recording(dvr.recording)
 
 
 func _dvr_drop_note(summary: Dictionary) -> String:
@@ -256,6 +281,9 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	phase_kind = kind
 	if phase in ["loading", "failed", "stopped"]:
 		inputs_recording = false  # a reloaded quad, or a lost session, has no recorder
+		if dvr != null and dvr.recording:
+			dvr.stop()  # a reloaded quad, or a lost session, has no picture to record
+			_sync_dvr()
 	if phase == "loading":
 		radio_cut = false  # a reloaded quad has no faults
 		_link_was_lost = false

@@ -72,6 +72,21 @@ func test_the_status_line_shows_when_the_sticks_are_being_recorded() -> void:
 	hud.queue_free()
 
 
+func test_the_dvr_indicator_is_a_separate_rec_label() -> void:
+	var hud := await _hud()
+	eq(hud._rec.text, "REC", "the label")
+	ok(not hud._rec.visible, "hidden at first")
+	hud.set_dvr_recording(true)
+	ok(hud._rec.visible, "shown while recording")
+	hud.set_hud_visible(false)
+	ok(not hud._rec.visible, "hidden with the HUD")
+	hud.set_hud_visible(true)
+	ok(hud._rec.visible, "shown again with the HUD while recording")
+	hud.set_dvr_recording(false)
+	ok(not hud._rec.visible, "hidden when recording stops")
+	hud.queue_free()
+
+
 func test_the_lap_line_shows_the_race() -> void:
 	var hud := await _hud()
 	hud.update_view(_view())
