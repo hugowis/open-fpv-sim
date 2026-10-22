@@ -14,7 +14,7 @@ jobs:
   core:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -36,7 +36,7 @@ jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
       # ofs-godot alone needs a newer Rust (godot-rust 0.5.5); the stable jobs cover it.
@@ -45,7 +45,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -70,7 +70,7 @@ jobs:
       BF_DIR: ${{ github.workspace }}/../betaflight
       OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -103,7 +103,7 @@ jobs:
   godot:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
@@ -120,7 +120,7 @@ jobs:
       BF_DIR: ${{ github.workspace }}/../betaflight
       OFS_SITL_LAUNCH: ${{ github.workspace }}/../betaflight/obj/main/betaflight_SITL.elf
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v6
@@ -180,7 +180,7 @@ jobs:
     # The actions here are pinned to commit SHAs: this job can publish to PyPI, so a moved tag must not change what
     # runs in it. Dependabot (.github/dependabot.yml) proposes the updates.
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
