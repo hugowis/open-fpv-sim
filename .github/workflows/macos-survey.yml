@@ -80,11 +80,11 @@ jobs:
           cp crates/ofs-sim/tests/golden/radio-flight.macos-*.digests survey/goldens/
       - name: Upload this runner's radio goldens
         if: always() && inputs.write_goldens
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: radio-goldens-${{ matrix.os }}
           path: survey/goldens/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: survey-${{ matrix.os }}
