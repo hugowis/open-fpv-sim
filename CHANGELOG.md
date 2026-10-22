@@ -181,6 +181,12 @@ audit follow-ups — the detail by item follows.
 - **Rebuild SITL** with `scripts/build-sitl.sh`: the simulator always passes `--port-offset`, so an older SITL binary
   stops at startup with `[SITL] Unknown argument: --port-offset`.
 
+### A dropped Python `Sim` stops its server (#109)
+#### Fixed
+- **A `Sim` from `ofs.launch()` that was loaded and then dropped without `close()` is collected, and its server and
+  Betaflight stop with it.** The thread reading the event stream held the `Sim`, so it lived (and its server ran, and held
+  a SITL slot) until the script exited; a loop that launched a server per round ran out of slots after 16.
+
 ## 0.2.0 — 2026-10-17 (phases 2 and 3)
 Milestones M5 to M8c. Phase 2 made the models more accurate and the simulator verifiable; phase 3 hardened it, added
 race timing and made flights scriptable.

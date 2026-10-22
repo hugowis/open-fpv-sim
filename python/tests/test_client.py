@@ -72,30 +72,36 @@ def test_close_unloads_before_stopping_a_launched_server(sim_bin, tmp_path):
 
 
 def test_a_launched_server_stops_when_its_sim_is_dropped_without_close(sim_bin, tmp_path):
-    """A script that never calls close() (spec 6.2's) must not orphan its server: the Sim's finalizer stops it,
-    at collection or at exit. Here the Sim only lives inside main() and the cyclic GC collects it."""
+    """A script that never calls close() (spec 6.2's) must not orphan its server: the Sim's finalizer stops it when
+    the Sim is collected. The Sim has loaded a quad, so its event stream and the thread reading it are open; the
+    script itself checks, right after the collection, that the server is gone (the exit-time finalizer would hide it)."""
     script = tmp_path / "drop.py"
     script.write_text(
-        "import gc, os, ofs\n"
+        "import gc, grpc, ofs\n"
         "def main():\n"
         f"    s = ofs.launch(binary={sim_bin!r}, data_dir={str(tmp_path)!r})\n"
+        f"    s.load({QUAD!r}, open_loop_fc=True)\n"
         "    print(s.address, s._process.pid, flush=True)\n"
-        "main()\n"
+        "    return s.address\n"
+        "address = main()\n"
         "gc.collect()\n"
+        "channel = grpc.insecure_channel(address)\n"
+        "try:\n"
+        "    grpc.channel_ready_future(channel).result(timeout=3)\n"
+        "    print('ALIVE', flush=True)\n"
+        "except grpc.FutureTimeoutError:\n"
+        "    print('STOPPED', flush=True)\n"
     )
     log = tmp_path / "drop.out"
     with open(log, "w") as out:  # a file, not a pipe: an orphaned server would hold a pipe open forever
         subprocess.run([sys.executable, str(script)], stdout=out, timeout=60, check=True)
-    address, pid = log.read_text().split()
-    channel = grpc.insecure_channel(address)
-    try:
-        with pytest.raises(grpc.FutureTimeoutError):
-            grpc.channel_ready_future(channel).result(timeout=2)  # nothing answers: the server stopped
-    except BaseException:
-        os.kill(int(pid), signal.SIGTERM)  # don't leave the orphan running
-        raise
-    finally:
-        channel.close()
+    address, pid, verdict = log.read_text().split()
+    if verdict != "STOPPED":
+        try:
+            os.kill(int(pid), signal.SIGTERM)  # don't leave the orphan running
+        except OSError:
+            pass
+    assert verdict == "STOPPED", f"the server at {address} still answered after its Sim was dropped and collected"
 
 
 def test_launch_takes_a_relative_path_with_forward_slashes(sim_bin, tmp_path, monkeypatch):

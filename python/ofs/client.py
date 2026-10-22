@@ -392,15 +392,18 @@ class Sim:
         stream = self._stub.Watch(pb.Empty())
         self._watch = stream
 
-        def pump(events=self._events):
+        # The thread must not hold the Sim (it would never be collected while the stream is open, and the launched
+        # server would outlive a dropped Sim): it gets the event queue, and a weak reference to look the Sim up.
+        def pump(events=self._events, owner=weakref.ref(self)):
             reason = "the server closed the event stream"
             try:
                 for m in stream:
                     events.append(_event(m))
             except grpc.RpcError as e:
                 reason = f"the event stream failed: {e.code().name}"
-            if self._watch is stream:  # not closed by close()
-                self._watch = None
+            sim = owner()
+            if sim is not None and sim._watch is stream:  # not closed by close()
+                sim._watch = None
                 events.append(Event(time_s=math.nan, kind="watch_ended", message=f"{reason}; events are missed until "
                                                                                    "the next load()"))
 
