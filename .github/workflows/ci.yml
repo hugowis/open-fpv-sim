@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.120
       - uses: Swatinem/rust-cache@v2
       # ofs-godot alone needs a newer Rust (godot-rust 0.5.5); the stable jobs cover it.
       - run: cargo check --workspace --all-targets --locked --exclude ofs-godot
