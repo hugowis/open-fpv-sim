@@ -5,9 +5,11 @@ repository). The format follows Keep a Changelog.
 
 ## 0.3.0 — 2026-10-22
 
-**Upgrade:** protocol 13 (rebuild/reinstall the client and server together); `OFS_LIBRARY` may now be a list; the
-inputs CSV gains optional `tx`/`link_loss` columns; `radio.telemetry_slot_divisor` defaults to 4; a new
-`DownlinkLoss` fault; the F2 DVR toggle.
+**Upgrade:** protocol 13 (rebuild/reinstall the client and server together); a protocol-12 Python client or server
+is refused at the handshake; `OFS_LIBRARY` may now be a list; the inputs CSV gains optional `tx`/`link_loss`
+columns; `radio.telemetry_slot_divisor` defaults to 4; a new `DownlinkLoss` fault (the bus digest covers the new
+`fault.radio.downlink_loss_fraction` signal, so a repro bundle recorded by 0.2.0 no longer reports
+`reproduced=true` — re-record bundles on 0.3.0); the F2 DVR toggle.
 
 The release also carries the work that landed while it was open — parallel SITL sessions (M9a), the experimental
 native Windows SITL (M9b), macOS support (M9c), the stabilized-session and hardening sweeps (B2 to B5), and the
