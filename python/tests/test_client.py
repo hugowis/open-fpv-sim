@@ -375,3 +375,21 @@ def test_a_collision_event_names_the_object(sim, tmp_path):
     assert len(collisions) == 1, collisions
     assert "BuildingA" in collisions[0].message and "m/s" in collisions[0].message, collisions[0].message
     assert s.collision_speed_mps > 3.0, "the fall onto the roof was hard"
+
+
+def test_launches_started_together_each_get_their_own_server(sim_bin, tmp_path):
+    """The server reports the port it bound (`--port-file`): no launch can end up talking to another's server."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def start(n):
+        return ofs.launch(binary=sim_bin, data_dir=str(tmp_path / f"d{n}"))
+
+    with ThreadPoolExecutor(4) as pool:
+        sims = list(pool.map(start, range(4)))
+    try:
+        assert len({s.address for s in sims}) == 4, [s.address for s in sims]
+        assert len({s._process.pid for s in sims}) == 4
+        assert all(not s.address.endswith(":0") for s in sims)
+    finally:
+        for s in sims:
+            s.close()

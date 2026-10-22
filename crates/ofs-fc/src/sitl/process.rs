@@ -11,6 +11,9 @@ use super::net;
 use super::FcError;
 
 const TAIL_LINES: usize = 200;
+/// The longest piece of SITL output read as one line: a crashing child that prints without newlines cannot grow
+/// the buffer (or the tail) without bound; the rest of such a line arrives as the next line.
+const MAX_LINE_BYTES: u64 = 64 * 1024;
 /// How long a missed reply waits for a Betaflight reboot to show itself (see [`SitlProcess::rebooted`]).
 pub const REBOOT_GRACE: Duration = Duration::from_secs(3);
 /// How long after exiting a SITL's last output lines may still be on their way through the pipes.
@@ -421,7 +424,7 @@ fn pipe_lines(stream: impl Read + Send + 'static, log: SharedLog) {
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            match reader.read_until(b'\n', &mut buf) {
+            match reader.by_ref().take(MAX_LINE_BYTES).read_until(b'\n', &mut buf) {
                 Ok(0) | Err(_) => {
                     if let Ok(mut l) = log.lock() {
                         l.streams_ended += 1;
@@ -823,5 +826,29 @@ mod tests {
             text.contains(&format!("port {port}: LISTEN by pid {}", std::process::id())),
             "{text}"
         );
+    }
+}
+
+#[cfg(test)]
+mod line_cap_tests {
+    use super::*;
+
+    /// A child that prints 200 kB without a newline must not become one 200 kB line.
+    #[test]
+    fn output_without_newlines_is_read_in_capped_pieces() {
+        let mut text = vec![b'a'; 200_000];
+        text.extend_from_slice(b"\nlast\n");
+        let log: SharedLog = Arc::new(Mutex::new(LogSink::default()));
+        pipe_lines(std::io::Cursor::new(text), log.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while log.lock().unwrap().streams_ended < 1 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let sink = log.lock().unwrap();
+        assert_eq!(sink.streams_ended, 1);
+        let lens: Vec<usize> = sink.tail.iter().map(String::len).collect();
+        assert!(lens.iter().all(|l| *l as u64 <= MAX_LINE_BYTES), "{lens:?}");
+        assert_eq!(lens.iter().sum::<usize>(), 200_000 + "last".len(), "no byte is lost but the newlines");
+        assert_eq!(sink.tail.back().map(String::as_str), Some("last"));
     }
 }

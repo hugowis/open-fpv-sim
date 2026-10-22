@@ -19,6 +19,17 @@ repository). The format follows Keep a Changelog.
   returns early, so it shows as passed); `[dev]` leaves out `rerun-sdk` on Intel Macs, which it has no wheel for.
 - The cleanup of a SITL launched without a slot is a `ps`-based script on macOS, where `pkill -x betaflight_SITL` finds nothing.
 
+### Audit follow-ups (2026-10-22, `docs/superpowers/plans/2026-10-22-audit-smaller-fixes.md`)
+#### Fixed
+- **Two simulators sharing a data folder can no longer collide on a log name**: an MCAP recording, an inputs CSV or a
+  repro folder whose number another process took first is created under the next number.
+- **`ofs.launch()` no longer picks a port and hopes**: the server binds first (`--listen 127.0.0.1:0`) and reports its
+  port through the new `--port-file FILE` option, so a launch cannot end up on another process's server.
+- SITL output is read in lines of at most 64 KiB, so a child that prints without newlines cannot grow memory.
+#### Added
+- A test that the committed Python stubs match `proto/ofs/v1/sim.proto`; Dependabot for the workflows' actions, and the
+  publish job's actions pinned to commit SHAs.
+
 ### B5: the small-tails sweep
 #### Fixed
 - **`ofs-validate` reports every `submission.toml` schema problem in one pass** (unknown keys, wrong types, per key),

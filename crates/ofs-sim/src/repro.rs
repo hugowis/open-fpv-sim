@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use ofs_config::FcKind;
 use ofs_core::SimError;
-use ofs_log::recorder::next_numbered_path;
+use ofs_log::recorder::{create_numbered, RecordError};
 use ofs_log::tail::DEFAULT_WINDOW_S;
 
 use crate::journal::Journal;
@@ -172,8 +172,10 @@ pub(crate) fn effective_fc_flags(file_kind: FcKind, requested: Option<FcKind>) -
 pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> Result<PathBuf, String> {
     use toml::Value;
     let stem = src.quad_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
-    let dir = io("creating the logs directory", next_numbered_path(&src.logs_dir, &stem, "repro"))?;
-    io(&format!("creating {}", dir.display()), std::fs::create_dir(&dir))?;
+    let (dir, ()) = create_numbered(&src.logs_dir, &stem, "repro", |p| {
+        std::fs::create_dir(p).map_err(|e| RecordError::from_create(p, &e))
+    })
+    .map_err(|e| format!("creating the repro folder: {e}"))?;
 
     // The quad, its diff, the library it resolved against and the world: as the session read them at Load.
     for (rel, bytes) in &src.files {
