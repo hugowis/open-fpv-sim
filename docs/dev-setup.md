@@ -169,15 +169,18 @@ picture lags the world and judders at the field rate, like real analog glass. In
 6 dB and 3 dB) the receiver fails to complete fields — a dropped field holds the previous picture (pose, OSD
 and quality all freeze) for one field. The model and its constants are in `docs/research/video-link.md`.
 
-The **DVR** (keybind **D**) records the FPV view — exactly what the pilot sees — as an MJPEG AVI into
-`user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
+The **DVR** (keybind **D**, or its checkbox on the F2 controls screen — the same switch) records the FPV view —
+exactly what the pilot sees — as an MJPEG AVI into `user://recordings/`
+(`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
 `~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a
-dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again stops
-it, and it stops on its own (with a toast counting the saved frames) when the picture's INTERNAL size changes:
-an aspect switch or a chase-camera toggle, and — because the window aspect renders at the window's own size —
-a plain window resize with the window aspect. With a boxed aspect the internal resolution is fixed (960×720 or
-1280×720), so a plain window resize does not stop it. It
-records only the FPV view: press C first if the chase camera is up.
+dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again (or
+unchecking the box) stops it, and it stops on its own (with a toast counting the saved frames) when the
+picture's INTERNAL size changes: an aspect switch or a chase-camera toggle, and — because the window aspect
+renders at the window's own size — a plain window resize with the window aspect. With a boxed aspect the
+internal resolution is fixed (960×720 or 1280×720), so a plain window resize does not stop it. It records only
+the FPV view: press C first if the chase camera is up. The checkbox always shows the state that actually
+happened: D checks and unchecks it, and so does an automatic stop; a refused start (the chase camera up, or no
+simulator) leaves it unchecked.
 
 The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of
 the SmartAudio one: `[vtx] kind = "tramp"` on UART6 (Betaflight serial 5, function mask 8192 = `VTX_TRAMP`).

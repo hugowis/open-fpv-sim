@@ -258,6 +258,36 @@ func _run() -> void:
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")
 
+	# The F2 DVR toggle (i38): the checkbox drives the same start/stop path as D, and D moves the checkbox. The
+	# synthetic image source set above still feeds the recorder.
+	var menu_started: Array = []
+	app.dvr.started.connect(func(path: String): menu_started.append(path))
+	_press(app, KEY_F2)
+	_check(app.controls_menu.is_open(), "F2 opens the controls screen")
+	app.controls_menu._dvr.button_pressed = true  # a click on the box, not a call into the DVR
+	_check(app.dvr.recording and app.controls_menu.dvr_on(), "the DVR box starts the recording")
+	_check(app.hud._rec.visible, "and the HUD shows REC")
+	_check(app.hud.toast_texts()[app.hud.toast_texts().size() - 1].begins_with("DVR: recording to"), "through the app's one start path (the toast): %s" % str(app.hud.toast_texts()))
+	var menu_t0: float = app.client.get_telemetry()["time_s"]
+	var menu_deadline := Time.get_ticks_msec() + 20_000
+	while float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 and Time.get_ticks_msec() < menu_deadline:
+		await process_frame
+	app.controls_menu._dvr.button_pressed = false
+	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "unchecking the box stops it")
+	_check(not app.hud._rec.visible, "and the REC marker goes away")
+	_check(app.hud.toast_texts()[app.hud.toast_texts().size() - 1].begins_with("DVR:") and app.hud.toast_texts()[app.hud.toast_texts().size() - 1].contains("frames saved"), "through the app's one stop path (the toast): %s" % str(app.hud.toast_texts()))
+	if menu_started.size() == 1:
+		var menu_frames := _avi_frames(ProjectSettings.globalize_path(menu_started[0]))
+		_check(menu_frames.size() >= 1, "the toggled recording captured frames: %d" % menu_frames.size())
+	else:
+		_check(false, "the box started exactly one recording: %s" % str(menu_started))
+	_press(app, KEY_D)
+	_check(app.dvr.recording and app.controls_menu.dvr_on(), "D starts it with the screen open")
+	_press(app, KEY_D)
+	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "D stops it and the box follows")
+	_press(app, KEY_ESCAPE)
+	_check(not app.controls_menu.is_open(), "Escape closes the controls screen")
+
 	# A reload drops the recorder without an event: the indicator must go with it (the sticks recording is last so a
 	# reload here disturbs nothing above).
 	_press(app, KEY_I)
