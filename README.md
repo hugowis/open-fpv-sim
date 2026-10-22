@@ -202,7 +202,10 @@ The spec's sandbox example (`python/examples/sandbox.py`): run it from the repos
   motors/ESCs/props 240 Hz except their temperatures at 100 Hz, battery 10 Hz, everything else 50 Hz) into `<data_dir>/logs/<quad>-<n>.mcap`;
   `load(record=False)` does not, and real-time sessions record only when asked. `sim.recording.start(["imu.*",
   ("motor.*.omega_radps", 1000)])` picks signals and rates, `sim.recording.stop()` finishes the file. Recordings
-  open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files.
+  open in Foxglove unchanged. Two lockstep runs with the same seed and inputs write byte-identical files. While the
+  session is still writing, the file has no summary yet — `ofs.reader` refuses it and no indexed reader can build its
+  index, so call `stop()` (or `sim.log`, which stops and returns it) before opening one
+  (`docs/research/mcap-determinism.md`).
 - **Reading.** `sim.log` stops the running recording and returns it; `.to_dataframe(patterns)` gives one row per
   recorded time and one column per signal component (`imu.gyro_frd_radps.x`), indexed by `time_s`, NaN where a
   slower signal has no record. `.to_csv(path)` and `.to_parquet(path)` export; `ofs.reader.to_dataframe(path)`

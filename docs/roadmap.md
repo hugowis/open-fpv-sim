@@ -87,7 +87,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   `rate_hz` metadata says so).
 - A recording stopped by a write error has no summary section, so indexed readers refuse it; the
   `recording_stopped` event names the error.
-- Opening a recording in Foxglove while it is still being written is untested.
+- Opening a recording while it is still being written: the file has no summary until `stop()`, so indexed
+  readers refuse it and a streaming reader gets only the flushed chunks (`docs/research/mcap-determinism.md`).
+  Foxglove itself was not installed on the evidence machine, so its behavior on a live file remains to be checked.
 
 ### Race timing (`docs/race-timing.md`)
 - A gate is a trigger on the quad's centre: no margin for its size, no tilt. There is no lap limit and no reset (a
