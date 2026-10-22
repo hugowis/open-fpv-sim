@@ -3,7 +3,9 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; release 0.2.0 adds phases 2 and 3, see `CHANGELOG.md`).
+**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; releases 0.2.0 and 0.3.0 followed — 0.3.0 adds the
+`OFS_LIBRARY` search path, `radio.telemetry_slot_divisor`, the `DownlinkLoss` fault, `tx`/`link_loss` columns in the
+recorded-sticks CSV, the game's F2 DVR toggle and the mid-write-recording note, see `CHANGELOG.md`).
 v1 does what its design set out to
 (`docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md` §1.4, with the evidence for each point):
 a developer flies a simulated OpenDrone 5" quad running real Betaflight SITL with a joystick, through a simulated

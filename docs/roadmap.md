@@ -138,15 +138,13 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 ### Video and OSD
 - OSD font pages 2–3 (warnings, criticals) and the full HD/digital OSD element set.
 - Digital video systems (parent spec §2).
-- A DVR that survives a resize; a clean-feed DVR; audio; image-sequence and ffmpeg export; a DVR toggle on the F2
-  controls screen (v1 ships the **D** key).
+- A DVR that survives a resize; a clean-feed DVR; audio; image-sequence and ffmpeg export.
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
 - The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`), and a Configurator's EEPROM
   changes made after `Load`.
-- `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API;
-  `OFS_LIBRARY` as a search path.
+- `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API.
 
 ### Tooling
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries
