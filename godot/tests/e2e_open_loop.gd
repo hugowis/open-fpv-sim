@@ -286,13 +286,16 @@ func _run() -> void:
 	app.dvr.started.connect(func(path: String): menu_started.append(path))
 	_press(app, KEY_F2)
 	_check(app.controls_menu.is_open(), "F2 opens the controls screen")
+	await _current_field(app, 5.0)  # as for D above: a recording that starts while the picture is held has nothing to repeat
 	app.controls_menu._dvr.button_pressed = true  # a click on the box, not a call into the DVR
 	_check(app.dvr.recording and app.controls_menu.dvr_on(), "the DVR box starts the recording")
 	_check(app.hud._rec.visible, "and the HUD shows REC")
 	_check(app.hud.toast_texts()[app.hud.toast_texts().size() - 1].begins_with("DVR: recording to"), "through the app's one start path (the toast): %s" % str(app.hud.toast_texts()))
 	var menu_t0: float = app.client.get_telemetry()["time_s"]
 	var menu_deadline := Time.get_ticks_msec() + 20_000
-	while float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 and Time.get_ticks_msec() < menu_deadline:
+	# Half a simulated second, and until the recorder has encoded a frame: a runner that stalls (a real-time overrun) can
+	# spend the half second on held fields.
+	while (float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 or app.dvr._last_jpeg.is_empty()) and Time.get_ticks_msec() < menu_deadline:
 		await process_frame
 	app.controls_menu._dvr.button_pressed = false
 	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "unchecking the box stops it")
