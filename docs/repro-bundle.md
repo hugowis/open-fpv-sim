@@ -27,7 +27,7 @@ skipped). If the bundle cannot be written
 | `worlds/` | The world file, when the session had one. |
 | `journal.txt`, `inputs-<n>.csv` | Everything that steered the run, by tick: stick changes, transmitter on/off, faults (immediate and scheduled), `clear_faults`, and each `play_inputs` file. |
 | `tail.mcap` | The last 10 simulated seconds of the default channel table, from a recorder every session runs in memory (about 15 MB for the shipped quad). Opens in Foxglove or `ofs.reader`. |
-| `firmware/` | Betaflight sessions: `eeprom.bin` and `betaflight.diff` as they were right after `Load`, and the end of `sitl.log`. |
+| `firmware/` | Betaflight sessions: `eeprom.bin` and `betaflight.diff` as they were when the session failed (see "The firmware's settings"), and the end of `sitl.log`. |
 | `README.txt` | How to replay it. |
 
 ## Replaying
@@ -62,8 +62,21 @@ reproduce means the failure is not deterministic (the usual case is a Betaflight
 points of its run) and for a session whose journal outgrew its cap of 250 000 entries (about an hour of 50 Hz stick
 changes; `journal_truncated = true`). Those still replay, but a mismatch proves nothing.
 
+## The firmware's settings
+
+A Betaflight session's bundle holds the EEPROM as the session **failed**, so a setting the Betaflight Configurator
+saved after `Load` (a PID Save, a CLI `save`, a craft name) is in it, and a replay's SITL boots with it. SITL writes
+`eeprom.bin` only when the configuration is saved, in one short burst, and leaves it alone in between; the bundle reads
+the file at the failure and again, and keeps it when the two reads match (and have the size the file had at `Load`).
+A file that is missing or will not settle falls back to the copy taken right after `Load`, and `bundle.toml` says which:
+`firmware_captured = "failure"` or `"load"`. Settings the Configurator changed but did not save are in SITL's memory
+only and are not captured.
+
+The replay starts SITL from this EEPROM and runs the whole journal, so for a session that saved settings part-way
+through, the first part of the replay flies with the settings of the end: it can differ from the original run before the
+save, and the bundle's `exact` flag does not account for it.
+
 ## What it does not do
 
-It does not capture the Configurator's changes to Betaflight's settings after `Load` (the EEPROM is the one from
-`Load`), the pilot's goggles view, or a recording the session was making (`tail.mcap` is separate). Only the last 10
+It does not capture the pilot's goggles view, or a recording the session was making (`tail.mcap` is separate). Only the last 10
 seconds of channels are kept; the journal covers the whole session.

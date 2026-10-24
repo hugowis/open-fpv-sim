@@ -42,7 +42,8 @@ pub struct BundleSource {
     pub logs_dir: PathBuf,
     /// The Betaflight session's working directory.
     pub firmware_dir: Option<PathBuf>,
-    /// `FIRMWARE_STATE` files as they were right after `Load`.
+    /// `FIRMWARE_STATE` files as they were right after `Load`: the bundle's fallback when a file cannot be read at the
+    /// failure.
     pub firmware_initial: Vec<(String, Vec<u8>)>,
     /// The quad, its diff, the world and the library, as the session read them: path inside the bundle, bytes.
     pub files: Vec<(PathBuf, Vec<u8>)>,
@@ -156,6 +157,44 @@ pub fn snapshot_firmware(dir: &Path) -> Vec<(String, Vec<u8>)> {
     FIRMWARE_STATE.iter().filter_map(|name| std::fs::read(dir.join(name)).ok().map(|bytes| ((*name).to_string(), bytes))).collect()
 }
 
+/// The firmware state files as they are now, for a bundle written at a failure. SITL rewrites `eeprom.bin` only when
+/// the configuration is saved (a Configurator "Save", the CLI's `save`): `configLock` writes the whole file in one
+/// short burst, and the file is untouched in between, so a file read twice with the same bytes (and the length it had
+/// at `Load`: these files never change size, and a file being truncated reads as empty twice) is whole. A file that
+/// is missing or will not settle after a few reads falls back to its `initial` (right-after-`Load`) bytes. The flag
+/// is true when every file came from now.
+pub(crate) fn snapshot_firmware_at_failure(dir: &Path, initial: &[(String, Vec<u8>)]) -> (Vec<(String, Vec<u8>)>, bool) {
+    const READS: usize = 5;
+    let mut all_now = true;
+    let mut out = Vec::new();
+    for name in FIRMWARE_STATE {
+        let path = dir.join(name);
+        let at_load = initial.iter().find(|(n, _)| n == name);
+        let mut previous: Option<Vec<u8>> = None;
+        let mut settled = None;
+        for attempt in 0..READS {
+            let Ok(bytes) = std::fs::read(&path) else { break };
+            if previous.as_ref() == Some(&bytes) && !bytes.is_empty() && at_load.is_none_or(|(_, b)| b.len() == bytes.len()) {
+                settled = Some(bytes);
+                break;
+            }
+            previous = Some(bytes);
+            if attempt + 1 < READS {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        match (settled, at_load) {
+            (Some(bytes), _) => out.push((name.to_string(), bytes)),
+            (None, Some((_, bytes))) => {
+                all_now = false;
+                out.push((name.to_string(), bytes.clone()));
+            }
+            (None, None) => {}
+        }
+    }
+    (out, all_now)
+}
+
 fn kind_of(e: &SimError) -> &'static str {
     match e {
         SimError::Firmware(_) => "firmware",
@@ -210,9 +249,12 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
         Err(e) => Some(e.to_string()),
     };
 
+    let mut firmware_captured = None;
     if let Some(fw) = &src.firmware_dir {
         io("creating firmware/", std::fs::create_dir_all(dir.join("firmware")))?;
-        for (name, bytes) in &src.firmware_initial {
+        let (state, all_now) = snapshot_firmware_at_failure(fw, &src.firmware_initial);
+        firmware_captured = Some(if all_now { "failure" } else { "load" });
+        for (name, bytes) in &state {
             io("copying the firmware state", std::fs::write(dir.join("firmware").join(name), bytes))?;
         }
         if let Ok(log) = std::fs::read(fw.join("sitl.log")) {
@@ -248,6 +290,9 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
     put("journal_entries", Value::Integer(journal.entries().len() as i64));
     put("journal_truncated", Value::Boolean(journal.truncated()));
     put("exact", Value::Boolean(exact));
+    if let Some(when) = firmware_captured {
+        put("firmware_captured", Value::String(when.into()));
+    }
     if let Some(e) = tail_error {
         put("tail_error", Value::String(e));
     }
@@ -406,6 +451,56 @@ mod tests {
 
     fn repo(rel: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(rel)
+    }
+
+    #[test]
+    fn the_firmware_state_is_read_now_and_falls_back_to_the_load_time_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let initial = vec![("eeprom.bin".to_string(), b"eeprom at load..".to_vec()), ("betaflight.diff".to_string(), b"diff at load".to_vec())];
+        std::fs::write(dir.path().join("eeprom.bin"), b"eeprom saved....").unwrap();
+        std::fs::write(dir.path().join("betaflight.diff"), b"diff at load").unwrap();
+        let (state, now) = snapshot_firmware_at_failure(dir.path(), &initial);
+        assert!(now);
+        assert_eq!(
+            state,
+            [("eeprom.bin".to_string(), b"eeprom saved....".to_vec()), ("betaflight.diff".to_string(), b"diff at load".to_vec())]
+        );
+        // A file that has gone: the load-time bytes, and the caller is told.
+        std::fs::remove_file(dir.path().join("eeprom.bin")).unwrap();
+        let (state, now) = snapshot_firmware_at_failure(dir.path(), &initial);
+        assert!(!now);
+        assert_eq!(state[0], ("eeprom.bin".to_string(), b"eeprom at load..".to_vec()));
+        // No file and no load-time copy: nothing to keep, and nothing is claimed to be lost.
+        let (state, now) = snapshot_firmware_at_failure(dir.path(), &[]);
+        assert!(now);
+        assert_eq!(state, [("betaflight.diff".to_string(), b"diff at load".to_vec())]);
+    }
+
+    #[test]
+    fn a_file_being_rewritten_is_never_captured_half_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("eeprom.bin");
+        let (a, b) = (vec![b'a'; 8192], vec![b'b'; 8192]);
+        std::fs::write(&path, &a).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (path, stop, a, b) = (path.clone(), stop.clone(), a.clone(), b.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    for bytes in [&a, &b] {
+                        std::fs::write(&path, bytes).ok();
+                    }
+                }
+            })
+        };
+        let initial = vec![("eeprom.bin".to_string(), vec![b'l'; 8192])];
+        for _ in 0..20 {
+            let (state, _) = snapshot_firmware_at_failure(dir.path(), &initial);
+            let got = &state[0].1;
+            assert!(*got == a || *got == b || *got == vec![b'l'; 8192], "a mixed or short capture: {} bytes", got.len());
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().unwrap();
     }
 
     fn vehicle_from(cfg: &ofs_config::QuadConfig) -> Vehicle {

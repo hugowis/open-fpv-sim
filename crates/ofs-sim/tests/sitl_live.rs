@@ -465,6 +465,54 @@ fn a_bundle_of_a_flown_session() -> (std::path::PathBuf, tempfile::TempDir) {
     (bundle, _dir)
 }
 
+/// #106: a setting the Configurator saves after `Load` is in the bundle (it holds the EEPROM as the session failed,
+/// not as it started), and a replay's SITL boots with it.
+#[test]
+#[ignore]
+fn a_bundle_carries_the_eeprom_the_configurator_saved_after_load() {
+    use ofs_sim::repro::{snapshot_firmware, write_bundle, BundleSource};
+    use ofs_sim::vehicle::build_seeded;
+    const MSP_NAME: u8 = 10;
+    const MSP_SET_NAME: u8 = 11;
+    const MSP_EEPROM_WRITE: u8 = 250;
+    let mut rig = Rig::new();
+    let data_dir = rig._dir.path().to_path_buf();
+    let quad = std::path::absolute(QUAD).unwrap();
+    let firmware = ofs_sim::vehicle::firmware_dir(&data_dir, &quad);
+    let cfg = load(&quad).unwrap();
+    let roots = ofs_config::library_roots(std::env::var("OFS_LIBRARY").ok().as_deref(), cfg.source_dir());
+    let mut source = BundleSource::new(&cfg, None, &roots, 1, false, false, data_dir.join("logs"), Some(firmware.clone())).unwrap();
+    source.firmware_initial = snapshot_firmware(&firmware);
+    let at_load = source.firmware_initial.iter().find(|(n, _)| n == "eeprom.bin").expect("the first boot saved an EEPROM").1.clone();
+    assert!(!at_load.windows(8).any(|w| w == b"REPRO106"));
+
+    // The Configurator renames the craft and saves, a second into the session.
+    rig.v.run_for(1.0).unwrap();
+    let mut client = msp();
+    let v = &mut rig.v;
+    client.request(MSP_SET_NAME, b"REPRO106", 500, || v.run_for(0.01)).unwrap();
+    client.request(MSP_EEPROM_WRITE, &[], 500, || v.run_for(0.01)).unwrap();
+    v.run_for(1.0).unwrap();
+    drop(client);
+
+    let error = ofs_core::SimError::Firmware("simulated failure for the bundle test".into());
+    let bundle = write_bundle(&source, &rig.v, &error).unwrap();
+    let kept = std::fs::read(bundle.join("firmware/eeprom.bin")).unwrap();
+    assert_ne!(kept, at_load, "the bundle's EEPROM is the failure's, not Load's");
+    assert!(kept.windows(8).any(|w| w == b"REPRO106"), "and holds the saved name");
+    let manifest = std::fs::read_to_string(bundle.join("bundle.toml")).unwrap();
+    assert!(manifest.contains("firmware_captured = \"failure\""), "{manifest}");
+
+    let Rig { v, _dir } = rig;
+    drop(v); // SITL must stop before the replay's boots
+    let replay_dir = tempfile::tempdir().unwrap();
+    let opts = BuildOptions { seed: 1, data_dir: replay_dir.path().to_path_buf(), fc_override: None, world: ofs_config::WorldConfig::open_field() };
+    let mut replayed = build_seeded(&cfg, &opts, Some(&bundle.join("firmware")), None).unwrap();
+    replayed.run_for(1.0).unwrap();
+    let reply = msp().request(MSP_NAME, &[], 500, || replayed.run_for(0.01)).unwrap();
+    assert_eq!(reply.payload, b"REPRO106", "the replay's Betaflight booted with the saved setting");
+}
+
 #[test]
 #[ignore]
 fn a_sitl_sessions_bundle_carries_its_firmware_and_replays() {

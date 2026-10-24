@@ -8,6 +8,15 @@ repository). The format follows Keep a Changelog.
 **Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server
 is refused at the handshake.
 
+### A repro bundle keeps the EEPROM as the session failed (#106)
+#### Changed
+- **`firmware/eeprom.bin` (and `betaflight.diff`) are read when the bundle is written, not at `Load`**, so a setting the
+  Configurator saved after `Load` is in the bundle and a replay's Betaflight boots with it. The file is read twice and
+  kept when both reads match; a missing or unsettled file falls back to the `Load`-time copy. `bundle.toml` gains
+  `firmware_captured` (`"failure"` or `"load"`) for Betaflight sessions. A replay flies the whole journal with the
+  failure's settings (`docs/repro-bundle.md`, "The firmware's settings"). Settings changed but not saved never reach the
+  EEPROM and are not captured.
+
 ### Race gates: the quad's size and tilted openings (#103)
 #### Changed
 - **A pass has to fit the quad.** The crossing point must be at least the quad's bounding radius (its collision
