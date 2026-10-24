@@ -3,10 +3,13 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
-## Unreleased
+## 0.4.0 — 2026-10-24
 
 **Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server
-is refused at the handshake.
+is refused at the handshake. In a world with gates, a pass now needs room for the quad (a clipped pass raises
+`gate_hit` and no longer counts), and the bus digest covers the new `race.finished` signal, so a repro bundle of a
+gate world recorded by 0.3.0 no longer reports `reproduced=true` — re-record it on 0.4.0. A bundle's journal can now
+hold a `race_reset` line, which a 0.3.0 build refuses to read. Worlds without gates, and every golden, are unchanged.
 
 ### A repro bundle keeps the EEPROM as the session failed (#106)
 #### Changed
@@ -53,6 +56,11 @@ is refused at the handshake.
 #### Changed
 - **`ofs.reader.read` on a file that is still being recorded** says so: the "unfinished recording" error now names the
   running recording as the likely cause and the way out (`sim.recording.stop()`, or `sim.log`, which stops it).
+
+### Tests
+- The open-loop Godot end-to-end test waits for a current field instead of judging one frame, and the DVR check owes no
+  frames for boundaries held before the first fresh one (#118: the flake was seen on the macOS job only; the issue stays
+  open until that job has a clean record).
 
 ## 0.3.0 — 2026-10-22
 
