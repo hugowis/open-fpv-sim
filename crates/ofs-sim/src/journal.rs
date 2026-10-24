@@ -25,6 +25,8 @@ pub enum Action {
     ClearFaults,
     PlayInputs(Inputs),
     StopInputs,
+    /// A fresh race was asked for (the race model applies it at the next tick).
+    ResetRace,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,6 +99,7 @@ impl Journal {
                     text.push_str(&format!("play {name}"));
                 }
                 Action::StopInputs => text.push_str("stop"),
+                Action::ResetRace => text.push_str("race_reset"),
             }
             text.push('\n');
         }
@@ -267,6 +270,7 @@ fn parse_entry(line: &str, dir: &Path) -> Result<Entry, String> {
         },
         "clear" if rest.is_empty() => Action::ClearFaults,
         "stop" if rest.is_empty() => Action::StopInputs,
+        "race_reset" if rest.is_empty() => Action::ResetRace,
         "play" => {
             let [file] = rest.as_slice() else { return Err("play needs one file name".into()) };
             let path = dir.join(file);
@@ -314,6 +318,7 @@ mod tests {
         j.push(500, Action::ClearFaults);
         j.push(501, Action::Transmitter(false));
         j.push(502, Action::StopInputs);
+        j.push(503, Action::ResetRace);
         let back = round_trip(&j);
         assert_eq!(back.entries().len(), j.entries().len());
         for (a, b) in j.entries().iter().zip(back.entries()) {

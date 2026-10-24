@@ -26,7 +26,9 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply.
+    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
+    RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
     Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
@@ -153,10 +155,17 @@ class SimStub:
                 request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.FromString,
                 _registered_method=True)
+        self.ResetRace = channel.unary_unary(
+                '/ofs.v1.Sim/ResetRace',
+                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                _registered_method=True)
 
 
 class SimServicer:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply.
+    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
+    RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
     Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
@@ -319,6 +328,13 @@ class SimServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ResetRace(self, request, context):
+        """Starts a fresh race at the next tick (docs/race-timing.md); FAILED_PRECONDITION when the world has no gates.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SimServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -432,6 +448,11 @@ def add_SimServicer_to_server(servicer, server):
                     request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.SerializeToString,
             ),
+            'ResetRace': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResetRace,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'ofs.v1.Sim', rpc_method_handlers)
@@ -441,7 +462,9 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply.
+    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
+    RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
     Protocol 12 added the open-loop stabilizer on Load (M8b).
     Protocol 11 added gates, lap timing and the race state (M8a).
@@ -1036,6 +1059,33 @@ class Sim:
             '/ofs.v1.Sim/StopInputsRecording',
             ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.InputsRecordingSummary.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResetRace(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ofs.v1.Sim/ResetRace',
+            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.Empty.FromString,
             options,
             channel_credentials,
             insecure,

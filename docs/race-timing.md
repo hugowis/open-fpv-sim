@@ -25,6 +25,15 @@ name = "Gate1"
 The gates are numbered in file order from 0. **Gate 0 is the start and finish.** A world has at most 64 gates, and a
 world without any has no race at all (no model, no `race.*` signals, `State.race.present = false`).
 
+An optional `[race]` table sets the rules of the race:
+
+```toml
+[race]
+laps = 3                     # the race ends after this many laps; leave it out to race forever
+```
+
+`laps` must be at least 1 and needs at least one gate.
+
 A gate is a *trigger*: it does not collide with the quad and it blocks no signal. Draw its frame with ordinary
 `[[objects]]` if you want something to hit: `worlds/flat.toml` has the posts and bar of its three gates as boxes, and
 the `[[gates]]` are what those leave free (3.08 m between the posts, 2.44 m under the bar). Godot draws each opening
@@ -55,8 +64,15 @@ as a translucent rectangle labelled START or with the gate's number.
   farther than 3 m (`REARM_M`) from the gate's plane (along the direction of travel) since the last one, so hovering
   through the plane does not run up laps. The rule applies only to a one-gate course: a two-gate course whose gates
   face each other through one frame can still count laps while hovering there.
-- **Not included.** No lap limit, no reset (a new `Load` starts a fresh race), no ghost or best-lap replay, no
-  highlight of the next gate in Godot.
+- **The lap limit.** With `[race] laps = N`, completing lap N ends the race: that pass raises `lap_completed` and then
+  `race_finished` (same time), the clock stops (`running` false, `finished` true, `next_gate` 0), the last and best lap
+  times stay, and no gate counts until the race is reset. Without a limit the race goes on.
+- **A reset.** `ResetRace` (Python `sim.reset_race()`, the **N** key in the game) starts a fresh race at the next tick,
+  without a new `Load`: no clock, no laps, no last or best time, not finished, gate 0 next, and the same course can be
+  flown again at once. It raises `race_reset`, and the `race.*` signals go back to zero. A world without gates refuses
+  it (`InvalidState`). The state is read at ticks, so a `get_state` before the next tick still shows the old race; the
+  reset is part of the repro bundle's journal (`race_reset`) and replays at the same tick.
+- **Not included.** No ghost or best-lap replay.
 
 ## Tilted gates
 
@@ -76,6 +92,8 @@ the opening on the same plane (`World.gate_basis`), and `World.gates` carries bo
 | `gate_passed` | `Gate0 (gate 0) start` for the start, else `Gate1 (gate 1) split 8.412 s` | the crossing |
 | `lap_completed` | `lap 1: 31.204 s (best)`; `(best)` when it is the fastest lap so far (the first lap is) | the crossing of gate 0 |
 | `gate_hit` | `Gate1 (gate 1) hit` | the crossing (a clipped pass: see "A hit") |
+| `race_finished` | `race finished: 3 laps` (`1 lap`), right after the last `lap_completed` | the same crossing |
+| `race_reset` | `race reset` | the tick the reset was applied at |
 
 Seconds have three decimals. The format is stable: scripts may parse it.
 
@@ -86,15 +104,22 @@ Seconds have three decimals. The format is stable: scripts may parse it.
 | field | meaning |
 |---|---|
 | `present` | the world has gates |
-| `running` | gate 0 has started the clock |
+| `running` | gate 0 has started the clock and the lap limit is not reached |
+| `finished` | the lap limit is reached: the clock has stopped, nothing counts until a reset |
+| `lap_limit` | the world's `[race] laps` (0 = none) |
 | `next_gate` | the gate to fly through next (0 before the start, and again once every gate is passed) |
 | `gate_count` | gates in the course |
 | `laps` | laps completed |
 | `current_lap_s` | time since the current lap started (0 until the clock runs) |
 | `last_lap_s`, `best_lap_s` | 0 until a lap completes (`laps > 0` says they are real) |
 
-The recording has the same values as scalar signals `race.running`, `race.next_gate`, `race.laps`, `race.lap_start_s`,
-`race.last_lap_s` and `race.best_lap_s`.
+The recording has the same values as scalar signals `race.running`, `race.finished`, `race.next_gate`, `race.laps`,
+`race.lap_start_s`, `race.last_lap_s` and `race.best_lap_s`.
+
+In the game the HUD's lap line reads `LAP 2/3   NEXT 1   ...` with a limit and `RACE FINISHED   3 LAPS   BEST 29.9`
+once it is over, **N** starts a new race, and the gate to fly through next is drawn green and stronger (the start/finish
+gate is yellow while it is not next); the highlight follows the state message, so it changes on the frame the gate is
+passed.
 
 ## From Python
 

@@ -121,6 +121,29 @@ roll_deg = {roll}
 }
 
 #[test]
+fn a_lap_limit_is_optional_and_checked() {
+    let loads = |text: &str| world::load(&write(tempfile::tempdir().unwrap().path(), text)).is_ok();
+    assert_eq!(world::load(Path::new(WORLD)).unwrap().race.laps, None, "the shipped world races forever");
+    let mut limited = world_text();
+    limited.push_str("
+[race]
+laps = 3
+");
+    assert_eq!(world::load(&write(tempfile::tempdir().unwrap().path(), &limited)).unwrap().race.laps, Some(3));
+    assert!(loads(&limited));
+    let found = problems(&limited.replace("laps = 3", "laps = 0"));
+    assert!(found.iter().any(|p| p.starts_with("race.laps: must be >= 1")), "{found:#?}");
+    // A limit with no gates has nothing to count.
+    let text = world_text();
+    let bare = text[..text.find("
+[[gates]]").unwrap()].to_string() + "
+[race]
+laps = 2
+";
+    assert!(problems(&bare).iter().any(|p| p.starts_with("race.laps: a lap limit needs")), "{:#?}", problems(&bare));
+}
+
+#[test]
 fn a_world_has_at_most_64_gates() {
     let mut text = world_text();
     for i in 0..61 {

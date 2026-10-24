@@ -626,6 +626,17 @@ impl Sim for SimService {
         .await
     }
 
+    async fn reset_race(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
+        self.blocking(|_shared, slot| {
+            let s = loaded(slot)?;
+            if !s.vehicle.reset_race() {
+                return Err(invalid_state("this world has no gates, so there is no race to reset"));
+            }
+            Ok(pb::Empty {})
+        })
+        .await
+    }
+
     async fn start_inputs_recording(&self, _req: Request<pb::Empty>) -> Result<Response<pb::InputsRecordingStarted>, Status> {
         let logs = self.logs_dir();
         self.blocking(move |shared, slot| {

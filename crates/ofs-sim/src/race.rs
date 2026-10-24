@@ -78,16 +78,22 @@ impl Gate {
 pub enum RaceEvent {
     /// Gate `gate` was passed; `split_s` is the time since the lap started (0 for the start itself).
     GatePassed { gate: usize, time_s: f64, split_s: f64 },
-    /// Lap number `lap` (from 1) took `lap_s`; `best` when it is the fastest so far (the first lap is).
-    LapCompleted { lap: u32, time_s: f64, lap_s: f64, best: bool },
+    /// Lap number `lap` (from 1) took `lap_s`; `best` when it is the fastest so far (the first lap is). `finished`
+    /// when it was the world's last lap: the race is over.
+    LapCompleted { lap: u32, time_s: f64, lap_s: f64, best: bool, finished: bool },
     /// The quad went through the next gate's opening but its body did not fit: no credit, the gate is still next.
     GateHit { gate: usize, time_s: f64 },
+    /// The race was reset: no clock, no laps, gate 0 next.
+    Reset { time_s: f64 },
 }
 
 /// The race so far. `last_lap_s` and `best_lap_s` are 0 until a lap completes.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RaceStatus {
+    /// The clock is running (gate 0 started it and the lap limit is not reached).
     pub running: bool,
+    /// The lap limit is reached: the clock has stopped and nothing counts until a reset.
+    pub finished: bool,
     /// The gate the quad must fly through next (0 before the start, and again once all gates are passed).
     pub next_gate: usize,
     pub laps: u32,
@@ -103,11 +109,26 @@ pub struct RaceTracker {
     status: RaceStatus,
     last_counted: Option<usize>,
     away: bool,
+    lap_limit: Option<u32>,
 }
 
 impl RaceTracker {
     pub fn new(gates: Vec<Gate>) -> Self {
-        Self { gates, prev: None, status: RaceStatus::default(), last_counted: None, away: false }
+        Self { gates, prev: None, status: RaceStatus::default(), last_counted: None, away: false, lap_limit: None }
+    }
+
+    /// The race is over after this many laps (none: it goes on).
+    pub fn with_lap_limit(mut self, laps: Option<u32>) -> Self {
+        self.lap_limit = laps;
+        self
+    }
+
+    /// Starts a fresh race: no clock, no laps, no best time, gate 0 next. The path so far is kept, so a quad that
+    /// is already moving through a gate this step still counts.
+    pub fn reset(&mut self) {
+        self.status = RaceStatus::default();
+        self.last_counted = None;
+        self.away = false;
     }
 
     pub fn status(&self) -> RaceStatus {
@@ -126,7 +147,7 @@ impl RaceTracker {
     /// the pose the previous call was given (the first call only records its pose). At most one gate counts per step.
     pub fn step(&mut self, t0_s: f64, dt_s: f64, p1: DVec3) -> Option<RaceEvent> {
         let p0 = self.prev.replace(p1)?;
-        if self.gates.is_empty() {
+        if self.gates.is_empty() || self.status.finished {
             return None;
         }
         if let Some(last) = self.last_counted {
@@ -165,7 +186,13 @@ impl RaceTracker {
             }
             s.lap_start_s = time_s;
             s.next_gate = 1 % self.gates.len();
-            return Some(RaceEvent::LapCompleted { lap: s.laps, time_s, lap_s, best });
+            let finished = self.lap_limit.is_some_and(|limit| s.laps >= limit);
+            if finished {
+                s.running = false;
+                s.finished = true;
+                s.next_gate = 0;
+            }
+            return Some(RaceEvent::LapCompleted { lap: s.laps, time_s, lap_s, best, finished });
         }
         s.next_gate = (next + 1) % self.gates.len();
         Some(RaceEvent::GatePassed { gate: next, time_s, split_s: time_s - s.lap_start_s })
@@ -178,9 +205,13 @@ pub struct RaceInfo {
     /// The world has gates.
     pub present: bool,
     pub running: bool,
+    /// The world's lap limit is reached: the clock has stopped.
+    pub finished: bool,
     pub next_gate: u32,
     pub gate_count: u32,
     pub laps: u32,
+    /// The world's lap limit (0 = none).
+    pub lap_limit: u32,
     /// Time since the current lap started (0 until the clock runs).
     pub current_lap_s: f64,
     pub last_lap_s: f64,
@@ -191,6 +222,7 @@ pub struct RaceInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct RaceSignals {
     running: Signal<f64>,
+    finished: Signal<f64>,
     next_gate: Signal<f64>,
     laps: Signal<f64>,
     lap_start_s: Signal<f64>,
@@ -203,6 +235,7 @@ impl RaceSignals {
     pub fn register(bus: &mut Bus) -> Self {
         Self {
             running: bus.signal(names::RACE_RUNNING),
+            finished: bus.signal(names::RACE_FINISHED),
             next_gate: bus.signal(names::RACE_NEXT_GATE),
             laps: bus.signal(names::RACE_LAPS),
             lap_start_s: bus.signal(names::RACE_LAP_START_S),
@@ -213,6 +246,7 @@ impl RaceSignals {
 
     fn write(&self, bus: &mut Bus, s: &RaceStatus) {
         bus.set(self.running, f64::from(u8::from(s.running)));
+        bus.set(self.finished, f64::from(u8::from(s.finished)));
         bus.set(self.next_gate, s.next_gate as f64);
         bus.set(self.laps, f64::from(s.laps));
         bus.set(self.lap_start_s, s.lap_start_s);
@@ -220,15 +254,17 @@ impl RaceSignals {
         bus.set(self.best_lap_s, s.best_lap_s);
     }
 
-    /// The race as of simulated time `time_s`, with `gate_count` gates in the course.
-    pub fn info(&self, bus: &Bus, time_s: f64, gate_count: usize) -> RaceInfo {
+    /// The race as of simulated time `time_s`, with `gate_count` gates in the course and a lap limit (0: none).
+    pub fn info(&self, bus: &Bus, time_s: f64, gate_count: usize, lap_limit: u32) -> RaceInfo {
         let running = bus.get(self.running) > 0.5;
         RaceInfo {
             present: true,
             running,
+            finished: bus.get(self.finished) > 0.5,
             next_gate: bus.get(self.next_gate) as u32,
             gate_count: gate_count as u32,
             laps: bus.get(self.laps) as u32,
+            lap_limit,
             current_lap_s: if running { time_s - bus.get(self.lap_start_s) } else { 0.0 },
             last_lap_s: bus.get(self.last_lap_s),
             best_lap_s: bus.get(self.best_lap_s),
@@ -236,17 +272,37 @@ impl RaceSignals {
     }
 }
 
-/// The events the model has raised and nobody has taken yet; clones share one queue.
+#[derive(Debug, Default)]
+struct Shared {
+    events: Vec<RaceEvent>,
+    reset: bool,
+}
+
+/// The events the model has raised and nobody has taken yet, and a reset waiting for the next tick; clones share one
+/// queue.
 #[derive(Debug, Clone, Default)]
-pub struct RaceHandle(Arc<Mutex<Vec<RaceEvent>>>);
+pub struct RaceHandle(Arc<Mutex<Shared>>);
 
 impl RaceHandle {
     pub fn take_events(&self) -> Vec<RaceEvent> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut self.lock().events)
+    }
+
+    /// Asks for a fresh race; the model applies it at the start of its next tick (and raises [`RaceEvent::Reset`]).
+    pub fn request_reset(&self) {
+        self.lock().reset = true;
+    }
+
+    fn take_reset(&self) -> bool {
+        std::mem::take(&mut self.lock().reset)
     }
 
     fn push(&self, event: RaceEvent) {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+        self.lock().events.push(event);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -259,11 +315,11 @@ pub struct GateTimer {
 }
 
 impl GateTimer {
-    /// `clearance_m`: the quad's bounding radius.
-    pub fn new(gates: &[GateSection], clearance_m: f64, bus: &mut Bus) -> (GateTimer, RaceHandle) {
+    /// `clearance_m`: the quad's bounding radius; `lap_limit`: the race ends after this many laps.
+    pub fn new(gates: &[GateSection], clearance_m: f64, lap_limit: Option<u32>, bus: &mut Bus) -> (GateTimer, RaceHandle) {
         let handle = RaceHandle::default();
         let signals = RaceSignals::register(bus);
-        let tracker = RaceTracker::new(gates.iter().map(|g| Gate::from_config(g, clearance_m)).collect());
+        let tracker = RaceTracker::new(gates.iter().map(|g| Gate::from_config(g, clearance_m)).collect()).with_lap_limit(lap_limit);
         signals.write(bus, &tracker.status());
         let timer = GateTimer { tracker, pos: bus.signal(names::BODY_POS_NED), signals, handle: handle.clone() };
         (timer, handle)
@@ -280,6 +336,11 @@ impl Model for GateTimer {
     }
 
     fn step(&mut self, ctx: &StepCtx, bus: &mut Bus) -> Result<(), SimError> {
+        if self.handle.take_reset() {
+            self.tracker.reset();
+            self.handle.push(RaceEvent::Reset { time_s: ctx.time_s });
+            self.signals.write(bus, &self.tracker.status());
+        }
         if let Some(event) = self.tracker.step(ctx.time_s, ctx.dt_s, bus.get(self.pos)) {
             self.handle.push(event);
             self.signals.write(bus, &self.tracker.status());
@@ -503,6 +564,81 @@ mod tests {
             assert_eq!(r.step(1.0 + f64::from(i), 1.0, at(wobble, 3.5, -1.5)), None, "jitter {i}");
         }
         assert_eq!(r.status().laps, 0);
+    }
+
+    /// Flies the three-gate course through to gate 0 again, `laps` times over (the first pass only starts the clock),
+    /// turning around outside the course between flights.
+    fn fly_laps(r: &mut RaceTracker, laps: u32) -> (Vec<RaceEvent>, f64) {
+        let (mut events, mut t) = fly(r, 0.0, 0.0, 100.0);
+        for _ in 0..laps {
+            r.step(t, 0.1, at(10.0, 40.0, -1.5));
+            let (e, t1) = fly(r, t + 20.0, 10.0, 100.0);
+            events.extend(e);
+            t = t1;
+        }
+        (events, t)
+    }
+
+    #[test]
+    fn the_race_ends_at_the_lap_limit_and_nothing_more_counts() {
+        let mut r = course(3).with_lap_limit(Some(2));
+        let (events, t) = fly_laps(&mut r, 2);
+        let laps: Vec<(u32, bool)> = events
+            .iter()
+            .filter_map(|e| match *e {
+                RaceEvent::LapCompleted { lap, finished, .. } => Some((lap, finished)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(laps, [(1, false), (2, true)], "{events:?}");
+        let s = r.status();
+        assert!(s.finished && !s.running && s.laps == 2 && s.next_gate == 0, "{s:?}");
+        assert!(s.best_lap_s > 0.0 && s.last_lap_s > 0.0, "the times survive the finish");
+        let (more, _) = fly(&mut r, t + 20.0, 0.0, 100.0);
+        assert!(more.is_empty(), "a flight after the finish counts for nothing: {more:?}");
+        assert_eq!(r.status(), s);
+    }
+
+    #[test]
+    fn without_a_limit_the_race_goes_on() {
+        let mut r = course(3);
+        let (events, _) = fly_laps(&mut r, 4);
+        assert_eq!(events.iter().filter(|e| matches!(e, RaceEvent::LapCompleted { finished: false, .. })).count(), 4);
+        assert!(!r.status().finished);
+    }
+
+    #[test]
+    fn a_one_lap_limit_finishes_on_the_first_lap() {
+        let mut r = course(2).with_lap_limit(Some(1));
+        let (events, _) = fly_laps(&mut r, 1);
+        assert!(matches!(events.last(), Some(RaceEvent::LapCompleted { lap: 1, finished: true, .. })), "{events:?}");
+    }
+
+    #[test]
+    fn a_reset_starts_a_fresh_race() {
+        let mut r = course(3).with_lap_limit(Some(1));
+        let (_, t) = fly_laps(&mut r, 1);
+        assert!(r.status().finished);
+        r.reset();
+        assert_eq!(r.status(), RaceStatus::default(), "no clock, laps, best or last time, not finished, gate 0 next");
+        // The same course can be raced again from the start.
+        r.step(t, 0.1, at(10.0, 40.0, -1.5));
+        let (events, _) = fly(&mut r, t + 20.0, 0.0, 100.0);
+        assert!(matches!(events[0], RaceEvent::GatePassed { gate: 0, split_s, .. } if split_s == 0.0), "{events:?}");
+        assert!(r.status().running && !r.status().finished);
+    }
+
+    #[test]
+    fn a_reset_mid_race_forgets_the_laps_and_the_gate_order() {
+        let mut r = course(3);
+        let (_, t) = fly_laps(&mut r, 1);
+        let (_, t) = fly(&mut r, t, 0.0, 65.0); // closes lap 2, then gate 1
+        assert!(r.status().next_gate == 2 && r.status().laps == 2, "{:?}", r.status());
+        r.reset();
+        r.step(t, 0.1, at(10.0, 40.0, -1.5));
+        // Gate 2 is no longer next: gate 0 is.
+        let (events, _) = fly(&mut r, t + 20.0, 50.0, 100.0);
+        assert!(events.is_empty(), "gate 1 and 2 first: nothing counts before the start: {events:?}");
     }
 
     fn tilted(pitch: f64, roll: f64, clearance: f64) -> Gate {

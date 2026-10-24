@@ -149,6 +149,12 @@ impl OfsClient {
         self.send(Command::SetInputsRecording(on));
     }
 
+    /// Starts a fresh race: no clock, no laps, gate 0 next (a `race_reset` event confirms it). An error without gates.
+    #[func]
+    fn reset_race(&self) {
+        self.send(Command::ResetRace);
+    }
+
     /// The current phase (see `phase_changed`).
     #[func]
     fn get_phase(&self) -> GString {
@@ -197,7 +203,8 @@ impl OfsClient {
     /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
     /// `video_sparkles`, `video_chroma`, `video_field_valid`, `video_latency_ms`, `video_antenna`
     /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name), and the lap clock's
-    /// `race_present` (the world has gates), `race_running`, `race_next_gate`, `race_gate_count`, `race_laps`,
+    /// `race_present` (the world has gates), `race_running`, `race_finished` (the lap limit is reached), `race_lap_limit`
+    /// (0 = none), `race_next_gate`, `race_gate_count`, `race_laps`,
     /// `race_lap_s` (the current lap so far), `race_last_lap_s` and `race_best_lap_s` (both 0 until a lap completes).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
@@ -259,6 +266,8 @@ impl OfsClient {
         let r = &t.race;
         d.set("race_present", r.present);
         d.set("race_running", r.running);
+        d.set("race_finished", r.finished);
+        d.set("race_lap_limit", i64::from(r.lap_limit));
         d.set("race_next_gate", i64::from(r.next_gate));
         d.set("race_gate_count", i64::from(r.gate_count));
         d.set("race_laps", i64::from(r.laps));

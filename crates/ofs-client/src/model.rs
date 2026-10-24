@@ -226,9 +226,13 @@ pub struct WorldGate {
 pub struct RaceInfo {
     pub present: bool,
     pub running: bool,
+    /// The world's lap limit is reached: the clock has stopped.
+    pub finished: bool,
     pub next_gate: u32,
     pub gate_count: u32,
     pub laps: u32,
+    /// The world's lap limit (0 = none).
+    pub lap_limit: u32,
     pub current_lap_s: f64,
     /// 0 until a lap completes.
     pub last_lap_s: f64,
@@ -240,9 +244,11 @@ impl RaceInfo {
         RaceInfo {
             present: r.present,
             running: r.running,
+            finished: r.finished,
             next_gate: r.next_gate,
             gate_count: r.gate_count,
             laps: r.laps,
+            lap_limit: r.lap_limit,
             current_lap_s: r.current_lap_s,
             last_lap_s: r.last_lap_s,
             best_lap_s: r.best_lap_s,
@@ -513,6 +519,10 @@ pub enum EventKind {
     LapCompleted,
     /// The quad went through a gate's opening but its body did not fit: no credit (the message names the gate).
     GateHit,
+    /// The lap limit was reached: the race is over until it is reset.
+    RaceFinished,
+    /// The race was reset.
+    RaceReset,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -544,6 +554,8 @@ impl EventKind {
             EventKind::GatePassed => "gate_passed",
             EventKind::LapCompleted => "lap_completed",
             EventKind::GateHit => "gate_hit",
+            EventKind::RaceFinished => "race_finished",
+            EventKind::RaceReset => "race_reset",
             EventKind::Unknown => "unknown",
         }
     }
@@ -584,6 +596,8 @@ impl Event {
             Ok(pb::EventKind::GatePassed) => EventKind::GatePassed,
             Ok(pb::EventKind::LapCompleted) => EventKind::LapCompleted,
             Ok(pb::EventKind::GateHit) => EventKind::GateHit,
+            Ok(pb::EventKind::RaceFinished) => EventKind::RaceFinished,
+            Ok(pb::EventKind::RaceReset) => EventKind::RaceReset,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }
@@ -642,6 +656,8 @@ pub enum Command {
     SetRadioLoss(bool),
     /// Starts (true) or stops (false) recording the sticks and link state to a replayable CSV the server names.
     SetInputsRecording(bool),
+    /// Starts a fresh race (no clock, no laps, gate 0 next); an error event when the world has no gates.
+    ResetRace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

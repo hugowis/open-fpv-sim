@@ -23,6 +23,7 @@ const HELP_LINES := [
 	"D  record the FPV view (DVR)",
 	"K  cut / restore the radio link (failsafe test)",
 	"I  record the sticks and link state to a CSV (replay with play_inputs)",
+	"N  start a new race (lap clock and laps back to zero)",
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",
@@ -292,11 +293,15 @@ func _update_video(t: Dictionary) -> void:
 	_video.add_theme_color_override("font_color", GREEN if clean else (RED if sync == "lost" else YELLOW))
 
 
-## "LAP 2   NEXT 3   1:15.3   LAST 31.2   BEST 29.9": the lap being flown, the gate to fly through next (START once
-## every gate is passed), the time on this lap and, after the first lap, the last and best. Empty without gates.
+## "LAP 2/3   NEXT 3   1:15.3   LAST 31.2   BEST 29.9": the lap being flown (of the limit, when the world has one), the
+## gate to fly through next (START once every gate is passed), the time on this lap and, after the first lap, the last
+## and best. "RACE FINISHED ..." once the lap limit is reached. Empty without gates.
 func _update_race(t: Dictionary) -> void:
 	if not t.get("race_present", false):
 		_race.text = ""
+		return
+	if t.get("race_finished", false):
+		_race.text = "RACE FINISHED   %d LAPS   BEST %.1f   (N: new race)" % [t.get("race_laps", 0), t.get("race_best_lap_s", 0.0)]
 		return
 	if not t.get("race_running", false):
 		_race.text = "RACE  fly through the start gate"
@@ -306,7 +311,9 @@ func _update_race(t: Dictionary) -> void:
 	var laps: int = t.get("race_laps", 0)
 	# Round to the displayed tenth first, then split: formatting 59.96 directly gives "0:60.0".
 	var shown_s: float = snappedf(lap_s, 0.1)
-	var text := "LAP %d   NEXT %s   %d:%04.1f" % [laps + 1, "START" if next_gate == 0 else str(next_gate), int(shown_s) / 60, fmod(shown_s, 60.0)]
+	var limit: int = t.get("race_lap_limit", 0)
+	var lap_label := str(laps + 1) + ("/%d" % limit if limit > 0 else "")
+	var text := "LAP %s   NEXT %s   %d:%04.1f" % [lap_label, "START" if next_gate == 0 else str(next_gate), int(shown_s) / 60, fmod(shown_s, 60.0)]
 	if laps > 0:
 		text += "   LAST %.1f   BEST %.1f" % [t.get("race_last_lap_s", 0.0), t.get("race_best_lap_s", 0.0)]
 	_race.text = text

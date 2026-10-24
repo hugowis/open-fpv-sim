@@ -745,6 +745,21 @@ async fn a_world_can_be_named() {
 }
 
 #[tokio::test]
+async fn a_race_can_only_be_reset_in_a_world_with_gates() {
+    let mut c = start().await;
+    let err = c.reset_race(Empty {}).await.unwrap_err();
+    assert_eq!(err.code(), Code::FailedPrecondition, "nothing loaded: {err}");
+    c.load(open_loop(Mode::Lockstep)).await.unwrap();
+    let err = c.reset_race(Empty {}).await.unwrap_err();
+    assert_eq!((err.code(), kind(&err).as_str()), (Code::FailedPrecondition, "invalid_state"), "the open field has no gates: {err}");
+    assert!(err.message().contains("no gates"), "{}", err.message());
+    c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    c.reset_race(Empty {}).await.unwrap();
+    let race = c.run(RunRequest { seconds: 0.01 }).await.unwrap().into_inner().race.unwrap();
+    assert_eq!((race.running, race.finished, race.lap_limit, race.next_gate), (false, false, 0, 0));
+}
+
+#[tokio::test]
 async fn a_downgrade_override_on_a_stabilized_quad_is_refused() {
     // The library resolves beside the quads directory, so the quad goes in `quads/` next to a copy of the repo's.
     let dir = tempfile::tempdir().unwrap();

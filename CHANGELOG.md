@@ -21,6 +21,18 @@ is refused at the handshake.
   heading). The crossing test, the ground check and the Godot frame use the tilted plane; `Gate.pitch_deg` and
   `roll_deg` on `World.gates` (protocol 14, Python `ofs.Gate`). Worlds without them behave exactly as before.
 
+### Race: lap limit, reset and next-gate highlight (#104)
+#### Added
+- **`[race] laps = N` in a world file** ends the race after N laps: `lap_completed`, then the new `race_finished`
+  event, the clock stops and nothing counts until a reset. `State.race` gains `finished` and `lap_limit`, and the
+  `race.finished` signal joins the other `race.*` ones (so a recording of a world with gates has one more channel).
+  Worlds without `[race]` race forever, as before.
+- **`ResetRace`** (protocol 14; Python `sim.reset_race()`, the **N** key in the game) starts a fresh race at the next
+  tick without a `Load`: no clock, laps or times, gate 0 next, a `race_reset` event, the `race.*` signals back to zero.
+  A world without gates refuses it. A repro bundle's journal records it (`race_reset`).
+- **The game highlights the next gate** (green and stronger; the start/finish gate stays yellow until it is next), shows
+  `LAP 2/3` with a limit and `RACE FINISHED` at the end, and toasts both events.
+
 ### Part provenance over the API (#43)
 #### Added
 - **`LoadReply.parts`** (protocol 14) lists the library parts the quad loaded — frame, motors, props, escs, battery

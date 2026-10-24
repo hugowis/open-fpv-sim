@@ -188,13 +188,15 @@ class Race:
     """The lap clock. `present` is False in a world without gates (everything else is then zero). `last_lap_s` and
     `best_lap_s` are 0 until a lap completes (`laps > 0`)."""
     present: bool = False
-    running: bool = False  # gate 0 has started the clock
+    running: bool = False  # gate 0 has started the clock (and the world's lap limit is not reached)
     next_gate: int = 0  # the gate to fly through next
     gate_count: int = 0
     laps: int = 0  # completed
     current_lap_s: float = 0.0  # time since the current lap started
     last_lap_s: float = 0.0
     best_lap_s: float = 0.0
+    finished: bool = False  # the lap limit is reached: the clock has stopped; `reset_race()` starts another race
+    lap_limit: int = 0  # the world's `[race] laps` (0 = none)
 
 
 @dataclass(frozen=True)
@@ -359,7 +361,7 @@ def _state(m) -> State:
         collision_speed_mps=m.collision_speed_mps,
         battery_cell_voltages=tuple(m.battery_cell_voltages),
         race=Race(m.race.present, m.race.running, m.race.next_gate, m.race.gate_count, m.race.laps,
-                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s),
+                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s, m.race.finished, m.race.lap_limit),
     )
 
 
@@ -547,6 +549,12 @@ class Sim:
     def stop_inputs(self) -> None:
         """Stops the playing inputs file, if any (the sticks and link state keep their last values)."""
         self._call(self._stub.StopInputs, pb.Empty())
+
+    def reset_race(self) -> None:
+        """Starts a fresh race at the next tick: no clock, no laps, no best time, gate 0 next (a `race_reset` event
+        says it happened). `InvalidState` when the world has no gates. State read before the next tick still shows
+        the old race."""
+        self._call(self._stub.ResetRace, pb.Empty())
 
     def record_inputs(self) -> str:
         """Starts recording this session's sticks and link state to a CSV the server names under `logs_dir` (one row

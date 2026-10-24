@@ -13,11 +13,17 @@ const PILOT_COLOR := Color(0.25, 0.55, 1.0)
 const EMITTER_COLOR := Color(0.85, 0.25, 0.85)
 const GATE_START_COLOR := Color(1.0, 0.85, 0.2)
 const GATE_COLOR := Color(0.3, 0.85, 1.0)
+const GATE_NEXT_COLOR := Color(0.35, 1.0, 0.45)
+const GATE_ALPHA := 0.25
+const GATE_NEXT_ALPHA := 0.6
 ## Where the pilot's eyes are below the goggle position, and how tall the marker is.
 const PILOT_BODY_HEIGHT_M := 1.5
 
 ## The nodes `build` made, removed by the next `build`.
 var _built: Array[Node] = []
+## The opening materials of the gates `build` made, in course order, so `set_next_gate` can recolour them.
+var _gate_materials: Array[StandardMaterial3D] = []
+var _next_gate := -1
 
 
 func _ready() -> void:
@@ -32,6 +38,7 @@ func build(world: Dictionary) -> void:
 		remove_child(node)
 		node.queue_free()
 	_built.clear()
+	_gate_materials.clear()
 	for o in world.get("objects", []):
 		match o.get("shape", ""):
 			"box":
@@ -47,6 +54,23 @@ func build(world: Dictionary) -> void:
 	var gates: Array = world.get("gates", [])
 	for i in gates.size():
 		_add_gate(i, gates[i])
+	set_next_gate(_next_gate)
+
+
+## Highlights the gate to fly through next: brighter and green, where the others stay translucent cyan and the
+## start/finish gate yellow. -1 highlights none (no race, or the race is over).
+func set_next_gate(index: int) -> void:
+	_next_gate = index
+	for i in _gate_materials.size():
+		_gate_materials[i].albedo_color = gate_color(i, index)
+
+
+## The opening's colour: the next gate green and strong, the start/finish gate yellow, the rest cyan.
+static func gate_color(index: int, next: int) -> Color:
+	if index == next:
+		return Color(GATE_NEXT_COLOR.r, GATE_NEXT_COLOR.g, GATE_NEXT_COLOR.b, GATE_NEXT_ALPHA)
+	var base := GATE_START_COLOR if index == 0 else GATE_COLOR
+	return Color(base.r, base.g, base.b, GATE_ALPHA)
 
 
 ## The names of the nodes the world file made (for the tests and the e2e).
@@ -193,10 +217,11 @@ func _add_gate(index: int, g: Dictionary) -> void:
 	quad.size = Vector2(float(g["width"]), float(g["height"]))
 	var color := GATE_START_COLOR if index == 0 else GATE_COLOR
 	var material := StandardMaterial3D.new()
+	_gate_materials.append(material)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.albedo_color = Color(color.r, color.g, color.b, 0.25)
+	material.albedo_color = gate_color(index, _next_gate)
 	var opening := MeshInstance3D.new()
 	opening.name = "Opening"
 	opening.mesh = quad

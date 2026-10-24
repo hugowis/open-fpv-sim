@@ -38,8 +38,12 @@ fn course() -> Vec<GateSection> {
 /// A quad flying north along the centre line at `speed` from 5 m south of home to 100 m, and starting over again
 /// (the jump back is a backwards crossing of every gate, which counts for nothing).
 fn rig(base_hz: u32, speed: f64) -> (Scheduler, RaceHandle) {
+    rig_with_limit(base_hz, speed, None)
+}
+
+fn rig_with_limit(base_hz: u32, speed: f64, lap_limit: Option<u32>) -> (Scheduler, RaceHandle) {
     let mut bus = Bus::new();
-    let (timer, handle) = GateTimer::new(&course(), 0.0, &mut bus);
+    let (timer, handle) = GateTimer::new(&course(), 0.0, lap_limit, &mut bus);
     let lap_s = 105.0 / speed;
     let mut s = Scheduler::new(base_hz, bus);
     s.add(Box::new(Mover(Box::new(move |t| DVec3::new(-5.0 + speed * (t % lap_s), 0.0, -1.5)))));
@@ -60,13 +64,35 @@ fn a_course_flown_in_order_raises_start_splits_and_a_lap() {
     assert!(matches!(events[0], RaceEvent::GatePassed { gate: 0, split_s, .. } if split_s == 0.0));
     let RaceEvent::GatePassed { gate: 1, split_s, .. } = events[1] else { panic!("{:?}", events[1]) };
     assert!((split_s - 2.0).abs() < 1e-6, "{split_s}");
-    let RaceEvent::LapCompleted { lap: 1, lap_s, best: true, time_s } = events[3] else { panic!("{:?}", events[3]) };
+    let RaceEvent::LapCompleted { lap: 1, lap_s, best: true, time_s, finished: false } = events[3] else { panic!("{:?}", events[3]) };
     assert!((lap_s - 7.0).abs() < 1e-6 && (time_s - (7.0 + 35.0 / 15.0)).abs() < 1e-6, "{lap_s} {time_s}");
     assert!(handle.take_events().is_empty(), "taking the events empties the queue");
     assert_eq!((get(&s, names::RACE_RUNNING), get(&s, names::RACE_LAPS)), (1.0, 1.0));
     assert!((get(&s, names::RACE_LAST_LAP_S) - 7.0).abs() < 1e-6);
     assert_eq!(get(&s, names::RACE_BEST_LAP_S), get(&s, names::RACE_LAST_LAP_S));
     assert_eq!(get(&s, names::RACE_NEXT_GATE), 0.0, "gates 1 and 2 of the second lap are passed: gate 0 is next");
+}
+
+#[test]
+fn the_lap_limit_stops_the_race_and_a_reset_requested_between_ticks_starts_another() {
+    let (mut s, handle) = rig_with_limit(1000, 15.0, Some(1));
+    s.run_for(15.0).unwrap(); // two flights of the 7 s loop: the first closes lap 1 (and the race), the second counts nothing
+    let events = handle.take_events();
+    let lap_events = events.iter().filter(|e| matches!(e, RaceEvent::LapCompleted { .. })).count();
+    assert_eq!(lap_events, 1, "one lap, then the race is over: {events:?}");
+    assert!(matches!(events.last(), Some(RaceEvent::LapCompleted { lap: 1, finished: true, .. })), "{events:?}");
+    assert_eq!((get(&s, names::RACE_FINISHED), get(&s, names::RACE_RUNNING), get(&s, names::RACE_LAPS)), (1.0, 0.0, 1.0));
+
+    handle.request_reset();
+    s.run_for(0.01).unwrap();
+    let events = handle.take_events();
+    assert!(matches!(events[..], [RaceEvent::Reset { time_s }] if (time_s - 15.0).abs() < 0.01), "{events:?}");
+    for signal in [names::RACE_FINISHED, names::RACE_RUNNING, names::RACE_LAPS, names::RACE_NEXT_GATE, names::RACE_BEST_LAP_S, names::RACE_LAST_LAP_S] {
+        assert_eq!(get(&s, signal), 0.0, "{signal} after a reset");
+    }
+    // The loop keeps flying: the course starts again from gate 0.
+    s.run_for(10.0).unwrap();
+    assert!(matches!(handle.take_events().first(), Some(RaceEvent::GatePassed { gate: 0, .. })));
 }
 
 #[test]
@@ -85,7 +111,7 @@ fn a_quad_at_100_mps_is_counted_once_per_gate_at_any_tick_rate() {
 #[test]
 fn a_pass_over_a_post_raises_a_hit_through_the_timer() {
     let mut bus = Bus::new();
-    let (timer, handle) = GateTimer::new(&course(), 0.2, &mut bus);
+    let (timer, handle) = GateTimer::new(&course(), 0.2, None, &mut bus);
     let mut s = Scheduler::new(1000, bus);
     // 1.4 m east of the centre line: inside the 3 m opening (1.5 m half-width), over the post for a 0.2 m radius.
     s.add(Box::new(Mover(Box::new(|t| DVec3::new(-5.0 + 15.0 * t, 1.4, -1.5)))));

@@ -58,6 +58,7 @@ fn a_vehicle_journals_what_steers_it() {
                     Action::ClearFaults => "clear",
                     Action::PlayInputs(_) => "play",
                     Action::StopInputs => "stop",
+                    Action::ResetRace => "race_reset",
                 },
             )
         })

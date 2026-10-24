@@ -58,8 +58,20 @@ pub struct WorldConfig {
     /// The race course, in order: gate 0 is the start and finish (docs/race-timing.md).
     #[serde(default)]
     pub gates: Vec<GateSection>,
+    /// The race's rules; absent = race forever.
+    #[serde(default)]
+    pub race: RaceSection,
     #[serde(skip)]
     pub source_path: PathBuf,
+}
+
+/// The rules of the race the gates make.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RaceSection {
+    /// The race ends when this many laps are completed (absent = no limit).
+    #[serde(default)]
+    pub laps: Option<u32>,
 }
 
 /// The most gates a world may declare.
@@ -343,6 +355,7 @@ impl WorldConfig {
             objects: Vec::new(),
             emitters: Vec::new(),
             gates: Vec::new(),
+            race: RaceSection::default(),
             source_path: PathBuf::new(),
         }
     }
@@ -435,6 +448,10 @@ impl WorldConfig {
                     c.check(o.size_m.is_none(), &field("shape"), "size_m is for a box");
                 }
             }
+        }
+        if let Some(laps) = self.race.laps {
+            c.check(laps >= 1, "race.laps", "must be >= 1 (leave it out for no limit)");
+            c.check(!self.gates.is_empty(), "race.laps", "a lap limit needs at least one [[gates]] entry");
         }
         c.check(self.gates.len() <= MAX_GATES, "gates", format!("at most {MAX_GATES} gates (got {})", self.gates.len()));
         let mut names = HashSet::new();

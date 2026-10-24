@@ -327,6 +327,11 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
                         shared.error(status_error(status));
                     }
                 }
+                Some(Command::ResetRace) => {
+                    if let Err(status) = client.reset_race(pb::Empty {}).await {
+                        shared.error(status_error(status));
+                    }
+                }
                 Some(Command::SetInputsRecording(on)) => {
                     let result = if on {
                         client.start_inputs_recording(pb::Empty {}).await.map(|_| ())

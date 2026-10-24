@@ -149,6 +149,9 @@ func _process(delta: float) -> void:
 		_world_version = world_version
 		world.build(client.get_world())
 	var telemetry: Dictionary = client.get_telemetry()
+	# The gate to fly through next, from the state just read; none before there is a race, and none once it is over.
+	var racing: bool = telemetry.get("race_present", false) and not telemetry.get("race_finished", false)
+	world.set_next_gate(int(telemetry.get("race_next_gate", 0)) if racing else -1)
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
 	var detail: String = client.get_phase_detail()
@@ -181,6 +184,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			set_radio_cut(not radio_cut)
 		KEY_I:
 			_toggle_inputs_recording()
+		KEY_N:
+			if client != null:
+				client.reset_race()
 		KEY_H:
 			hud.toggle_hud()
 		KEY_F1:
@@ -335,6 +341,8 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast(message)
 		"gate_hit":
 			hud.add_toast(message, "warn")
+		"race_finished", "race_reset":
+			hud.add_toast(message)
 		"video_lost":
 			hud.add_toast("Video lost - %s" % message.trim_prefix("video lost: "), "warn")
 		"video_restored":

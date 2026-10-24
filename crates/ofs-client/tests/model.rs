@@ -209,12 +209,13 @@ fn a_gate_is_converted_to_godots_frame() {
 #[test]
 fn the_race_state_reaches_the_telemetry() {
     let state = pb::State {
-        race: Some(pb::RaceState { present: true, running: true, next_gate: 2, gate_count: 3, laps: 1, current_lap_s: 4.5, last_lap_s: 31.2, best_lap_s: 30.0 }),
+        race: Some(pb::RaceState { present: true, running: true, next_gate: 2, gate_count: 3, laps: 1, current_lap_s: 4.5, last_lap_s: 31.2, best_lap_s: 30.0, finished: true, lap_limit: 3 }),
         ..Default::default()
     };
     let r = Telemetry::from_pb(&state).race;
     assert_eq!((r.present, r.running, r.next_gate, r.gate_count, r.laps), (true, true, 2, 3, 1));
     assert_eq!((r.current_lap_s, r.last_lap_s, r.best_lap_s), (4.5, 31.2, 30.0));
+    assert_eq!((r.finished, r.lap_limit), (true, 3));
     assert!(!Telemetry::from_pb(&pb::State::default()).race.present, "a state without a race: none");
 }
 
@@ -226,4 +227,8 @@ fn the_race_event_kinds_have_names() {
     assert_eq!((e.kind, e.kind.as_str()), (EventKind::LapCompleted, "lap_completed"));
     let e = Event::from_pb(pb::Event { time_s: 4.0, kind: pb::EventKind::GateHit as i32, message: "Gate1 (gate 1) hit".into() });
     assert_eq!((e.kind, e.kind.as_str()), (EventKind::GateHit, "gate_hit"));
+    let e = Event::from_pb(pb::Event { time_s: 5.0, kind: pb::EventKind::RaceFinished as i32, message: "race finished: 3 laps".into() });
+    assert_eq!((e.kind, e.kind.as_str()), (EventKind::RaceFinished, "race_finished"));
+    let e = Event::from_pb(pb::Event { time_s: 6.0, kind: pb::EventKind::RaceReset as i32, message: "race reset".into() });
+    assert_eq!((e.kind, e.kind.as_str()), (EventKind::RaceReset, "race_reset"));
 }

@@ -1092,7 +1092,7 @@ pub fn build_seeded(
     // After the physics, which wrote this tick's pose; a world without gates adds neither the model nor its signals.
     let mut race = None;
     if !opts.world.gates.is_empty() {
-        let (timer, handle) = GateTimer::new(&opts.world.gates, cfg.bounding_radius_m(), &mut bus);
+        let (timer, handle) = GateTimer::new(&opts.world.gates, cfg.bounding_radius_m(), opts.world.race.laps, &mut bus);
         race = Some(RaceLink { signals: RaceSignals::register(&mut bus), handle });
         models.push(Box::new(timer));
     }
@@ -1607,6 +1607,9 @@ impl Vehicle {
             Action::StopInputs => {
                 self.stop_inputs();
             }
+            Action::ResetRace => {
+                self.reset_race();
+            }
         }
         Ok(())
     }
@@ -1704,8 +1707,19 @@ impl Vehicle {
             race: self
                 .race
                 .as_ref()
-                .map_or_else(RaceInfo::default, |r| r.signals.info(b, self.scheduler.time_s(), self.world.gates.len())),
+                .map_or_else(RaceInfo::default, |r| {
+                    r.signals.info(b, self.scheduler.time_s(), self.world.gates.len(), self.world.race.laps.unwrap_or(0))
+                }),
         }
+    }
+
+    /// Starts a fresh race at the next tick (no clock, no laps, no best time, gate 0 next). `false` when the world
+    /// has no gates, so there is no race to reset.
+    pub fn reset_race(&mut self) -> bool {
+        let Some(race) = &self.race else { return false };
+        self.journal.push(self.scheduler.tick(), Action::ResetRace);
+        race.handle.request_reset();
+        true
     }
 
     /// The gate and lap events raised since the last call.

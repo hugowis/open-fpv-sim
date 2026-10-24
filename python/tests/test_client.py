@@ -2,6 +2,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 import grpc
 import pytest
@@ -422,3 +423,20 @@ def test_launches_started_together_each_get_their_own_server(sim_bin, tmp_path):
     finally:
         for s in sims:
             s.close()
+
+
+def test_a_race_can_be_reset_only_in_a_world_with_gates(sim):
+    sim.load(QUAD, open_loop_fc=True, record=False)
+    with pytest.raises(ofs.InvalidState, match="no gates"):
+        sim.reset_race()
+    sim.load(QUAD, open_loop_fc=True, world=WORLD, record=False)
+    sim.reset_race()
+    s = sim.run(0.05)
+    assert (s.race.present, s.race.running, s.race.finished, s.race.lap_limit) == (True, False, False, 0)
+    # Events arrive on a background thread, so one can still be in flight when `run` returns.
+    deadline = time.monotonic() + 5.0
+    seen = []
+    while time.monotonic() < deadline and not any(k == "race_reset" for k, _ in seen):
+        seen += [(e.kind, e.message) for e in sim.events()]
+        time.sleep(0.01)
+    assert ("race_reset", "race reset") in seen, "the reset is announced"

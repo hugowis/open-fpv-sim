@@ -90,6 +90,15 @@ pub(crate) fn events_in_time_order(mut out: Vec<pb::Event>) -> Vec<pb::Event> {
     out
 }
 
+/// The protocol events a race event makes: the last lap also ends the race.
+pub(crate) fn race_events(e: &RaceEvent, gate_names: &[String]) -> Vec<pb::Event> {
+    let mut out = vec![race_event(e, gate_names)];
+    if let RaceEvent::LapCompleted { lap, time_s, finished: true, .. } = *e {
+        out.push(event(time_s, pb::EventKind::RaceFinished, format!("race finished: {lap} {}", if lap == 1 { "lap" } else { "laps" })));
+    }
+    out
+}
+
 pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
     match *e {
         RaceEvent::GatePassed { gate, time_s, split_s } => {
@@ -98,13 +107,14 @@ pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
                 if gate == 0 && split_s == 0.0 { format!("{name} (gate {gate}) start") } else { format!("{name} (gate {gate}) split {split_s:.3} s") };
             event(time_s, pb::EventKind::GatePassed, message)
         }
-        RaceEvent::LapCompleted { lap, time_s, lap_s, best } => {
+        RaceEvent::LapCompleted { lap, time_s, lap_s, best, .. } => {
             event(time_s, pb::EventKind::LapCompleted, format!("lap {lap}: {lap_s:.3} s{}", if best { " (best)" } else { "" }))
         }
         RaceEvent::GateHit { gate, time_s } => {
             let name = gate_names.get(gate).map_or("unknown", String::as_str);
             event(time_s, pb::EventKind::GateHit, format!("{name} (gate {gate}) hit"))
         }
+        RaceEvent::Reset { time_s } => event(time_s, pb::EventKind::RaceReset, "race reset"),
     }
 }
 
@@ -112,6 +122,8 @@ fn race_msg(r: &RaceInfo) -> pb::RaceState {
     pb::RaceState {
         present: r.present,
         running: r.running,
+        finished: r.finished,
+        lap_limit: r.lap_limit,
         next_gate: r.next_gate,
         gate_count: r.gate_count,
         laps: r.laps,
@@ -346,10 +358,10 @@ impl Session {
         let faults = self.vehicle.active_fault_names();
         let s = self.vehicle.state();
         let mut out = self.events_for(&s, faults);
-        let race_events = self.vehicle.take_race_events();
-        if !race_events.is_empty() {
+        let raised = self.vehicle.take_race_events();
+        if !raised.is_empty() {
             let names: Vec<String> = self.vehicle.world().gates.iter().map(|g| g.name.clone()).collect();
-            out.extend(race_events.iter().map(|e| race_event(e, &names)));
+            out.extend(raised.iter().flat_map(|e| race_events(e, &names)));
         }
         if let Some(name) = self.vehicle.take_finished_inputs() {
             out.push(event(s.time_s, pb::EventKind::InputsEnded, format!("{name}: finished")));
@@ -674,12 +686,22 @@ mod tests {
         assert_eq!((start.kind, start.time_s, start.message.as_str()), (pb::EventKind::GatePassed as i32, 2.5, "Gate0 (gate 0) start"));
         let split = race_event(&RaceEvent::GatePassed { gate: 1, time_s: 10.9124, split_s: 8.4123 }, &names);
         assert_eq!((split.kind, split.message.as_str()), (pb::EventKind::GatePassed as i32, "Gate1 (gate 1) split 8.412 s"));
-        let first = race_event(&RaceEvent::LapCompleted { lap: 1, time_s: 33.0, lap_s: 31.2041, best: true }, &names);
+        let first = race_event(&RaceEvent::LapCompleted { lap: 1, time_s: 33.0, lap_s: 31.2041, best: true, finished: false }, &names);
         assert_eq!((first.kind, first.time_s, first.message.as_str()), (pb::EventKind::LapCompleted as i32, 33.0, "lap 1: 31.204 s (best)"));
-        let slower = race_event(&RaceEvent::LapCompleted { lap: 2, time_s: 66.0, lap_s: 33.0, best: false }, &names);
+        let slower = race_event(&RaceEvent::LapCompleted { lap: 2, time_s: 66.0, lap_s: 33.0, best: false, finished: false }, &names);
         assert_eq!(slower.message, "lap 2: 33.000 s");
         let hit = race_event(&RaceEvent::GateHit { gate: 2, time_s: 40.25 }, &names);
         assert_eq!((hit.kind, hit.time_s, hit.message.as_str()), (pb::EventKind::GateHit as i32, 40.25, "Gate2 (gate 2) hit"));
+        let reset = race_event(&RaceEvent::Reset { time_s: 41.0 }, &names);
+        assert_eq!((reset.kind, reset.time_s, reset.message.as_str()), (pb::EventKind::RaceReset as i32, 41.0, "race reset"));
+        let last = race_events(&RaceEvent::LapCompleted { lap: 3, time_s: 99.0, lap_s: 30.0, best: false, finished: true }, &names);
+        let shown: Vec<(i32, &str)> = last.iter().map(|e| (e.kind, e.message.as_str())).collect();
+        assert_eq!(
+            shown,
+            [(pb::EventKind::LapCompleted as i32, "lap 3: 30.000 s"), (pb::EventKind::RaceFinished as i32, "race finished: 3 laps")],
+            "the last lap also ends the race"
+        );
+        assert_eq!(race_events(&RaceEvent::LapCompleted { lap: 1, time_s: 9.0, lap_s: 9.0, best: true, finished: true }, &names)[1].message, "race finished: 1 lap");
     }
 
     #[test]
