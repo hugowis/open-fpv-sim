@@ -128,14 +128,40 @@ class LoadRequest(_message.Message):
     def __init__(self, quad_path: _Optional[str] = ..., seed: _Optional[int] = ..., mode: _Optional[_Union[Mode, str]] = ..., open_loop_fc: _Optional[bool] = ..., overrun_policy: _Optional[_Union[OverrunPolicy, str]] = ..., keep_alive: _Optional[bool] = ..., world_path: _Optional[str] = ..., stabilize: _Optional[bool] = ...) -> None: ...
 
 class LoadReply(_message.Message):
-    __slots__ = ("quad_name", "base_hz", "configurator_address")
+    __slots__ = ("quad_name", "base_hz", "configurator_address", "parts")
     QUAD_NAME_FIELD_NUMBER: _ClassVar[int]
     BASE_HZ_FIELD_NUMBER: _ClassVar[int]
     CONFIGURATOR_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    PARTS_FIELD_NUMBER: _ClassVar[int]
     quad_name: str
     base_hz: int
     configurator_address: str
-    def __init__(self, quad_name: _Optional[str] = ..., base_hz: _Optional[int] = ..., configurator_address: _Optional[str] = ...) -> None: ...
+    parts: _containers.RepeatedCompositeFieldContainer[PartInfo]
+    def __init__(self, quad_name: _Optional[str] = ..., base_hz: _Optional[int] = ..., configurator_address: _Optional[str] = ..., parts: _Optional[_Iterable[_Union[PartInfo, _Mapping]]] = ...) -> None: ...
+
+class PartInfo(_message.Message):
+    __slots__ = ("kind", "id", "name", "provenance")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    PROVENANCE_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    id: str
+    name: str
+    provenance: _containers.RepeatedCompositeFieldContainer[ParamProvenance]
+    def __init__(self, kind: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., provenance: _Optional[_Iterable[_Union[ParamProvenance, _Mapping]]] = ...) -> None: ...
+
+class ParamProvenance(_message.Message):
+    __slots__ = ("path", "source", "link", "note")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    LINK_FIELD_NUMBER: _ClassVar[int]
+    NOTE_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    source: str
+    link: str
+    note: str
+    def __init__(self, path: _Optional[str] = ..., source: _Optional[str] = ..., link: _Optional[str] = ..., note: _Optional[str] = ...) -> None: ...
 
 class Sticks(_message.Message):
     __slots__ = ("roll", "pitch", "yaw", "throttle", "aux")

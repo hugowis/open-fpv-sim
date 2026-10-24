@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 13
+PROTOCOL_VERSION = 14
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -268,6 +268,33 @@ class Event:
     message: str
 
 
+@dataclass(frozen=True)
+class Provenance:
+    """Where one library parameter's value came from."""
+    source: str  # "datasheet" | "measured" | "estimated"
+    link: str
+    note: str
+
+
+@dataclass(frozen=True)
+class Part:
+    """A library part the loaded quad uses, with the provenance of each parameter (keyed by dotted path, e.g.
+    "motor.kv")."""
+    kind: str  # "frame" | "motor" | "prop" | "esc" | "battery" | "vtx"
+    id: str  # a single motor/prop/esc id covers every position, so it is listed once
+    name: str
+    provenance: dict[str, Provenance]
+
+    @property
+    def estimated(self) -> list[str]:
+        """The parameters whose value is only an estimate."""
+        return [path for path, p in self.provenance.items() if p.source == "estimated"]
+
+
+def _part(m) -> Part:
+    return Part(m.kind, m.id, m.name, {p.path: Provenance(p.source, p.link, p.note) for p in m.provenance})
+
+
 def _v(m) -> tuple:
     return (m.x, m.y, m.z)
 
@@ -357,6 +384,7 @@ class Sim:
     def __init__(self, address: str, process: subprocess.Popen | None = None):
         self.address = address
         self.configurator_address = ""
+        self.parts: list[Part] = []
         self._process = process
         self._channel = grpc.insecure_channel(address)
         self._stub = pbg.SimStub(self._channel)
@@ -420,7 +448,8 @@ class Sim:
         the throttle to every motor; adding `stabilize=True` makes it a minimal angle-mode stabilizer, so the roll
         and pitch sticks set the lean, the yaw stick the turn rate, and a script can fly a path (it is not
         Betaflight: real tuning needs SITL; `docs/scripted-flight.md`). Returns the quad's name;
-        `configurator_address` is set when it runs Betaflight."""
+        `configurator_address` is set when it runs Betaflight, and `parts` lists the library parts the quad loaded
+        with the provenance of each of their parameters (`part.estimated` names the guesses)."""
         if mode not in _MODES:
             raise ValueError(f"mode must be one of {sorted(_MODES)}")
         if overrun_policy not in _POLICIES:
@@ -431,6 +460,7 @@ class Sim:
             overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or ""),
             stabilize=stabilize))
         self.configurator_address = reply.configurator_address
+        self.parts = [_part(p) for p in reply.parts]
         self.recording._session_ended()
         if (mode == "lockstep") if record is None else record:
             self.recording.start()

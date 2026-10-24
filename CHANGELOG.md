@@ -5,6 +5,16 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+**Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server
+is refused at the handshake.
+
+### Part provenance over the API (#43)
+#### Added
+- **`LoadReply.parts`** (protocol 14) lists the library parts the quad loaded — frame, motors, props, escs, battery
+  and vtx, a single motor/prop/esc id once — with the provenance of every parameter (`datasheet`, `measured` or
+  `estimated`, the link and the note). Python: `sim.parts` after `load()` (`ofs.Part`, `ofs.Provenance`);
+  `part.estimated` names the parameters that are only guesses. Rust: `QuadConfig::part_provenance`.
+
 ### Reader error for a still-running recording (#117)
 #### Changed
 - **`ofs.reader.read` on a file that is still being recorded** says so: the "unfinished recording" error now names the

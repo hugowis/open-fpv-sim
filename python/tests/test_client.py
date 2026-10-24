@@ -23,6 +23,17 @@ def test_open_loop_rest_then_climb(sim):
     assert len(s.motor_rpm) == 4
 
 
+def test_a_loaded_quad_reports_where_its_numbers_came_from(sim):
+    assert sim.parts == []
+    sim.load(QUAD, open_loop_fc=True)
+    assert [p.kind for p in sim.parts] == ["frame", "motor", "prop", "esc", "battery", "vtx"]
+    assert all(p.provenance for p in sim.parts), "every part parameter has provenance"
+    motor = sim.parts[1]
+    assert motor.provenance["motor.kv_rpm_per_v"].source == "estimated"
+    assert "motor.kv_rpm_per_v" in motor.estimated
+    assert {p.source for part in sim.parts for p in part.provenance.values()} <= {"datasheet", "measured", "estimated"}
+
+
 def test_errors_are_typed(sim):
     with pytest.raises(ofs.NotLoaded):
         sim.run(0.1)

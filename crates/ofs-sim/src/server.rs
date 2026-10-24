@@ -68,6 +68,20 @@ pub(crate) fn loaded(slot: &mut Slot) -> Result<&mut Session, Status> {
     slot.as_mut().ok_or_else(not_loaded)
 }
 
+fn part_info(p: &ofs_config::part::PartProvenance) -> pb::PartInfo {
+    let provenance = p
+        .parameters
+        .iter()
+        .map(|(path, v)| pb::ParamProvenance {
+            path: path.clone(),
+            source: v.source.as_str().to_string(),
+            link: v.link.clone(),
+            note: v.note.clone(),
+        })
+        .collect();
+    pb::PartInfo { kind: p.kind.to_string(), id: p.id.clone(), name: p.name.clone(), provenance }
+}
+
 fn invalid_state(message: &str) -> Status {
     error("invalid_state", Code::FailedPrecondition, message)
 }
@@ -346,7 +360,8 @@ impl Sim for SimService {
             session.repro = repro;
             session.blackbox = blackbox;
             *slot = Some(session);
-            Ok(pb::LoadReply { quad_name: cfg.name.clone(), base_hz: cfg.sim.base_hz, configurator_address })
+            let parts = cfg.part_provenance.iter().map(part_info).collect();
+            Ok(pb::LoadReply { quad_name: cfg.name.clone(), base_hz: cfg.sim.base_hz, configurator_address, parts })
         })
         .await
     }

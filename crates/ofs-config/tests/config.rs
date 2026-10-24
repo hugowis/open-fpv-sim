@@ -67,6 +67,27 @@ fn reference_quad_loads_and_validates() {
 }
 
 #[test]
+fn a_loaded_quad_keeps_each_parts_provenance_once_per_referenced_id() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let kinds: Vec<_> = cfg.part_provenance.iter().map(|p| (p.kind, p.id.as_str())).collect();
+    assert_eq!(
+        kinds,
+        [
+            ("frame", "opendrone-5f"),
+            ("motor", "opendrone-openmotor-2207"),
+            ("prop", "opendrone-5in-prop"),
+            ("esc", "opendrone-4in1-esc"),
+            ("battery", "opendrone-6s-1300"),
+            ("vtx", "opendrone-smartaudio-1w"),
+        ],
+        "the single motor, prop and esc ids are listed once, not once per position"
+    );
+    assert!(cfg.part_provenance.iter().all(|p| !p.name.is_empty() && !p.parameters.is_empty()));
+    let motor = &cfg.part_provenance[1];
+    assert_eq!(motor.parameters["motor.kv_rpm_per_v"].source.as_str(), "estimated");
+}
+
+#[test]
 fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
     let dir = tempfile::tempdir().unwrap();
     let old = quad_text()

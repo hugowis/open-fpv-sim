@@ -114,6 +114,12 @@ async fn open_loop_session_runs_and_reports_state() {
     let mut c = start().await;
     let reply = c.load(open_loop(Mode::Lockstep)).await.unwrap().into_inner();
     assert_eq!(reply.configurator_address, "", "no Betaflight, no Configurator");
+    let kinds: Vec<_> = reply.parts.iter().map(|p| p.kind.as_str()).collect();
+    assert_eq!(kinds, ["frame", "motor", "prop", "esc", "battery", "vtx"]);
+    let motor = &reply.parts[1];
+    let kv = motor.provenance.iter().find(|p| p.path == "motor.kv_rpm_per_v").expect("the motor's kv has provenance");
+    assert_eq!(kv.source, "estimated");
+    assert!(!kv.note.is_empty());
     let s = c.run(RunRequest { seconds: 1.0 }).await.unwrap().into_inner();
     assert!((s.time_s - 1.0).abs() < 1e-9);
     assert!((s.position_ned_m.unwrap().z + 0.04).abs() < 2e-3, "rests on the body sphere: {:?}", s.position_ned_m);

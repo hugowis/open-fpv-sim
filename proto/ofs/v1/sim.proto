@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 13: protocol 12 plus the downlink-loss fault.
+// Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply.
+// Protocol 13 added the downlink-loss fault.
 // Protocol 12 added the open-loop stabilizer on Load (M8b).
 // Protocol 11 added gates, lap timing and the race state (M8a).
 // Protocol 10 added recording a live flight's sticks to a replayable CSV (M5).
@@ -95,6 +96,21 @@ message LoadReply {
   string quad_name = 1;
   uint32 base_hz = 2;
   string configurator_address = 3;  // the slot's Configurator address (tcp://127.0.0.1:5761 for slot 0) when the FC is Betaflight SITL, else empty
+  repeated PartInfo parts = 4;      // the library parts the quad loaded: frame, motors, props, escs, battery, vtx
+}
+
+// A library part the quad loaded and where each of its numbers came from.
+message PartInfo {
+  string kind = 1;  // frame | motor | prop | esc | battery | vtx
+  string id = 2;    // the library id the quad referenced (a single motor/prop/esc id covers every position)
+  string name = 3;  // the part file's own name
+  repeated ParamProvenance provenance = 4;  // sorted by path
+}
+message ParamProvenance {
+  string path = 1;    // the parameter, dotted (motor.kv)
+  string source = 2;  // datasheet | measured | estimated
+  string link = 3;
+  string note = 4;
 }
 
 // roll, pitch, yaw, aux in [-1, 1]; throttle in [0, 1]. Up to 4 aux channels; missing ones are -1.

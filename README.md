@@ -156,6 +156,9 @@ refused at load:
     source = "estimated"     # datasheet | measured | estimated
     note = "M1 estimate; the OpenMotor datasheet value replaces this when transcribed"
 
+A script reads them back after `load`: `sim.parts` lists each loaded part with its parameters' provenance, and
+`part.estimated` names the guesses.
+
 Every shipped value is an estimate recorded in the open — the ledger is
 `docs/research/component-library.md`, and `library/README.md` describes adding a part. Schema-4 quad files
 (which carried the `[frame]`, `[ground]`, `[motor]`, `[prop]`, `[esc]`, `[battery]` and `[vtx]` hardware
