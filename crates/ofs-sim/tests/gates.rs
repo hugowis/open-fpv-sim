@@ -29,6 +29,8 @@ fn course() -> Vec<GateSection> {
             heading_deg: 0.0,
             width_m: 3.0,
             height_m: 2.0,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
         })
         .collect()
 }
@@ -37,7 +39,7 @@ fn course() -> Vec<GateSection> {
 /// (the jump back is a backwards crossing of every gate, which counts for nothing).
 fn rig(base_hz: u32, speed: f64) -> (Scheduler, RaceHandle) {
     let mut bus = Bus::new();
-    let (timer, handle) = GateTimer::new(&course(), &mut bus);
+    let (timer, handle) = GateTimer::new(&course(), 0.0, &mut bus);
     let lap_s = 105.0 / speed;
     let mut s = Scheduler::new(base_hz, bus);
     s.add(Box::new(Mover(Box::new(move |t| DVec3::new(-5.0 + speed * (t % lap_s), 0.0, -1.5)))));
@@ -77,6 +79,21 @@ fn a_quad_at_100_mps_is_counted_once_per_gate_at_any_tick_rate() {
         let RaceEvent::GatePassed { gate: 2, split_s, .. } = events[2] else { panic!("{:?}", events[2]) };
         assert!((split_s - 0.6).abs() < 1e-6, "{base_hz} Hz: {split_s}");
     }
+}
+
+/// A pass that is inside the opening but closer to a post than the quad is wide raises a hit, not a start.
+#[test]
+fn a_pass_over_a_post_raises_a_hit_through_the_timer() {
+    let mut bus = Bus::new();
+    let (timer, handle) = GateTimer::new(&course(), 0.2, &mut bus);
+    let mut s = Scheduler::new(1000, bus);
+    // 1.4 m east of the centre line: inside the 3 m opening (1.5 m half-width), over the post for a 0.2 m radius.
+    s.add(Box::new(Mover(Box::new(|t| DVec3::new(-5.0 + 15.0 * t, 1.4, -1.5)))));
+    s.add(Box::new(timer));
+    s.run_for(3.0).unwrap();
+    let events = handle.take_events();
+    assert!(matches!(events[..], [RaceEvent::GateHit { gate: 0, time_s }] if (time_s - 35.0 / 15.0).abs() < 1e-3), "{events:?}");
+    assert_eq!((get(&s, names::RACE_RUNNING), get(&s, names::RACE_NEXT_GATE)), (0.0, 0.0), "no start, gate 0 still next");
 }
 
 /// The race path end to end through a `Session`: a stabilized quad steered through Gate0 of the circuit world raises

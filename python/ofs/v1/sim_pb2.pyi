@@ -52,6 +52,7 @@ class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EVENT_KIND_INPUTS_RECORDING_STOPPED: _ClassVar[EventKind]
     EVENT_KIND_GATE_PASSED: _ClassVar[EventKind]
     EVENT_KIND_LAP_COMPLETED: _ClassVar[EventKind]
+    EVENT_KIND_GATE_HIT: _ClassVar[EventKind]
 MODE_UNSPECIFIED: Mode
 MODE_LOCKSTEP: Mode
 MODE_REALTIME: Mode
@@ -86,6 +87,7 @@ EVENT_KIND_INPUTS_RECORDING_STARTED: EventKind
 EVENT_KIND_INPUTS_RECORDING_STOPPED: EventKind
 EVENT_KIND_GATE_PASSED: EventKind
 EVENT_KIND_LAP_COMPLETED: EventKind
+EVENT_KIND_GATE_HIT: EventKind
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -590,18 +592,22 @@ class WorldObject(_message.Message):
     def __init__(self, name: _Optional[str] = ..., shape: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., size_m: _Optional[_Union[Vec3, _Mapping]] = ..., radius_m: _Optional[float] = ..., height_m: _Optional[float] = ..., color: _Optional[_Union[Vec3, _Mapping]] = ..., rf_loss_db: _Optional[float] = ...) -> None: ...
 
 class Gate(_message.Message):
-    __slots__ = ("name", "center_ned_m", "heading_deg", "width_m", "height_m")
+    __slots__ = ("name", "center_ned_m", "heading_deg", "width_m", "height_m", "pitch_deg", "roll_deg")
     NAME_FIELD_NUMBER: _ClassVar[int]
     CENTER_NED_M_FIELD_NUMBER: _ClassVar[int]
     HEADING_DEG_FIELD_NUMBER: _ClassVar[int]
     WIDTH_M_FIELD_NUMBER: _ClassVar[int]
     HEIGHT_M_FIELD_NUMBER: _ClassVar[int]
+    PITCH_DEG_FIELD_NUMBER: _ClassVar[int]
+    ROLL_DEG_FIELD_NUMBER: _ClassVar[int]
     name: str
     center_ned_m: Vec3
     heading_deg: float
     width_m: float
     height_m: float
-    def __init__(self, name: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., heading_deg: _Optional[float] = ..., width_m: _Optional[float] = ..., height_m: _Optional[float] = ...) -> None: ...
+    pitch_deg: float
+    roll_deg: float
+    def __init__(self, name: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., heading_deg: _Optional[float] = ..., width_m: _Optional[float] = ..., height_m: _Optional[float] = ..., pitch_deg: _Optional[float] = ..., roll_deg: _Optional[float] = ...) -> None: ...
 
 class Emitter(_message.Message):
     __slots__ = ("name", "position_ned_m", "freq_mhz", "power_mw")

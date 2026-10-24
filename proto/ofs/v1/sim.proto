@@ -279,6 +279,9 @@ enum EventKind {
   EVENT_KIND_GATE_PASSED = 22;
   // The message is "lap <n>: <s> s", with " (best)" appended when it is the fastest lap so far (the first is).
   EVENT_KIND_LAP_COMPLETED = 23;
+  // The quad went through the next gate's opening but its bounding sphere did not fit: no credit, the gate is still
+  // next. The message is "<name> (gate <i>) hit"; the event's time is the crossing's.
+  EVENT_KIND_GATE_HIT = 24;
 }
 
 message Event {
@@ -406,14 +409,16 @@ message WorldObject {
   double rf_loss_db = 8;
 }
 
-// A gate: a vertical opening flown through in the direction of heading_deg (0 = north, clockwise). Gate 0 is the
-// start and finish; the gates are listed in course order.
+// A gate: an opening flown through in the direction of heading_deg (0 = north, clockwise), upright unless tilted.
+// Gate 0 is the start and finish; the gates are listed in course order.
 message Gate {
   string name = 1;
   Vec3 center_ned_m = 2;
   double heading_deg = 3;
   double width_m = 4;
   double height_m = 5;
+  double pitch_deg = 6;  // aerospace Z-Y-X after the heading: positive lifts the direction of travel (top leans back)
+  double roll_deg = 7;   // positive turns the opening clockwise seen from the approach
 }
 
 message Emitter {

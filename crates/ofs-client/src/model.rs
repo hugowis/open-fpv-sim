@@ -215,6 +215,10 @@ pub struct WorldGate {
     pub heading_deg: f64,
     pub width_m: f64,
     pub height_m: f64,
+    /// Tilt after the heading (aerospace Z-Y-X): a positive pitch lifts the direction of travel, a positive roll
+    /// turns the opening clockwise seen from the approach. Both 0 for an upright gate.
+    pub pitch_deg: f64,
+    pub roll_deg: f64,
 }
 
 /// The lap clock (all zero/false when the world has no gates).
@@ -326,6 +330,8 @@ impl World {
                     heading_deg: g.heading_deg,
                     width_m: g.width_m,
                     height_m: g.height_m,
+                    pitch_deg: g.pitch_deg,
+                    roll_deg: g.roll_deg,
                 })
                 .collect(),
         }
@@ -505,6 +511,8 @@ pub enum EventKind {
     GatePassed,
     /// A lap completed (the message gives its time).
     LapCompleted,
+    /// The quad went through a gate's opening but its body did not fit: no credit (the message names the gate).
+    GateHit,
     /// A kind this client does not know (a newer server).
     Unknown,
 }
@@ -535,6 +543,7 @@ impl EventKind {
             EventKind::InputsRecordingStopped => "inputs_recording_stopped",
             EventKind::GatePassed => "gate_passed",
             EventKind::LapCompleted => "lap_completed",
+            EventKind::GateHit => "gate_hit",
             EventKind::Unknown => "unknown",
         }
     }
@@ -574,6 +583,7 @@ impl Event {
             Ok(pb::EventKind::InputsRecordingStopped) => EventKind::InputsRecordingStopped,
             Ok(pb::EventKind::GatePassed) => EventKind::GatePassed,
             Ok(pb::EventKind::LapCompleted) => EventKind::LapCompleted,
+            Ok(pb::EventKind::GateHit) => EventKind::GateHit,
             Ok(pb::EventKind::Unspecified) | Err(_) => EventKind::Unknown,
         };
         Event { time_s: e.time_s, kind, message: e.message }

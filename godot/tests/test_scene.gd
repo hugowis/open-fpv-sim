@@ -91,6 +91,26 @@ func test_gates_are_drawn_as_openings_facing_their_direction_of_travel() -> void
 	world.queue_free()
 
 
+func test_a_tilted_gate_is_drawn_on_its_tilted_plane() -> void:
+	var upright := World.gate_basis(0.0)
+	ok(upright.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-6 and upright.y.distance_to(Vector3.UP) < 1e-6, "north, upright")
+	var pitched := World.gate_basis(0.0, 45.0)
+	var s := sqrt(0.5)
+	ok(pitched.z.distance_to(Vector3(0.0, s, -s)) < 1e-6, "a positive pitch lifts the direction of travel: %s" % str(pitched.z))
+	ok(pitched.y.distance_to(Vector3(0.0, s, s)) < 1e-6, "and leans the top back toward the approach: %s" % str(pitched.y))
+	var rolled := World.gate_basis(0.0, 0.0, 90.0)
+	ok(rolled.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-6, "a roll keeps the direction of travel")
+	ok(rolled.y.distance_to(Vector3(1.0, 0.0, 0.0)) < 1e-6, "a quarter turn clockwise from the approach puts the opening's up to the east: %s" % str(rolled.y))
+	for b in [pitched, rolled, World.gate_basis(137.0, -33.0, 71.0)]:
+		ok(absf(b.determinant() - 1.0) < 1e-6 and b.is_conformal(), "a proper rotation")
+	var world := World.new()
+	await add_to_tree(world)
+	world.build({"gates": [{"name": "T", "center": Vector3(0.0, 3.0, -30.0), "heading_deg": 0.0, "pitch_deg": 45.0, "roll_deg": 0.0, "width": 3.0, "height": 2.0}]})
+	var t: Node3D = world.get_node("Gate_T")
+	ok(t.global_transform.basis.z.distance_to(Vector3(0.0, s, -s)) < 1e-5, "the node carries the tilt: %s" % str(t.global_transform.basis.z))
+	world.queue_free()
+
+
 func test_the_world_is_only_scenery() -> void:
 	var world := World.new()
 	await add_to_tree(world)

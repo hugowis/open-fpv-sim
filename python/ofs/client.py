@@ -157,12 +157,16 @@ class Handset:
 
 @dataclass(frozen=True)
 class Gate:
-    """A race gate: a vertical opening flown through in the direction of `heading_deg` (0 = north, clockwise)."""
+    """A race gate: an opening flown through in the direction of `heading_deg` (0 = north, clockwise). It stands
+    upright unless tilted: `pitch_deg` and `roll_deg` follow the heading (aerospace Z-Y-X; a positive pitch lifts the
+    direction of travel, a positive roll turns the opening clockwise seen from the approach)."""
     name: str
     center_ned_m: tuple
     heading_deg: float
     width_m: float
     height_m: float
+    pitch_deg: float = 0.0
+    roll_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -324,7 +328,8 @@ def _world(m) -> World:
             antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
                                            a.aim_el_deg) for a in m.handset.antennas),
         ) if m.HasField("handset") else Handset((), ()),
-        gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m) for g in m.gates),
+        gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m, g.pitch_deg, g.roll_deg)
+                    for g in m.gates),
     )
 
 

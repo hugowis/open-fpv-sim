@@ -8,6 +8,19 @@ repository). The format follows Keep a Changelog.
 **Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server
 is refused at the handshake.
 
+### Race gates: the quad's size and tilted openings (#103)
+#### Changed
+- **A pass has to fit the quad.** The crossing point must be at least the quad's bounding radius (its collision
+  spheres' farthest edge, 0.2 m for the shipped quad) inside the opening's edges. A pass whose centre is inside the
+  opening but closer to an edge raises the new `gate_hit` event (protocol 14, `EVENT_KIND_GATE_HIT`; Godot toasts it),
+  gives no credit and leaves the gate next. A gate counts again, as after any pass, only once the quad has been 3 m
+  from its plane. A course whose openings are wider than the quad by more than its radius, like `worlds/circuit.toml`,
+  is unaffected.
+#### Added
+- **`pitch_deg` and `roll_deg` on a `[[gates]]` entry** (default 0, an upright gate; aerospace Z-Y-X after the
+  heading). The crossing test, the ground check and the Godot frame use the tilted plane; `Gate.pitch_deg` and
+  `roll_deg` on `World.gates` (protocol 14, Python `ofs.Gate`). Worlds without them behave exactly as before.
+
 ### Part provenance over the API (#43)
 #### Added
 - **`LoadReply.parts`** (protocol 14) lists the library parts the quad loaded — frame, motors, props, escs, battery

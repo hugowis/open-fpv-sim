@@ -100,6 +100,27 @@ fn every_gate_problem_is_reported_at_once() {
 }
 
 #[test]
+fn a_gate_tilt_is_optional_and_checked() {
+    let tilted = |center: &str, pitch: &str, roll: &str| {
+        world_text() + &gate_block("Tilt", center, "0.0", "3.0", "2.0") + &format!("pitch_deg = {pitch}
+roll_deg = {roll}
+")
+    };
+    let loads = |text: &str| world::load(&write(tempfile::tempdir().unwrap().path(), text)).is_ok();
+    assert!(loads(&tilted("[10.0, 0.0, -2.0]", "30.0", "-45.0")));
+    let found = problems(&tilted("[10.0, 0.0, -2.0]", "90.0", "181.0"));
+    for expected in ["gates[3].pitch_deg", "gates[3].roll_deg"] {
+        assert!(found.iter().any(|p| p.starts_with(expected)), "{expected} missing from {found:#?}");
+    }
+    // Rolled a quarter turn the 3 m width is the vertical extent: centred 1.2 m up it reaches 0.3 m below the ground.
+    assert!(problems(&tilted("[10.0, 0.0, -1.2]", "0.0", "90.0")).iter().any(|p| p.starts_with("gates[3].center_ned_m")));
+    assert!(loads(&tilted("[10.0, 0.0, -1.5]", "0.0", "90.0")), "its lowest edge just touches the ground");
+    // The shipped gates are upright, with their axes exactly where they were before tilt existed.
+    let (forward, across, down) = world::load(Path::new(WORLD)).unwrap().gates[0].axes();
+    assert_eq!((forward, across, down), ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]));
+}
+
+#[test]
 fn a_world_has_at_most_64_gates() {
     let mut text = world_text();
     for i in 0..61 {

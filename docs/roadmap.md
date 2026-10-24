@@ -92,8 +92,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   Foxglove itself was not installed on the evidence machine, so its behavior on a live file remains to be checked.
 
 ### Race timing (`docs/race-timing.md`)
-- A gate is a trigger on the quad's centre: no margin for its size, no tilt. There is no lap limit and no reset (a
-  new `Load` starts a fresh race), and Godot does not highlight the next gate.
+- A gate is a trigger: a pass needs the quad's bounding sphere inside the opening (a clipped pass is a `gate_hit`),
+  and a gate can be tilted (`pitch_deg`, `roll_deg`). There is no lap limit and no reset (a new `Load` starts a fresh
+  race), and Godot does not highlight the next gate.
 
 ### Python
 - The live view follows the state stream (up to 240 Hz); the 8 kHz signals are only in the recording.

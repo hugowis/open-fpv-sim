@@ -166,14 +166,29 @@ func _add_handset(position: Vector3) -> void:
 	_add_built(handset)
 
 
+## A gate's frame in Godot: local +Z along the direction of travel, +Y the opening's "up". The heading is a turn about
+## the vertical (north is -Z, east is +X); the optional pitch and roll tilt it after that, aerospace Z-Y-X as in the
+## world file (a positive pitch lifts the direction of travel, a positive roll turns the opening clockwise seen
+## from the approach). An upright gate is the heading alone.
+static func gate_basis(heading_deg: float, pitch_deg: float = 0.0, roll_deg: float = 0.0) -> Basis:
+	var h := deg_to_rad(heading_deg)
+	var p := deg_to_rad(pitch_deg)
+	var r := deg_to_rad(roll_deg)
+	var forward_ned := Vector3(cos(h) * cos(p), sin(h) * cos(p), -sin(p))
+	var down_ned := Vector3(cos(h) * sin(p) * cos(r) + sin(h) * sin(r), sin(h) * sin(p) * cos(r) - cos(h) * sin(r), cos(p) * cos(r))
+	# NED (north, east, down) to Godot (east, up, south).
+	var z := Vector3(forward_ned.y, -forward_ned.z, -forward_ned.x)
+	var y := Vector3(-down_ned.y, down_ned.z, down_ned.x)
+	return Basis(y.cross(z), y, z)
+
+
 ## A gate's opening: a translucent rectangle across the direction of travel (the node's +Z points along it), labelled
 ## START for gate 0 and with its number for the others. The posts and bar of a physical gate are ordinary objects.
 func _add_gate(index: int, g: Dictionary) -> void:
 	var gate := Node3D.new()
 	gate.name = "Gate_" + String(g["name"])
 	gate.position = g["center"]
-	# Local +Z rotated about +Y by PI - heading is (sin h, 0, -cos h): north is -Z, east is +X.
-	gate.rotation.y = PI - deg_to_rad(float(g["heading_deg"]))
+	gate.basis = gate_basis(float(g["heading_deg"]), float(g.get("pitch_deg", 0.0)), float(g.get("roll_deg", 0.0)))
 	var quad := QuadMesh.new()
 	quad.size = Vector2(float(g["width"]), float(g["height"]))
 	var color := GATE_START_COLOR if index == 0 else GATE_COLOR

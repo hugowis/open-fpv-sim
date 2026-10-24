@@ -88,6 +88,15 @@ fn a_loaded_quad_keeps_each_parts_provenance_once_per_referenced_id() {
 }
 
 #[test]
+fn the_bounding_radius_is_the_farthest_collision_sphere_edge() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let r = cfg.bounding_radius_m();
+    assert!((0.1..0.4).contains(&r), "a 5 inch quad is about 0.2 m from its centre to a prop tip: {r}");
+    let reach = cfg.collision_spheres().iter().map(|s| (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() + s[3]).fold(0.0, f64::max);
+    assert_eq!(r, reach);
+}
+
+#[test]
 fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
     let dir = tempfile::tempdir().unwrap();
     let old = quad_text()

@@ -221,7 +221,8 @@ The client and server speak **protocol 14**: `StartRecording`/`StopRecording`, `
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
-protocol 13), and the loaded parts' provenance (`LoadReply.parts`, protocol 14; Python `sim.parts`).
+protocol 13), the loaded parts' provenance (`LoadReply.parts`, protocol 14; Python `sim.parts`), and gate tilt and clipped
+passes (`Gate.pitch_deg`/`roll_deg`, `EVENT_KIND_GATE_HIT`, protocol 14).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

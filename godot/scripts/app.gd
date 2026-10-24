@@ -333,6 +333,8 @@ func _on_event(kind: String, message: String, _time_s: float) -> void:
 			hud.add_toast(message, "warn")
 		"gate_passed", "lap_completed":
 			hud.add_toast(message)
+		"gate_hit":
+			hud.add_toast(message, "warn")
 		"video_lost":
 			hud.add_toast("Video lost - %s" % message.trim_prefix("video lost: "), "warn")
 		"video_restored":

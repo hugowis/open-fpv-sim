@@ -34,6 +34,18 @@ def test_a_loaded_quad_reports_where_its_numbers_came_from(sim):
     assert {p.source for part in sim.parts for p in part.provenance.values()} <= {"datasheet", "measured", "estimated"}
 
 
+def test_a_tilted_gate_reaches_the_client(sim, tmp_path):
+    world = (REPO / "worlds" / "circuit.toml").read_text(encoding="utf-8")
+    tilted = tmp_path / "tilted.toml"
+    world = world.replace('name = "Gate0"', 'name = "Gate0"\npitch_deg = 12.5\nroll_deg = -30.0', 1)
+    # The circuit's gates stand on the ground; a tilted one is lifted so its corner stays above it.
+    tilted.write_text(world.replace("[20.0, 0.0, -2.0]", "[20.0, 0.0, -4.0]", 1), encoding="utf-8")
+    sim.load(QUAD, open_loop_fc=True, world=str(tilted), record=False)
+    gates = sim.get_world().gates
+    assert (gates[0].pitch_deg, gates[0].roll_deg) == (12.5, -30.0)
+    assert (gates[1].pitch_deg, gates[1].roll_deg) == (0.0, 0.0), "an untilted gate is upright"
+
+
 def test_errors_are_typed(sim):
     with pytest.raises(ofs.NotLoaded):
         sim.run(0.1)

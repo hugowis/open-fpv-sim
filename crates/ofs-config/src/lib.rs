@@ -993,6 +993,12 @@ impl QuadConfig {
         spheres
     }
 
+    /// The radius of the smallest sphere around the vehicle's origin that holds every collision sphere: the
+    /// quad's size for a gate to clear.
+    pub fn bounding_radius_m(&self) -> f64 {
+        self.collision_spheres().iter().map(|s| (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() + s[3]).fold(0.0, f64::max)
+    }
+
     /// The restitution and friction coefficients of contacts, defaults filled in.
     pub fn collision_contact(&self) -> (f64, f64) {
         match &self.collision {

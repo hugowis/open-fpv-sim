@@ -1092,7 +1092,7 @@ pub fn build_seeded(
     // After the physics, which wrote this tick's pose; a world without gates adds neither the model nor its signals.
     let mut race = None;
     if !opts.world.gates.is_empty() {
-        let (timer, handle) = GateTimer::new(&opts.world.gates, &mut bus);
+        let (timer, handle) = GateTimer::new(&opts.world.gates, cfg.bounding_radius_m(), &mut bus);
         race = Some(RaceLink { signals: RaceSignals::register(&mut bus), handle });
         models.push(Box::new(timer));
     }

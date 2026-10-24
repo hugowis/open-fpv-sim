@@ -348,7 +348,8 @@ impl OfsClient {
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
     /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
-    /// clockwise from north), `width`, `height`}), in course order.
+    /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}), in course
+    /// order.
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -391,6 +392,8 @@ impl OfsClient {
             e.set("heading_deg", g.heading_deg);
             e.set("width", g.width_m);
             e.set("height", g.height_m);
+            e.set("pitch_deg", g.pitch_deg);
+            e.set("roll_deg", g.roll_deg);
             gates.push(&e.to_variant());
         }
         let mut handset_antennas = VarArray::new();
