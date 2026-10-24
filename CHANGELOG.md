@@ -3,6 +3,13 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased
+
+### Reader error for a still-running recording (#117)
+#### Changed
+- **`ofs.reader.read` on a file that is still being recorded** says so: the "unfinished recording" error now names the
+  running recording as the likely cause and the way out (`sim.recording.stop()`, or `sim.log`, which stops it).
+
 ## 0.3.0 — 2026-10-22
 
 **Upgrade:** protocol 13 (rebuild/reinstall the client and server together); a protocol-12 Python client or server
