@@ -27,6 +27,20 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 	return condition.call()
 
 
+## Waits up to `seconds` for a field the client shows fresh (`field_valid`, nothing held), and returns the last view it
+## saw with "current" saying whether that was one. A loaded runner can stall the state stream for a moment, and the
+## client then holds the previous field (held_fields > 0) without anything being wrong with the link (#118): a single
+## look at one frame is not a verdict, but a clean link that never shows a current field is.
+func _current_field(app: Node, seconds: float) -> Dictionary:
+	var seen := {}
+	var current: bool = await _wait_for(func() -> bool:
+		seen.clear()
+		seen.merge(app.client.get_fpv_view())
+		return seen.has("pose") and bool(seen.get("field_valid", false)) and int(seen.get("held_fields", -1)) == 0, seconds)
+	seen["current"] = current
+	return seen
+
+
 func _press(app: Node, keycode: int) -> void:
 	var event := InputEventKey.new()
 	event.physical_keycode = keycode
@@ -195,11 +209,13 @@ func _run() -> void:
 	_check(not app.video.is_active(), "a clean link draws nothing over the picture")
 
 	# The delayed composite: pose, video and OSD sampled at one field-quantized instant in the past.
-	var fpv: Dictionary = app.client.get_fpv_view()
+	var fpv: Dictionary = await _current_field(app, 5.0)
+	var why := "held_fields %s, field_valid %s, render_time_s %s, sim time_s %s, telemetry age %s" % [
+		fpv.get("held_fields"), fpv.get("field_valid"), fpv.get("render_time_s"), app.client.get_telemetry().get("time_s"), app.client.get_telemetry().get("age_s")]
 	_check(fpv.has("pose"), "the fpv view carries a pose")
 	_check(fpv.has("render_time_s") and float(fpv["render_time_s"]) > 0.0, "the render instant is set")
-	_check(bool(fpv.get("field_valid", false)), "a clean link completes every field")
-	_check(int(fpv.get("held_fields", -1)) == 0, "a clean link holds nothing: held_fields is 0")
+	_check(bool(fpv.get("field_valid", false)), "a clean link completes every field (%s)" % why)
+	_check(int(fpv.get("held_fields", -1)) == 0, "a clean link holds nothing: held_fields is 0 within 5 s (%s)" % why)
 	_check(int(fpv.get("latency_ms", -1)) == 40, "the default latency reaches the client")
 	_check(float(fpv["render_time_s"]) <= float(app.client.get_telemetry()["time_s"]), "the picture trails the sim clock")
 
@@ -231,14 +247,20 @@ func _run() -> void:
 		return image
 	var started: Array = []
 	app.dvr.started.connect(func(path: String): started.append(path))
+	# A recording that starts while the picture is held has no frame to repeat yet: begin on a current field.
+	await _current_field(app, 5.0)
 	var t0: float = app.client.get_telemetry()["time_s"]
 	var seen_targets := {}
 	var deadline := Time.get_ticks_msec() + 20_000
 	_press(app, KEY_D)
 	_check(app.dvr.recording, "D starts the DVR")
+	var fresh_seen := false
 	while float(app.client.get_telemetry()["time_s"]) < t0 + 2.0:
-		var target := int(app.client.get_fpv_view().get("target_field", -1))
-		if target >= 0:
+		var view: Dictionary = app.client.get_fpv_view()
+		var target := int(view.get("target_field", -1))
+		# Boundaries held before the first current field have no frame to repeat: they are not owed to the recording.
+		fresh_seen = fresh_seen or (target >= 0 and int(view.get("held_fields", -1)) == 0)
+		if target >= 0 and fresh_seen:
 			seen_targets[target] = true
 		await process_frame
 		if Time.get_ticks_msec() >= deadline:

@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 13
+PROTOCOL_VERSION = 14
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -157,12 +157,16 @@ class Handset:
 
 @dataclass(frozen=True)
 class Gate:
-    """A race gate: a vertical opening flown through in the direction of `heading_deg` (0 = north, clockwise)."""
+    """A race gate: an opening flown through in the direction of `heading_deg` (0 = north, clockwise). It stands
+    upright unless tilted: `pitch_deg` and `roll_deg` follow the heading (aerospace Z-Y-X; a positive pitch lifts the
+    direction of travel, a positive roll turns the opening clockwise seen from the approach)."""
     name: str
     center_ned_m: tuple
     heading_deg: float
     width_m: float
     height_m: float
+    pitch_deg: float = 0.0
+    roll_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -184,13 +188,15 @@ class Race:
     """The lap clock. `present` is False in a world without gates (everything else is then zero). `last_lap_s` and
     `best_lap_s` are 0 until a lap completes (`laps > 0`)."""
     present: bool = False
-    running: bool = False  # gate 0 has started the clock
+    running: bool = False  # gate 0 has started the clock (and the world's lap limit is not reached)
     next_gate: int = 0  # the gate to fly through next
     gate_count: int = 0
     laps: int = 0  # completed
     current_lap_s: float = 0.0  # time since the current lap started
     last_lap_s: float = 0.0
     best_lap_s: float = 0.0
+    finished: bool = False  # the lap limit is reached: the clock has stopped; `reset_race()` starts another race
+    lap_limit: int = 0  # the world's `[race] laps` (0 = none)
 
 
 @dataclass(frozen=True)
@@ -268,6 +274,33 @@ class Event:
     message: str
 
 
+@dataclass(frozen=True)
+class Provenance:
+    """Where one library parameter's value came from."""
+    source: str  # "datasheet" | "measured" | "estimated"
+    link: str
+    note: str
+
+
+@dataclass(frozen=True)
+class Part:
+    """A library part the loaded quad uses, with the provenance of each parameter (keyed by dotted path, e.g.
+    "motor.kv")."""
+    kind: str  # "frame" | "motor" | "prop" | "esc" | "battery" | "vtx"
+    id: str  # a single motor/prop/esc id covers every position, so it is listed once
+    name: str
+    provenance: dict[str, Provenance]
+
+    @property
+    def estimated(self) -> list[str]:
+        """The parameters whose value is only an estimate."""
+        return [path for path, p in self.provenance.items() if p.source == "estimated"]
+
+
+def _part(m) -> Part:
+    return Part(m.kind, m.id, m.name, {p.path: Provenance(p.source, p.link, p.note) for p in m.provenance})
+
+
 def _v(m) -> tuple:
     return (m.x, m.y, m.z)
 
@@ -297,7 +330,8 @@ def _world(m) -> World:
             antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
                                            a.aim_el_deg) for a in m.handset.antennas),
         ) if m.HasField("handset") else Handset((), ()),
-        gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m) for g in m.gates),
+        gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m, g.pitch_deg, g.roll_deg)
+                    for g in m.gates),
     )
 
 
@@ -327,7 +361,7 @@ def _state(m) -> State:
         collision_speed_mps=m.collision_speed_mps,
         battery_cell_voltages=tuple(m.battery_cell_voltages),
         race=Race(m.race.present, m.race.running, m.race.next_gate, m.race.gate_count, m.race.laps,
-                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s),
+                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s, m.race.finished, m.race.lap_limit),
     )
 
 
@@ -357,6 +391,7 @@ class Sim:
     def __init__(self, address: str, process: subprocess.Popen | None = None):
         self.address = address
         self.configurator_address = ""
+        self.parts: list[Part] = []
         self._process = process
         self._channel = grpc.insecure_channel(address)
         self._stub = pbg.SimStub(self._channel)
@@ -420,7 +455,8 @@ class Sim:
         the throttle to every motor; adding `stabilize=True` makes it a minimal angle-mode stabilizer, so the roll
         and pitch sticks set the lean, the yaw stick the turn rate, and a script can fly a path (it is not
         Betaflight: real tuning needs SITL; `docs/scripted-flight.md`). Returns the quad's name;
-        `configurator_address` is set when it runs Betaflight."""
+        `configurator_address` is set when it runs Betaflight, and `parts` lists the library parts the quad loaded
+        with the provenance of each of their parameters (`part.estimated` names the guesses)."""
         if mode not in _MODES:
             raise ValueError(f"mode must be one of {sorted(_MODES)}")
         if overrun_policy not in _POLICIES:
@@ -431,6 +467,7 @@ class Sim:
             overrun_policy=_POLICIES[overrun_policy], keep_alive=keep_alive, world_path=str(world or ""),
             stabilize=stabilize))
         self.configurator_address = reply.configurator_address
+        self.parts = [_part(p) for p in reply.parts]
         self.recording._session_ended()
         if (mode == "lockstep") if record is None else record:
             self.recording.start()
@@ -512,6 +549,12 @@ class Sim:
     def stop_inputs(self) -> None:
         """Stops the playing inputs file, if any (the sticks and link state keep their last values)."""
         self._call(self._stub.StopInputs, pb.Empty())
+
+    def reset_race(self) -> None:
+        """Starts a fresh race at the next tick: no clock, no laps, no best time, gate 0 next (a `race_reset` event
+        says it happened). `InvalidState` when the world has no gates. State read before the next tick still shows
+        the old race."""
+        self._call(self._stub.ResetRace, pb.Empty())
 
     def record_inputs(self) -> str:
         """Starts recording this session's sticks and link state to a CSV the server names under `logs_dir` (one row

@@ -149,6 +149,12 @@ impl OfsClient {
         self.send(Command::SetInputsRecording(on));
     }
 
+    /// Starts a fresh race: no clock, no laps, gate 0 next (a `race_reset` event confirms it). An error without gates.
+    #[func]
+    fn reset_race(&self) {
+        self.send(Command::ResetRace);
+    }
+
     /// The current phase (see `phase_changed`).
     #[func]
     fn get_phase(&self) -> GString {
@@ -197,7 +203,8 @@ impl OfsClient {
     /// `video_interference_dbm`, `video_sync` ("locked", "unstable", "lost"; empty without a VTX), `video_noise`,
     /// `video_sparkles`, `video_chroma`, `video_field_valid`, `video_latency_ms`, `video_antenna`
     /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name), and the lap clock's
-    /// `race_present` (the world has gates), `race_running`, `race_next_gate`, `race_gate_count`, `race_laps`,
+    /// `race_present` (the world has gates), `race_running`, `race_finished` (the lap limit is reached), `race_lap_limit`
+    /// (0 = none), `race_next_gate`, `race_gate_count`, `race_laps`,
     /// `race_lap_s` (the current lap so far), `race_last_lap_s` and `race_best_lap_s` (both 0 until a lap completes).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
@@ -259,6 +266,8 @@ impl OfsClient {
         let r = &t.race;
         d.set("race_present", r.present);
         d.set("race_running", r.running);
+        d.set("race_finished", r.finished);
+        d.set("race_lap_limit", i64::from(r.lap_limit));
         d.set("race_next_gate", i64::from(r.next_gate));
         d.set("race_gate_count", i64::from(r.gate_count));
         d.set("race_laps", i64::from(r.laps));
@@ -348,7 +357,8 @@ impl OfsClient {
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
     /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
-    /// clockwise from north), `width`, `height`}), in course order.
+    /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}), in course
+    /// order.
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -391,6 +401,8 @@ impl OfsClient {
             e.set("heading_deg", g.heading_deg);
             e.set("width", g.width_m);
             e.set("height", g.height_m);
+            e.set("pitch_deg", g.pitch_deg);
+            e.set("roll_deg", g.roll_deg);
             gates.push(&e.to_variant());
         }
         let mut handset_antennas = VarArray::new();

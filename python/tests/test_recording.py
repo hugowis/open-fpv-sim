@@ -60,6 +60,7 @@ def test_reading_an_unfinished_file_says_what_happened(sim, tmp_path):
     message = str(e.value)
     assert "unfinished" in message and "recording_stopped" in message, message
     assert str(unfinished) in message
+    assert "still being recorded" in message and "sim.recording.stop()" in message, message
 
 
 def test_reading_a_damaged_file_says_so(sim, tmp_path):

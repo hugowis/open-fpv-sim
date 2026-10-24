@@ -109,6 +109,14 @@ func test_the_lap_line_shows_the_race() -> void:
 	eq(hud.race_text(), "LAP 1   NEXT 3   0:59.9", "59.94 rounds down")
 	hud.update_view(_view({"telemetry": {}}))
 	eq(hud.race_text(), "", "no state, no line")
+	var limited := _telemetry({"race_present": true, "race_running": true, "race_gate_count": 5, "race_next_gate": 2, "race_laps": 1, "race_lap_limit": 3,
+		"race_lap_s": 5.0, "race_last_lap_s": 31.2, "race_best_lap_s": 29.9})
+	hud.update_view(_view({"telemetry": limited}))
+	eq(hud.race_text(), "LAP 2/3   NEXT 2   0:05.0   LAST 31.2   BEST 29.9", "the lap limit shows beside the lap")
+	var finished := _telemetry({"race_present": true, "race_running": false, "race_finished": true, "race_gate_count": 5, "race_laps": 3, "race_lap_limit": 3,
+		"race_best_lap_s": 29.9})
+	hud.update_view(_view({"telemetry": finished}))
+	eq(hud.race_text(), "RACE FINISHED   3 LAPS   BEST 29.9   (N: new race)", "the finished race says so and how to start another")
 	hud.queue_free()
 
 

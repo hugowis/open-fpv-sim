@@ -42,6 +42,8 @@ pub struct QuadConfig {
     pub vtx: Option<VtxSection>,
     /// The part ids the quad referenced, kept for error messages and introspection.
     pub parts: PartRefs,
+    /// What the loaded parts say about where each of their numbers came from, in the order of `parts`.
+    pub part_provenance: Vec<part::PartProvenance>,
     pub source_path: PathBuf,
 }
 
@@ -825,12 +827,20 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
 
     // Every id resolved above (any failure returned with the problems), so the optional paths are present.
     let battery_part = part::load_battery(&battery_path.expect("the battery id resolved"))?;
-    let motors: Vec<MotorSection> =
-        broadcast(&motor_paths, n, part::load_motor)?.into_iter().map(|p| p.motor).collect();
-    let props: Vec<PropSection> =
-        broadcast(&prop_paths, n, part::load_prop)?.into_iter().map(|p| p.prop).collect();
-    let escs: Vec<EscSection> =
-        broadcast(&esc_paths, n, part::load_esc)?.into_iter().map(|p| p.esc).collect();
+    let motor_parts = load_all(&motor_paths, part::load_motor)?;
+    let prop_parts = load_all(&prop_paths, part::load_prop)?;
+    let esc_parts = load_all(&esc_paths, part::load_esc)?;
+    let provenance = |kind, id: &String, name: &String, parameters: &std::collections::BTreeMap<String, part::Provenance>| {
+        part::PartProvenance { kind, id: id.clone(), name: name.clone(), parameters: parameters.clone() }
+    };
+    let mut part_provenance = vec![provenance("frame", &file.frame, &frame_part.name, &frame_part.provenance)];
+    part_provenance.extend(file.motors.iter().zip(&motor_parts).map(|(id, p)| provenance("motor", id, &p.name, &p.provenance)));
+    part_provenance.extend(file.props.iter().zip(&prop_parts).map(|(id, p)| provenance("prop", id, &p.name, &p.provenance)));
+    part_provenance.extend(file.escs.iter().zip(&esc_parts).map(|(id, p)| provenance("esc", id, &p.name, &p.provenance)));
+    part_provenance.push(provenance("battery", &file.battery.part, &battery_part.name, &battery_part.provenance));
+    let motors: Vec<MotorSection> = broadcast(motor_parts, n).into_iter().map(|p| p.motor).collect();
+    let props: Vec<PropSection> = broadcast(prop_parts, n).into_iter().map(|p| p.prop).collect();
+    let escs: Vec<EscSection> = broadcast(esc_parts, n).into_iter().map(|p| p.esc).collect();
     let battery = BatterySection {
         cells: battery_part.battery.cells,
         capacity_mah: battery_part.battery.capacity_mah,
@@ -848,7 +858,9 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
     };
     let vtx = match (vtx_path, &file.vtx) {
         (Some(vtx_path), Some(wiring)) => {
-            let hardware = part::load_vtx(&vtx_path)?.vtx;
+            let vtx_part = part::load_vtx(&vtx_path)?;
+            part_provenance.push(provenance("vtx", &wiring.part, &vtx_part.name, &vtx_part.provenance));
+            let hardware = vtx_part.vtx;
             Some(VtxSection {
                 kind: hardware.kind,
                 uart: wiring.uart,
@@ -893,6 +905,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
             battery: file.battery.part,
             vtx: file.vtx.as_ref().map(|v| v.part.clone()),
         },
+        part_provenance,
         source_path: path.to_path_buf(),
     };
     let problems = cfg.validate();
@@ -902,14 +915,16 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
     Ok(cfg)
 }
 
-/// Loads every path's part; a single part broadcasts to `n` entries (one part id covering every motor,
-/// prop or ESC of the aircraft).
-fn broadcast<P: Clone>(paths: &[PathBuf], n: usize, load: impl Fn(&Path) -> Result<P, ConfigError>) -> Result<Vec<P>, ConfigError> {
-    let parts = paths.iter().map(|p| load(p)).collect::<Result<Vec<_>, ConfigError>>()?;
+fn load_all<P>(paths: &[PathBuf], load: impl Fn(&Path) -> Result<P, ConfigError>) -> Result<Vec<P>, ConfigError> {
+    paths.iter().map(|p| load(p)).collect()
+}
+
+/// A single part broadcasts to `n` entries (one part id covering every motor, prop or ESC of the aircraft).
+fn broadcast<P: Clone>(parts: Vec<P>, n: usize) -> Vec<P> {
     if parts.len() == 1 {
-        return Ok(vec![parts[0].clone(); n]);
+        return vec![parts[0].clone(); n];
     }
-    Ok(parts)
+    parts
 }
 
 /// The smallest advance ratio at which a windmilling propeller's torque vanishes that the model accepts.
@@ -976,6 +991,12 @@ impl QuadConfig {
         }
         spheres.push([0.0, 0.0, 0.0, BODY_SPHERE_RADIUS_M]);
         spheres
+    }
+
+    /// The radius of the smallest sphere around the vehicle's origin that holds every collision sphere: the
+    /// quad's size for a gate to clear.
+    pub fn bounding_radius_m(&self) -> f64 {
+        self.collision_spheres().iter().map(|s| (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() + s[3]).fold(0.0, f64::max)
     }
 
     /// The restitution and friction coefficients of contacts, defaults filled in.

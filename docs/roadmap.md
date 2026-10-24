@@ -92,8 +92,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   Foxglove itself was not installed on the evidence machine, so its behavior on a live file remains to be checked.
 
 ### Race timing (`docs/race-timing.md`)
-- A gate is a trigger on the quad's centre: no margin for its size, no tilt. There is no lap limit and no reset (a
-  new `Load` starts a fresh race), and Godot does not highlight the next gate.
+- A gate is a trigger: a pass needs the quad's bounding sphere inside the opening (a clipped pass is a `gate_hit`),
+  and a gate can be tilted (`pitch_deg`, `roll_deg`). A world can cap the race (`[race] laps`), `ResetRace` starts a
+  fresh one without a `Load`, and Godot highlights the next gate. There is no ghost or best-lap replay.
 
 ### Python
 - The live view follows the state stream (up to 240 Hz); the 8 kHz signals are only in the recording.
@@ -142,9 +143,8 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
-- The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`), and a Configurator's EEPROM
-  changes made after `Load`.
-- `fcs/`, `receivers/` and `cameras/` part kinds; the IMU and barometer as parts; provenance exposed over the API.
+- The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`).
+- `fcs/`, `receivers/` and `cameras/` part kinds and the IMU and barometer as parts.
 
 ### Tooling
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries

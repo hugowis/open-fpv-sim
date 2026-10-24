@@ -91,6 +91,54 @@ func test_gates_are_drawn_as_openings_facing_their_direction_of_travel() -> void
 	world.queue_free()
 
 
+func test_a_tilted_gate_is_drawn_on_its_tilted_plane() -> void:
+	var upright := World.gate_basis(0.0)
+	ok(upright.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-6 and upright.y.distance_to(Vector3.UP) < 1e-6, "north, upright")
+	var pitched := World.gate_basis(0.0, 45.0)
+	var s := sqrt(0.5)
+	ok(pitched.z.distance_to(Vector3(0.0, s, -s)) < 1e-6, "a positive pitch lifts the direction of travel: %s" % str(pitched.z))
+	ok(pitched.y.distance_to(Vector3(0.0, s, s)) < 1e-6, "and leans the top back toward the approach: %s" % str(pitched.y))
+	var rolled := World.gate_basis(0.0, 0.0, 90.0)
+	ok(rolled.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-6, "a roll keeps the direction of travel")
+	ok(rolled.y.distance_to(Vector3(1.0, 0.0, 0.0)) < 1e-6, "a quarter turn clockwise from the approach puts the opening's up to the east: %s" % str(rolled.y))
+	for b in [pitched, rolled, World.gate_basis(137.0, -33.0, 71.0)]:
+		ok(absf(b.determinant() - 1.0) < 1e-6 and b.is_conformal(), "a proper rotation")
+	var world := World.new()
+	await add_to_tree(world)
+	world.build({"gates": [{"name": "T", "center": Vector3(0.0, 3.0, -30.0), "heading_deg": 0.0, "pitch_deg": 45.0, "roll_deg": 0.0, "width": 3.0, "height": 2.0}]})
+	var t: Node3D = world.get_node("Gate_T")
+	ok(t.global_transform.basis.z.distance_to(Vector3(0.0, s, -s)) < 1e-5, "the node carries the tilt: %s" % str(t.global_transform.basis.z))
+	world.queue_free()
+
+
+func test_the_next_gate_is_highlighted_and_the_start_gate_stays_distinct() -> void:
+	var next_color := World.gate_color(2, 2)
+	var plain := World.gate_color(1, 2)
+	var start := World.gate_color(0, 2)
+	ok(next_color.a > plain.a and next_color.g > next_color.r, "the next gate is stronger and green: %s" % str(next_color))
+	ok(plain.is_equal_approx(Color(0.3, 0.85, 1.0, 0.25)), "the others stay translucent cyan")
+	ok(start.is_equal_approx(Color(1.0, 0.85, 0.2, 0.25)), "the start gate stays yellow while it is not next")
+	ok(World.gate_color(0, 0).is_equal_approx(next_color), "and takes the highlight when it is next")
+	var world := World.new()
+	await add_to_tree(world)
+	world.build({"gates": [
+		{"name": "A", "center": Vector3(0.0, 1.22, -30.0), "heading_deg": 0.0, "width": 3.0, "height": 2.0},
+		{"name": "B", "center": Vector3(0.0, 1.22, -60.0), "heading_deg": 0.0, "width": 3.0, "height": 2.0},
+	]})
+	var opening := func(n: String) -> Color: return ((world.get_node(n).get_node("Opening") as MeshInstance3D).material_override as StandardMaterial3D).albedo_color
+	world.set_next_gate(1)
+	ok(opening.call("Gate_B").is_equal_approx(next_color), "gate 1 is highlighted")
+	ok(opening.call("Gate_A").is_equal_approx(start), "gate 0 is not")
+	world.set_next_gate(0)
+	ok(opening.call("Gate_A").is_equal_approx(next_color) and opening.call("Gate_B").is_equal_approx(plain), "the highlight follows the next gate at once")
+	world.set_next_gate(-1)
+	ok(opening.call("Gate_A").is_equal_approx(start) and opening.call("Gate_B").is_equal_approx(plain), "none highlighted when there is no next gate")
+	world.build({"gates": [{"name": "C", "center": Vector3.ZERO, "heading_deg": 0.0, "width": 1.0, "height": 1.0}]})
+	world.set_next_gate(0)
+	ok(opening.call("Gate_C").is_equal_approx(next_color), "a rebuilt world is highlighted too")
+	world.queue_free()
+
+
 func test_the_world_is_only_scenery() -> void:
 	var world := World.new()
 	await add_to_tree(world)

@@ -22,6 +22,26 @@ pub enum ProvenanceSource {
     Estimated,
 }
 
+impl ProvenanceSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Datasheet => "datasheet",
+            Self::Measured => "measured",
+            Self::Estimated => "estimated",
+        }
+    }
+}
+
+/// One library part a quad loaded, with the provenance of each of its parameters (keyed by dotted path).
+#[derive(Debug, Clone)]
+pub struct PartProvenance {
+    /// The library directory's part kind: `frame`, `motor`, `prop`, `esc`, `battery` or `vtx`.
+    pub kind: &'static str,
+    pub id: String,
+    pub name: String,
+    pub parameters: BTreeMap<String, Provenance>,
+}
+
 /// Where one parameter's value came from. `link` (not `ref` — a Rust keyword) is a URL or doc id.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

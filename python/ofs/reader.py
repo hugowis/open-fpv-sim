@@ -85,8 +85,10 @@ def _summary(path, reader):
 
 
 def _unfinished(path) -> str:
-    return (f"{path}: unfinished recording (it was stopped by a write error such as a full disk, or the server was "
-            "killed while recording); the recording_stopped event names the cause")
+    return (f"{path}: unfinished recording (it is still being recorded, so its summary is not written yet: stop it "
+            "first with sim.recording.stop(), or read sim.log, which stops it; otherwise it was stopped by a write "
+            "error such as a full disk, or the server was killed while recording, and the recording_stopped event "
+            "names the cause)")
 
 
 def _damaged(path) -> str:

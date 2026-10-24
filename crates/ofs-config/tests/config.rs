@@ -67,6 +67,36 @@ fn reference_quad_loads_and_validates() {
 }
 
 #[test]
+fn a_loaded_quad_keeps_each_parts_provenance_once_per_referenced_id() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let kinds: Vec<_> = cfg.part_provenance.iter().map(|p| (p.kind, p.id.as_str())).collect();
+    assert_eq!(
+        kinds,
+        [
+            ("frame", "opendrone-5f"),
+            ("motor", "opendrone-openmotor-2207"),
+            ("prop", "opendrone-5in-prop"),
+            ("esc", "opendrone-4in1-esc"),
+            ("battery", "opendrone-6s-1300"),
+            ("vtx", "opendrone-smartaudio-1w"),
+        ],
+        "the single motor, prop and esc ids are listed once, not once per position"
+    );
+    assert!(cfg.part_provenance.iter().all(|p| !p.name.is_empty() && !p.parameters.is_empty()));
+    let motor = &cfg.part_provenance[1];
+    assert_eq!(motor.parameters["motor.kv_rpm_per_v"].source.as_str(), "estimated");
+}
+
+#[test]
+fn the_bounding_radius_is_the_farthest_collision_sphere_edge() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let r = cfg.bounding_radius_m();
+    assert!((0.1..0.4).contains(&r), "a 5 inch quad is about 0.2 m from its centre to a prop tip: {r}");
+    let reach = cfg.collision_spheres().iter().map(|s| (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() + s[3]).fold(0.0, f64::max);
+    assert_eq!(r, reach);
+}
+
+#[test]
 fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
     let dir = tempfile::tempdir().unwrap();
     let old = quad_text()

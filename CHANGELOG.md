@@ -3,6 +3,65 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## 0.4.0 — 2026-10-24
+
+**Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server
+is refused at the handshake. In a world with gates, a pass now needs room for the quad (a clipped pass raises
+`gate_hit` and no longer counts), and the bus digest covers the new `race.finished` signal, so a repro bundle of a
+gate world recorded by 0.3.0 no longer reports `reproduced=true` — re-record it on 0.4.0. A bundle's journal can now
+hold a `race_reset` line, which a 0.3.0 build refuses to read. Worlds without gates, and every golden, are unchanged.
+
+### A repro bundle keeps the EEPROM as the session failed (#106)
+#### Changed
+- **`firmware/eeprom.bin` (and `betaflight.diff`) are read when the bundle is written, not at `Load`**, so a setting the
+  Configurator saved after `Load` is in the bundle and a replay's Betaflight boots with it. The file is read twice and
+  kept when both reads match; a missing or unsettled file falls back to the `Load`-time copy. `bundle.toml` gains
+  `firmware_captured` (`"failure"` or `"load"`) for Betaflight sessions. A replay flies the whole journal with the
+  failure's settings (`docs/repro-bundle.md`, "The firmware's settings"). Settings changed but not saved never reach the
+  EEPROM and are not captured.
+
+### Race gates: the quad's size and tilted openings (#103)
+#### Changed
+- **A pass has to fit the quad.** The crossing point must be at least the quad's bounding radius (its collision
+  spheres' farthest edge, 0.2 m for the shipped quad) inside the opening's edges. A pass whose centre is inside the
+  opening but closer to an edge raises the new `gate_hit` event (protocol 14, `EVENT_KIND_GATE_HIT`; Godot toasts it),
+  gives no credit and leaves the gate next. A gate counts again, as after any pass, only once the quad has been 3 m
+  from its plane. A course whose openings are wider than the quad by more than its radius, like `worlds/circuit.toml`,
+  is unaffected.
+#### Added
+- **`pitch_deg` and `roll_deg` on a `[[gates]]` entry** (default 0, an upright gate; aerospace Z-Y-X after the
+  heading). The crossing test, the ground check and the Godot frame use the tilted plane; `Gate.pitch_deg` and
+  `roll_deg` on `World.gates` (protocol 14, Python `ofs.Gate`). Worlds without them behave exactly as before.
+
+### Race: lap limit, reset and next-gate highlight (#104)
+#### Added
+- **`[race] laps = N` in a world file** ends the race after N laps: `lap_completed`, then the new `race_finished`
+  event, the clock stops and nothing counts until a reset. `State.race` gains `finished` and `lap_limit`, and the
+  `race.finished` signal joins the other `race.*` ones (so a recording of a world with gates has one more channel).
+  Worlds without `[race]` race forever, as before.
+- **`ResetRace`** (protocol 14; Python `sim.reset_race()`, the **N** key in the game) starts a fresh race at the next
+  tick without a `Load`: no clock, laps or times, gate 0 next, a `race_reset` event, the `race.*` signals back to zero.
+  A world without gates refuses it. A repro bundle's journal records it (`race_reset`).
+- **The game highlights the next gate** (green and stronger; the start/finish gate stays yellow until it is next), shows
+  `LAP 2/3` with a limit and `RACE FINISHED` at the end, and toasts both events.
+
+### Part provenance over the API (#43)
+#### Added
+- **`LoadReply.parts`** (protocol 14) lists the library parts the quad loaded — frame, motors, props, escs, battery
+  and vtx, a single motor/prop/esc id once — with the provenance of every parameter (`datasheet`, `measured` or
+  `estimated`, the link and the note). Python: `sim.parts` after `load()` (`ofs.Part`, `ofs.Provenance`);
+  `part.estimated` names the parameters that are only guesses. Rust: `QuadConfig::part_provenance`.
+
+### Reader error for a still-running recording (#117)
+#### Changed
+- **`ofs.reader.read` on a file that is still being recorded** says so: the "unfinished recording" error now names the
+  running recording as the likely cause and the way out (`sim.recording.stop()`, or `sim.log`, which stops it).
+
+### Tests
+- The open-loop Godot end-to-end test waits for a current field instead of judging one frame, and the DVR check owes no
+  frames for boundaries held before the first fresh one (#118: the flake was seen on the macOS job only; the issue stays
+  open until that job has a clean record).
+
 ## 0.3.0 — 2026-10-22
 
 **Upgrade:** protocol 13 (rebuild/reinstall the client and server together); a protocol-12 Python client or server

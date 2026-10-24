@@ -58,15 +58,27 @@ pub struct WorldConfig {
     /// The race course, in order: gate 0 is the start and finish (docs/race-timing.md).
     #[serde(default)]
     pub gates: Vec<GateSection>,
+    /// The race's rules; absent = race forever.
+    #[serde(default)]
+    pub race: RaceSection,
     #[serde(skip)]
     pub source_path: PathBuf,
+}
+
+/// The rules of the race the gates make.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RaceSection {
+    /// The race ends when this many laps are completed (absent = no limit).
+    #[serde(default)]
+    pub laps: Option<u32>,
 }
 
 /// The most gates a world may declare.
 pub const MAX_GATES: usize = 64;
 
-/// A gate: a vertical opening the quad flies through, in the direction of `heading_deg`. A trigger only: it does not
-/// collide with the quad and blocks no signal (a frame made of posts is a set of `[[objects]]`).
+/// A gate: an opening the quad flies through, in the direction of `heading_deg` (upright unless tilted). A trigger
+/// only: it does not collide with the quad and blocks no signal (a frame made of posts is a set of `[[objects]]`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GateSection {
@@ -79,6 +91,28 @@ pub struct GateSection {
     /// The opening's size across the direction of travel, and its height.
     pub width_m: f64,
     pub height_m: f64,
+    /// Tilt, aerospace Z-Y-X after the heading: a positive pitch lifts the direction of travel (the gate leans back,
+    /// its top toward the approaching quad), a positive roll turns the opening clockwise seen from the approach.
+    /// Both default to 0, an upright gate.
+    #[serde(default)]
+    pub pitch_deg: f64,
+    #[serde(default)]
+    pub roll_deg: f64,
+}
+
+impl GateSection {
+    /// The gate's axes in NED: the direction of travel, across the opening and the opening's own "down" (the height
+    /// axis). An upright gate gives exactly `(cos h, sin h, 0)`, `(-sin h, cos h, 0)` and `(0, 0, 1)`.
+    pub fn axes(&self) -> ([f64; 3], [f64; 3], [f64; 3]) {
+        let (sh, ch) = self.heading_deg.to_radians().sin_cos();
+        let (sp, cp) = self.pitch_deg.to_radians().sin_cos();
+        let (sr, cr) = self.roll_deg.to_radians().sin_cos();
+        (
+            [ch * cp, sh * cp, -sp],
+            [ch * sp * sr - sh * cr, sh * sp * sr + ch * cr, cp * sr],
+            [ch * sp * cr + sh * sr, sh * sp * cr - ch * sr, cp * cr],
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -321,6 +355,7 @@ impl WorldConfig {
             objects: Vec::new(),
             emitters: Vec::new(),
             gates: Vec::new(),
+            race: RaceSection::default(),
             source_path: PathBuf::new(),
         }
     }
@@ -414,6 +449,10 @@ impl WorldConfig {
                 }
             }
         }
+        if let Some(laps) = self.race.laps {
+            c.check(laps >= 1, "race.laps", "must be >= 1 (leave it out for no limit)");
+            c.check(!self.gates.is_empty(), "race.laps", "a lap limit needs at least one [[gates]] entry");
+        }
         c.check(self.gates.len() <= MAX_GATES, "gates", format!("at most {MAX_GATES} gates (got {})", self.gates.len()));
         let mut names = HashSet::new();
         for (i, g) in self.gates.iter().enumerate() {
@@ -423,12 +462,16 @@ impl WorldConfig {
             c.check(g.heading_deg.is_finite(), &field("heading_deg"), "must be finite");
             c.check(g.width_m.is_finite() && g.width_m > 0.0, &field("width_m"), format!("must be > 0 (got {})", g.width_m));
             c.check(g.height_m.is_finite() && g.height_m > 0.0, &field("height_m"), format!("must be > 0 (got {})", g.height_m));
-            // A NaN is reported by the finite checks above, not here.
-            let bottom_d = g.center_ned_m[2] + g.height_m / 2.0;
+            c.check(g.pitch_deg.is_finite() && g.pitch_deg.abs() < 90.0, &field("pitch_deg"), format!("must be in (-90, 90) (got {})", g.pitch_deg));
+            c.check(g.roll_deg.is_finite() && g.roll_deg.abs() <= 180.0, &field("roll_deg"), format!("must be in [-180, 180] (got {})", g.roll_deg));
+            // A NaN is reported by the finite checks above, not here. The lowest corner of a tilted opening reaches
+            // `|across_d|·width/2 + |down_d|·height/2` below its centre.
+            let (_, across, down) = g.axes();
+            let bottom_d = g.center_ned_m[2] + across[2].abs() * g.width_m / 2.0 + down[2].abs() * g.height_m / 2.0;
             c.check(
-                bottom_d.is_nan() || bottom_d <= 0.0,
+                bottom_d.is_nan() || bottom_d <= 1e-9, // a quarter-turn roll leaves a 1e-16 of rounding
                 &field("center_ned_m"),
-                "the gate's opening must not reach below the ground (center d + height/2 must be <= 0)",
+                "the gate's opening must not reach below the ground (center d + its lowest corner's drop must be <= 0)",
             );
         }
         let mut names = HashSet::new();

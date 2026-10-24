@@ -3,9 +3,10 @@
 An open-source FPV drone simulator that runs **real Betaflight** (SITL) against physics, electrical, sensor and radio models,
 replicating real protocols so real tools work against it. Inspired by the [OpenDrone](https://opendrone.be/) open-hardware initiative.
 
-**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; releases 0.2.0 and 0.3.0 followed — 0.3.0 adds the
-`OFS_LIBRARY` search path, `radio.telemetry_slot_divisor`, the `DownlinkLoss` fault, `tx`/`link_loss` columns in the
-recorded-sticks CSV, the game's F2 DVR toggle and the mid-write-recording note, see `CHANGELOG.md`).
+**Status: v1 complete** (2026-10-13; `pip install open-fpv-sim`; releases 0.2.0, 0.3.0 and 0.4.0 followed — 0.4.0 finishes the race course
+(gates that account for the quad's size and can be tilted, `[race] laps`, `reset_race()`, the next-gate highlight),
+exposes part provenance (`sim.parts`) and keeps the EEPROM a Configurator saved in a repro bundle, see
+`CHANGELOG.md`).
 v1 does what its design set out to
 (`docs/superpowers/specs/2026-10-04-open-fpv-sim-design.md` §1.4, with the evidence for each point):
 a developer flies a simulated OpenDrone 5" quad running real Betaflight SITL with a joystick, through a simulated
@@ -100,7 +101,7 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** or the F2
 DVR toggle record the FPV view, **K** cut the radio link (failsafe test), **I** record the sticks and link state
-to a replayable CSV, **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
+to a replayable CSV, **N** start a new race (in a world with gates), **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
 closes the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
@@ -155,6 +156,9 @@ refused at load:
     [provenance."motor.kv_rpm_per_v"]
     source = "estimated"     # datasheet | measured | estimated
     note = "M1 estimate; the OpenMotor datasheet value replaces this when transcribed"
+
+A script reads them back after `load`: `sim.parts` lists each loaded part with its parameters' provenance, and
+`part.estimated` names the guesses.
 
 Every shipped value is an estimate recorded in the open — the ledger is
 `docs/research/component-library.md`, and `library/README.md` describes adding a part. Schema-4 quad files

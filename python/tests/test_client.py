@@ -2,6 +2,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 import grpc
 import pytest
@@ -21,6 +22,29 @@ def test_open_loop_rest_then_climb(sim):
     assert s.altitude_m > 1.0
     assert s.battery_voltage_v < 24.5
     assert len(s.motor_rpm) == 4
+
+
+def test_a_loaded_quad_reports_where_its_numbers_came_from(sim):
+    assert sim.parts == []
+    sim.load(QUAD, open_loop_fc=True)
+    assert [p.kind for p in sim.parts] == ["frame", "motor", "prop", "esc", "battery", "vtx"]
+    assert all(p.provenance for p in sim.parts), "every part parameter has provenance"
+    motor = sim.parts[1]
+    assert motor.provenance["motor.kv_rpm_per_v"].source == "estimated"
+    assert "motor.kv_rpm_per_v" in motor.estimated
+    assert {p.source for part in sim.parts for p in part.provenance.values()} <= {"datasheet", "measured", "estimated"}
+
+
+def test_a_tilted_gate_reaches_the_client(sim, tmp_path):
+    world = (REPO / "worlds" / "circuit.toml").read_text(encoding="utf-8")
+    tilted = tmp_path / "tilted.toml"
+    world = world.replace('name = "Gate0"', 'name = "Gate0"\npitch_deg = 12.5\nroll_deg = -30.0', 1)
+    # The circuit's gates stand on the ground; a tilted one is lifted so its corner stays above it.
+    tilted.write_text(world.replace("[20.0, 0.0, -2.0]", "[20.0, 0.0, -4.0]", 1), encoding="utf-8")
+    sim.load(QUAD, open_loop_fc=True, world=str(tilted), record=False)
+    gates = sim.get_world().gates
+    assert (gates[0].pitch_deg, gates[0].roll_deg) == (12.5, -30.0)
+    assert (gates[1].pitch_deg, gates[1].roll_deg) == (0.0, 0.0), "an untilted gate is upright"
 
 
 def test_errors_are_typed(sim):
@@ -399,3 +423,20 @@ def test_launches_started_together_each_get_their_own_server(sim_bin, tmp_path):
     finally:
         for s in sims:
             s.close()
+
+
+def test_a_race_can_be_reset_only_in_a_world_with_gates(sim):
+    sim.load(QUAD, open_loop_fc=True, record=False)
+    with pytest.raises(ofs.InvalidState, match="no gates"):
+        sim.reset_race()
+    sim.load(QUAD, open_loop_fc=True, world=WORLD, record=False)
+    sim.reset_race()
+    s = sim.run(0.05)
+    assert (s.race.present, s.race.running, s.race.finished, s.race.lap_limit) == (True, False, False, 0)
+    # Events arrive on a background thread, so one can still be in flight when `run` returns.
+    deadline = time.monotonic() + 5.0
+    seen = []
+    while time.monotonic() < deadline and not any(k == "race_reset" for k, _ in seen):
+        seen += [(e.kind, e.message) for e in sim.events()]
+        time.sleep(0.01)
+    assert ("race_reset", "race reset") in seen, "the reset is announced"
