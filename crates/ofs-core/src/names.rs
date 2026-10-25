@@ -47,6 +47,10 @@ pub const IMU_GYRO: &str = "imu.gyro_frd_radps";
 /// Specific force, FRD.
 pub const IMU_ACCEL: &str = "imu.accel_frd_mps2";
 pub const BARO_PRESSURE: &str = "baro.pressure_pa";
+/// The magnetometer's measured field, body FRD, µT (hard/soft iron and noise included).
+pub const MAG_FIELD: &str = "mag.field_frd_ut";
+/// The magnetic heading the compass computes from that field and the true roll and pitch, rad in [0, 2π).
+pub const MAG_HEADING: &str = "mag.heading_rad";
 
 /// Sticks in [-1, 1]; throttle in [0, 1]; aux in [-1, 1].
 pub const RC_ROLL: &str = "rc.roll";
