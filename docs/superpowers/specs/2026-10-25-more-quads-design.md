@@ -13,9 +13,9 @@ quad is now data: parts, a quad TOML and a Betaflight diff, with no code.
 
   | Quad | File stem | Class | AUW | Pack | Character |
   |---|---|---|---|---|---|
-  | OpenDrone 3T toothpick | `opendrone-3t-toothpick` | 3", 125 mm | 105 g | 3S 450 mAh | gentle: thrust-to-weight about 5, hover at about half throttle, slow |
-  | OpenDrone 5R race | `opendrone-5r-race` | 5", 220 mm | 540 g | 6S 1300 mAh | sharp, hungry: thrust-to-weight about 16, hover at about a fifth, 45 A+ per motor |
-  | OpenDrone 7LR long-range | `opendrone-7lr-longrange` | 7", 320 mm | 950 g | 6S 4000 mAh | heavy, efficient: thrust-to-weight about 7, about 115 W in the hover, a long flight |
+  | OpenDrone 3T toothpick | `opendrone-3t-toothpick` | 3", 125 mm | 105 g | 3S 450 mAh | gentle: thrust-to-weight 4.2, hover at 44 % throttle, 25 W |
+  | OpenDrone 5R race | `opendrone-5r-race` | 5", 220 mm | 540 g | 6S 1300 mAh | sharp, hungry: thrust-to-weight 14.8, hover at 19 % throttle, 86 W |
+  | OpenDrone 7LR long-range | `opendrone-7lr-longrange` | 7", 320 mm | 900 g | 6S 4000 mAh | heavy, efficient: thrust-to-weight 6.3, hover at 24 % throttle, 100 W, a long flight |
 
 - New parts under `library/`, every parameter with a `[provenance]` entry; the ledger
   (`docs/research/component-library.md`) lists them and their status.
@@ -54,8 +54,9 @@ quad is now data: parts, a quad TOML and a Betaflight diff, with no code.
    control authority (`T/W·g / arm`) to the quad's. These are starting points checked for a stable hover under SITL,
    not a tune; the diff comments say so.
 7. **Top speed** is not simulated by a test (the open-loop stabilizer's gains are tuned for the 5F and say so). Each
-   quad file's header states AUW, thrust-to-weight, hover throttle and hover power from the sizing model, and the
-   flight-sanity test pins the first three against the running vehicle.
+   quad file's header states AUW, thrust-to-weight, hover throttle and hover power as the running vehicle shows them with
+   a full pack (the sizing model, at a nominal cell voltage, was 10 to 15 % off on thrust-to-weight and hover), and the
+   flight-sanity test pins them.
 
 ## Tests
 

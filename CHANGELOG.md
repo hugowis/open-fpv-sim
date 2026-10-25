@@ -5,6 +5,19 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### More pre-assembled quads: a toothpick, a race quad and a long-range quad (#129)
+#### Added
+- **Three quads that fly differently**, each built from library parts with its own Betaflight diff: `opendrone-3t-toothpick`
+  (3" 125 mm, 3S 450 mAh, 105 g, thrust-to-weight 4.2, hover at 44 %), `opendrone-5r-race` (5" 220 mm, 6S 1300 mAh,
+  540 g, thrust-to-weight 14.8, hover at 19 %, the ICM-42688-P IMU) and `opendrone-7lr-longrange` (7" 320 mm, 6S 4000 mAh
+  Li-ion, 900 g, thrust-to-weight 6.3, about 100 W in the hover, a 900 MHz ELRS link). Each loads headless and arms and
+  holds 1 m under SITL; the README lists the figures.
+- **Fourteen library parts** for them (frames, 1404 / 2306 / 2806.5 motors, 3" / 5" race / 7" props, 20 A and 60 A ESCs, a 3S
+  450 and a 6S 4000 pack, a 400 mW VTX). Every value is `estimated` (class-typical, scaled from the 5F parts, none read
+  from a datasheet); the ledger `docs/research/component-library.md` lists them.
+- **`crates/ofs-config/tests/quads.rs` and `crates/ofs-sim/tests/quads.rs`**: every shipped quad loads and validates, every
+  library part has a ledger section, and the three new quads show the thrust-to-weight and hover throttle their files claim.
+
 ### The IMU and the barometer as library parts (#42)
 #### Added
 - **`library/imus/` and `library/barometers/`**: `opendrone-imu` and `opendrone-baro` hold the numbers the shipped quads

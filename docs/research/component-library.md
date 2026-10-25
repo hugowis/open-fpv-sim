@@ -1,19 +1,27 @@
 # The component library's provenance
 
-Every value shipped in `library/` is an M1 estimate, recorded in the open, except the datasheet noise densities of
-the ICM-42688-P. Since M4a a quad file references parts instead of carrying hardware (the IMU and the barometer
+Every value shipped in `library/` is an estimate, recorded in the open (M1's for the 5" parts, class-typical ones for the
+parts of the toothpick, race and long-range quads), except the datasheet noise densities of the ICM-42688-P, the
+Quad-X motor order and the Tramp power table (both Betaflight's). Since M4a a quad file references parts instead of carrying hardware (the IMU and the barometer
 joined in schema 6) — one TOML per part under `library/` (see the "Component
 library" section of README.md) — and every parameter of a part file must carry a `[provenance]` entry: a
 `source` (`datasheet`, `measured` or `estimated`), an optional `link` and an optional `note`. The loader
 refuses a part file whose data skips an entry, and one whose provenance names a parameter that does not
 exist; a table-valued parameter is one entry (`prop.ct_table` is one parameter, however long its rows).
-This note is the ledger: one table per shipped part file — seven files, six kinds, 46 parameters —
-transcribed as shipped at M4a.
+This note is the ledger: one table per part file — 26 files, eight kinds, 198 parameters. The first seven files are as
+shipped at M4a; the aged pack, the soft-mount frame and the IMU and barometer parts came later; the last fourteen
+are the parts of the toothpick, race and long-range quads (#129).
 
 The follow-up is datasheet transcription: the OpenMotor motor and the OpenVTX video transmitters are open
 hardware with published specifications, and anyone can fill the real numbers in. It lands by editing the
 part file — the parameter's value and its provenance entry (`source = "datasheet"`, the link, a note) — and
 nothing else. No code, no quad file, no other part changes; a quad picks the new value up on its next load.
+
+The parts of #129 (`opendrone-3t`, `opendrone-5r`, `opendrone-7lr` and their motors, props, ESCs, packs and the 400 mW
+VTX) are all `estimated`, except the Quad-X motor order. No figure in them was read from a datasheet: each is a
+class-typical value for its size, chosen with a steady-state model of the simulator's own equations so the quad lands
+where its class does (thrust-to-weight, hover throttle, hover power), and each note says what the value was scaled from.
+Where a note says "opendrone-5f's value scaled by …", the 5F parts are the reference.
 
 Two values deserve their own sentence. `motor.pole_pairs = 7`: the OpenMotor 2207 is a 14-pole motor, and
 2 × 7 is Betaflight's `motor_poles` default of 14, so a quad whose Betaflight diff leaves `motor_poles`
