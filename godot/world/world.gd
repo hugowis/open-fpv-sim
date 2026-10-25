@@ -23,7 +23,12 @@ const PILOT_BODY_HEIGHT_M := 1.5
 var _built: Array[Node] = []
 ## The opening materials of the gates `build` made, in course order, so `set_next_gate` can recolour them.
 var _gate_materials: Array[StandardMaterial3D] = []
+var _gate_nodes: Array[Node3D] = []
 var _next_gate := -1
+## The world's declared gates and courses (`build` keeps them) and the course being drawn: its gates, in its order.
+var _gates: Array = []
+var _courses: Array = []
+var _course := 0
 
 
 func _ready() -> void:
@@ -39,6 +44,10 @@ func build(world: Dictionary) -> void:
 		node.queue_free()
 	_built.clear()
 	_gate_materials.clear()
+	_gate_nodes.clear()
+	_gates = world.get("gates", [])
+	_courses = world.get("courses", [])
+	_course = int(world.get("default_course", 0))
 	for o in world.get("objects", []):
 		match o.get("shape", ""):
 			"box":
@@ -51,10 +60,42 @@ func build(world: Dictionary) -> void:
 		_add_handset(world["handset_position"])
 	for e in world.get("emitters", []):
 		_add_emitter(e)
-	var gates: Array = world.get("gates", [])
+	_build_gates()
+	set_next_gate(_next_gate)
+
+
+## Draws the gates of course number `index` (an index into the world's courses; any other value is the world's only,
+## unnamed course). Nothing happens when that course is already drawn.
+func set_course(index: int) -> void:
+	if index == _course:
+		return
+	_course = index
+	_build_gates()
+	set_next_gate(_next_gate)
+
+
+## The declared gates the current course flies, in its order: all of them when the world has no courses.
+func course_gates() -> Array:
+	if _courses.is_empty() or _course < 0 or _course >= _courses.size():
+		return _gates
+	var out := []
+	for gate_name in _courses[_course]["gates"]:
+		for g in _gates:
+			if g["name"] == gate_name:
+				out.append(g)
+	return out
+
+
+func _build_gates() -> void:
+	for node in _gate_nodes:
+		_built.erase(node)
+		remove_child(node)
+		node.queue_free()
+	_gate_nodes.clear()
+	_gate_materials.clear()
+	var gates := course_gates()
 	for i in gates.size():
 		_add_gate(i, gates[i])
-	set_next_gate(_next_gate)
 
 
 ## Highlights the gate to fly through next: brighter and green, where the others stay translucent cyan and the
@@ -235,6 +276,7 @@ func _add_gate(index: int, g: Dictionary) -> void:
 	label.modulate = color
 	gate.add_child(label)
 	_add_built(gate)
+	_gate_nodes.append(gate)
 
 
 ## A post up to the transmitter, labelled with its frequency.

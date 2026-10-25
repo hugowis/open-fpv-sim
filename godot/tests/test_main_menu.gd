@@ -81,6 +81,34 @@ func test_choices_are_emitted_to_be_saved_and_the_course_row_follows_the_world()
 	menu.free()
 
 
+func test_a_world_with_several_courses_offers_them() -> void:
+	var m := await _menu({"world_path": DIR + "/data/worlds/zz-field.toml"})
+	var menu = m[0]
+	_write(DIR + "/data/worlds/zz-courses.toml", "name = \"Zz courses\"
+[[gates]]
+name = \"G0\"
+[[courses]]
+name = \"Line\"
+[[courses]]
+name = \"Hunt\"
+")
+	menu.open()
+	ok(not menu.row("course").visible, "a world without courses: no course row")
+	menu.row("world").set_value(DIR + "/data/worlds/zz-courses.toml")
+	menu.row("world").changed.emit(DIR + "/data/worlds/zz-courses.toml")
+	ok(menu.row("course").visible, "two courses: the row appears")
+	eq(menu.row("course").text, "Course: Default", "the world's own course until the pilot picks")
+	menu.row("course").step(2)
+	eq(m[2].back(), ["course", "Hunt"], "a pick is emitted by name")
+	menu.close()
+	menu.open()
+	eq(menu.row("course").text, "Course: Hunt", "and remembered")
+	menu.row("world").set_value(DIR + "/data/worlds/zz-course.toml")
+	menu.row("world").changed.emit(DIR + "/data/worlds/zz-course.toml")
+	ok(not menu.row("course").visible, "one gate, no courses: no row")
+	menu.free()
+
+
 func test_the_buttons_emit() -> void:
 	var m := await _menu()
 	m[0].row("start").pressed.emit()
