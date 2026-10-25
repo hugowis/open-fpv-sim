@@ -1,0 +1,171 @@
+# A proximity park: walls, pillars and a hedge around a tight four-gate diamond, made for slow airframes and
+# precise flying (epic #136, issue #131). Gate2 is rolled 15 degrees so its opening leans with the turn; a rolled
+# frame cannot be drawn with axis-aligned boxes, so Gate2 has no posts and bar.
+#
+# Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
+# All values are estimates.
+schema_version = 1
+name = "Proximity park"
+
+[pilot]
+# At the west entrance, goggles 1.7 m up, looking north over the loop.
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = false
+
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+# A quad left on by the workshop shed, south of the loop, on a channel of its own.
+[[emitters]]
+name = "workshop-quad"
+freq_mhz = 5806.0
+power_mw = 25.0
+position_ned_m = [18.0, -16.0, -1.0]
+
+# Gate0 is the start and finish, flown east: its posts separate north-south along x.
+[[objects]]
+name = "Gate0PostL"
+shape = "box"
+center_ned_m = [10.75, 0.0, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.9, 0.3, 0.2]
+
+[[objects]]
+name = "Gate0PostR"
+shape = "box"
+center_ned_m = [13.25, 0.0, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.9, 0.3, 0.2]
+
+[[objects]]
+name = "Gate0Bar"
+shape = "box"
+center_ned_m = [12.0, 0.0, -2.25]
+size_m = [2.6, 0.1, 0.1]
+color = [0.9, 0.3, 0.2]
+
+# Gate1, flown north: posts separate east-west along y.
+[[objects]]
+name = "Gate1PostL"
+shape = "box"
+center_ned_m = [20.0, 7.75, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.9, 0.45, 0.15]
+
+[[objects]]
+name = "Gate1PostR"
+shape = "box"
+center_ned_m = [20.0, 10.25, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.9, 0.45, 0.15]
+
+[[objects]]
+name = "Gate1Bar"
+shape = "box"
+center_ned_m = [20.0, 9.0, -2.25]
+size_m = [0.1, 2.6, 0.1]
+color = [0.9, 0.45, 0.15]
+
+# Gate2 (rolled 15 degrees) and its course-side dressing: no physical frame, the opening alone marks it.
+[[objects]]
+name = "EastWall"
+shape = "box"
+center_ned_m = [20.0, 13.5, -1.5]
+size_m = [10.0, 0.3, 3.0]
+color = [0.75, 0.72, 0.65]
+rf_loss_db = 12.0
+
+[[objects]]
+name = "SouthWall"
+shape = "box"
+center_ned_m = [8.0, 0.0, -1.5]
+size_m = [0.3, 7.0, 3.0]
+color = [0.75, 0.72, 0.65]
+rf_loss_db = 12.0
+
+[[objects]]
+name = "PillarA"
+shape = "cylinder"
+center_ned_m = [16.0, 4.5, -2.0]
+radius_m = 0.3
+height_m = 4.0
+color = [0.8, 0.35, 0.25]
+
+[[objects]]
+name = "PillarB"
+shape = "cylinder"
+center_ned_m = [24.0, -4.5, -2.0]
+radius_m = 0.3
+height_m = 4.0
+color = [0.8, 0.35, 0.25]
+
+# A low hedge across the middle of the loop: hop it on the Gate0-Gate2 cut.
+[[objects]]
+name = "Hedge"
+shape = "box"
+center_ned_m = [20.0, 0.0, -0.4]
+size_m = [6.0, 0.8, 0.8]
+color = [0.25, 0.5, 0.2]
+rf_loss_db = 6.0
+
+# Gate3, flown south: posts along y, like Gate1.
+[[objects]]
+name = "Gate3PostL"
+shape = "box"
+center_ned_m = [20.0, -10.25, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.2, 0.6, 0.9]
+
+[[objects]]
+name = "Gate3PostR"
+shape = "box"
+center_ned_m = [20.0, -7.75, -1.1]
+size_m = [0.1, 0.1, 2.2]
+color = [0.2, 0.6, 0.9]
+
+[[objects]]
+name = "Gate3Bar"
+shape = "box"
+center_ned_m = [20.0, -9.0, -2.25]
+size_m = [0.1, 2.6, 0.1]
+color = [0.2, 0.6, 0.9]
+
+# The loop: Gate0 east, Gate1 north, Gate2 west (rolled), Gate3 south, back to Gate0.
+[[gates]]
+name = "Gate0"
+center_ned_m = [12.0, 0.0, -1.1]
+heading_deg = 90.0
+width_m = 2.4
+height_m = 2.2
+
+[[gates]]
+name = "Gate1"
+center_ned_m = [20.0, 9.0, -1.1]
+heading_deg = 0.0
+width_m = 2.4
+height_m = 2.2
+
+[[gates]]
+name = "Gate2"
+center_ned_m = [28.0, 0.0, -1.5]
+heading_deg = 270.0
+roll_deg = 15.0
+width_m = 2.4
+height_m = 2.2
+
+[[gates]]
+name = "Gate3"
+center_ned_m = [20.0, -9.0, -1.1]
+heading_deg = 180.0
+width_m = 2.4
+height_m = 2.2
+
+[race]
+laps = 5
