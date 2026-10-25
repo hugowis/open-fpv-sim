@@ -10,12 +10,14 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 ## Known limitations of v1
 
 ### Physics (`docs/research/collision.md`)
-- Friction is viscous below 5 cm/s; `body.accel_ned` is coordinate acceleration (it
-  includes gravity); a motor's published `omega_dot` is the derivative before clamping.
+- `body.accel_ned` is coordinate acceleration (it includes gravity); a motor's published `omega_dot` is the
+  derivative before clamping.
 - The IMU's analytic vibration rate term (the gyro disturbance from prop imbalance) still ignores rotor gyroscopic
   coupling, which M6a added to the rigid-body dynamics only.
 - Two contact mechanisms, one per job: hits get impulses, resting weight gets the spring-dampers, so a hard
-  touchdown both bounces and compresses the legs. Position correction moves only the deepest contact out.
+  touchdown both bounces and compresses the legs. The landing points hold on a slope by static friction (a
+  millimetre of tangential sag, not a rigid hold) but the spheres' impulse friction creeps `g·sinθ·Δt` (0.4 mm/s on
+  a 20° slope); the position correction translates the body out of every contact but never turns it.
 - The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
 
 ### Electrical

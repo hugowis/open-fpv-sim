@@ -334,7 +334,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 ## Native Windows SITL (experimental, no WSL)
 The pinned Betaflight SITL also builds and runs as a native Windows program, through the Cygwin-based `msys`
 environment of MSYS2 (issue #67; the findings are in `docs/research/sitl-native-windows.md`). It measured about
-2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path: nothing builds this in CI yet.
+2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path. CI builds it and runs the live tests against it (the `windows-sitl` job, not yet a required check).
 Windows may ask whether to allow `betaflight_SITL.exe` on the network the first time it starts (it listens on its
 Betaflight ports on every interface): answer Cancel, the simulator talks to it over loopback, which is not filtered.
 
@@ -349,6 +349,11 @@ Betaflight ports on every interface): answer Cancel, the simulator talks to it o
    the live tests or the simulator as usual (the `ofs-fc` and `ofs-video` live tests split the variable at spaces, so
    keep the path free of them). Keep the DLLs beside the `.exe` (a start-up error naming `msys-2.0.dll` means they are
    missing).
+
+The build script runs make in the C locale and, when the link fails on undefined symbols, lists them and points at
+`src/platform/SIMULATOR/win_stubs.c` (in `ofs-sitl-windows.patch`): a new pinned Betaflight tag that adds code the PE link
+keeps needs its hardware-only symbols stubbed there. In CI the same list is an annotation on the run, and the job uploads
+the `.exe` and its two DLLs as the `betaflight-sitl-windows` artifact (for a manual run, not a release).
 
 The default cleanup on a plain Windows host is a PowerShell command scoped to the session's slot (about 0.2 s before
 a launch and after a stop when no SITL is left over, and bounded to 10 s); `OFS_SITL_CLEANUP` still overrides it. The

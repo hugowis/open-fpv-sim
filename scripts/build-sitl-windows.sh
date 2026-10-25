@@ -50,7 +50,17 @@ git submodule update --init --recursive --depth 1
 # Link-time optimisation is off: gcc 15's lto1 crashes on this link (internal compiler error in get_token).
 # Betaflight's make does not track EXTRA_FLAGS or target.h edits reliably; build clean.
 rm -rf obj/main/SITL
-make TARGET=SITL OPTIMISATION_BASE="-ffast-math -fmerge-all-constants" EXTRA_FLAGS="$FLAGS" -j"$(nproc)"
+log="$(mktemp)"
+# LC_ALL=C: the linker's messages are localised, and the check below reads them.
+if ! LC_ALL=C make TARGET=SITL OPTIMISATION_BASE="-ffast-math -fmerge-all-constants" EXTRA_FLAGS="$FLAGS" -j"$(nproc)" 2>&1 | tee "$log"; then
+  # A new pinned tag can add code the PE link keeps and no SITL object defines: name the symbols to add to win_stubs.c.
+  syms="$(sed -n "s/.*undefined reference to [\`']\([^'\`]*\)'.*/\1/p" "$log" | sort -u | tr '\n' ' ')"
+  if [ -n "$syms" ]; then
+    echo "error: undefined symbols, add them to src/platform/SIMULATOR/win_stubs.c (third_party/betaflight/ofs-sitl-windows.patch): $syms" >&2
+    [ -z "${GITHUB_ACTIONS:-}" ] || echo "::error title=win_stubs.c does not cover the link::undefined symbols: $syms"
+  fi
+  exit 1
+fi
 # The Makefile names the executable *.elf; Windows wants .exe, and the Cygwin runtime DLL goes beside it.
 cp obj/main/betaflight_SITL.elf obj/main/betaflight_SITL.exe
 for dll in $(ldd obj/main/betaflight_SITL.exe | awk '$3 ~ /^\/usr\/bin\// { print $3 }'); do
