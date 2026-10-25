@@ -286,7 +286,7 @@ class Provenance:
 class Part:
     """A library part the loaded quad uses, with the provenance of each parameter (keyed by dotted path, e.g.
     "motor.kv")."""
-    kind: str  # "frame" | "motor" | "prop" | "esc" | "battery" | "vtx"
+    kind: str  # "frame" | "motor" | "prop" | "esc" | "battery" | "imu" | "baro" | "vtx"
     id: str  # a single motor/prop/esc id covers every position, so it is listed once
     name: str
     provenance: dict[str, Provenance]

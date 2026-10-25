@@ -1,0 +1,28 @@
+# TDK InvenSense ICM-42688-P, the gyro/accelerometer on many current flight controllers. The simulator draws white noise
+# once per base-rate sample (8 kHz), so a datasheet noise density becomes a per-sample deviation by the square root of the
+# Nyquist bandwidth, 4000 Hz (63.25 sqrt(Hz)):
+#   gyro   2.8 mdps/rtHz = 4.887e-5 rad/s/rtHz  -> 3.09e-3 rad/s
+#   accel  70 ug/rtHz    = 6.865e-4 m/s2/rtHz   -> 0.0434 m/s2
+schema_version = 1
+name = "TDK InvenSense ICM-42688-P"
+
+[imu]
+gyro_noise_std_radps = 0.00309
+gyro_bias_radps = [0.0, 0.0, 0.0]
+accel_noise_std_mps2 = 0.0434
+accel_bias_mps2 = [0.0, 0.0, 0.0]
+
+[provenance."imu.gyro_noise_std_radps"]
+source = "datasheet"
+link = "https://invensense.tdk.com/products/icm-42688-p/"
+note = "gyro noise density 2.8 mdps/rtHz (DS-000347 v1.9, low-noise mode) times sqrt(4000 Hz), the simulator's base-rate Nyquist bandwidth; the bandwidth is the simulator's assumption, not the chip's"
+[provenance."imu.gyro_bias_radps"]
+source = "estimated"
+note = "zero: the datasheet gives a zero-rate-output tolerance, not a typical bias, and a bias belongs to one unit; use the fault.imu.* seams"
+[provenance."imu.accel_noise_std_mps2"]
+source = "datasheet"
+link = "https://invensense.tdk.com/products/icm-42688-p/"
+note = "accelerometer noise density 70 ug/rtHz (DS-000347 v1.9; TDK lists 65 on X/Y and 70 on Z, the larger is used) times 9.80665 m/s2 per g times sqrt(4000 Hz); the bandwidth is the simulator's assumption"
+[provenance."imu.accel_bias_mps2"]
+source = "estimated"
+note = "zero: a zero-g offset belongs to one unit, not to the part; use the fault.imu.* seams"

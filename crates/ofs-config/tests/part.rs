@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use ofs_config::part::{
-    load_battery, load_esc, load_frame, load_motor, load_prop, load_vtx, ProvenanceSource,
+    load_baro, load_battery, load_esc, load_frame, load_imu, load_motor, load_prop, load_vtx, ProvenanceSource,
 };
 
 const FRAME: &str = r#"
@@ -213,6 +213,58 @@ fn a_motor_part_carries_pole_pairs_and_the_sections_default_the_new_fields() {
     assert_eq!(cfg.props[0].imbalance_kgm, 0.0);
 }
 
+const IMU: &str = r#"
+schema_version = 1
+name = "Test IMU"
+
+[imu]
+gyro_noise_std_radps = 0.002
+gyro_bias_radps = [0.0, 0.0, 0.0]
+accel_noise_std_mps2 = 0.05
+accel_bias_mps2 = [0.0, 0.0, 0.0]
+
+[provenance."imu.gyro_noise_std_radps"]
+source = "datasheet"
+[provenance."imu.gyro_bias_radps"]
+source = "estimated"
+[provenance."imu.accel_noise_std_mps2"]
+source = "datasheet"
+[provenance."imu.accel_bias_mps2"]
+source = "estimated"
+"#;
+
+const BARO: &str = r#"
+schema_version = 1
+name = "Test barometer"
+
+[baro]
+noise_std_pa = 2.0
+
+[provenance."baro.noise_std_pa"]
+source = "measured"
+"#;
+
+#[test]
+fn an_imu_and_a_baro_part_load_with_their_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let imu = load_imu(&write(dir.path(), "i.toml", IMU)).unwrap();
+    assert_eq!((imu.imu.gyro_noise_std_radps, imu.imu.accel_noise_std_mps2), (0.002, 0.05));
+    assert_eq!(imu.provenance["imu.gyro_noise_std_radps"].source, ProvenanceSource::Datasheet);
+    let baro = load_baro(&write(dir.path(), "b.toml", BARO)).unwrap();
+    assert_eq!(baro.baro.noise_std_pa, 2.0);
+}
+
+#[test]
+fn an_imu_or_baro_parameter_without_provenance_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let no_bias = IMU.replace("[provenance.\"imu.accel_bias_mps2\"]\nsource = \"estimated\"\n", "");
+    let err = load_imu(&write(dir.path(), "i.toml", &no_bias)).unwrap_err().to_string();
+    assert!(err.contains("imu.accel_bias_mps2") && err.contains("missing provenance"), "{err}");
+    let invented = format!("{BARO}[provenance.\"baro.range_pa\"]\nsource = \"datasheet\"\n");
+    let err = load_baro(&write(dir.path(), "b.toml", &invented)).unwrap_err().to_string();
+    assert!(err.contains("baro.range_pa") && err.contains("unknown path"), "{err}");
+}
+
 #[test]
 fn table_valued_parameters_are_one_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -241,4 +293,11 @@ fn every_shipped_part_loads_and_names_its_id() {
     let tramp = load_vtx(&root.join("vtx/opendrone-tramp-600.toml")).unwrap();
     assert_eq!(tramp.vtx.power_levels_mw, vec![25, 100, 200, 400, 600]);
     assert_eq!(tramp.vtx.kind, ofs_config::VtxKind::Tramp);
+    let imu = load_imu(&root.join("imus/opendrone-imu.toml")).unwrap();
+    assert_eq!((imu.imu.gyro_noise_std_radps, imu.imu.accel_noise_std_mps2), (0.002, 0.05));
+    let icm = load_imu(&root.join("imus/tdk-icm-42688p.toml")).unwrap();
+    assert!((icm.imu.gyro_noise_std_radps - 2.8e-3_f64.to_radians() * 4000_f64.sqrt()).abs() < 1e-5, "2.8 mdps/rtHz over 4 kHz");
+    assert!((icm.imu.accel_noise_std_mps2 - 70e-6 * 9.80665 * 4000_f64.sqrt()).abs() < 1e-4, "70 ug/rtHz over 4 kHz");
+    assert_eq!(icm.provenance["imu.gyro_noise_std_radps"].source, ProvenanceSource::Datasheet);
+    assert_eq!(load_baro(&root.join("barometers/opendrone-baro.toml")).unwrap().baro.noise_std_pa, 2.0);
 }

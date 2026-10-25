@@ -5,8 +5,8 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::{
-    CollisionSection, ConfigError, EscSection, FrameSection, GroundSection, MotorSection, Problem, PropSection,
-    VtxAntennaSection, VtxKind,
+    BaroSection, CollisionSection, ConfigError, EscSection, FrameSection, GroundSection, ImuSection, MotorSection,
+    Problem, PropSection, VtxAntennaSection, VtxKind,
 };
 
 /// 1: first shape (M4a). Part files version independently of quad files.
@@ -35,7 +35,7 @@ impl ProvenanceSource {
 /// One library part a quad loaded, with the provenance of each of its parameters (keyed by dotted path).
 #[derive(Debug, Clone)]
 pub struct PartProvenance {
-    /// The library directory's part kind: `frame`, `motor`, `prop`, `esc`, `battery` or `vtx`.
+    /// The library directory's part kind: `frame`, `motor`, `prop`, `esc`, `battery`, `imu`, `baro` or `vtx`.
     pub kind: &'static str,
     pub id: String,
     pub name: String,
@@ -153,6 +153,24 @@ pub struct VtxPart {
     pub provenance: BTreeMap<String, Provenance>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImuPart {
+    pub schema_version: u32,
+    pub name: String,
+    pub imu: ImuSection,
+    pub provenance: BTreeMap<String, Provenance>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BaroPart {
+    pub schema_version: u32,
+    pub name: String,
+    pub baro: BaroSection,
+    pub provenance: BTreeMap<String, Provenance>,
+}
+
 fn check_part_schema(raw: &toml::Value) -> Result<(), String> {
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v >= i64::from(MIN_PART_SCHEMA_VERSION) && v <= i64::from(PART_SCHEMA_VERSION) => Ok(()),
@@ -234,3 +252,5 @@ part_loader!(load_prop, PropPart);
 part_loader!(load_esc, EscPart);
 part_loader!(load_battery, BatteryPart);
 part_loader!(load_vtx, VtxPart);
+part_loader!(load_imu, ImuPart);
+part_loader!(load_baro, BaroPart);

@@ -147,7 +147,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
 - The repro bundle as a single archive (it is a folder today, `docs/repro-bundle.md`).
-- `fcs/`, `receivers/` and `cameras/` part kinds and the IMU and barometer as parts.
+- `fcs/`, `receivers/` and `cameras/` part kinds.
 
 ### Tooling
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries

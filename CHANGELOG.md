@@ -5,6 +5,19 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### The IMU and the barometer as library parts (#42)
+#### Added
+- **`library/imus/` and `library/barometers/`**: `opendrone-imu` and `opendrone-baro` hold the numbers the shipped quads
+  carried inline, so the simulation is unchanged, and `tdk-icm-42688p` is an IMU sourced from the ICM-42688-P datasheet's
+  noise densities (the conversion to a per-sample deviation is in its provenance and in
+  `docs/research/component-library.md`). Their provenance appears in `sim.parts` as the kinds `imu` and `baro`.
+
+#### Changed
+- **Quad schema 6**: a quad writes `imu = "<id>"` and `baro = "<id>"` beside `frame = …` instead of the `[imu]` and `[baro]`
+  tables; the five shipped quads are converted. Schema-5 quads with inline tables still load (without provenance for
+  those two); a part reference at schema 5, or an inline table at schema 6, is a validation error naming the field.
+  `PartRefs` gains `imu` and `baro` (`None` for an inline table).
+
 No protocol, server or Python change. **Rust and Godot API:** `Client::dvr_start`, `dvr_write_frame` and `dvr_stop`
 now take a `DvrFeed` (`Goggles` or `Clean`), and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop` take
 the feed name (`"goggles"` or `"clean"`); `OfsClient.dvr_export(path, mode)` and `dvr_export_poll()` are new.

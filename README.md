@@ -140,15 +140,16 @@ column and still play.
 
 ## Component library
 
-The quad file is schema 5: it references parts and keeps only its own wiring, and the hardware lives in
+The quad file is schema 6: it references parts and keeps only its own wiring, and the hardware lives in
 `library/` — one TOML per part, every parameter's provenance recorded.
 
     library/
-      frames/    motors/   props/   escs/   batteries/   vtx/
+      frames/    motors/   props/   escs/   batteries/   imus/   barometers/   vtx/
     quads/       <quad>.toml + <quad>.betaflight.diff   (as today)
 
 A part's id is its file stem, and the quad references it — `motors = ["opendrone-openmotor-2207"]` in
-`quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part. The library is resolved against
+`quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part, and `imu = "tdk-icm-42688p"` swaps the
+shipped IMU for the datasheet-sourced one. A schema-5 quad that writes `[imu]` and `[baro]` as inline tables still loads. The library is resolved against
 `<quad dir>/../library`; set `OFS_LIBRARY` to a list of roots to fly another part set without touching `quads/`.
 The first root that has a part id wins, so a later root fills the parts the earlier ones lack. Separate roots with
 `;` on Windows and `:` elsewhere: `OFS_LIBRARY="C:\shared\ofs-library;library"` or

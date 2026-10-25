@@ -1,11 +1,13 @@
 # OpenDrone 5" freestyle — assembled from library parts (M1 estimates live in the part files now).
-schema_version = 5
+schema_version = 6
 name = "OpenDrone 5F freestyle (weak link)"
 
 frame = "opendrone-5f"
 motors = ["opendrone-openmotor-2207"]
 props = ["opendrone-5in-prop"]
 escs = ["opendrone-4in1-esc"]
+imu = "opendrone-imu"
+baro = "opendrone-baro"
 
 [battery]
 part = "opendrone-6s-1300"
@@ -14,15 +16,6 @@ rate_hz = 1000
 
 [sim]
 base_hz = 8000
-
-[imu]
-gyro_noise_std_radps = 0.002
-gyro_bias_radps = [0.0, 0.0, 0.0]
-accel_noise_std_mps2 = 0.05
-accel_bias_mps2 = [0.0, 0.0, 0.0]
-
-[baro]
-noise_std_pa = 2.0
 
 [home]
 lat_deg = 50.85
