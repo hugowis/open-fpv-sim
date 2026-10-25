@@ -140,7 +140,9 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - A compass, and the heading mapping it needs.
 
 ### Video and OSD
-- OSD font pages 2–3 (warnings, criticals) and the full HD/digital OSD element set.
+- The full HD/digital OSD element set (#32): the `OSD_SYS_*` elements and the 50 × 18 canvas that Betaflight sends only
+  when built with `USE_OSD_HD`, which needs an HD SITL build, a decoder for the system-element sub-command and an HD font
+  with a verified licence. Warnings and criticals (font pages 2–3) are drawn as the bold glyphs in amber and red.
 - Digital video systems (parent spec §2).
 - DVR audio (#36).
 
