@@ -61,6 +61,9 @@ pub struct WorldConfig {
     /// The race's rules; absent = race forever.
     #[serde(default)]
     pub race: RaceSection,
+    /// Named courses over the declared gates; absent = one course of all the gates in file order.
+    #[serde(default)]
+    pub courses: Vec<CourseSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
 }
@@ -72,6 +75,50 @@ pub struct RaceSection {
     /// The race ends when this many laps are completed (absent = no limit).
     #[serde(default)]
     pub laps: Option<u32>,
+    /// The course a fresh session starts in (absent = the first `[[courses]]` entry).
+    #[serde(default)]
+    pub course: Option<String>,
+}
+
+/// How a race is won.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RaceMode {
+    /// Fly the laps (the world's or the course's limit, or forever).
+    #[default]
+    Laps,
+    /// As many laps as fit before `time_limit_s` runs out.
+    TimeAttack,
+}
+
+/// A named course: some of the declared gates, in order. The first is the start and finish.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CourseSection {
+    /// Letters, digits, `_` and `-`, unique among the courses.
+    pub name: String,
+    /// Declared gate names, in course order, each at most once.
+    pub gates: Vec<String>,
+    #[serde(default)]
+    pub mode: RaceMode,
+    /// A lap-mode course's own lap limit; absent = the world's `[race] laps`.
+    #[serde(default)]
+    pub laps: Option<u32>,
+    /// A time-attack course's clock, from the first pass of gate 0.
+    #[serde(default)]
+    pub time_limit_s: Option<f64>,
+}
+
+/// A course as the race runs it: gate indices into `WorldConfig::gates`, and its rules.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Course {
+    /// Empty for the implicit course of a world without `[[courses]]`.
+    pub name: String,
+    pub gates: Vec<usize>,
+    pub mode: RaceMode,
+    /// The lap limit that applies (the course's own, else the world's); `None` for time attack and "forever".
+    pub laps: Option<u32>,
+    pub time_limit_s: Option<f64>,
 }
 
 /// The most gates a world may declare.
@@ -369,8 +416,35 @@ impl WorldConfig {
             emitters: Vec::new(),
             gates: Vec::new(),
             race: RaceSection::default(),
+            courses: Vec::new(),
             source_path: PathBuf::new(),
         }
+    }
+
+    /// The courses a race can run: the `[[courses]]` resolved against the gates, or one unnamed course of all the
+    /// gates in file order. Empty without gates. Call it on a validated config.
+    pub fn resolved_courses(&self) -> Vec<Course> {
+        if self.gates.is_empty() {
+            return Vec::new();
+        }
+        if self.courses.is_empty() {
+            return vec![Course { name: String::new(), gates: (0..self.gates.len()).collect(), mode: RaceMode::Laps, laps: self.race.laps, time_limit_s: None }];
+        }
+        self.courses
+            .iter()
+            .map(|c| Course {
+                name: c.name.clone(),
+                gates: c.gates.iter().filter_map(|n| self.gates.iter().position(|g| &g.name == n)).collect(),
+                mode: c.mode,
+                laps: if c.mode == RaceMode::Laps { c.laps.or(self.race.laps) } else { None },
+                time_limit_s: c.time_limit_s,
+            })
+            .collect()
+    }
+
+    /// The index in [`resolved_courses`](Self::resolved_courses) a fresh session starts in.
+    pub fn default_course(&self) -> usize {
+        self.race.course.as_ref().and_then(|n| self.courses.iter().position(|c| &c.name == n)).unwrap_or(0)
     }
 
     pub fn validate(&self) -> Vec<Problem> {
@@ -502,6 +576,33 @@ impl WorldConfig {
                 &field("center_ned_m"),
                 "the gate's opening must not reach below the ground (center d + its lowest corner's drop must be <= 0)",
             );
+        }
+        if !self.courses.is_empty() {
+            c.check(!self.gates.is_empty(), "courses", "a course needs [[gates]] to pick from");
+        }
+        let mut names = HashSet::new();
+        for (i, course) in self.courses.iter().enumerate() {
+            let field = |f: &str| format!("courses[{i}].{f}");
+            check_name(&mut c, &course.name, &field("name"), &mut names);
+            c.check(!course.gates.is_empty(), &field("gates"), "a course needs at least one gate");
+            let mut picked = HashSet::new();
+            for (j, gate) in course.gates.iter().enumerate() {
+                c.check(self.gates.iter().any(|g| &g.name == gate), &format!("courses[{i}].gates[{j}]"), format!("no gate named {gate:?}"));
+                c.check(picked.insert(gate.as_str()), &format!("courses[{i}].gates[{j}]"), format!("{gate:?} is already in this course"));
+            }
+            match course.mode {
+                RaceMode::Laps => {
+                    c.check(course.laps.is_none_or(|l| l >= 1), &field("laps"), "must be >= 1 (leave it out for the world's limit)");
+                    c.check(course.time_limit_s.is_none(), &field("time_limit_s"), "only a time_attack course has a time limit");
+                }
+                RaceMode::TimeAttack => {
+                    c.check(course.time_limit_s.is_some_and(|t| t.is_finite() && t > 0.0), &field("time_limit_s"), "a time_attack course needs time_limit_s > 0");
+                    c.check(course.laps.is_none(), &field("laps"), "a time_attack course ends on the clock, not on laps");
+                }
+            }
+        }
+        if let Some(name) = &self.race.course {
+            c.check(self.courses.iter().any(|x| &x.name == name), "race.course", format!("no course named {name:?}"));
         }
         let mut names = HashSet::new();
         for (i, e) in self.emitters.iter().enumerate() {
