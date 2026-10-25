@@ -22,6 +22,7 @@ repository). The format follows Keep a Changelog.
 - **Betaflight does not see this magnetometer.** The SITL datagram has no magnetometer field; SITL builds its compass from the
   attitude quaternion and a fixed field. The model feeds recordings, scripts and clients; extending the datagram and
   patching SITL is the follow-up (`docs/superpowers/specs/2026-10-25-compass-design.md`).
+
 ### Static friction and a full position correction in the contact model (#65)
 #### Changed
 - **A landing point sticks.** Its friction was `mu*N*v_t/max(|v_t|, 5 cm/s)`, viscous below 5 cm/s, so a resting quad
