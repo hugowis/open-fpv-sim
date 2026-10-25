@@ -15,14 +15,14 @@ class MockClient:
 	var frames: Array = []
 	var starts := 0
 
-	func dvr_start(_path: String, _width: int, _height: int) -> String:
+	func dvr_start(_feed: String, _path: String, _width: int, _height: int) -> String:
 		starts += 1
 		return ""
 
-	func dvr_write_frame(jpeg: PackedByteArray) -> void:
+	func dvr_write_frame(_feed: String, jpeg: PackedByteArray) -> void:
 		frames.append(jpeg)
 
-	func dvr_stop() -> Dictionary:
+	func dvr_stop(_feed: String) -> Dictionary:
 		return {"frames": frames.size(), "dropped_frames": 0, "bytes": 0}
 
 
@@ -89,10 +89,10 @@ func test_a_recording_round_trips() -> void:
 	var client := await _client()
 	var path := OS.get_user_data_dir() + "/test_dvr_roundtrip.avi"
 	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
-	eq(client.dvr_start(path, 4, 2), "", "starts")
+	eq(client.dvr_start("goggles", path, 4, 2), "", "starts")
 	for i in 10:
-		client.dvr_write_frame(PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))  # a JPEG-shaped blob; the muxer does not validate
-	var summary: Dictionary = client.dvr_stop()
+		client.dvr_write_frame("goggles", PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))  # a JPEG-shaped blob; the muxer does not validate
+	var summary: Dictionary = client.dvr_stop("goggles")
 	eq(int(summary.get("frames", -1)), 10, "ten frames")
 	eq(int(summary.get("dropped_frames", -1)), 0, "nothing dropped")
 	eq(_count_frames(path) / 2, 10, "ten 00dc chunks in movi and ten index entries")
@@ -104,12 +104,32 @@ func test_a_recording_round_trips() -> void:
 
 func test_stop_without_start_and_double_start_are_honest() -> void:
 	var client := await _client()
-	eq(client.dvr_stop().size(), 0, "stop without start is empty")
+	eq(client.dvr_stop("goggles").size(), 0, "stop without start is empty")
 	var path := OS.get_user_data_dir() + "/test_dvr_double.avi"
 	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
-	eq(client.dvr_start(path, 4, 2), "", "first start")
-	ok(client.dvr_start(path, 4, 2) != "", "a second start fails")
-	client.dvr_stop()
+	eq(client.dvr_start("goggles", path, 4, 2), "", "first start")
+	ok(client.dvr_start("goggles", path, 4, 2) != "", "a second start fails")
+	client.dvr_stop("goggles")
+	client.free()
+
+
+func test_two_feeds_record_independently() -> void:
+	var client := await _client()
+	var p1 := OS.get_user_data_dir() + "/test_dvr_feed_goggles.avi"
+	var p2 := OS.get_user_data_dir() + "/test_dvr_feed_clean.avi"
+	DirAccess.remove_absolute(p1)
+	DirAccess.remove_absolute(p2)
+	eq(client.dvr_start("goggles", p1, 4, 2), "", "goggles starts")
+	eq(client.dvr_start("clean", p2, 4, 2), "", "clean starts alongside it")
+	ok(client.dvr_start("clean", p2, 4, 2) != "", "a second clean start fails")
+	ok(client.dvr_start("bogus", p2, 4, 2) != "", "an unknown feed fails")
+	for i in 2:
+		client.dvr_write_frame("goggles", PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))
+	for i in 3:
+		client.dvr_write_frame("clean", PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))
+	eq(int(client.dvr_stop("goggles").get("frames", -1)), 2, "goggles holds its two frames")
+	eq(int(client.dvr_stop("clean").get("frames", -1)), 3, "clean holds its three frames")
+	eq(client.dvr_stop("bogus").size(), 0, "stopping an unknown feed is empty")
 	client.free()
 
 

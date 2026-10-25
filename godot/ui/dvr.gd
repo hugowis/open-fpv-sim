@@ -25,7 +25,7 @@ var image_source := Callable()
 
 func start(client: Object, viewport: SubViewport) -> String:
 	var path := "user://recordings/REC_%s.avi" % _timestamp()
-	var error: String = client.dvr_start(ProjectSettings.globalize_path(path), viewport.size.x, viewport.size.y)
+	var error: String = client.dvr_start("goggles", ProjectSettings.globalize_path(path), viewport.size.x, viewport.size.y)
 	if error != "":
 		return error
 	recording = true
@@ -53,7 +53,7 @@ func capture(view: Dictionary) -> void:
 	_last_target = target
 	if held > 0:
 		if not _last_jpeg.is_empty():
-			_client.dvr_write_frame(_last_jpeg)
+			_client.dvr_write_frame("goggles", _last_jpeg)
 		return
 	var image: Image = image_source.call() if image_source.is_valid() else _viewport.get_texture().get_image()
 	if image == null or image.is_empty():
@@ -61,14 +61,14 @@ func capture(view: Dictionary) -> void:
 	_last_jpeg = image.save_jpg_to_buffer(JPEG_QUALITY)
 	if _last_jpeg.is_empty():
 		return  # the encoder produced nothing: a 0-byte frame is never worth writing
-	_client.dvr_write_frame(_last_jpeg)
+	_client.dvr_write_frame("goggles", _last_jpeg)
 
 
 func stop() -> Dictionary:
 	if not recording:
 		return {}
 	recording = false
-	var summary: Dictionary = _client.dvr_stop()
+	var summary: Dictionary = _client.dvr_stop("goggles")
 	stopped.emit(summary)
 	return summary
 

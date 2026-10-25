@@ -1,5 +1,5 @@
 //! The DVR container's structure, checked by parsing what it wrote: a minimal RIFF/AVI walker.
-use ofs_client::dvr::DvrWriter;
+use ofs_client::dvr::{DvrFeed, DvrWriter};
 use std::path::Path;
 
 /// One `idx1` entry: (flags, offset, size).
@@ -169,4 +169,12 @@ fn a_start_on_an_existing_file_fails_and_leaves_it_untouched() {
     assert!(err.contains("already exists"), "{err}");
     assert_eq!(std::fs::read(&path).unwrap(), before, "the earlier recording is untouched");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dvr_feed_parse_knows_goggles_and_clean_only() {
+    assert_eq!(DvrFeed::parse("goggles"), Some(DvrFeed::Goggles));
+    assert_eq!(DvrFeed::parse("clean"), Some(DvrFeed::Clean));
+    assert_eq!(DvrFeed::parse("Clean"), None);
+    assert_eq!(DvrFeed::parse(""), None);
 }

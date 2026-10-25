@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use godot::classes::{INode, Node};
 use godot::prelude::*;
-use ofs_client::{Client, Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
+use ofs_client::dvr::DvrFeed;
+use ofs_client::{Client,Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
 
 struct OfsExtension;
 
@@ -309,29 +310,33 @@ impl OfsClient {
         d
     }
 
-    /// Starts a DVR recording to `path` (an absolute .avi path) at the viewport's pixel size; "" or why not.
+    /// Starts a DVR recording of `feed` ("goggles" or "clean") to `path` (an absolute .avi path) at the given pixel
+    /// size; "" or why not.
     #[func]
-    fn dvr_start(&self, path: GString, width: i64, height: i64) -> GString {
+    fn dvr_start(&self, feed: GString, path: GString, width: i64, height: i64) -> GString {
         let Some(client) = self.client.as_ref() else { return GString::from("no session") };
-        match client.dvr_start(path.to_string(), width.max(1) as u32, height.max(1) as u32) {
+        let name = feed.to_string();
+        let Some(feed) = DvrFeed::parse(&name) else { return GString::from(format!("unknown feed {name}").as_str()) };
+        match client.dvr_start(feed, path.to_string(), width.max(1) as u32, height.max(1) as u32) {
             Ok(()) => GString::new(),
             Err(e) => GString::from(e.as_str()),
         }
     }
 
     #[func]
-    fn dvr_write_frame(&self, jpeg: PackedByteArray) {
-        if let Some(client) = self.client.as_ref() {
-            client.dvr_write_frame(jpeg.to_vec());
+    fn dvr_write_frame(&self, feed: GString, jpeg: PackedByteArray) {
+        if let (Some(client), Some(feed)) = (self.client.as_ref(), DvrFeed::parse(&feed.to_string())) {
+            client.dvr_write_frame(feed, jpeg.to_vec());
         }
     }
 
-    /// Stops the recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
+    /// Stops the `feed` recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
     #[func]
-    fn dvr_stop(&self) -> VarDictionary {
+    fn dvr_stop(&self, feed: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
         let Some(client) = self.client.as_ref() else { return d };
-        let Ok(summary) = client.dvr_stop() else { return d };
+        let Some(feed) = DvrFeed::parse(&feed.to_string()) else { return d };
+        let Ok(summary) = client.dvr_stop(feed) else { return d };
         d.set("frames", summary.frames as i64);
         d.set("dropped_frames", summary.dropped_frames as i64);
         d.set("bytes", summary.bytes as i64);
