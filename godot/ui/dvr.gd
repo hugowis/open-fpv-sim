@@ -23,6 +23,9 @@ var _client: Object
 ## declared at start (every frame is fitted to it: an AVI has one size for its whole length), `jpeg` its last frame.
 var _feeds: Array = []
 var _last_target := -1
+## True until the first field after `start` was captured: a disabled SubViewport keeps its last texture, so the clean
+## viewport's picture on that field is the previous recording's last one and must not be encoded.
+var _first_field := false
 ## Where a current field's picture comes from: the FPV SubViewport (goggles) or the clean one, unless a test sets
 ## these to a Callable returning an Image (headless Godot renders nothing; the tests feed synthetic images through the
 ## same encode-and-write path).
@@ -61,6 +64,7 @@ func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewp
 	_client = client
 	_feeds = started_feeds
 	_last_target = -1
+	_first_field = true
 	started.emit(first_path)
 	return ""
 
@@ -71,8 +75,9 @@ func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewp
 ## encoded from the feed's viewport; a held one repeats the last frame as-is — the SubViewport still animates prop spin
 ## from live telemetry, so re-encoding would break the freeze. Every frame is fitted to the size declared at start.
 ## All or nothing per boundary, so the files stay on one timeline: once any feed has a frame, every feed writes one (a
-## feed that has none yet, like the clean one before its first render, writes a black frame); while no feed has one,
-## nobody writes.
+## feed that has none yet, like the clean one on its first field, writes a black frame); while no feed has one, nobody
+## writes. The clean feed does not encode on the first field after `start` (its viewport has not rendered for this
+## recording yet), so that frame is black.
 func capture(view: Dictionary) -> void:
 	if not recording or view.is_empty():
 		return
@@ -83,9 +88,10 @@ func capture(view: Dictionary) -> void:
 	_last_target = target
 	var any_frame := false
 	for entry in _feeds:
-		if held == 0:
+		if held == 0 and not (_first_field and entry["feed"] == "clean"):
 			_encode(entry)  # a feed with no usable picture keeps its previous frame
 		any_frame = any_frame or not entry["jpeg"].is_empty()
+	_first_field = false
 	if not any_frame:
 		return  # headless, or nothing rendered yet: this field is not in the recording
 	for entry in _feeds:
@@ -117,6 +123,7 @@ func _black(entry: Dictionary) -> PackedByteArray:
 
 ## `image` itself when it already is width x height; otherwise a black width x height image with `image` scaled to fit
 ## (aspect kept, bilinear) and centred, so a resize or aspect switch mid-recording still yields the declared size.
+@warning_ignore("integer_division")
 static func fit_image(image: Image, width: int, height: int) -> Image:
 	if image.get_width() == width and image.get_height() == height:
 		return image
@@ -131,23 +138,27 @@ static func fit_image(image: Image, width: int, height: int) -> Image:
 	return fitted
 
 
-## Stops every feed. The first feed's summary comes back with `paths`; it is empty when any feed failed to finalize
-## (after all of them were stopped), so there is nothing to export.
+## Stops every feed. The first feed's summary comes back with `paths` and `dropped_frames` summed over all feeds (each
+## feed has its own writer queue, so one file can drop frames the other does not); it is empty when any feed failed to
+## finalize (after all of them were stopped), so there is nothing to export.
 func stop() -> Dictionary:
 	if not recording:
 		return {}
 	recording = false
 	var summary := {}
 	var failed := false
+	var dropped := 0
 	for i in _feeds.size():
 		var one: Dictionary = _client.dvr_stop(_feeds[i]["feed"])
 		failed = failed or one.is_empty()
+		dropped += int(one.get("dropped_frames", 0))
 		if i == 0:
 			summary = one
 	_feeds = []
 	if failed:
 		summary = {}
 	else:
+		summary["dropped_frames"] = dropped
 		summary["paths"] = paths
 	stopped.emit(summary)
 	return summary

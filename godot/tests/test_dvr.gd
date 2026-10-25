@@ -47,7 +47,9 @@ class MockClient:
 		stopped_feeds.append(feed)
 		if fail_stop or feed == fail_stop_feed:
 			return {}
-		return {"frames": counts.get(feed, 0), "dropped_frames": 0, "bytes": 0}
+		return {"frames": counts.get(feed, 0), "dropped_frames": dropped.get(feed, 0), "bytes": 0}
+
+	var dropped := {}  # frames each feed's writer queue dropped
 
 	var exports: Array = []  # [path, mode] per dvr_export call
 	var export_results: Array = []
@@ -426,6 +428,20 @@ func test_fit_image_pillarboxes_a_taller_image() -> void:
 	eq(fitted.get_pixel(7, 4), Color.BLACK, "the right column is black")
 
 
+func test_fit_image_with_odd_sizes_is_exactly_the_target_and_centred_by_integer_division() -> void:
+	# 5x3 into 7x5: scale 1.4 -> 7x4 (4.2 rounds down), the spare row (5 - 4 = 1) goes below: offset 1 / 2 = 0.
+	var wide: Image = Dvr.fit_image(_solid(5, 3, Color.RED), 7, 5)
+	eq(wide.get_size(), Vector2i(7, 5), "exactly the target size")
+	ok(wide.get_pixel(0, 0).r > 0.9 and wide.get_pixel(6, 3).r > 0.9, "the picture fills rows 0-3 edge to edge")
+	ok(wide.get_pixel(0, 4).r < 0.1 and wide.get_pixel(6, 4).r < 0.1, "the last row is the black band")
+	# 3x3 into 8x5: scale 5/3 -> 5x5 at x offset (8 - 5) / 2 = 1: columns 1-5 are the picture, 0 and 6-7 are black.
+	var narrow: Image = Dvr.fit_image(_solid(3, 3, Color.RED), 8, 5)
+	eq(narrow.get_size(), Vector2i(8, 5), "exactly the target size")
+	ok(narrow.get_pixel(0, 2).r < 0.1, "column 0 is black")
+	ok(narrow.get_pixel(1, 2).r > 0.9 and narrow.get_pixel(5, 2).r > 0.9, "columns 1-5 are the picture")
+	ok(narrow.get_pixel(6, 2).r < 0.1 and narrow.get_pixel(7, 2).r < 0.1, "columns 6-7 are black")
+
+
 func test_a_resize_mid_recording_keeps_the_declared_size() -> void:
 	var dvr: Node = Dvr.new()
 	await add_to_tree(dvr)
@@ -576,6 +592,8 @@ func test_clean_only_starts_one_clean_file() -> void:
 	eq(mock.started_feeds.size(), 1, "one writer")
 	eq(mock.started_feeds[0][0], "clean", "the clean feed")
 	_feed_field(dvr, 1)
+	eq(mock.feed_frames("clean").size(), 0, "the first field has no clean picture of this recording yet")
+	_feed_field(dvr, 2)
 	eq(mock.feed_frames("clean").size(), 1, "the clean frame is written")
 	eq(mock.feed_frames("goggles").size(), 0, "and no goggles frame")
 	eq(dvr.stop()["paths"], dvr.paths, "the summary carries the one path")
@@ -710,6 +728,59 @@ func test_a_clean_feed_that_renders_late_still_gets_a_frame_per_field() -> void:
 	eq(first.load_jpg_from_buffer(mock.feed_frames("clean")[0]), OK, "the first clean frame decodes")
 	eq(first.get_size(), Vector2i(6, 6), "at the clean feed's declared size")
 	dvr.stop()
+	_free_recorder(r)
+
+
+func test_the_clean_feed_does_not_encode_the_first_field_of_a_recording() -> void:
+	# A disabled SubViewport keeps its last texture: on a second recording the first clean image is the old one.
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	dvr.image_source = func() -> Image: return _solid(8, 4, Color.GREEN)
+	dvr.clean_image_source = func() -> Image: return _solid(6, 6, Color.RED)  # the stale picture
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	dvr.capture({"render_time_s": 0.04, "held_fields": 0, "target_field": 2, "field_valid": true})
+	eq(mock.feed_frames("goggles").size(), 2, "goggles has both fields")
+	eq(mock.feed_frames("clean").size(), 2, "so has clean")
+	var first := Image.new()
+	var second := Image.new()
+	var goggles := Image.new()
+	eq(first.load_jpg_from_buffer(mock.feed_frames("clean")[0]), OK, "the first clean frame decodes")
+	eq(second.load_jpg_from_buffer(mock.feed_frames("clean")[1]), OK, "the second decodes")
+	eq(goggles.load_jpg_from_buffer(mock.feed_frames("goggles")[0]), OK, "the first goggles frame decodes")
+	ok(first.get_pixel(3, 3).r < 0.1, "the first clean frame is black, not the stale picture")
+	ok(second.get_pixel(3, 3).r > 0.5, "the second is the picture")
+	ok(goggles.get_pixel(4, 2).g > 0.3, "goggles encodes its first field")
+	dvr.stop()
+	_free_recorder(r)
+	# A held first field consumes the guard too: the clean feed encodes on the next current field.
+	var held := await _recorder("both")
+	held["dvr"].image_source = func() -> Image: return _solid(8, 4, Color.GREEN)
+	held["dvr"].clean_image_source = func() -> Image: return _solid(6, 6, Color.RED)
+	held["dvr"].capture({"render_time_s": 0.02, "held_fields": 1, "target_field": 1, "field_valid": false})
+	held["dvr"].capture({"render_time_s": 0.04, "held_fields": 0, "target_field": 2, "field_valid": true})
+	eq(held["mock"].feed_frames("clean").size(), 1, "nothing was written for the held first field")
+	var again := Image.new()
+	again.load_jpg_from_buffer(held["mock"].feed_frames("clean")[0])
+	ok(again.get_pixel(3, 3).r > 0.5, "the guard applies to the first field only")
+	held["dvr"].stop()
+	_free_recorder(held)
+
+
+func test_stop_sums_the_dropped_frames_of_every_feed() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	_feed_field(dvr, 1)
+	_feed_field(dvr, 2)
+	mock.dropped = {"goggles": 0, "clean": 3}
+	var summary: Dictionary = dvr.stop()
+	eq(summary.get("dropped_frames"), 3, "a drop in the clean file only is reported")
+	eq(summary.get("frames"), 2, "the rest is the first feed's summary")
+	var other := await _recorder("both")
+	other["mock"].dropped = {"goggles": 2, "clean": 5}
+	eq(other["dvr"].stop().get("dropped_frames"), 7, "both feeds' drops add up")
+	_free_recorder(other)
 	_free_recorder(r)
 
 
