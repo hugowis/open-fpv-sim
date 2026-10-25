@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use ofs_sim::pb::sim_client::SimClient;
 use ofs_sim::pb::{
-    fault, Empty, EventKind, Fault, HandshakeRequest, InputsFile, LoadRequest, Mode, PilotInput, RadioLinkLoss, RecordingSignal,
+    fault, Empty, EventKind, Fault, HandshakeRequest, InputsFile, LoadRequest, Mode, PilotInput, RadioLinkLoss, RaceMode, RecordingSignal, ResetRaceRequest,
     RunRequest, StartRecordingRequest, Sticks, StreamRequest, VideoSync,
 };
 use ofs_sim::server::{sim_server, SimService, PROTOCOL_VERSION};
@@ -747,16 +747,50 @@ async fn a_world_can_be_named() {
 #[tokio::test]
 async fn a_race_can_only_be_reset_in_a_world_with_gates() {
     let mut c = start().await;
-    let err = c.reset_race(Empty {}).await.unwrap_err();
+    let err = c.reset_race(ResetRaceRequest::default()).await.unwrap_err();
     assert_eq!(err.code(), Code::FailedPrecondition, "nothing loaded: {err}");
     c.load(open_loop(Mode::Lockstep)).await.unwrap();
-    let err = c.reset_race(Empty {}).await.unwrap_err();
+    let err = c.reset_race(ResetRaceRequest::default()).await.unwrap_err();
     assert_eq!((err.code(), kind(&err).as_str()), (Code::FailedPrecondition, "invalid_state"), "the open field has no gates: {err}");
     assert!(err.message().contains("no gates"), "{}", err.message());
     c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
-    c.reset_race(Empty {}).await.unwrap();
+    c.reset_race(ResetRaceRequest::default()).await.unwrap();
     let race = c.run(RunRequest { seconds: 0.01 }).await.unwrap().into_inner().race.unwrap();
     assert_eq!((race.running, race.finished, race.lap_limit, race.next_gate), (false, false, 0, 0));
+}
+
+#[tokio::test]
+async fn a_reset_picks_the_course_and_the_race_names_it() {
+    let mut c = start().await;
+    c.load(LoadRequest { world_path: "park".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    let world = c.get_world(Empty {}).await.unwrap().into_inner();
+    let courses: Vec<(&str, i32, u32, f64)> = world.courses.iter().map(|c| (c.name.as_str(), c.mode, c.laps, c.time_limit_s)).collect();
+    assert_eq!(courses, [("Diamond", RaceMode::Laps as i32, 5, 0.0), ("Hunt", RaceMode::TimeAttack as i32, 0, 60.0)]);
+    assert_eq!((world.default_course, world.courses[0].gates.len()), (0, 4));
+    let race = c.run(RunRequest { seconds: 0.01 }).await.unwrap().into_inner().race.unwrap();
+    assert_eq!((race.course.as_str(), race.course_index, race.mode, race.lap_limit, race.time_left_s), ("Diamond", 0, RaceMode::Laps as i32, 5, 0.0));
+
+    let err = c.reset_race(ResetRaceRequest { course: "Nope".into() }).await.unwrap_err();
+    assert_eq!((err.code(), kind(&err).as_str()), (Code::InvalidArgument, "invalid_argument"), "{err}");
+    assert!(err.message().contains("Diamond") && err.message().contains("Hunt"), "the error lists the courses: {}", err.message());
+
+    let mut events = c.watch(Empty {}).await.unwrap().into_inner();
+    c.reset_race(ResetRaceRequest { course: "Hunt".into() }).await.unwrap();
+    let race = c.run(RunRequest { seconds: 0.01 }).await.unwrap().into_inner().race.unwrap();
+    assert_eq!((race.course.as_str(), race.course_index, race.mode, race.lap_limit), ("Hunt", 1, RaceMode::TimeAttack as i32, 0));
+    assert_eq!((race.time_limit_s, race.time_left_s), (60.0, 60.0), "the whole minute is left before the start");
+    let reset = loop {
+        let e = events.message().await.unwrap().expect("the event stream is open");
+        if e.kind == EventKind::RaceReset as i32 {
+            break e;
+        }
+    };
+    assert_eq!(reset.message, "race reset: Hunt");
+
+    // An empty name keeps the course: the same one restarts.
+    c.reset_race(ResetRaceRequest::default()).await.unwrap();
+    let race = c.run(RunRequest { seconds: 0.01 }).await.unwrap().into_inner().race.unwrap();
+    assert_eq!(race.course, "Hunt");
 }
 
 #[tokio::test]

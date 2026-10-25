@@ -18,6 +18,7 @@ use ofs_log::{RecordError, Recorder, RecorderHandle, RecordingSummary, SignalRat
 use crate::inputs::{tick_at, Column, Inputs, Stick};
 use crate::inputs_recorder::{InputsRecorder, InputsRecordingSummary, InputsState};
 use crate::journal::{Action, Journal};
+use ofs_config::world::Course;
 use crate::race::{GateTimer, RaceEvent, RaceHandle, RaceInfo, RaceSignals};
 use ofs_fc::sitl::bridge::{BridgeConfig, SerialLink, SerialTap, SitlBridge};
 use ofs_fc::sitl::codec::PortMap;
@@ -312,6 +313,7 @@ pub struct VehicleState {
 struct RaceLink {
     signals: RaceSignals,
     handle: RaceHandle,
+    courses: Vec<Course>,
 }
 
 struct VideoHandles {
@@ -1107,8 +1109,9 @@ pub fn build_seeded(
     // After the physics, which wrote this tick's pose; a world without gates adds neither the model nor its signals.
     let mut race = None;
     if !opts.world.gates.is_empty() {
-        let (timer, handle) = GateTimer::new(&opts.world.gates, cfg.bounding_radius_m(), opts.world.race.laps, &mut bus);
-        race = Some(RaceLink { signals: RaceSignals::register(&mut bus), handle });
+        let courses = opts.world.resolved_courses();
+        let (timer, handle) = GateTimer::with_courses(&opts.world.gates, courses.clone(), opts.world.default_course(), cfg.bounding_radius_m(), &mut bus);
+        race = Some(RaceLink { signals: RaceSignals::register(&mut bus), handle, courses });
         models.push(Box::new(timer));
     }
 
@@ -1622,8 +1625,8 @@ impl Vehicle {
             Action::StopInputs => {
                 self.stop_inputs();
             }
-            Action::ResetRace => {
-                self.reset_race();
+            Action::ResetRace(course) => {
+                self.reset_race(*course);
             }
         }
         Ok(())
@@ -1722,19 +1725,26 @@ impl Vehicle {
             race: self
                 .race
                 .as_ref()
-                .map_or_else(RaceInfo::default, |r| {
-                    r.signals.info(b, self.scheduler.time_s(), self.world.gates.len(), self.world.race.laps.unwrap_or(0))
-                }),
+                .map_or_else(RaceInfo::default, |r| r.signals.info(b, self.scheduler.time_s(), &r.courses)),
         }
     }
 
-    /// Starts a fresh race at the next tick (no clock, no laps, no best time, gate 0 next). `false` when the world
-    /// has no gates, so there is no race to reset.
-    pub fn reset_race(&mut self) -> bool {
+    /// Starts a fresh race at the next tick (no clock, no laps, no best time, gate 0 next) on the course with index
+    /// `course`, or the current one. `false` when the world has no gates, so there is no race to reset, or `course`
+    /// is not one of the world's.
+    pub fn reset_race(&mut self, course: Option<usize>) -> bool {
         let Some(race) = &self.race else { return false };
-        self.journal.push(self.scheduler.tick(), Action::ResetRace);
-        race.handle.request_reset();
+        if course.is_some_and(|c| c >= race.courses.len()) {
+            return false;
+        }
+        self.journal.push(self.scheduler.tick(), Action::ResetRace(course));
+        race.handle.request_reset(course);
         true
+    }
+
+    /// The courses a race can run (empty when the world has no gates).
+    pub fn courses(&self) -> &[Course] {
+        self.race.as_ref().map_or(&[], |r| &r.courses)
     }
 
     /// The gate and lap events raised since the last call.

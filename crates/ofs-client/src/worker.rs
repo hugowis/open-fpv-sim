@@ -327,8 +327,8 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
                         shared.error(status_error(status));
                     }
                 }
-                Some(Command::ResetRace) => {
-                    if let Err(status) = client.reset_race(pb::Empty {}).await {
+                Some(Command::ResetRace(course)) => {
+                    if let Err(status) = client.reset_race(pb::ResetRaceRequest { course }).await {
                         shared.error(status_error(status));
                     }
                 }

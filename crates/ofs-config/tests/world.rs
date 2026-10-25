@@ -86,6 +86,9 @@ fn the_park_world_loads() {
     );
     assert!(w.gates.iter().all(|g| g.width_m == 2.4 && g.height_m == 2.2));
     assert_eq!(w.gates[2].roll_deg, 15.0, "the west gate leans with the turn");
+    let courses = w.resolved_courses();
+    assert_eq!(courses.iter().map(|c| (c.name.as_str(), c.mode, c.laps, c.time_limit_s)).collect::<Vec<_>>(), [("Diamond", world::RaceMode::Laps, Some(5), None), ("Hunt", world::RaceMode::TimeAttack, None, Some(60.0))]);
+    assert_eq!(w.default_course(), 0, "the default course is the whole loop, as before");
     let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(names.len(), 14, "gate frames (9), walls (2), pillars (2), hedge");
     let post = w.objects.iter().find(|o| o.name == "Gate0PostL").unwrap();

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use ofs_config::world::{self as world_cfg, WorldConfig};
+use ofs_config::world::{self as world_cfg, Course, RaceMode, WorldConfig};
 use ofs_config::{AntennaKind, Polarization};
 use ofs_core::SimError;
 use ofs_video::link::VideoSync;
@@ -90,19 +90,39 @@ pub(crate) fn events_in_time_order(mut out: Vec<pb::Event>) -> Vec<pb::Event> {
     out
 }
 
+/// What race events are written with: for each course its gates' names by place, and the course names (empty for the
+/// implicit course of a world without `[[courses]]`).
+pub(crate) struct RaceNames {
+    gates: Vec<Vec<String>>,
+    courses: Vec<String>,
+}
+
+impl RaceNames {
+    pub(crate) fn new(world: &WorldConfig, courses: &[Course]) -> Self {
+        RaceNames {
+            gates: courses.iter().map(|c| c.gates.iter().map(|&i| world.gates[i].name.clone()).collect()).collect(),
+            courses: courses.iter().map(|c| c.name.clone()).collect(),
+        }
+    }
+
+    fn gate(&self, course: usize, place: usize) -> &str {
+        self.gates.get(course).and_then(|g| g.get(place)).map_or("unknown", String::as_str)
+    }
+}
+
 /// The protocol events a race event makes: the last lap also ends the race.
-pub(crate) fn race_events(e: &RaceEvent, gate_names: &[String]) -> Vec<pb::Event> {
-    let mut out = vec![race_event(e, gate_names)];
+pub(crate) fn race_events(e: &RaceEvent, names: &RaceNames) -> Vec<pb::Event> {
+    let mut out = vec![race_event(e, names)];
     if let RaceEvent::LapCompleted { lap, time_s, finished: true, .. } = *e {
         out.push(event(time_s, pb::EventKind::RaceFinished, format!("race finished: {lap} {}", if lap == 1 { "lap" } else { "laps" })));
     }
     out
 }
 
-pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
+pub(crate) fn race_event(e: &RaceEvent, names: &RaceNames) -> pb::Event {
     match *e {
-        RaceEvent::GatePassed { gate, time_s, split_s } => {
-            let name = gate_names.get(gate).map_or("unknown", String::as_str);
+        RaceEvent::GatePassed { gate, course, time_s, split_s } => {
+            let name = names.gate(course, gate);
             let message =
                 if gate == 0 && split_s == 0.0 { format!("{name} (gate {gate}) start") } else { format!("{name} (gate {gate}) split {split_s:.3} s") };
             event(time_s, pb::EventKind::GatePassed, message)
@@ -110,16 +130,27 @@ pub(crate) fn race_event(e: &RaceEvent, gate_names: &[String]) -> pb::Event {
         RaceEvent::LapCompleted { lap, time_s, lap_s, best, .. } => {
             event(time_s, pb::EventKind::LapCompleted, format!("lap {lap}: {lap_s:.3} s{}", if best { " (best)" } else { "" }))
         }
-        RaceEvent::GateHit { gate, time_s } => {
-            let name = gate_names.get(gate).map_or("unknown", String::as_str);
+        RaceEvent::GateHit { gate, course, time_s } => {
+            let name = names.gate(course, gate);
             event(time_s, pb::EventKind::GateHit, format!("{name} (gate {gate}) hit"))
         }
-        RaceEvent::Reset { time_s } => event(time_s, pb::EventKind::RaceReset, "race reset"),
+        RaceEvent::TimeUp { time_s, laps } => {
+            event(time_s, pb::EventKind::RaceFinished, format!("race finished: {laps} {}", if laps == 1 { "lap" } else { "laps" }))
+        }
+        RaceEvent::Reset { time_s, course } => match names.courses.get(course).filter(|n| !n.is_empty()) {
+            Some(name) => event(time_s, pb::EventKind::RaceReset, format!("race reset: {name}")),
+            None => event(time_s, pb::EventKind::RaceReset, "race reset"),
+        },
     }
 }
 
-fn race_msg(r: &RaceInfo) -> pb::RaceState {
+fn race_msg(r: &RaceInfo, courses: &[Course]) -> pb::RaceState {
     pb::RaceState {
+        course: courses.get(r.course as usize).map(|c| c.name.clone()).unwrap_or_default(),
+        course_index: r.course,
+        mode: race_mode_msg(r.mode) as i32,
+        time_limit_s: r.time_limit_s,
+        time_left_s: r.time_left_s,
         present: r.present,
         running: r.running,
         finished: r.finished,
@@ -254,6 +285,29 @@ pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
                 roll_deg: g.roll_deg,
             })
             .collect(),
+        courses: if w.courses.is_empty() {
+            Vec::new()
+        } else {
+            w.courses
+                .iter()
+                .zip(w.resolved_courses())
+                .map(|(c, r)| pb::Course {
+                    name: c.name.clone(),
+                    gates: c.gates.clone(),
+                    mode: race_mode_msg(c.mode) as i32,
+                    laps: r.laps.unwrap_or(0),
+                    time_limit_s: c.time_limit_s.unwrap_or(0.0),
+                })
+                .collect()
+        },
+        default_course: w.default_course() as u32,
+    }
+}
+
+fn race_mode_msg(m: RaceMode) -> pb::RaceMode {
+    match m {
+        RaceMode::Laps => pb::RaceMode::Laps,
+        RaceMode::TimeAttack => pb::RaceMode::TimeAttack,
     }
 }
 
@@ -360,7 +414,7 @@ impl Session {
         let mut out = self.events_for(&s, faults);
         let raised = self.vehicle.take_race_events();
         if !raised.is_empty() {
-            let names: Vec<String> = self.vehicle.world().gates.iter().map(|g| g.name.clone()).collect();
+            let names = RaceNames::new(self.vehicle.world(), self.vehicle.courses());
             out.extend(raised.iter().flat_map(|e| race_events(e, &names)));
         }
         if let Some(name) = self.vehicle.take_finished_inputs() {
@@ -486,7 +540,7 @@ impl Session {
                 frame_count: s.fc_telemetry.frame_count,
                 telemetry_age_s: s.fc_telemetry.age_s,
             }),
-            race: Some(race_msg(&s.race)),
+            race: Some(race_msg(&s.race, self.vehicle.courses())),
         }
     }
 
@@ -588,8 +642,8 @@ mod tests {
     #[test]
     fn a_batch_of_events_is_time_ordered_with_ties_kept_in_insertion_order() {
         let mut out = vec![event(1.0, pb::EventKind::LinkDown, "early state event"), event(3.0, pb::EventKind::LinkUp, "later state event")];
-        let names = vec!["Gate0".to_string(), "Gate1".to_string()];
-        let race = [RaceEvent::GatePassed { gate: 1, time_s: 2.0, split_s: 2.0 }];
+        let names = names(&["Gate0", "Gate1"]);
+        let race = [RaceEvent::GatePassed { gate: 1, course: 0, time_s: 2.0, split_s: 2.0 }];
         out.extend(race.iter().map(|e| race_event(e, &names)));
         let times: Vec<f64> = events_in_time_order(out).iter().map(|e| e.time_s).collect();
         assert_eq!(times, vec![1.0, 2.0, 3.0], "the race crossing sits between the two state events");
@@ -678,21 +732,37 @@ mod tests {
         Session::new(crate::vehicle::build(&cfg, &opts, None).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true)
     }
 
+    /// One unnamed course over these gates.
+    fn names(gates: &[&str]) -> RaceNames {
+        RaceNames { gates: vec![gates.iter().map(|g| g.to_string()).collect()], courses: vec![String::new()] }
+    }
+
+    #[test]
+    fn a_named_course_is_in_the_reset_message_and_names_its_gates_by_place() {
+        // Course 1 flies the file's gate 2 first.
+        let names = RaceNames { gates: vec![vec!["A".into(), "B".into(), "C".into()], vec!["C".into(), "A".into()]], courses: vec!["Line".into(), "Hunt".into()] };
+        assert_eq!(race_event(&RaceEvent::Reset { time_s: 1.0, course: 1 }, &names).message, "race reset: Hunt");
+        assert_eq!(race_event(&RaceEvent::GatePassed { gate: 1, course: 1, time_s: 2.0, split_s: 1.0 }, &names).message, "A (gate 1) split 1.000 s");
+        let up = race_event(&RaceEvent::TimeUp { time_s: 61.0, laps: 4 }, &names);
+        assert_eq!((up.kind, up.time_s, up.message.as_str()), (pb::EventKind::RaceFinished as i32, 61.0, "race finished: 4 laps"));
+        assert_eq!(race_event(&RaceEvent::TimeUp { time_s: 61.0, laps: 1 }, &names).message, "race finished: 1 lap");
+    }
+
     #[test]
     fn race_events_become_gate_passed_and_lap_completed_events_with_the_documented_text() {
         use crate::race::RaceEvent;
-        let names: Vec<String> = ["Gate0", "Gate1", "Gate2"].map(String::from).to_vec();
-        let start = race_event(&RaceEvent::GatePassed { gate: 0, time_s: 2.5, split_s: 0.0 }, &names);
+        let names = names(&["Gate0", "Gate1", "Gate2"]);
+        let start = race_event(&RaceEvent::GatePassed { gate: 0, course: 0, time_s: 2.5, split_s: 0.0 }, &names);
         assert_eq!((start.kind, start.time_s, start.message.as_str()), (pb::EventKind::GatePassed as i32, 2.5, "Gate0 (gate 0) start"));
-        let split = race_event(&RaceEvent::GatePassed { gate: 1, time_s: 10.9124, split_s: 8.4123 }, &names);
+        let split = race_event(&RaceEvent::GatePassed { gate: 1, course: 0, time_s: 10.9124, split_s: 8.4123 }, &names);
         assert_eq!((split.kind, split.message.as_str()), (pb::EventKind::GatePassed as i32, "Gate1 (gate 1) split 8.412 s"));
         let first = race_event(&RaceEvent::LapCompleted { lap: 1, time_s: 33.0, lap_s: 31.2041, best: true, finished: false }, &names);
         assert_eq!((first.kind, first.time_s, first.message.as_str()), (pb::EventKind::LapCompleted as i32, 33.0, "lap 1: 31.204 s (best)"));
         let slower = race_event(&RaceEvent::LapCompleted { lap: 2, time_s: 66.0, lap_s: 33.0, best: false, finished: false }, &names);
         assert_eq!(slower.message, "lap 2: 33.000 s");
-        let hit = race_event(&RaceEvent::GateHit { gate: 2, time_s: 40.25 }, &names);
+        let hit = race_event(&RaceEvent::GateHit { gate: 2, course: 0, time_s: 40.25 }, &names);
         assert_eq!((hit.kind, hit.time_s, hit.message.as_str()), (pb::EventKind::GateHit as i32, 40.25, "Gate2 (gate 2) hit"));
-        let reset = race_event(&RaceEvent::Reset { time_s: 41.0 }, &names);
+        let reset = race_event(&RaceEvent::Reset { time_s: 41.0, course: 0 }, &names);
         assert_eq!((reset.kind, reset.time_s, reset.message.as_str()), (pb::EventKind::RaceReset as i32, 41.0, "race reset"));
         let last = race_events(&RaceEvent::LapCompleted { lap: 3, time_s: 99.0, lap_s: 30.0, best: false, finished: true }, &names);
         let shown: Vec<(i32, &str)> = last.iter().map(|e| (e.kind, e.message.as_str())).collect();
@@ -715,6 +785,8 @@ mod tests {
         assert_eq!(g.center_ned_m, Some(pb::Vec3 { x: 30.0, y: 0.0, z: -1.22 }));
         let race = session.state_msg().race.expect("a race message");
         assert_eq!((race.present, race.running, race.gate_count, race.laps, race.next_gate), (true, false, 3, 0, 0));
+        assert!(world.courses.is_empty() && race.course.is_empty(), "a world without [[courses]] names no course");
+        assert_eq!((race.course_index, race.mode, race.time_limit_s), (0, pb::RaceMode::Laps as i32, 0.0));
         let bare = testing::open_loop_session(RunMode::Lockstep);
         assert!(!bare.state_msg().race.unwrap().present);
     }

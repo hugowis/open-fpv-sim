@@ -1,6 +1,6 @@
 //! The GateTimer model on a bare scheduler: a test model flies the quad along a path, the timer reads its poses.
 use glam::DVec3;
-use ofs_config::world::GateSection;
+use ofs_config::world::{Course, GateSection, RaceMode};
 use ofs_core::{names, Bus, Model, Scheduler, SimError, StepCtx};
 use ofs_sim::race::{GateTimer, RaceEvent, RaceHandle};
 
@@ -83,10 +83,10 @@ fn the_lap_limit_stops_the_race_and_a_reset_requested_between_ticks_starts_anoth
     assert!(matches!(events.last(), Some(RaceEvent::LapCompleted { lap: 1, finished: true, .. })), "{events:?}");
     assert_eq!((get(&s, names::RACE_FINISHED), get(&s, names::RACE_RUNNING), get(&s, names::RACE_LAPS)), (1.0, 0.0, 1.0));
 
-    handle.request_reset();
+    handle.request_reset(None);
     s.run_for(0.01).unwrap();
     let events = handle.take_events();
-    assert!(matches!(events[..], [RaceEvent::Reset { time_s }] if (time_s - 15.0).abs() < 0.01), "{events:?}");
+    assert!(matches!(events[..], [RaceEvent::Reset { time_s, course: 0 }] if (time_s - 15.0).abs() < 0.01), "{events:?}");
     for signal in [names::RACE_FINISHED, names::RACE_RUNNING, names::RACE_LAPS, names::RACE_NEXT_GATE, names::RACE_BEST_LAP_S, names::RACE_LAST_LAP_S] {
         assert_eq!(get(&s, signal), 0.0, "{signal} after a reset");
     }
@@ -118,7 +118,7 @@ fn a_pass_over_a_post_raises_a_hit_through_the_timer() {
     s.add(Box::new(timer));
     s.run_for(3.0).unwrap();
     let events = handle.take_events();
-    assert!(matches!(events[..], [RaceEvent::GateHit { gate: 0, time_s }] if (time_s - 35.0 / 15.0).abs() < 1e-3), "{events:?}");
+    assert!(matches!(events[..], [RaceEvent::GateHit { gate: 0, course: 0, time_s }] if (time_s - 35.0 / 15.0).abs() < 1e-3), "{events:?}");
     assert_eq!((get(&s, names::RACE_RUNNING), get(&s, names::RACE_NEXT_GATE)), (0.0, 0.0), "no start, gate 0 still next");
 }
 
@@ -184,4 +184,38 @@ fn a_gate_event_arrives_through_session_changes() {
     );
     // The flight raises one race event, so batch order is not exercisable here; the unit test
     // `a_batch_of_events_is_time_ordered_with_ties_kept_in_insertion_order` pins it.
+}
+
+/// Two courses over the three gates (30, 60 and 90 m): the whole line, and a time-attack out-and-back on its ends.
+fn courses() -> Vec<Course> {
+    vec![
+        Course { name: "Line".into(), gates: vec![0, 1, 2], mode: RaceMode::Laps, laps: Some(1), time_limit_s: None },
+        Course { name: "Hunt".into(), gates: vec![0, 2], mode: RaceMode::TimeAttack, laps: None, time_limit_s: Some(3.9) },
+    ]
+}
+
+#[test]
+fn a_reset_can_switch_course_and_a_time_attack_ends_on_the_clock() {
+    let mut bus = Bus::new();
+    let (timer, handle) = GateTimer::with_courses(&course(), courses(), 0, 0.0, &mut bus);
+    let mut s = Scheduler::new(1000, bus);
+    // 15 m/s over the 7 s loop: gate 0 (30 m) at 2.33 s, gate 1 at 4.33 s, gate 2 at 6.33 s; then the loop restarts.
+    s.add(Box::new(Mover(Box::new(|t| DVec3::new(-5.0 + 15.0 * (t % 7.0), 0.0, -1.5)))));
+    s.add(Box::new(timer));
+    s.run_for(0.01).unwrap();
+    assert_eq!(get(&s, names::RACE_COURSE), 0.0);
+    handle.request_reset(Some(1));
+    s.run_for(0.01).unwrap();
+    assert!(matches!(handle.take_events()[..], [RaceEvent::Reset { course: 1, .. }]));
+    assert_eq!(get(&s, names::RACE_COURSE), 1.0);
+    s.run_for(10.0).unwrap();
+    let events = handle.take_events();
+    // Start at 2.33 s; the clock runs out 3.9 s later, just before the loop reaches gate 2 (4 s after the start).
+    let RaceEvent::GatePassed { gate: 0, course: 1, time_s: start, .. } = events[0] else { panic!("{events:?}") };
+    let up = events.iter().find_map(|e| if let RaceEvent::TimeUp { time_s, laps } = *e { Some((time_s, laps)) } else { None });
+    let (end, laps) = up.expect("the clock ran out");
+    assert!((end - (start + 3.9)).abs() < 1e-9 && laps == 0, "{events:?}");
+    assert_eq!((get(&s, names::RACE_FINISHED), get(&s, names::RACE_RUNNING)), (1.0, 0.0));
+    assert!((get(&s, names::RACE_START_S) - start).abs() < 1e-9);
+    assert!(events.iter().skip(1).all(|e| matches!(e, RaceEvent::TimeUp { .. })), "nothing counts after the deadline: {events:?}");
 }
