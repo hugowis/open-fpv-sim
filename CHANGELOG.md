@@ -5,6 +5,21 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Game content, first batch: a modelled quad and two new worlds (#130, #131)
+#### Added
+- **`worlds/park.toml`**: a proximity park, a tight four-gate diamond among walls, pillars and a hedge, made for slow
+  airframes. Gate 2 is rolled 15 degrees; a rolled frame cannot be drawn with axis-aligned boxes (#28), so that gate has no
+  posts and bar.
+- **`worlds/meadow.toml`**: an open meadow, a big fast four-gate loop for the 5" and 7" quads, with trees, a barn and hay
+  bales for the video link to block. Gate 2 is pitched 20 degrees (same limit); the diagonal gate 1 gets posts only.
+  Both load from the menu and race and reset like `flat` and `circuit`; `crates/ofs-config/tests/world.rs` covers them.
+
+#### Changed
+- **The quad in the chase camera is modelled** (plate, arms, motor bells, battery and strap, two antennas, a camera
+  housing at the FPV camera's up-tilt) instead of gray boxes, still with each prop turning at its own motor command. The
+  FPV view is unchanged: the housing sits inside the camera's near clip. It is built in code (`godot/drone/drone.gd`), not a
+  glTF model, and the menu and workbench previews are not part of this batch.
+
 ### A compass: the magnetometer model and the heading (#31)
 #### Added
 - **A magnetometer library part** (`library/magnetometers/<id>.toml`, `[mag]`: `noise_std_ut`, `rate_hz`, `hard_iron_ut`, a

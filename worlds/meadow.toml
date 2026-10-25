@@ -1,0 +1,204 @@
+# An open meadow: a big, fast four-gate loop for the 5 inch and 7 inch quads (epic #136, issue #131). Trees, a
+# barn and hay bales give the video link something to block. Gate2 is pitched 20 degrees, leaning its opening up
+# on the west leg; a pitched frame cannot be drawn with axis-aligned boxes, so Gate2 has no posts and bar, and
+# the diagonal Gate1 gets posts only.
+#
+# Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
+# All values are estimates.
+schema_version = 1
+name = "Open meadow"
+
+[pilot]
+# Southwest of the course, goggles 1.7 m up, looking north.
+position_ned_m = [-5.0, 3.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = true
+
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+[[receiver.antennas]]
+name = "patch"
+kind = "patch"
+gain_dbi = 8.0
+beamwidth_deg = 60.0
+polarization = "rhcp"
+aim_az_deg = 0.0
+aim_el_deg = 10.0
+
+# The barn's VTX, left on, 0.2 m over its roof.
+[[emitters]]
+name = "barn-vtx"
+freq_mhz = 5732.0
+power_mw = 25.0
+position_ned_m = [40.0, 30.0, -6.2]
+
+# Gate0 is the start and finish, flown east: posts separate along x.
+[[objects]]
+name = "Gate0PostL"
+shape = "box"
+center_ned_m = [25.925, 0.0, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate0PostR"
+shape = "box"
+center_ned_m = [34.075, 0.0, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate0Bar"
+shape = "box"
+center_ned_m = [30.0, 0.0, -5.075]
+size_m = [8.3, 0.15, 0.15]
+color = [0.2, 0.8, 0.35]
+
+# Gate1 is the diagonal (heading 45): posts across the travel, no bar (a bar would need a rotated box).
+[[objects]]
+name = "Gate1PostL"
+shape = "box"
+center_ned_m = [57.12, 47.88, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate1PostR"
+shape = "box"
+center_ned_m = [62.88, 42.12, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+# Trees: trunks only at this distance, close enough to matter to the link and the prop spheres.
+[[objects]]
+name = "Tree1"
+shape = "cylinder"
+center_ned_m = [20.0, -20.0, -3.0]
+radius_m = 0.5
+height_m = 6.0
+color = [0.2, 0.45, 0.15]
+
+[[objects]]
+name = "Tree2"
+shape = "cylinder"
+center_ned_m = [45.0, 20.0, -3.5]
+radius_m = 0.7
+height_m = 7.0
+color = [0.2, 0.45, 0.15]
+
+[[objects]]
+name = "Tree3"
+shape = "cylinder"
+center_ned_m = [70.0, 15.0, -2.5]
+radius_m = 0.4
+height_m = 5.0
+color = [0.25, 0.5, 0.18]
+
+[[objects]]
+name = "Tree4"
+shape = "cylinder"
+center_ned_m = [80.0, -25.0, -4.0]
+radius_m = 0.8
+height_m = 8.0
+color = [0.2, 0.45, 0.15]
+
+[[objects]]
+name = "Tree5"
+shape = "cylinder"
+center_ned_m = [35.0, -35.0, -3.0]
+radius_m = 0.6
+height_m = 6.0
+color = [0.25, 0.5, 0.18]
+
+# Inside the loop, off the course lines.
+[[objects]]
+name = "Tree6"
+shape = "cylinder"
+center_ned_m = [75.0, -8.0, -3.5]
+radius_m = 0.5
+height_m = 7.0
+color = [0.2, 0.45, 0.15]
+
+[[objects]]
+name = "Barn"
+shape = "box"
+center_ned_m = [40.0, 30.0, -3.0]
+size_m = [10.0, 6.0, 6.0]
+color = [0.7, 0.3, 0.25]
+rf_loss_db = 25.0
+
+[[objects]]
+name = "HayBale1"
+shape = "box"
+center_ned_m = [50.0, 10.0, -0.6]
+size_m = [1.8, 1.2, 1.2]
+color = [0.85, 0.7, 0.3]
+
+[[objects]]
+name = "HayBale2"
+shape = "box"
+center_ned_m = [55.0, -12.0, -0.6]
+size_m = [1.8, 1.2, 1.2]
+color = [0.85, 0.7, 0.3]
+
+# Gate3, flown south: posts along y, full frame.
+[[objects]]
+name = "Gate3PostL"
+shape = "box"
+center_ned_m = [60.0, -49.075, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate3PostR"
+shape = "box"
+center_ned_m = [60.0, -40.925, -2.5]
+size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+[[objects]]
+name = "Gate3Bar"
+shape = "box"
+center_ned_m = [60.0, -45.0, -5.075]
+size_m = [0.15, 8.3, 0.15]
+color = [0.2, 0.8, 0.35]
+
+# The loop: Gate0 east, Gate1 north-east, Gate2 west (pitched up 20 degrees), Gate3 south, back to Gate0.
+[[gates]]
+name = "Gate0"
+center_ned_m = [30.0, 0.0, -2.5]
+heading_deg = 90.0
+width_m = 8.0
+height_m = 5.0
+
+[[gates]]
+name = "Gate1"
+center_ned_m = [60.0, 45.0, -2.5]
+heading_deg = 45.0
+width_m = 8.0
+height_m = 5.0
+
+[[gates]]
+name = "Gate2"
+center_ned_m = [90.0, 0.0, -3.8]
+heading_deg = 270.0
+pitch_deg = 20.0
+width_m = 8.0
+height_m = 5.0
+
+[[gates]]
+name = "Gate3"
+center_ned_m = [60.0, -45.0, -2.5]
+heading_deg = 180.0
+width_m = 8.0
+height_m = 5.0
+
+[race]
+laps = 3

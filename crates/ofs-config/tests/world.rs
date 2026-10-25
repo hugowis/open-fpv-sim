@@ -70,6 +70,60 @@ fn the_circuit_world_loads() {
 }
 
 #[test]
+fn the_park_world_loads() {
+    let w = world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/park.toml"))).unwrap();
+    assert_eq!(w.name, "Proximity park");
+    assert_eq!(w.race.laps, Some(5));
+    let gates: Vec<(&str, [f64; 3], f64)> = w.gates.iter().map(|g| (g.name.as_str(), g.center_ned_m, g.heading_deg)).collect();
+    assert_eq!(
+        gates,
+        [
+            ("Gate0", [12.0, 0.0, -1.1], 90.0),
+            ("Gate1", [20.0, 9.0, -1.1], 0.0),
+            ("Gate2", [28.0, 0.0, -1.5], 270.0),
+            ("Gate3", [20.0, -9.0, -1.1], 180.0),
+        ]
+    );
+    assert!(w.gates.iter().all(|g| g.width_m == 2.4 && g.height_m == 2.2));
+    assert_eq!(w.gates[2].roll_deg, 15.0, "the west gate leans with the turn");
+    let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(names.len(), 14, "gate frames (9), walls (2), pillars (2), hedge");
+    let post = w.objects.iter().find(|o| o.name == "Gate0PostL").unwrap();
+    assert_eq!(post.center_ned_m, [10.75, 0.0, -1.1], "Gate0 flies east: its posts separate along x");
+    let hedge = w.objects.iter().find(|o| o.name == "Hedge").unwrap();
+    assert_eq!((hedge.shape, hedge.rf_loss_db), (Shape::Box, 6.0));
+    assert_eq!(w.emitters.len(), 1);
+    assert_eq!(w.emitters[0].freq_mhz, Some(5806.0));
+}
+
+#[test]
+fn the_meadow_world_loads() {
+    let w = world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/meadow.toml"))).unwrap();
+    assert_eq!(w.name, "Open meadow");
+    assert_eq!(w.race.laps, Some(3));
+    let gates: Vec<(&str, [f64; 3], f64)> = w.gates.iter().map(|g| (g.name.as_str(), g.center_ned_m, g.heading_deg)).collect();
+    assert_eq!(
+        gates,
+        [
+            ("Gate0", [30.0, 0.0, -2.5], 90.0),
+            ("Gate1", [60.0, 45.0, -2.5], 45.0),
+            ("Gate2", [90.0, 0.0, -3.8], 270.0),
+            ("Gate3", [60.0, -45.0, -2.5], 180.0),
+        ]
+    );
+    assert!(w.gates.iter().all(|g| g.width_m == 8.0 && g.height_m == 5.0));
+    assert_eq!(w.gates[2].pitch_deg, 20.0, "the west gate leans up with the climb");
+    let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(names.len(), 17, "gate frames (8), trees (6), barn, hay bales (2)");
+    let post = w.objects.iter().find(|o| o.name == "Gate1PostL").unwrap();
+    assert_eq!(post.center_ned_m, [57.12, 47.88, -2.5], "Gate1's posts sit across the 45-degree travel");
+    let barn = w.objects.iter().find(|o| o.name == "Barn").unwrap();
+    assert_eq!((barn.shape, barn.size_m, barn.rf_loss_db), (Shape::Box, Some([10.0, 6.0, 6.0]), 25.0));
+    assert_eq!(w.emitters.len(), 1);
+    assert_eq!(w.emitters[0].freq_mhz, Some(5732.0));
+}
+
+#[test]
 fn the_open_field_has_no_gates() {
     assert!(WorldConfig::open_field().gates.is_empty());
 }

@@ -37,7 +37,9 @@ laps = 3                     # the race ends after this many laps; leave it out 
 A gate is a *trigger*: it does not collide with the quad and it blocks no signal. Draw its frame with ordinary
 `[[objects]]` if you want something to hit: `worlds/flat.toml` has the posts and bar of its three gates as boxes, and
 the `[[gates]]` are what those leave free (3.08 m between the posts, 2.44 m under the bar). Godot draws each opening
-as a translucent rectangle labelled START or with the gate's number.
+as a translucent rectangle labelled START or with the gate's number. The shipped worlds show three scales of course:
+`flat`'s straight three-gate line, `park`'s tight walled diamond with one rolled gate, and `meadow`'s big fast loop
+with one pitched gate.
 
 ## The rules
 
