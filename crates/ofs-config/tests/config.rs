@@ -1050,3 +1050,62 @@ fn an_unknown_part_name_is_an_error_that_lists_the_valid_names() {
     let err = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nreceiver = \"sbus\"")).unwrap_err();
     assert!(err.to_string().contains("unknown variant `sbus`") && err.to_string().contains("crsf"), "{err}");
 }
+
+fn mag_quad() -> String {
+    quad_text().replace("schema_version = 6", "schema_version = 7").replace("baro = \"opendrone-baro\"
+", "baro = \"opendrone-baro\"
+mag = \"opendrone-mag\"
+")
+}
+
+#[test]
+fn a_schema_7_quad_can_carry_a_magnetometer_part() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = load(&write_quad(dir.path(), &mag_quad())).unwrap();
+    assert_eq!(cfg.parts.mag.as_deref(), Some("opendrone-mag"));
+    let mag = cfg.mag.as_ref().unwrap();
+    assert_eq!((mag.rate_hz, mag.noise_std_ut), (100, 0.3));
+    let kinds: Vec<_> = cfg.part_provenance.iter().map(|p| p.kind).collect();
+    assert_eq!(kinds, ["frame", "motor", "prop", "esc", "battery", "imu", "baro", "mag", "vtx"]);
+    assert!(cfg.validate().is_empty());
+}
+
+#[test]
+fn the_shipped_quads_have_no_magnetometer_and_schema_6_still_loads() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    assert!(cfg.mag.is_none() && cfg.parts.mag.is_none());
+    assert!(cfg.part_provenance.iter().all(|p| p.kind != "mag"));
+}
+
+#[test]
+fn a_mag_reference_needs_schema_7() {
+    let dir = tempfile::tempdir().unwrap();
+    let at_6 = mag_quad().replace("schema_version = 7", "schema_version = 6");
+    let err = load(&write_quad(dir.path(), &at_6)).unwrap_err().to_string();
+    assert!(err.contains("mag: a part reference needs schema_version = 7"), "{err}");
+}
+
+#[test]
+fn an_unknown_mag_id_lists_what_the_directory_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load(&write_quad(dir.path(), &mag_quad().replace("opendrone-mag", "no-such-mag"))).unwrap_err().to_string();
+    assert!(err.contains("no-such-mag") && err.contains("opendrone-mag"), "{err}");
+}
+
+#[test]
+fn the_mag_values_are_checked_against_the_base_rate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_quad(dir.path(), &mag_quad());
+    let part = part_text("magnetometers", "opendrone-mag");
+    for (from, to, field) in [
+        ("rate_hz = 100", "rate_hz = 300", "mag.rate_hz"),
+        ("noise_std_ut = 0.3", "noise_std_ut = -1.0", "mag.noise_std_ut"),
+        ("hard_iron_ut = [0.0, 0.0, 0.0]", "hard_iron_ut = [0.0, nan, 0.0]", "mag.hard_iron_ut"),
+        ("[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]", "[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]", "mag.soft_iron"),
+    ] {
+        assert!(part.contains(from), "{from} in the shipped part");
+        write_part(dir.path(), "magnetometers", "opendrone-mag", &part.replace(from, to));
+        let err = load(&path).unwrap_err().to_string();
+        assert!(err.contains(field), "{to}: {err}");
+    }
+}
