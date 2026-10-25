@@ -164,6 +164,27 @@ func test_the_drone_has_four_propellers_that_follow_the_motor_commands() -> void
 	drone.queue_free()
 
 
+func test_the_drone_is_a_modelled_quad_the_fpv_camera_never_sees() -> void:
+	var drone := Drone.new()
+	await add_to_tree(drone)
+	for i in [1, 2, 3, 4]:
+		ok(drone.get_node_or_null("Motor%d" % i) != null, "motor bell %d" % i)
+		ok(drone.get_node_or_null("Prop%d" % i) != null, "prop %d" % i)
+	ok(drone.get_node_or_null("Antenna1") != null and drone.get_node_or_null("Antenna2") != null, "two VTX antennas")
+	var eye := Vector3(0.0, 0.02, -0.04)  # fpv_camera.gd's _ready position, near = 0.02
+	var housing: MeshInstance3D = drone.get_node("CameraHousing")
+	eq(housing.position, eye, "the camera housing sits at the FPV camera's eye point")
+	var corner: float = ((housing.mesh as BoxMesh).size * 0.5).length()
+	ok(corner < 0.02, "the housing hides inside the near clip (corner %f)" % corner)
+	var plate: MeshInstance3D = drone.get_node("Plate")
+	var plate_nose: float = plate.position.z - (plate.mesh as BoxMesh).size.z * 0.5
+	ok(plate_nose >= eye.z, "the plate's nose stays behind the FPV camera")
+	var battery_material: StandardMaterial3D = drone.get_node("Battery").material_override
+	ok(battery_material.albedo_color.is_equal_approx(Color(0.9, 0.55, 0.1)), "the battery stays orange")
+	ok((drone.get_node("Plate").material_override as StandardMaterial3D).albedo_color.r < 0.2, "the plate is carbon")
+	drone.queue_free()
+
+
 func test_the_fpv_camera_looks_forward_and_up() -> void:
 	var drone := Drone.new()
 	var camera := FpvCamera.new()
