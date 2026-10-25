@@ -252,8 +252,9 @@ func _set_dvr(on: bool) -> void:
 	_sync_dvr()
 
 
-## The one stop path (D, the F2 box and entering the chase view): stops the recording, toasts how it went and, when
-## it stopped normally, hands each recorded file to the export the `dvr_export` setting asks for.
+## The one stop path (D, the F2 box, entering the chase view and a lost or reloaded session): idles the clean feed,
+## stops the recording, toasts how it went and, when it stopped normally with frames, hands each recorded file to the
+## export the `dvr_export` setting asks for (every feed holds the same number of frames, so none is empty).
 func _stop_dvr(chase: bool) -> void:
 	clean_feed.set_active(false)
 	var summary: Dictionary = dvr.stop()

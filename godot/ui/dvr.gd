@@ -19,7 +19,7 @@ var recording := false
 ## The absolute .avi paths of the current (or last) recording, goggles first; `stop()`'s summary carries them as `paths`.
 var paths := PackedStringArray()
 var _client: Object
-## One entry per recorded feed, in start order: {feed, viewport, source, size, jpeg}. `size` is the picture size the feed
+## One entry per recorded feed, in start order: {feed, viewport, size, jpeg}. `size` is the picture size the feed
 ## declared at start (every frame is fitted to it: an AVI has one size for its whole length), `jpeg` its last frame.
 var _feeds: Array = []
 var _last_target := -1
@@ -68,8 +68,11 @@ func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewp
 ## Feeds one field. `view` is the Dictionary `OfsClient.get_fpv_view()` returns, deduped on `target_field` — the
 ## integer index of the field boundary the client renders for, which advances through a drop stretch even though
 ## `render_time_s` holds: each new boundary contributes exactly one frame. A current field (`held_fields == 0`) is
-## encoded from the viewport; a held one repeats the last frame as-is — the SubViewport still animates prop spin
+## encoded from the feed's viewport; a held one repeats the last frame as-is — the SubViewport still animates prop spin
 ## from live telemetry, so re-encoding would break the freeze. Every frame is fitted to the size declared at start.
+## All or nothing per boundary, so the files stay on one timeline: once any feed has a frame, every feed writes one (a
+## feed that has none yet, like the clean one before its first render, writes a black frame); while no feed has one,
+## nobody writes.
 func capture(view: Dictionary) -> void:
 	if not recording or view.is_empty():
 		return
@@ -78,24 +81,38 @@ func capture(view: Dictionary) -> void:
 	if target == _last_target:
 		return
 	_last_target = target
+	var any_frame := false
 	for entry in _feeds:
-		_capture_feed(entry, held > 0)
+		if held == 0:
+			_encode(entry)  # a feed with no usable picture keeps its previous frame
+		any_frame = any_frame or not entry["jpeg"].is_empty()
+	if not any_frame:
+		return  # headless, or nothing rendered yet: this field is not in the recording
+	for entry in _feeds:
+		_client.dvr_write_frame(entry["feed"], entry["jpeg"] if not entry["jpeg"].is_empty() else _black(entry))
 
 
-func _capture_feed(entry: Dictionary, held: bool) -> void:
-	if held:
-		if not entry["jpeg"].is_empty():
-			_client.dvr_write_frame(entry["feed"], entry["jpeg"])
-		return
+## Encodes this feed's current picture into `entry["jpeg"]`; leaves it as it was when there is no picture or the
+## encoder produced nothing (a 0-byte frame is never worth writing).
+func _encode(entry: Dictionary) -> void:
 	var source := image_source if entry["feed"] == "goggles" else clean_image_source
 	var image: Image = source.call() if source.is_valid() else entry["viewport"].get_texture().get_image()
 	if image == null or image.is_empty():
-		return  # headless or the texture not yet rendered (the clean one's first frame): this field is not in this file
+		return
 	var size: Vector2i = entry["size"]
-	entry["jpeg"] = fit_image(image, size.x, size.y).save_jpg_to_buffer(JPEG_QUALITY)
-	if entry["jpeg"].is_empty():
-		return  # the encoder produced nothing: a 0-byte frame is never worth writing
-	_client.dvr_write_frame(entry["feed"], entry["jpeg"])
+	var jpeg := fit_image(image, size.x, size.y).save_jpg_to_buffer(JPEG_QUALITY)
+	if not jpeg.is_empty():
+		entry["jpeg"] = jpeg
+
+
+## A black frame at the feed's declared size, encoded once.
+func _black(entry: Dictionary) -> PackedByteArray:
+	if not entry.has("black"):
+		var size: Vector2i = entry["size"]
+		var image := Image.create(size.x, size.y, false, Image.FORMAT_RGB8)
+		image.fill(Color.BLACK)
+		entry["black"] = image.save_jpg_to_buffer(JPEG_QUALITY)
+	return entry["black"]
 
 
 ## `image` itself when it already is width x height; otherwise a black width x height image with `image` scaled to fit

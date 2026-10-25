@@ -230,11 +230,14 @@ func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	# The stretch ends: the recovered field renders for the boundary the last repeat already covered.
 	dvr.capture({"render_time_s": 0.08, "held_fields": 0, "target_field": 4, "field_valid": true})
 	eq(mock.frames.size(), 2, "the recovery boundary is deduped: one frame per boundary")
-	# The next current field would encode from the viewport; headless has no picture, so nothing is written.
+	# The next current field would encode from the viewport; headless has no picture, so it repeats the last frame
+	# (a missing picture keeps the timeline, like a held field).
+	dvr.image_source = func() -> Image: return null
 	dvr.capture({"render_time_s": 0.1, "held_fields": 0, "target_field": 5, "field_valid": true})
-	eq(mock.frames.size(), 2, "headless: no picture to encode, no frame written")
+	eq(mock.frames.size(), 3, "no picture to encode: the last frame repeats")
+	eq(mock.frames[2], PackedByteArray([1, 2, 3]), "the held bytes")
 	eq(dvr._last_target, 5, "the dedup key is the integer field the client renders for")
-	eq(dvr.stop()["frames"], 2, "the stand-in reports what was fed")
+	eq(dvr.stop()["frames"], 3, "the stand-in reports what was fed")
 	dvr.queue_free()
 
 
@@ -690,19 +693,53 @@ func test_the_clean_frame_is_fitted_like_the_goggles_frame() -> void:
 	_free_recorder(r)
 
 
-func test_an_empty_clean_image_skips_only_the_clean_write() -> void:
+func test_a_clean_feed_that_renders_late_still_gets_a_frame_per_field() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	var rendered := [false]
+	dvr.image_source = _synthetic_image
+	dvr.clean_image_source = func() -> Image: return _synthetic_image() if rendered[0] else null  # no frame before the first render
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	rendered[0] = true
+	dvr.capture({"render_time_s": 0.04, "held_fields": 0, "target_field": 2, "field_valid": true})
+	dvr.capture({"render_time_s": 0.06, "held_fields": 0, "target_field": 3, "field_valid": true})
+	eq(mock.feed_frames("goggles").size(), 3, "goggles has three frames")
+	eq(mock.feed_frames("clean").size(), 3, "so has clean: its first field is a black frame")
+	var first := Image.new()
+	eq(first.load_jpg_from_buffer(mock.feed_frames("clean")[0]), OK, "the first clean frame decodes")
+	eq(first.get_size(), Vector2i(6, 6), "at the clean feed's declared size")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_a_clean_feed_with_no_picture_at_all_writes_black_frames_beside_a_full_goggles_file() -> void:
 	var r := await _recorder("both")
 	var dvr: Node = r["dvr"]
 	var mock: MockClient = r["mock"]
 	dvr.image_source = _synthetic_image
-	dvr.clean_image_source = func() -> Image: return null  # the clean viewport has not rendered yet
-	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
-	eq(mock.feed_frames("goggles").size(), 1, "the goggles frame is written")
-	eq(mock.feed_frames("clean").size(), 0, "the clean one is skipped")
-	dvr.clean_image_source = func() -> Image: return Image.new()
-	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "target_field": 2, "field_valid": false})
-	eq(mock.feed_frames("goggles").size(), 2, "a held field still repeats goggles")
-	eq(mock.feed_frames("clean").size(), 0, "and has nothing to repeat for clean")
+	dvr.clean_image_source = func() -> Image: return Image.new()  # an empty image, never a picture
+	for field in [1, 2, 3]:
+		dvr.capture({"render_time_s": 0.02 * field, "held_fields": 0, "target_field": field, "field_valid": true})
+	dvr.capture({"render_time_s": 0.08, "held_fields": 1, "target_field": 4, "field_valid": false})
+	eq(mock.feed_frames("goggles").size(), 4, "goggles keeps every field, the held one included")
+	eq(mock.feed_frames("clean").size(), 4, "clean has the same count")
+	var frame := Image.new()
+	eq(frame.load_jpg_from_buffer(mock.feed_frames("clean")[3]), OK, "the black frame decodes")
+	eq(frame.get_pixel(3, 3).get_luminance() < 0.05, true, "and is black")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_nobody_writes_while_no_feed_has_a_frame() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	dvr.capture({"render_time_s": 0.02, "held_fields": 1, "target_field": 1, "field_valid": false})  # held, nothing to repeat
+	dvr.image_source = func() -> Image: return null
+	dvr.clean_image_source = func() -> Image: return null
+	dvr.capture({"render_time_s": 0.04, "held_fields": 0, "target_field": 2, "field_valid": true})
+	eq(mock.fed.size(), 0, "no frame anywhere, no write")
 	dvr.stop()
 	_free_recorder(r)
 
