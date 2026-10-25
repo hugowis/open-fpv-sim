@@ -30,6 +30,9 @@ class MockOsd extends CanvasLayer:
 	func set_frame(_frame: Dictionary) -> void:
 		pass
 
+	func set_enabled(_enabled: bool) -> void:
+		pass
+
 
 ## The app's DVR coordination, without its `_ready` (which would start a session): the real menu, HUD and DVR, and
 ## a stand-in client. The menu signal is wired as `_ready` does it.
@@ -189,15 +192,93 @@ func test_the_menu_d_and_a_resize_keep_the_dvr_views_in_sync() -> void:
 	s["box"].size = Vector2(960, 720)
 	s["viewport"].size = Vector2i(1, 1)
 	app._layout_fpv()
-	ok(not dvr.recording, "a picture size change stops the DVR")
-	ok(not menu.dvr_on(), "the menu unchecks")
-	ok(not hud._rec.visible, "REC hides")
-	ok("picture size changed" in " ".join(hud.toast_texts()), "with its own toast: %s" % str(hud.toast_texts()))
+	ok(dvr.recording, "a picture size change does not stop the DVR")
+	ok(menu.dvr_on(), "the menu stays checked")
+	ok(hud._rec.visible, "REC stays")
 	eq(s["viewport"].size, Vector2i(960, 720), "and the viewport takes the new size")
 	app.free()
 	menu.queue_free()
 	hud.queue_free()
 	dvr.queue_free()
+
+
+func test_entering_the_chase_view_stops_the_dvr() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var menu = s["menu"]
+	var hud = s["hud"]
+	# set_chase_view also switches the cameras and the picture layers: stand-ins for those.
+	app.fpv_camera = Camera3D.new()
+	app.chase_camera = Camera3D.new()
+	app.lens = MockOsd.new()
+	app.video = MockOsd.new()
+	for node in [app.fpv_camera, app.chase_camera, app.lens, app.video]:
+		app.add_child(node)
+	s["box"].size = Vector2(960, 720)
+	app._layout_fpv()
+	menu._dvr.button_pressed = true
+	ok(s["dvr"].recording, "recording in the FPV view")
+	app.set_chase_view(true)
+	ok(not s["dvr"].recording, "the chase view stops the DVR")
+	ok(not menu.dvr_on(), "the menu unchecks")
+	ok(not hud._rec.visible, "REC hides")
+	ok("chase" in " ".join(hud.toast_texts()), "with a chase toast: %s" % str(hud.toast_texts()))
+	app.free()
+	menu.queue_free()
+	hud.queue_free()
+	s["dvr"].queue_free()
+
+
+func _solid(width: int, height: int, color: Color) -> Image:
+	var image := Image.create(width, height, false, Image.FORMAT_RGB8)
+	image.fill(color)
+	return image
+
+
+func test_fit_image_keeps_a_same_size_image_untouched() -> void:
+	var image := _solid(8, 4, Color.RED)
+	ok(Dvr.fit_image(image, 8, 4) == image, "the same object comes back")
+
+
+func test_fit_image_letterboxes_a_wider_image() -> void:
+	var fitted: Image = Dvr.fit_image(_solid(16, 4, Color.RED), 8, 8)
+	eq(fitted.get_size(), Vector2i(8, 8), "the target size")
+	eq(fitted.get_format(), Image.FORMAT_RGB8, "the input's format")
+	eq(fitted.get_pixel(4, 0), Color.BLACK, "the top row is black")
+	eq(fitted.get_pixel(4, 4), Color.RED, "the centre is the picture")
+	eq(fitted.get_pixel(4, 7), Color.BLACK, "the last row is black")
+
+
+func test_fit_image_pillarboxes_a_taller_image() -> void:
+	var fitted: Image = Dvr.fit_image(_solid(4, 16, Color.RED), 8, 8)
+	eq(fitted.get_size(), Vector2i(8, 8), "the target size")
+	eq(fitted.get_pixel(0, 4), Color.BLACK, "the left column is black")
+	eq(fitted.get_pixel(4, 4), Color.RED, "the centre is the picture")
+	eq(fitted.get_pixel(7, 4), Color.BLACK, "the right column is black")
+
+
+func test_a_resize_mid_recording_keeps_the_declared_size() -> void:
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(8, 4)
+	await add_to_tree(viewport)
+	var mock := MockClient.new()
+	eq(dvr.start(mock, viewport), "", "starts against the stand-in")
+	var sizes := [Vector2i(6, 6), Vector2i(16, 16)]
+	dvr.image_source = func() -> Image:
+		var size: Vector2i = sizes.pop_front()
+		return _solid(size.x, size.y, Color.GREEN)
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	dvr.capture({"render_time_s": 0.04, "held_fields": 0, "target_field": 2, "field_valid": true})
+	eq(mock.frames.size(), 2, "both fields are written")
+	for jpeg in mock.frames:
+		var decoded := Image.new()
+		eq(decoded.load_jpg_from_buffer(jpeg), OK, "decodes")
+		eq(decoded.get_size(), Vector2i(8, 4), "at the size the file declared")
+	dvr.stop()
+	dvr.queue_free()
+	viewport.queue_free()
 
 
 func test_a_reload_stops_the_dvr_and_syncs_the_views() -> void:
@@ -261,6 +342,7 @@ func test_a_current_field_is_encoded_as_a_jpeg_at_the_dvr_quality() -> void:
 	var dvr: Node = Dvr.new()
 	await add_to_tree(dvr)
 	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 48)
 	await add_to_tree(viewport)
 	var mock := MockClient.new()
 	eq(dvr.start(mock, viewport), "", "starts against the stand-in")

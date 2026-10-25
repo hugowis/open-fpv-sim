@@ -3,8 +3,8 @@ extends Node
 ## included, exactly what the pilot sees — to an MJPEG AVI. The Rust side muxes (OfsClient.dvr_*); this node
 ## times the captures to the field the client renders for (`target_field`, an integer index computed in Rust)
 ## and owns the UX. A boundary the client cannot show freshly (`held_fields > 0`: dropped fields held the picture back) repeats the held frame, so the recording
-## freezes where the pilot froze. Records in the FPV view only; a resize or aspect switch while recording
-## stops it (app.gd).
+## freezes where the pilot froze. Records in the FPV view only (entering the chase view stops it, app.gd); a resize
+## or aspect switch while recording keeps going, each frame letterboxed to the starting size.
 
 signal started(path: String)
 signal stopped(summary: Dictionary)
@@ -16,6 +16,8 @@ const JPEG_QUALITY := 0.8
 var recording := false
 var _client: Object
 var _viewport: SubViewport
+## The picture size declared at start: every frame is fitted to it, because an AVI has one size for its whole length.
+var _size := Vector2i.ZERO
 var _last_target := -1
 var _last_jpeg := PackedByteArray()
 ## Where a current field's picture comes from: the FPV SubViewport, unless a test sets this to a Callable returning
@@ -31,6 +33,7 @@ func start(client: Object, viewport: SubViewport) -> String:
 	recording = true
 	_client = client
 	_viewport = viewport
+	_size = viewport.size
 	_last_target = -1
 	_last_jpeg = PackedByteArray()
 	started.emit(path)
@@ -41,8 +44,7 @@ func start(client: Object, viewport: SubViewport) -> String:
 ## integer index of the field boundary the client renders for, which advances through a drop stretch even though
 ## `render_time_s` holds: each new boundary contributes exactly one frame. A current field (`held_fields == 0`) is
 ## encoded from the viewport; a held one repeats the last frame as-is — the SubViewport still animates prop spin
-## from live telemetry, so re-encoding would break the freeze. A frame the size of the viewport's texture; when the
-## size changes app.gd stops the recording.
+## from live telemetry, so re-encoding would break the freeze. Every frame is fitted to the size declared at start.
 func capture(view: Dictionary) -> void:
 	if not recording or view.is_empty():
 		return
@@ -58,10 +60,26 @@ func capture(view: Dictionary) -> void:
 	var image: Image = image_source.call() if image_source.is_valid() else _viewport.get_texture().get_image()
 	if image == null or image.is_empty():
 		return  # headless or the texture not yet rendered: this field is simply not in the recording
-	_last_jpeg = image.save_jpg_to_buffer(JPEG_QUALITY)
+	_last_jpeg = fit_image(image, _size.x, _size.y).save_jpg_to_buffer(JPEG_QUALITY)
 	if _last_jpeg.is_empty():
 		return  # the encoder produced nothing: a 0-byte frame is never worth writing
 	_client.dvr_write_frame("goggles", _last_jpeg)
+
+
+## `image` itself when it already is width x height; otherwise a black width x height image with `image` scaled to fit
+## (aspect kept, bilinear) and centred, so a resize or aspect switch mid-recording still yields the declared size.
+static func fit_image(image: Image, width: int, height: int) -> Image:
+	if image.get_width() == width and image.get_height() == height:
+		return image
+	var scale := minf(float(width) / image.get_width(), float(height) / image.get_height())
+	var w := maxi(1, roundi(image.get_width() * scale))
+	var h := maxi(1, roundi(image.get_height() * scale))
+	var scaled := image.duplicate() as Image
+	scaled.resize(w, h, Image.INTERPOLATE_BILINEAR)
+	var fitted := Image.create(width, height, false, image.get_format())
+	fitted.fill(Color.BLACK)
+	fitted.blit_rect(scaled, Rect2i(0, 0, w, h), Vector2i((width - w) / 2, (height - h) / 2))
+	return fitted
 
 
 func stop() -> Dictionary:

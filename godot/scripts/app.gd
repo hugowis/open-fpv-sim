@@ -103,18 +103,13 @@ static func fpv_box_for(window_size: Vector2, aspect: String, chase: bool) -> Di
 	return {"box": box, "internal": internal}
 
 
-## Sizes the FPV box and the viewport's internal resolution. A size change while the DVR records stops it
-## (Review Focus 5): stop before the resize so the comparison sees the old size.
+## Sizes the FPV box and the viewport's internal resolution. A recording keeps going: the DVR fits each frame to
+## the size it started with.
 func _layout_fpv() -> void:
 	var layout: Dictionary = fpv_box_for(fpv_box.size, settings["fpv_aspect"], chase_view)
-	var internal: Vector2i = layout["internal"]
-	if dvr != null and dvr.recording and fpv_viewport.size != internal:
-		var summary: Dictionary = dvr.stop()
-		_sync_dvr()
-		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
 	fpv_texture.position = (layout["box"] as Rect2).position
 	fpv_texture.size = (layout["box"] as Rect2).size
-	fpv_viewport.size = internal
+	fpv_viewport.size = layout["internal"]
 
 
 func _load_controls() -> void:
@@ -204,6 +199,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func set_chase_view(chase: bool) -> void:
 	chase_view = chase
+	if chase and dvr != null and dvr.recording:
+		var summary: Dictionary = dvr.stop()
+		_sync_dvr()
+		hud.add_toast("DVR stopped: the chase camera is not recorded (%d frames saved)" % summary.get("frames", 0), "warn")
 	(chase_camera if chase else fpv_camera).make_current()
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
