@@ -152,4 +152,10 @@ copy of the Windows patch whose stub file lacks `IORead`. A stub that is *called
 
 | Date | Build (cold) | Build (cache hit) | Whole job | Native real-time factor | Failures / flaky tests |
 |---|---|---|---|---|---|
-| not yet measured | | | | | |
+| 2026-10-25 (run 40228666831, cold) | 83 s MSYS2 setup + 61 s build | n/a | 14 m 42 s | SITL 5.8x (recording), 6.7x (no recording); open loop 40.9x, 117x | none: `sitl_live` 7 + 13, `vtx_live` 1, Python 26 passed (1 skipped) |
+| 2026-10-25 (run 40231921016, cache hit) | n/a | no MSYS2 setup, no build | 9 m 15 s | not read | none |
+
+Four runs so far (two cold, one on the PR, one cache hit), all green. The 30 s benchmark rows are the best of 2 on a shared
+runner, so the SITL rows are about half of the 10.9x / 13.2x of the local machine (one run on one machine); the open-loop
+rows are far above them. The first main run pays the cold build once, because a cache saved on a branch or a pull request is
+not visible to `main`.
