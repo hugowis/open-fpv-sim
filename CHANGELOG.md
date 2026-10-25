@@ -5,6 +5,28 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Several courses and race modes per world (#132, protocol 15)
+#### Added
+- **`[[courses]]` in the world file**: a name, an ordered list of declared gate names, an optional `laps` and a `mode`.
+  `[race] course` picks the one a session starts in. A world without `[[courses]]` is unchanged: one unnamed course of all
+  its gates. Gate numbers (`next_gate`, "Gate1 (gate 1)") count along the course.
+- **A time attack** (`mode = "time_attack"`, `time_limit_s`): as many laps as fit in the time; the race ends at exactly the
+  deadline with `race_finished`, and a crossing after it counts for nothing.
+- **Protocol 15**: `ResetRace` takes a course name (`ResetRaceRequest`; an unknown one is `InvalidArgument`), `RaceState`
+  gains `course`, `course_index`, `mode`, `time_limit_s` and `time_left_s`, `World` gains `courses` and `default_course`;
+  the `race_reset` event says `race reset: <course>` in a world with named courses. The repro journal line is
+  `race_reset [index]`. New signals `race.course` and `race.start_s` (worlds with gates only).
+- **Python**: `ofs.Course`, `World.courses`/`default_course`, `Race.course`/`course_index`/`mode`/`time_limit_s`/
+  `time_left_s`, `sim.reset_race(course="")`.
+- **Godot**: a Course row in the menu (a world with two or more; `OFS_COURSE`, `--course=`), **Shift+N** cycles the course
+  and restarts it (N restarts the same one), the HUD lap line names the course and a time attack counts down, and the
+  world draws only the current course's gates.
+- **`worlds/park.toml`** gains two courses: "Diamond" (the whole loop, the default, as before) and "Hunt" (the same gates as a
+  60 s time attack).
+#### Changed
+- `ofs-godot`'s `reset_race` takes a course name (an empty String keeps the current course); `ofs-client`'s
+  `Command::ResetRace` carries it and `RaceInfo` is no longer `Copy`.
+
 ### Game content, first batch: a modelled quad and two new worlds (#130, #131)
 #### Added
 - **`worlds/park.toml`**: a proximity park, a tight four-gate diamond among walls, pillars and a hedge, made for slow

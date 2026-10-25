@@ -824,8 +824,7 @@ mod tests {
         // Gates at 30, 60 and 90 m flown at 10 m/s: the start is at 3 s, the second gate at 6 s, the third at 9 s.
         let mut r = course(3).with_time_limit(Some(5.0));
         let (events, _) = fly(&mut r, 0.0, 0.0, 100.0);
-        let kinds: Vec<_> = events.iter().map(|e| std::mem::discriminant(e)).collect();
-        assert_eq!(kinds.len(), 3, "{events:?}");
+        assert_eq!(events.len(), 3, "{events:?}");
         assert!(matches!(events[0], RaceEvent::GatePassed { gate: 0, .. }));
         assert!(matches!(events[1], RaceEvent::GatePassed { gate: 1, .. }));
         let RaceEvent::TimeUp { time_s, laps } = events[2] else { panic!("{:?}", events[2]) };

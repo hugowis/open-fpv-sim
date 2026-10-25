@@ -32,7 +32,8 @@ An optional `[race]` table sets the rules of the race:
 laps = 3                     # the race ends after this many laps; leave it out to race forever
 ```
 
-`laps` must be at least 1 and needs at least one gate.
+`laps` must be at least 1 and needs at least one gate. Several courses over the same gates: see "Courses and race
+modes".
 
 A gate is a *trigger*: it does not collide with the quad and it blocks no signal. Draw its frame with ordinary
 `[[objects]]` if you want something to hit: `worlds/flat.toml` has the posts and bar of its three gates as boxes, and
@@ -71,10 +72,50 @@ with one pitched gate.
   times stay, and no gate counts until the race is reset. Without a limit the race goes on.
 - **A reset.** `ResetRace` (Python `sim.reset_race()`, the **N** key in the game) starts a fresh race at the next tick,
   without a new `Load`: no clock, no laps, no last or best time, not finished, gate 0 next, and the same course can be
-  flown again at once. It raises `race_reset`, and the `race.*` signals go back to zero. A world without gates refuses
+  flown again at once (`reset_race("Hunt")` and **Shift+N** switch course: see below). It raises `race_reset`, and the `race.*` signals go back to zero. A world without gates refuses
   it (`InvalidState`). The state is read at ticks, so a `get_state` before the next tick still shows the old race; the
   reset is part of the repro bundle's journal (`race_reset`) and replays at the same tick.
 - **Not included.** No ghost or best-lap replay.
+
+## Courses and race modes
+
+A world can declare several named courses over its gates. Each `[[courses]]` entry picks declared gates by name, in the
+order they are flown; the first is the course's start and finish, and a gate appears once per course. Gates no course
+names are not part of any race (Godot does not draw them), and a gate that only one course uses is how a course "brings
+its own".
+
+```toml
+[[courses]]
+name = "Diamond"             # letters, digits, '_' and '-'; unique among the courses
+gates = ["Gate0", "Gate1", "Gate2", "Gate3"]
+laps = 2                     # optional: this course's lap limit; absent = [race] laps
+
+[[courses]]
+name = "Hunt"
+mode = "time_attack"         # "laps" (the default) or "time_attack"
+time_limit_s = 60.0          # a time attack needs it; a laps course cannot have it
+gates = ["Gate0", "Gate1", "Gate2", "Gate3"]
+
+[race]
+laps = 5                     # the default lap limit of the laps courses
+course = "Diamond"           # the course a session starts in; absent = the first
+```
+
+A world with no `[[courses]]` has one unnamed course of all its gates in file order: `flat`, `circuit` and every older
+world race exactly as before, with `course = ""` in the state. In a course, **gate numbers are positions in the course**:
+`next_gate`, `gate_count` and the events' "Gate1 (gate 1)" count along the course, whatever the file order is.
+
+**Choosing the course.** A session starts on the world's default course. `ResetRace` takes the course's name (empty:
+keep the current one) and switches at the next tick, journaled like any reset (`race_reset <index>`), so a replay races
+the same course. An unknown name is `InvalidArgument`. `World.courses` lists the declared courses (name, gate names,
+mode, lap limit, time limit) and `default_course` the starting one.
+
+**Time attack** (the lap-hunt): the first pass of gate 0 starts the race clock and the lap clock; laps count as usual,
+with no lap limit. When the race clock reaches `time_limit_s` the race ends at exactly that instant (not rounded to a
+tick): `race_finished` ("race finished: 4 laps", 0 laps possible), `finished` true, `running` false, nothing counts
+until the next reset. The lap in progress is dropped, and a gate crossing later than the deadline counts for nothing,
+even inside the same tick. `time_left_s` in the state counts down from the whole limit (shown from before the start) to
+0.
 
 ## Tilted gates
 
@@ -94,34 +135,41 @@ the opening on the same plane (`World.gate_basis`), and `World.gates` carries bo
 | `gate_passed` | `Gate0 (gate 0) start` for the start, else `Gate1 (gate 1) split 8.412 s` | the crossing |
 | `lap_completed` | `lap 1: 31.204 s (best)`; `(best)` when it is the fastest lap so far (the first lap is) | the crossing of gate 0 |
 | `gate_hit` | `Gate1 (gate 1) hit` | the crossing (a clipped pass: see "A hit") |
-| `race_finished` | `race finished: 3 laps` (`1 lap`), right after the last `lap_completed` | the same crossing |
-| `race_reset` | `race reset` | the tick the reset was applied at |
+| `race_finished` | `race finished: 3 laps` (`1 lap`), right after the last `lap_completed`; at a time attack's deadline there is no `lap_completed` | the same crossing, or the deadline |
+| `race_reset` | `race reset`; `race reset: Hunt` in a world with named courses | the tick the reset was applied at |
 
 Seconds have three decimals. The format is stable: scripts may parse it.
 
 ## State
 
-`State.race` (Python) / `RaceState` (protocol 11):
+`State.race` (Python) / `RaceState` (protocol 11, courses and modes in 15):
 
 | field | meaning |
 |---|---|
 | `present` | the world has gates |
 | `running` | gate 0 has started the clock and the lap limit is not reached |
 | `finished` | the lap limit is reached: the clock has stopped, nothing counts until a reset |
-| `lap_limit` | the world's `[race] laps` (0 = none) |
+| `lap_limit` | the course's lap limit (the course's own or `[race] laps`; 0 = none, always 0 in time attack) |
+| `course`, `course_index` | the course being raced: its name (empty without `[[courses]]`) and its place in `World.courses` (0 for the unnamed one) |
+| `mode`, `time_limit_s`, `time_left_s` | `"laps"` or `"time_attack"` (Python; `RaceMode` in the protocol); a time attack's clock and what is left of it |
 | `next_gate` | the gate to fly through next (0 before the start, and again once every gate is passed) |
-| `gate_count` | gates in the course |
+| `gate_count` | gates in the course being raced |
 | `laps` | laps completed |
 | `current_lap_s` | time since the current lap started (0 until the clock runs) |
 | `last_lap_s`, `best_lap_s` | 0 until a lap completes (`laps > 0` says they are real) |
 
-The recording has the same values as scalar signals `race.running`, `race.finished`, `race.next_gate`, `race.laps`,
-`race.lap_start_s`, `race.last_lap_s` and `race.best_lap_s`.
+The recording has the same values as scalar signals `race.running`, `race.finished`, `race.next_gate`, `race.course`
+(the course's index), `race.laps`, `race.start_s` (when the race clock started), `race.lap_start_s`, `race.last_lap_s`
+and `race.best_lap_s`.
 
 In the game the HUD's lap line reads `LAP 2/3   NEXT 1   ...` with a limit and `RACE FINISHED   3 LAPS   BEST 29.9`
-once it is over, **N** starts a new race, and the gate to fly through next is drawn green and stronger (the start/finish
-gate is yellow while it is not next); the highlight follows the state message, so it changes on the frame the gate is
-passed.
+once it is over, **N** starts a new race on the same course, and the gate to fly through next is drawn green and
+stronger (the start/finish gate is yellow while it is not next); the highlight follows the state message, so it changes
+on the frame the gate is passed. In a world with courses the line starts with the course's name
+(`DIAMOND   LAP 2/5   ...`), a time attack reads `HUNT   LEFT 0:41.2   LAP 3   NEXT START   ...` and ends in
+`HUNT   TIME UP   4 LAPS   BEST 29.1`, **Shift+N** cycles to the next course and restarts it, and the menu has a Course
+row for a world with two or more (`OFS_COURSE`, `--course=`; empty = the world's own default). Godot draws only the
+current course's gates, numbered along it.
 
 ## From Python
 
@@ -131,6 +179,7 @@ import ofs
 sim = ofs.launch(headless=True)
 sim.load("quads/opendrone-5f-freestyle.toml", world="flat", mode="lockstep")
 print([g.name for g in sim.get_world().gates])           # ['Gate0', 'Gate1', 'Gate2']
+# A world with courses: print([(c.name, c.mode) for c in sim.get_world().courses]); sim.reset_race("Hunt")
 state = sim.run(seconds=1.0)
 print(state.race.present, state.race.running, state.race.laps)
 for event in sim.events():
