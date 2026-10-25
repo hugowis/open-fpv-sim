@@ -183,17 +183,30 @@ impl Default for VideoSection {
     }
 }
 
-/// The environment the quad flies in: for now the ambient air temperature the thermal model starts from and cools to.
+/// The environment the quad flies in: the ambient air temperature the thermal model starts from and cools to, and the
+/// earth's magnetic field the compass reads.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EnvironmentSection {
     /// Ambient air temperature in °C; allowed -40 to 60.
     pub ambient_c: f64,
+    /// Total intensity of the earth's field in µT; allowed above 0 up to 100 (the real field spans about 25 to 65).
+    pub magnetic_field_ut: f64,
+    /// Angle of the field below the horizontal, degrees (positive = pointing down, as in the northern hemisphere).
+    pub magnetic_inclination_deg: f64,
+    /// Angle of magnetic north east of true north, degrees (positive = east).
+    pub magnetic_declination_deg: f64,
 }
 
 impl Default for EnvironmentSection {
     fn default() -> Self {
-        Self { ambient_c: ofs_core::consts::DEFAULT_AMBIENT_C }
+        use ofs_core::consts::*;
+        Self {
+            ambient_c: DEFAULT_AMBIENT_C,
+            magnetic_field_ut: DEFAULT_MAG_FIELD_UT,
+            magnetic_inclination_deg: DEFAULT_MAG_INCLINATION_DEG,
+            magnetic_declination_deg: DEFAULT_MAG_DECLINATION_DEG,
+        }
     }
 }
 
@@ -384,6 +397,22 @@ impl WorldConfig {
             ambient.is_finite() && (-40.0..=60.0).contains(&ambient),
             "environment.ambient_c",
             format!("must be between -40 and 60 degrees C (got {ambient})"),
+        );
+        let e = &self.environment;
+        c.check(
+            e.magnetic_field_ut.is_finite() && e.magnetic_field_ut > 0.0 && e.magnetic_field_ut <= 100.0,
+            "environment.magnetic_field_ut",
+            format!("must be above 0 and at most 100 µT (got {})", e.magnetic_field_ut),
+        );
+        c.check(
+            (-90.0..=90.0).contains(&e.magnetic_inclination_deg),
+            "environment.magnetic_inclination_deg",
+            format!("must be between -90 and 90 degrees (got {})", e.magnetic_inclination_deg),
+        );
+        c.check(
+            (-180.0..=180.0).contains(&e.magnetic_declination_deg),
+            "environment.magnetic_declination_deg",
+            format!("must be between -180 and 180 degrees (got {})", e.magnetic_declination_deg),
         );
         let v = &self.video;
         let snrs = [

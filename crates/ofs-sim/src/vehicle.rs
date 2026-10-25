@@ -38,6 +38,7 @@ use ofs_radio::parts::{Handset, Link, Receiver, RfFrontEnd};
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
 use ofs_radio::telemetry::{FcTelemetry, FcTelemetryHandle};
 use ofs_sensors::baro::{Baro, BaroParams};
+use ofs_sensors::mag::{earth_field_ned, soft_iron_from_rows, Mag, MagParams};
 use ofs_sensors::imu::{Imu, ImuParams, VibrationParams};
 use ofs_sensors::mount::MountResponse;
 use ofs_video::link::{
@@ -986,6 +987,20 @@ pub fn build_seeded(
     };
     models.push(Box::new(Imu::new(imu, opts.seed, &mut bus)));
     models.push(Box::new(Baro::new(BaroParams { noise_std_pa: cfg.baro.noise_std_pa, home_alt_m: cfg.home.alt_m }, opts.seed, &mut bus)));
+    if let Some(m) = &cfg.mag {
+        let e = &opts.world.environment;
+        models.push(Box::new(Mag::new(
+            MagParams {
+                noise_std_ut: m.noise_std_ut,
+                hard_iron_ut: v3(m.hard_iron_ut),
+                soft_iron: soft_iron_from_rows(m.soft_iron),
+                earth_ned_ut: earth_field_ned(e.magnetic_field_ut, e.magnetic_inclination_deg, e.magnetic_declination_deg),
+                rate_divisor: base_hz / m.rate_hz,
+            },
+            opts.seed,
+            &mut bus,
+        )));
+    }
 
     let r = &cfg.radio;
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);

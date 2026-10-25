@@ -59,7 +59,7 @@ the ambient to the last bit). The model steps at 100 Hz after the motors and the
 | motor `i` | `I²·R_winding + τ_friction·ω`: winding copper loss plus the no-load torque `Ke·I0` that `EscMotor` already takes off the rotor, times the speed. |
 | VTX | `P_rf·(1/η − 1) + idle_w` while `vtx.present`; in pit mode only `idle_w` (`vtx.power_mw` keeps the selected level there, and the pit output is a few mW). |
 
-The ambient is `[environment] ambient_c` in the world file (default 25 °C, allowed −40 to 60).
+The ambient is `[environment] ambient_c` in the world file (default 25 °C, allowed −40 to 60). The same table carries the earth's magnetic field for the compass (`magnetic_field_ut`, `magnetic_inclination_deg`, `magnetic_declination_deg`; #31).
 
 **Published** (recorded like any signal; the default table records the ESC and motor temperatures at the model's own
 100 Hz, `vtx.temp_c` at 50 Hz): `esc.{i}.temp_c`, `motor.{i}.temp_c`, `vtx.temp_c`. A rig that builds the ESC telemetry

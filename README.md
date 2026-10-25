@@ -152,16 +152,22 @@ column and still play.
 
 ## Component library
 
-The quad file is schema 6: it references parts and keeps only its own wiring, and the hardware lives in
+The quad file is schema 6 (7 adds the optional magnetometer): it references parts and keeps only its own wiring, and the hardware lives in
 `library/` — one TOML per part, every parameter's provenance recorded.
 
     library/
-      frames/    motors/   props/   escs/   batteries/   imus/   barometers/   vtx/
+      frames/    motors/   props/   escs/   batteries/   imus/   barometers/   magnetometers/   vtx/
     quads/       <quad>.toml + <quad>.betaflight.diff   (as today)
 
 A part's id is its file stem, and the quad references it — `motors = ["opendrone-openmotor-2207"]` in
 `quads/opendrone-5f-freestyle.toml` fits four copies of the one motor part, and `imu = "tdk-icm-42688p"` swaps the
-shipped IMU for the datasheet-sourced one. A schema-5 quad that writes `[imu]` and `[baro]` as inline tables still loads. The library is resolved against
+shipped IMU for the datasheet-sourced one. A schema-5 quad that writes `[imu]` and `[baro]` as inline tables still loads. A quad has no compass unless it names one: set
+`schema_version = 7` and add `mag = "opendrone-mag"` (#31), and the simulator publishes `mag.field_frd_ut` (µT, body frame, with
+the part's noise, hard-iron offset and soft-iron matrix) and `mag.heading_rad` (the tilt-compensated magnetic heading) at the
+part's `rate_hz`; the earth field is the world's `[environment]` `magnetic_field_ut` / `magnetic_inclination_deg` /
+`magnetic_declination_deg` (default 50 µT, 60° down, 2° east). Betaflight SITL does not take a magnetometer from the simulator: its
+virtual compass derives a fixed field from the attitude we send, so the model feeds recordings and scripts, not the firmware
+(`docs/research/sitl-interface.md`). The library is resolved against
 `<quad dir>/../library`; set `OFS_LIBRARY` to a list of roots to fly another part set without touching `quads/`.
 The first root that has a part id wins, so a later root fills the parts the earlier ones lack. Separate roots with
 `;` on Windows and `:` elsewhere: `OFS_LIBRARY="C:\shared\ofs-library;library"` or

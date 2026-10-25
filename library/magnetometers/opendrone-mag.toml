@@ -1,0 +1,23 @@
+# A generic flight-controller magnetometer: a 100 Hz compass with a few tenths of a microtesla of noise and no
+# installation distortion. Every value is the author's estimate; no datasheet figure was read for it.
+schema_version = 1
+name = "OpenDrone magnetometer (generic)"
+
+[mag]
+noise_std_ut = 0.3
+rate_hz = 100
+hard_iron_ut = [0.0, 0.0, 0.0]
+soft_iron = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+[provenance."mag.noise_std_ut"]
+source = "estimated"
+note = "order of a few mgauss RMS per sample (0.3 uT), typical of MEMS magnetometers on flight controllers; not read from a datasheet or measured"
+[provenance."mag.rate_hz"]
+source = "estimated"
+note = "a common output data rate for a flight-controller compass; divides the simulator's base rates"
+[provenance."mag.hard_iron_ut"]
+source = "estimated"
+note = "zero: a hard-iron offset belongs to one installation (magnets, wiring current), not to the part; set it in your own part file to study calibration"
+[provenance."mag.soft_iron"]
+source = "estimated"
+note = "identity: soft-iron distortion belongs to one installation and the sensor's axis gains to one unit; row-major, applied to the body-frame field before the hard-iron offset"

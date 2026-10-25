@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use ofs_config::part::{
-    load_baro, load_battery, load_esc, load_frame, load_imu, load_motor, load_prop, load_vtx, ProvenanceSource,
+    load_baro, load_battery, load_esc, load_frame, load_imu, load_mag, load_motor, load_prop, load_vtx, ProvenanceSource,
 };
 
 const FRAME: &str = r#"
@@ -300,4 +300,50 @@ fn every_shipped_part_loads_and_names_its_id() {
     assert!((icm.imu.accel_noise_std_mps2 - 70e-6 * 9.80665 * 4000_f64.sqrt()).abs() < 1e-4, "70 ug/rtHz over 4 kHz");
     assert_eq!(icm.provenance["imu.gyro_noise_std_radps"].source, ProvenanceSource::Datasheet);
     assert_eq!(load_baro(&root.join("barometers/opendrone-baro.toml")).unwrap().baro.noise_std_pa, 2.0);
+}
+
+const MAG: &str = r#"
+schema_version = 1
+name = "Test magnetometer"
+
+[mag]
+noise_std_ut = 0.3
+rate_hz = 100
+hard_iron_ut = [1.0, -2.0, 0.5]
+soft_iron = [[1.0, 0.0, 0.0], [0.0, 1.1, 0.0], [0.0, 0.0, 0.9]]
+
+[provenance."mag.noise_std_ut"]
+source = "datasheet"
+[provenance."mag.rate_hz"]
+source = "datasheet"
+[provenance."mag.hard_iron_ut"]
+source = "measured"
+[provenance."mag.soft_iron"]
+source = "measured"
+"#;
+
+#[test]
+fn a_mag_part_loads_with_its_data_and_the_matrix_is_one_parameter() {
+    let dir = tempfile::tempdir().unwrap();
+    let mag = load_mag(&write(dir.path(), "m.toml", MAG)).unwrap();
+    assert_eq!((mag.mag.noise_std_ut, mag.mag.rate_hz), (0.3, 100));
+    assert_eq!(mag.mag.hard_iron_ut, [1.0, -2.0, 0.5]);
+    assert_eq!(mag.mag.soft_iron[1], [0.0, 1.1, 0.0]);
+    assert_eq!(mag.provenance["mag.hard_iron_ut"].source, ProvenanceSource::Measured);
+    let missing = MAG.replace("[provenance.\"mag.soft_iron\"]
+source = \"measured\"
+", "");
+    let err = load_mag(&write(dir.path(), "m2.toml", &missing)).unwrap_err().to_string();
+    assert!(err.contains("mag.soft_iron") && err.contains("missing provenance"), "{err}");
+    assert_eq!(err.matches("mag.soft_iron").count(), 1, "the matrix is one parameter, not one problem per row: {err}");
+}
+
+#[test]
+fn the_shipped_mag_part_is_estimated_with_no_distortion() {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library"));
+    let mag = load_mag(&root.join("magnetometers/opendrone-mag.toml")).unwrap();
+    assert_eq!(mag.mag.rate_hz, 100);
+    assert_eq!(mag.mag.hard_iron_ut, [0.0; 3]);
+    assert_eq!(mag.mag.soft_iron, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    assert!(mag.provenance.values().all(|p| p.source == ProvenanceSource::Estimated), "no datasheet figure has been read");
 }

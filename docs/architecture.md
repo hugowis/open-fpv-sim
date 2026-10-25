@@ -15,7 +15,7 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-config` | Quad, world and part files (TOML): parsing and validation that reports every problem at once. | core |
 | `ofs-physics` | 6-DOF rigid body, propellers, impulse collisions with the world. | core |
 | `ofs-electrical` | Battery, ESC and brushless motor. | core |
-| `ofs-sensors` | IMU and barometer. | core |
+| `ofs-sensors` | IMU, barometer and magnetometer (with the tilt-compensated heading). | core |
 | `ofs-rf` | Shared RF: propagation, Rician fading, receiver diversity, body shadow. | core |
 | `ofs-radio` | CRSF framing and the radio as three swappable parts (`Handset`, `Link`, `Receiver`) stepped by `RadioChain`: the `joystick` handset, the `elrs` (2.4 GHz and 900 MHz) and `fixed` links, the `crsf` receiver. | core, rf |
 | `ofs-fc` | The Betaflight SITL bridge (process, UDP exchange, UART taps), MSP, and an open-loop stand-in. | core |

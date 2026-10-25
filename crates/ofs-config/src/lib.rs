@@ -10,11 +10,11 @@ pub use world::{AntennaKind, Polarization, WorldConfig};
 
 pub mod part;
 
-/// 6: `imu = "id"` and `baro = "id"` reference library parts (#42); a schema-5 file's inline `[imu]`/`[baro]` tables
+/// 7: an optional `mag = "id"` references a magnetometer library part (#31). 6: `imu = "id"` and `baro = "id"` reference library parts (#42); a schema-5 file's inline `[imu]`/`[baro]` tables
 /// still load. 5: quads assemble from library parts (M4a) — frame/motor/prop/esc/battery/vtx hardware moves to
 /// `library/`, every part parameter carries provenance. 4: the real radio link and [collision] (M3c).
 /// 3: [esc_telemetry]/[osd]/[vtx] (M3a). 2: the required [radio] section (M2).
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 /// Oldest schema this build still reads: 5 (the hardware sections live in library/ part files, so older files
 /// cannot be mapped onto it).
 pub const MIN_SCHEMA_VERSION: u32 = 5;
@@ -33,6 +33,8 @@ pub struct QuadConfig {
     pub battery: BatterySection,
     pub imu: ImuSection,
     pub baro: BaroSection,
+    /// The magnetometer, if the quad carries one (schema 7); a quad without it has no compass.
+    pub mag: Option<MagSection>,
     pub home: HomeSection,
     pub initial: InitialSection,
     pub fc: FcSection,
@@ -62,6 +64,8 @@ struct QuadFile {
     battery: BatteryWiring,
     imu: PartOrInline<ImuSection>,
     baro: PartOrInline<BaroSection>,
+    #[serde(default)]
+    mag: Option<String>,
     home: HomeSection,
     initial: InitialSection,
     fc: FcSection,
@@ -125,6 +129,8 @@ pub struct PartRefs {
     pub imu: Option<String>,
     /// `None` for a schema-5 quad that writes `[baro]` inline.
     pub baro: Option<String>,
+    /// `None` for a quad without a magnetometer.
+    pub mag: Option<String>,
     pub vtx: Option<String>,
 }
 
@@ -293,6 +299,20 @@ pub struct ImuSection {
 #[serde(deny_unknown_fields)]
 pub struct BaroSection {
     pub noise_std_pa: f64,
+}
+
+/// A magnetometer, as the part file's `[mag]` states it (µT, body FRD).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MagSection {
+    /// White noise per output sample.
+    pub noise_std_ut: f64,
+    /// Output data rate; must divide `sim.base_hz`.
+    pub rate_hz: u32,
+    /// Constant offset added to the measured field.
+    pub hard_iron_ut: [f64; 3],
+    /// Row-major matrix applied to the body-frame field before the offset; identity = no distortion.
+    pub soft_iron: [[f64; 3]; 3],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -838,6 +858,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         PartOrInline::Part(id) => resolve("barometers", id, "baro", &mut problems),
         PartOrInline::Inline(_) => None,
     };
+    let mag_path = file.mag.as_ref().and_then(|id| resolve("magnetometers", id, "mag", &mut problems));
     let mut vtx_path = None;
     if let Some(wiring) = &file.vtx {
         vtx_path = resolve("vtx", &wiring.part, "vtx.part", &mut problems);
@@ -895,6 +916,14 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         (_, PartOrInline::Inline(section)) => (section, None),
         (None, PartOrInline::Part(_)) => unreachable!("the baro id resolved"),
     };
+    let mag = match (mag_path, &file.mag) {
+        (Some(path), Some(id)) => {
+            let p = part::load_mag(&path)?;
+            part_provenance.push(provenance("mag", id, &p.name, &p.provenance));
+            Some(p.mag)
+        }
+        _ => None,
+    };
     let vtx = match (vtx_path, &file.vtx) {
         (Some(vtx_path), Some(wiring)) => {
             let vtx_part = part::load_vtx(&vtx_path)?;
@@ -929,6 +958,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         battery,
         imu: imu.0,
         baro: baro.0,
+        mag,
         home: file.home,
         initial: file.initial,
         fc: file.fc,
@@ -944,6 +974,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
             battery: file.battery.part,
             imu: imu.1,
             baro: baro.1,
+            mag: file.mag.clone(),
             vtx: file.vtx.as_ref().map(|v| v.part.clone()),
         },
         part_provenance,
@@ -966,6 +997,11 @@ fn broadcast<P: Clone>(parts: Vec<P>, n: usize) -> Vec<P> {
         return vec![parts[0].clone(); n];
     }
     parts
+}
+
+fn det3(m: &[[f64; 3]; 3]) -> f64 {
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
 /// The smallest advance ratio at which a windmilling propeller's torque vanishes that the model accepts.
@@ -1173,6 +1209,13 @@ impl QuadConfig {
         c.non_negative(self.imu.gyro_noise_std_radps, "imu.gyro_noise_std_radps");
         c.non_negative(self.imu.accel_noise_std_mps2, "imu.accel_noise_std_mps2");
         c.non_negative(self.baro.noise_std_pa, "baro.noise_std_pa");
+        if let Some(m) = &self.mag {
+            c.non_negative(m.noise_std_ut, "mag.noise_std_ut");
+            c.divides(self.sim.base_hz, m.rate_hz, "mag.rate_hz");
+            c.finite(&m.hard_iron_ut, "mag.hard_iron_ut");
+            let soft = det3(&m.soft_iron);
+            c.check(m.soft_iron.iter().flatten().all(|v| v.is_finite()) && soft.abs() > 1e-9, "mag.soft_iron", "must be finite and invertible (a nonzero determinant)");
+        }
 
         c.check((-90.0..=90.0).contains(&self.home.lat_deg), "home.lat_deg", "must be in [-90, 90]");
         c.check((-180.0..=180.0).contains(&self.home.lon_deg), "home.lon_deg", "must be in [-180, 180]");
@@ -1263,6 +1306,7 @@ impl QuadConfig {
                 c.check(spheres.iter().all(|s| s[3] > 0.0), "collision.spheres_frd_m", "radii must be > 0");
             }
         }
+        c.check(self.parts.mag.is_none() || self.schema_version >= 7, "mag", "a part reference needs schema_version = 7");
         for (field, id) in [("imu", &self.parts.imu), ("baro", &self.parts.baro)] {
             // Schema 5 wrote inline tables and schema 6 references parts; a file must not mix its schema and its form.
             c.check(id.is_none() || self.schema_version >= 6, field, "a part reference needs schema_version = 6");

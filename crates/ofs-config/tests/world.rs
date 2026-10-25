@@ -476,6 +476,33 @@ fn the_ambient_defaults_to_25_and_is_range_checked() {
 }
 
 #[test]
+fn the_magnetic_field_defaults_to_the_one_sitl_synthesises_and_is_range_checked() {
+    let env = WorldConfig::open_field().environment;
+    assert_eq!((env.magnetic_field_ut, env.magnetic_inclination_deg, env.magnetic_declination_deg), (50.0, 60.0, 2.0));
+    let w = written_world(&(world_text() + "
+[environment]
+magnetic_field_ut = 30.0
+magnetic_inclination_deg = -40.0
+magnetic_declination_deg = -7.5
+")).unwrap();
+    assert_eq!((w.environment.magnetic_field_ut, w.environment.magnetic_inclination_deg, w.environment.magnetic_declination_deg), (30.0, -40.0, -7.5));
+    for (key, bad) in [
+        ("magnetic_field_ut", "0.0"),
+        ("magnetic_field_ut", "150.0"),
+        ("magnetic_inclination_deg", "95.0"),
+        ("magnetic_declination_deg", "nan"),
+        ("magnetic_declination_deg", "200.0"),
+    ] {
+        let shown = problems(&(world_text() + &format!("
+[environment]
+{key} = {bad}
+"))).join("
+");
+        assert!(shown.contains(&format!("environment.{key}")), "{key} = {bad}: {shown}");
+    }
+}
+
+#[test]
 fn a_non_finite_video_threshold_names_its_field() {
     let shown = problems(&(world_text() + "\n[video]\nsparkle_snr_db = nan\nlost_snr_db = inf\n")).join("\n");
     assert!(shown.contains("video.sparkle_snr_db: ") && shown.contains("video.lost_snr_db: "), "{shown}");

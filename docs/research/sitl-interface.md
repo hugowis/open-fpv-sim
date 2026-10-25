@@ -31,7 +31,7 @@ Verified on the external-time build (§4) with the legacy bridge (`-DENABLE_GAZE
 |---|---|---|
 | `imu_angular_velocity_rpy` | `(ωx, ωy, ωz)` FRD, **unchanged** | SITL applies `(x, −y, −z)` → Betaflight gets FLU rates. The plan's candidate `(x, y, −z)` was wrong on yaw. |
 | `imu_linear_acceleration_xyz` | `(−fx, fy, fz)` FRD specific force | SITL negates all axes → Betaflight gets `(fx, −fy, −fz)` = FLU specific force. Level at rest: send `(0, 0, −9.80665)`. |
-| `imu_orientation_quat` | `Rx(π)·q_ned·Rx(π)` (FLU→NWU), w ≥ 0 | Only feeds the virtual compass (attitude comes from Betaflight's own estimator). Heading not verified: with default settings the virtual compass is not fused (yaw stayed at 2–4° for a 90° heading). Irrelevant for acro/angle; revisit for GPS modes. |
+| `imu_orientation_quat` | `Rx(π)·q_ned·Rx(π)` (FLU→NWU), w ≥ 0 | Only feeds the virtual compass (attitude comes from Betaflight's own estimator). **SITL has no magnetometer input** (#31): `sitl.c` (`USE_VIRTUAL_MAG`) builds the compass from this quaternion and a fixed field, 4096 counts, 60° inclination, 2° east declination (NWU `(2046.8, -71.5, -3547.2)`), so the simulator's own magnetometer model (`ofs-sensors::mag`, default world field of the same direction) cannot reach the firmware without a datagram extension and a SITL patch. Heading not verified: with default settings the virtual compass is not fused (yaw stayed at 2–4° for a 90° heading). Irrelevant for acro/angle; revisit for GPS modes. |
 | `velocity_xyz` | ENU `(vE, vN, vU)` | virtual GPS only |
 | `position_xyz` | `(lon°, lat°, alt m)` | virtual GPS only |
 | `pressure` | Pa | used directly by the legacy bridge |
