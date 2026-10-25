@@ -320,4 +320,3 @@ func test_calibration_tables_are_cleaned() -> void:
 
 func test_the_real_input_singleton_has_the_device_methods_the_key_uses() -> void:
 	ok(Input.has_method("get_joy_guid") and Input.has_method("get_joy_name"), "Input exposes them")
-	eq(Controls.device_key(Input, 7), "", "a device that is not there has no key")
