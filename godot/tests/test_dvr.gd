@@ -7,6 +7,8 @@ const Dvr = preload("res://ui/dvr.gd")
 const App = preload("res://scripts/app.gd")
 const Menu = preload("res://ui/controls_menu.gd")
 const Hud = preload("res://ui/hud.gd")
+const CleanFeed = preload("res://ui/clean_feed.gd")
+const Lens = preload("res://ui/lens.gd")
 const QUAD := "res://../quads/opendrone-5f-freestyle.toml"
 
 
@@ -68,6 +70,16 @@ func _app_shell(client = MockClient.new()) -> Dictionary:
 	app.add_child(box)
 	app.add_child(texture)
 	app.add_child(osd)
+	var camera := Camera3D.new()
+	var lens := Lens.new()
+	var source := SubViewport.new()  # the clean feed needs its source camera and lens in the tree
+	source.add_child(camera)
+	source.add_child(lens)
+	await add_to_tree(source)
+	var clean_feed := CleanFeed.new()
+	await add_to_tree(clean_feed)
+	clean_feed.setup(camera, lens, Vector2i(64, 48))
+	app.clean_feed = clean_feed
 	app.dvr = dvr
 	app.controls_menu = menu
 	app.hud = hud

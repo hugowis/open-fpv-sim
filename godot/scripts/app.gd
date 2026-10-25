@@ -31,6 +31,7 @@ const TIPS := {
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 @onready var dvr: Node = $Dvr
+@onready var clean_feed: Node = $CleanFeed
 
 var client: Object = null  # OfsClient, from the extension
 var controls = Controls.new()
@@ -61,6 +62,7 @@ func _ready() -> void:
 	controls_menu.dvr_export_changed.connect(_on_dvr_export_changed)
 	controls_menu.dvr_toggled.connect(_set_dvr)
 	fpv_texture.texture = fpv_viewport.get_texture()
+	clean_feed.setup(fpv_camera, lens, fpv_viewport.size)
 	get_viewport().size_changed.connect(_layout_fpv)
 	_layout_fpv()
 	if not ClassDB.class_exists("OfsClient"):
@@ -112,6 +114,7 @@ func _layout_fpv() -> void:
 	fpv_texture.position = (layout["box"] as Rect2).position
 	fpv_texture.size = (layout["box"] as Rect2).size
 	fpv_viewport.size = layout["internal"]
+	clean_feed.resize(layout["internal"])
 
 
 func _load_controls() -> void:
@@ -139,6 +142,8 @@ func _process(delta: float) -> void:
 		if render_time != _fpv_render_time:
 			_fpv_render_time = render_time
 			osd.set_frame(fpv.get("osd", {}))
+		if clean_feed.is_active():
+			clean_feed.sync_camera()
 		dvr.capture(fpv)
 	elif client.has_pose():
 		drone.transform = client.get_pose()
