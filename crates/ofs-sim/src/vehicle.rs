@@ -33,6 +33,7 @@ use ofs_radio::band::Band;
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{ElrsLink, LinkParams};
 use ofs_radio::fixed::{FixedLink, FixedParams};
+use ofs_radio::ibus::IbusReceiver;
 use ofs_radio::joystick::JoystickHandset;
 use ofs_radio::parts::{Handset, Link, Receiver, RfFrontEnd};
 use ofs_radio::receiver::{CrsfReceiver, ReceiverParams};
@@ -718,6 +719,7 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
     };
     let receiver: Box<dyn Receiver> = match r.receiver {
         ReceiverKind::Crsf => Box::new(CrsfReceiver::new(ReceiverParams { link_stats_interval_packets: r.link_stats_interval_packets }, uart, telemetry_in)),
+        ReceiverKind::Ibus => Box::new(IbusReceiver::new(r.packet_rate_hz, uart, telemetry_in)),
     };
     RadioChain::new(handset, link, receiver, base_hz, bus)
 }

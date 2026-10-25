@@ -38,3 +38,11 @@ fn the_fixed_link_quad_builds_and_loses_about_a_fifth_of_its_packets() {
     assert!((60.0..=95.0).contains(&radio.lq_pct), "a 20 % loss fraction leaves LQ near 80: {}", radio.lq_pct);
     assert_eq!(radio.rssi_dbm, ofs_radio::fixed::NOMINAL_RSSI_DBM);
 }
+
+#[test]
+fn the_ibus_quad_builds_and_keeps_its_link_up() {
+    let mut v = quad("opendrone-5f-ibus.toml");
+    v.run_for(1.0).unwrap();
+    let radio = v.state().radio;
+    assert!(radio.link_up && radio.lq_pct == 100.0, "{radio:?}");
+}
