@@ -1,0 +1,63 @@
+# A SmartAudio v2.1 VTX for a toothpick. Betaflight builds its power list from the dBm values reported (SITL has no vtxtable).
+schema_version = 1
+name = "OpenDrone SmartAudio VTX (400 mW)"
+
+[vtx]
+kind = "smartaudio"
+power_levels_mw = [25, 100, 200, 400]
+power_levels_dbm = [14, 20, 23, 26]
+reply_latency_ms = 5.0
+pit_power_mw = 0.1
+
+[vtx.antenna]
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+# Up and back, on the back of the frame.
+mount_frd = [-0.5, 0.0, -1.0]
+
+[vtx.thermal]
+heat_capacity_jpk = 1.0
+resistance_kpw = 25.0
+efficiency = 0.25
+idle_w = 0.3
+
+[provenance."vtx.kind"]
+source = "estimated"
+note = "SmartAudio v2.1 behavioural model (M3a)"
+[provenance."vtx.power_levels_mw"]
+source = "estimated"
+note = "a 400 mW toothpick-class VTX, steps in the style of opendrone-smartaudio-1w; not a datasheet table"
+[provenance."vtx.power_levels_dbm"]
+source = "estimated"
+note = "dBm equivalents of the mW table, our own conversion"
+[provenance."vtx.reply_latency_ms"]
+source = "estimated"
+note = "M3a estimate"
+[provenance."vtx.pit_power_mw"]
+source = "estimated"
+note = "M3a estimate: a trickle next to the pilot"
+[provenance."vtx.antenna.kind"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.gain_dbi"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.polarization"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.antenna.mount_frd"]
+source = "estimated"
+note = "M3b estimate"
+[provenance."vtx.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate (a gram or two of board and shield); not measured"
+[provenance."vtx.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate, a small board with little airflow; not measured"
+[provenance."vtx.thermal.efficiency"]
+source = "estimated"
+note = "RF output over DC input, order of magnitude; not measured"
+[provenance."vtx.thermal.idle_w"]
+source = "estimated"
+note = "draw with no RF output, order of magnitude; not measured"

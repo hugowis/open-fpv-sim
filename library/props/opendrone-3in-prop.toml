@@ -1,0 +1,30 @@
+# OpenDrone 3" propeller - estimates. Units are in the key suffixes (SI), tables are indexed by rpm.
+schema_version = 1
+name = "OpenDrone 3in prop"
+
+[prop]
+diameter_m = 0.076
+inertia_kgm2 = 7e-07
+ct_table = [[0.0, 0.09], [60000.0, 0.09]]
+cp_table = [[0.0, 0.05], [60000.0, 0.05]]
+imbalance_kgm = 0.0
+windmill_j0 = 1.0
+
+[provenance."prop.diameter_m"]
+source = "estimated"
+note = "3 inch (76 mm)"
+[provenance."prop.inertia_kgm2"]
+source = "estimated"
+note = "a 1.5 g two-blade prop as a rod of its length, 1/12 * m * L^2; not measured"
+[provenance."prop.ct_table"]
+source = "estimated"
+note = "flat-table estimate, a little under opendrone-5in-prop's 0.11 for the lower Reynolds number of a small blade; not measured"
+[provenance."prop.cp_table"]
+source = "estimated"
+note = "flat-table estimate, a little above opendrone-5in-prop's 0.045 (small blades are less efficient); not measured"
+[provenance."prop.imbalance_kgm"]
+source = "estimated"
+note = "no measurement; 0 until a vibration measurement exists"
+[provenance."prop.windmill_j0"]
+source = "estimated"
+note = "zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured"
