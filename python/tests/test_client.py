@@ -47,6 +47,26 @@ def test_a_tilted_gate_reaches_the_client(sim, tmp_path):
     assert (gates[1].pitch_deg, gates[1].roll_deg) == (0.0, 0.0), "an untilted gate is upright"
 
 
+def test_courses_are_named_in_the_world_and_picked_by_a_reset(sim):
+    sim.load(QUAD, open_loop_fc=True, world="park", record=False)
+    world = sim.get_world()
+    assert [(c.name, c.mode, c.laps, c.time_limit_s) for c in world.courses] == [
+        ("Diamond", "laps", 5, 0.0), ("Hunt", "time_attack", 0, 60.0)]
+    assert world.courses[0].gates == ("Gate0", "Gate1", "Gate2", "Gate3") and world.default_course == 0
+    race = sim.run(0.05).race
+    assert (race.course, race.course_index, race.mode, race.lap_limit) == ("Diamond", 0, "laps", 5)
+    with pytest.raises(ofs.InvalidArgument, match="Hunt"):
+        sim.reset_race("Nope")
+    sim.reset_race("Hunt")
+    race = sim.run(0.05).race
+    assert (race.course, race.course_index, race.mode, race.time_limit_s, race.time_left_s) == ("Hunt", 1, "time_attack", 60.0, 60.0)
+    sim.reset_race()
+    assert sim.run(0.05).race.course == "Hunt", "a reset without a name restarts the same course"
+    sim.load(QUAD, open_loop_fc=True, world=WORLD, record=False)
+    race = sim.run(0.05).race
+    assert (sim.get_world().courses, race.course, race.mode) == ((), "", "laps"), "a world without courses names none"
+
+
 def test_errors_are_typed(sim):
     with pytest.raises(ofs.NotLoaded):
         sim.run(0.1)

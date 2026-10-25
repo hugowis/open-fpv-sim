@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 14
+PROTOCOL_VERSION = 15
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -170,9 +170,21 @@ class Gate:
 
 
 @dataclass(frozen=True)
+class Course:
+    """A named course of a world: some of its gates by name, in order (the first is the start and finish). `mode` is
+    "laps" or "time_attack"; `laps` is the lap limit that applies (0 = none); `time_limit_s` is a time attack's clock."""
+    name: str
+    gates: tuple
+    mode: str = "laps"
+    laps: int = 0
+    time_limit_s: float = 0.0
+
+
+@dataclass(frozen=True)
 class World:
     """The field a session flies in: where the pilot stands, the goggles' antennas, the objects, other transmitters
-    and the race gates (in course order; gate 0 is the start and finish)."""
+    the race gates and the named courses over them. Without `courses` the race is one course of all the gates in
+    file order (gate 0 is the start and finish); `default_course` indexes the one a fresh session starts in."""
     name: str
     pilot_position_ned_m: tuple
     pilot_facing_deg: float
@@ -181,6 +193,8 @@ class World:
     emitters: tuple
     handset: Handset = field(default_factory=lambda: Handset((), ()))
     gates: tuple = ()
+    courses: tuple = ()
+    default_course: int = 0
 
 
 @dataclass(frozen=True)
@@ -196,7 +210,12 @@ class Race:
     last_lap_s: float = 0.0
     best_lap_s: float = 0.0
     finished: bool = False  # the lap limit is reached: the clock has stopped; `reset_race()` starts another race
-    lap_limit: int = 0  # the world's `[race] laps` (0 = none)
+    lap_limit: int = 0  # the course's lap limit (0 = none, and always 0 in time attack)
+    course: str = ""  # the course being raced; empty for a world without [[courses]]
+    course_index: int = 0  # its place in `World.courses`
+    mode: str = "laps"  # "laps" or "time_attack"
+    time_limit_s: float = 0.0  # time attack: the clock
+    time_left_s: float = 0.0  # time attack: the whole limit before the start, 0 once the race is over
 
 
 @dataclass(frozen=True)
@@ -332,7 +351,12 @@ def _world(m) -> World:
         ) if m.HasField("handset") else Handset((), ()),
         gates=tuple(Gate(g.name, _v(g.center_ned_m), g.heading_deg, g.width_m, g.height_m, g.pitch_deg, g.roll_deg)
                     for g in m.gates),
+        courses=tuple(Course(c.name, tuple(c.gates), _RACE_MODES[c.mode], c.laps, c.time_limit_s) for c in m.courses),
+        default_course=m.default_course,
     )
+
+
+_RACE_MODES = {pb.RACE_MODE_LAPS: "laps", pb.RACE_MODE_TIME_ATTACK: "time_attack"}
 
 
 def _state(m) -> State:
@@ -361,7 +385,8 @@ def _state(m) -> State:
         collision_speed_mps=m.collision_speed_mps,
         battery_cell_voltages=tuple(m.battery_cell_voltages),
         race=Race(m.race.present, m.race.running, m.race.next_gate, m.race.gate_count, m.race.laps,
-                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s, m.race.finished, m.race.lap_limit),
+                  m.race.current_lap_s, m.race.last_lap_s, m.race.best_lap_s, m.race.finished, m.race.lap_limit,
+                  m.race.course, m.race.course_index, _RACE_MODES[m.race.mode], m.race.time_limit_s, m.race.time_left_s),
     )
 
 
@@ -550,11 +575,12 @@ class Sim:
         """Stops the playing inputs file, if any (the sticks and link state keep their last values)."""
         self._call(self._stub.StopInputs, pb.Empty())
 
-    def reset_race(self) -> None:
+    def reset_race(self, course: str = "") -> None:
         """Starts a fresh race at the next tick: no clock, no laps, no best time, gate 0 next (a `race_reset` event
-        says it happened). `InvalidState` when the world has no gates. State read before the next tick still shows
-        the old race."""
-        self._call(self._stub.ResetRace, pb.Empty())
+        says it happened), on the world's course called `course` or, by default, the course being raced.
+        `InvalidState` when the world has no gates, `InvalidArgument` for a course it does not declare. State read
+        before the next tick still shows the old race."""
+        self._call(self._stub.ResetRace, pb.ResetRaceRequest(course=course))
 
     def record_inputs(self) -> str:
         """Starts recording this session's sticks and link state to a CSV the server names under `logs_dir` (one row
