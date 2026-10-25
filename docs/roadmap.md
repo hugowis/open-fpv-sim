@@ -34,7 +34,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
   noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).
 - The radio is three swappable parts (`docs/writing-a-radio-model.md`), but only one handset (`joystick`), one
-  receiver (`crsf`) and two links (`elrs`, `fixed`) ship; a new one is a Rust module, a match arm and a config enum
+  receivers (`crsf`, `ibus`) and two links (`elrs`, `fixed`) ship; a new one is a Rust module, a match arm and a config enum
   variant, in-tree.
 
 ### Inputs recording (`docs/superpowers/specs/2026-10-15-m5-radio-components-design.md` §6)
@@ -132,7 +132,8 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
   routes are the external module bay with a USB-UART adapter, and a Lua script over `serialWrite`. **Blocked on a
   verified route.**
 - Crossfire and Tracer links: a profile or a `Link` each now that the seams exist; they need sourced figures.
-- Non-CRSF receivers (SBUS, iBUS, FrSky, DSMX): a `Receiver` each, with the matching Betaflight config.
+- Non-CRSF receivers: iBUS is done (`docs/research/ibus-receiver.md`, #8); SBUS, FrSky and DSMX remain, a `Receiver` each,
+  with the matching Betaflight config and a `#define USE_SERIALRX_<protocol>` in the SITL patch.
 - Plugin loading for radio models from outside the tree.
 
 ### Modelling

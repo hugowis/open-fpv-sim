@@ -44,7 +44,7 @@ What is in it:
   write byte-identical files, Betaflight included), pandas/CSV/Parquet export, a live Rerun view, scripted stick
   inputs, faults at a simulated time, and Betaflight's own Blackbox logs (M4c, `docs/research/mcap-determinism.md`).
 - The radio is three swappable parts — a handset, a link and a receiver — so other links can be tried: ExpressLRS on
-  2.4 GHz or 900 MHz, or a geometry-free `fixed` link, flown through the same chain; and a live flight's sticks record
+  2.4 GHz or 900 MHz, or a geometry-free `fixed` link, flown through the same chain, behind a CRSF or a FlySky iBUS receiver; and a live flight's sticks record
   to a CSV that `play_inputs` replays in lockstep (M5, `docs/writing-a-radio-model.md`).
 - macOS is supported best-effort on Apple silicon: the SITL builds with a one-hunk patch, the Rust, Python and Godot
   suites have passed in the survey, and CI has a non-blocking job (`docs/research/macos.md`; no physical Mac has been
@@ -143,7 +143,7 @@ With `OFS_SITL_LAUNCH` set (see "With real Betaflight" above), the game starts B
 simulated radio link.
 
 The radio between the handset and Betaflight is three swappable parts (a handset, a link, a receiver): the quad file's
-`[radio]` section picks them, and `docs/writing-a-radio-model.md` shows how to write another. Both link kinds read
+`[radio]` section picks them (`receiver = "crsf"` or `"ibus"`), and `docs/writing-a-radio-model.md` shows how to write another. Both link kinds read
 `[radio] telemetry_slot_divisor` (default 4): one downlink packet in that many carries a telemetry frame when heard.
 It accepts 1, 2, 4, 8, 16, 32, 64 or 128; there is no off value, and one value covers every band and packet
 rate. It changes telemetry cadence, not loss. The default keeps 0.2.0 recordings and goldens byte-identical. Press **I** to record the

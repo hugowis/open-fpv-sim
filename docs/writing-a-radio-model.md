@@ -2,10 +2,10 @@
 
 The simulated radio is three swappable parts (`crates/ofs-radio/src/parts.rs`): a **handset** (sticks to channels),
 a **link** (the air: loss, latency, link quality, the downlink) and a **receiver** (what arrives, as the serial
-protocol the flight controller reads, CRSF today). A `RadioChain` (`crates/ofs-radio/src/chain.rs`) steps them in
+protocol the flight controller reads: CRSF or iBUS). A `RadioChain` (`crates/ofs-radio/src/chain.rs`) steps them in
 order every packet slot. The quad file names the parts: `[radio] kind` picks the link (`"elrs"` or `"fixed"`), and
-`handset` (`"joystick"`) and `receiver` (`"crsf"`) pick the other two; those two default to the only variant each has
-today. This page walks through writing a new **link**, the part you are most likely to want;
+`handset` (`"joystick"`) and `receiver` (`"crsf"` or `"ibus"`) pick the other two; they default to `"joystick"` and
+`"crsf"`. This page walks through writing a new **link**, the part you are most likely to want;
 `crates/ofs-radio/src/fixed.rs` is the worked example (about 115 lines, comments included).
 
 ## The contract
@@ -56,6 +56,23 @@ uplink delivery or downlink LQ. A new link should take the same field (the vehic
    inside a test file works too: see `crates/ofs-radio/tests/swap.rs`.
 5. Ship an example quad (`quads/opendrone-5f-fixed-link.toml` is the one for the fixed link) so the model is one
    `load` away.
+
+## Writing a receiver
+
+A receiver implements `Receiver` (`parts.rs`): `emit` writes what a packet slot delivered to the flight controller's
+UART `Wire`, `ingest_telemetry` and `next_telemetry` carry the flight controller's own telemetry back (an iBUS receiver
+has none and drops it). `crates/ofs-radio/src/ibus.rs` is the example: the frame codec beside the receiver, tested
+against a golden frame computed by hand (`crates/ofs-radio/tests/ibus.rs`). A receiver draws no random numbers, and it
+owns its frame rate: the link delivers at its packet rate, a serial protocol has its own cadence (iBUS about 7 ms), so
+hold the latest channels and write when a frame is due. Then:
+
+1. Add a `ReceiverKind` variant (`ofs-config`) and its arm in `radio_chain` (`ofs-sim`).
+2. Add `#define USE_SERIALRX_<PROTOCOL>` to the SITL patch (`third_party/betaflight/ofs-sitl.patch`): `target.h`
+   undefines the serial receivers it does not use. Rebuild with `scripts/build-sitl.sh`; CI rebuilds on a patch change.
+3. Ship an example quad whose diff sets `serialrx_provider` (`quads/opendrone-5f-ibus.betaflight.diff`), and a live test
+   that reads the sticks back over `MSP_RC` (`ibus_bytes_in_the_state_datagram_reach_betaflight` in
+   `crates/ofs-fc/tests/sitl_live.rs`).
+4. Source every protocol figure and mark what is estimated (`docs/research/ibus-receiver.md`).
 
 ## Determinism
 
