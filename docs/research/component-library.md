@@ -3,13 +3,13 @@
 Every value shipped in `library/` is an estimate, recorded in the open (M1's for the 5" parts, class-typical ones for the
 parts of the toothpick, race and long-range quads), except the datasheet noise densities of the ICM-42688-P, the
 Quad-X motor order and the Tramp power table (both Betaflight's). Since M4a a quad file references parts instead of carrying hardware (the IMU and the barometer
-joined in schema 6) — one TOML per part under `library/` (see the "Component
+joined in schema 6, the magnetometer in schema 7) — one TOML per part under `library/` (see the "Component
 library" section of README.md) — and every parameter of a part file must carry a `[provenance]` entry: a
 `source` (`datasheet`, `measured` or `estimated`), an optional `link` and an optional `note`. The loader
 refuses a part file whose data skips an entry, and one whose provenance names a parameter that does not
 exist; a table-valued parameter is one entry (`prop.ct_table` is one parameter, however long its rows).
-This note is the ledger: one table per part file — 26 files, eight kinds, 198 parameters. The first seven files are as
-shipped at M4a; the aged pack, the soft-mount frame and the IMU and barometer parts came later; the last fourteen
+This note is the ledger: one table per part file — 27 files, nine kinds, 202 parameters. The first seven files are as
+shipped at M4a; the aged pack, the soft-mount frame, the IMU and barometer parts and the magnetometer came later; the last fourteen
 are the parts of the toothpick, race and long-range quads (#129).
 
 The follow-up is datasheet transcription: the OpenMotor motor and the OpenVTX video transmitters are open
@@ -312,6 +312,27 @@ the oversampling mode and the bandwidth, and adding one is a data-only change to
 | Parameter | Value | Source | Note |
 |---|---|---|---|
 | `baro.noise_std_pa` | 2.0 | estimated | M1 estimate of the pressure noise per sample (about 0.17 m of height); not measured |
+
+## `magnetometers/opendrone-mag.toml` — OpenDrone magnetometer (generic)
+
+A flight-controller compass: µT, body FRD, `measured = soft_iron · (Rᵀ · B_earth) + hard_iron + noise` (#31). No quad ships
+with it (a compass-less build is the common one); a quad adds it with `mag = "opendrone-mag"` at schema 7. No datasheet
+magnetometer part ships yet: the ST LIS3MDL datasheet could not be read when this was written (the PDF text was
+compressed, and forum quotes of its noise figure are second hand), so none of these values is read from a datasheet, and
+adding a real part is a data-only change to a new file under `magnetometers/`. Noise is per output sample at `rate_hz`, as
+datasheets state it, so no bandwidth conversion is needed.
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `mag.noise_std_ut` | 0.3 | estimated | a few mgauss RMS per sample, typical of MEMS magnetometers; not read from a datasheet |
+| `mag.rate_hz` | 100 | estimated | a common output data rate; must divide `sim.base_hz` |
+| `mag.hard_iron_ut` | [0.0, 0.0, 0.0] | estimated | an offset belongs to one installation (magnets, current-carrying wires), not to the part |
+| `mag.soft_iron` | identity | estimated | distortion belongs to one installation; row-major, applied before the offset |
+
+The world's field is not a part: `[environment]` in a world file carries `magnetic_field_ut` (default 50 µT, the author's
+round typical mid-latitude magnitude; the real field spans about 25 to 65 µT), `magnetic_inclination_deg` (60, down) and
+`magnetic_declination_deg` (2, east). The two angles are the direction of the field Betaflight SITL's virtual compass
+synthesises (`sitl.c`, NWU counts `(2046.8, -71.5, -3547.2)` of 4096), so the simulated compass and Betaflight's agree.
 
 ## `vtx/opendrone-smartaudio-1w.toml` — OpenDrone SmartAudio VTX (1 W)
 

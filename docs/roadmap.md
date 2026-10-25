@@ -137,7 +137,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Non-flat terrain and rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
 - DShot extended telemetry and MSP over CRSF.
-- A compass, and the heading mapping it needs.
+- Feed Betaflight SITL a measured magnetometer (#31 added the model and left the firmware on its fixed virtual compass): a reserved block in the state datagram like eRPM's, and a SITL patch for `virtualMagSet`, so noise, hard iron and the world's declination reach heading hold and GPS rescue. A datasheet magnetometer part and a `fault.mag.*` interference seam.
 
 ### Video and OSD
 - The full HD/digital OSD element set (#32): the `OSD_SYS_*` elements and the 50 × 18 canvas that Betaflight sends only

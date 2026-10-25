@@ -5,6 +5,24 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### A compass: the magnetometer model and the heading (#31)
+#### Added
+- **A magnetometer library part** (`library/magnetometers/<id>.toml`, `[mag]`: `noise_std_ut`, `rate_hz`, `hard_iron_ut`, a
+  row-major `soft_iron` matrix, each with provenance). One part ships, `opendrone-mag`, every value `estimated` (no
+  magnetometer datasheet could be read, so none is claimed). A quad adds it with `mag = "opendrone-mag"` at **quad schema 7**;
+  schema 5 and 6 files load unchanged and the shipped quads stay at 6 with no compass, so no existing flight, recording or
+  golden changes.
+- **`ofs-sensors::mag`**: the model publishes `mag.field_frd_ut` (µT, body frame: `soft_iron · (Rᵀ · B_earth) + hard_iron + noise`)
+  and `mag.heading_rad` (the tilt-compensated magnetic heading) at the part's rate, plus the pure `earth_field_ned`,
+  `magnetic_heading` and `true_heading` (declination east positive).
+- **The world carries the earth's field**: `[environment]` gains `magnetic_field_ut` (50), `magnetic_inclination_deg` (60, down)
+  and `magnetic_declination_deg` (2, east). The defaults have the direction of the field Betaflight SITL's virtual compass
+  synthesises, pinned by a test.
+#### Known limits
+- **Betaflight does not see this magnetometer.** The SITL datagram has no magnetometer field; SITL builds its compass from the
+  attitude quaternion and a fixed field. The model feeds recordings, scripts and clients; extending the datagram and
+  patching SITL is the follow-up (`docs/superpowers/specs/2026-10-25-compass-design.md`).
+
 ### A DVR start never fails on a taken name
 #### Fixed
 - **A recording started in the same millisecond as another failed with "already exists"** (the `REC_<ts>` stamp has
