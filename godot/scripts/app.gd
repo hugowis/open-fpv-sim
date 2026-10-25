@@ -3,6 +3,7 @@ extends Node3D
 ## sticks, draws the drone from the simulator's state and shows the HUD. Keys are listed in ui/hud.gd.
 
 const Controls = preload("res://scripts/controls.gd")
+const ControlProfiles = preload("res://scripts/control_profiles.gd")
 const AppSettings = preload("res://scripts/settings.gd")
 const ControlsMenu = preload("res://ui/controls_menu.gd")
 const MainMenu = preload("res://ui/main_menu.gd")
@@ -38,6 +39,7 @@ const TIPS := {
 
 var client: Object = null  # OfsClient, from the extension
 var controls = Controls.new()
+var profiles = ControlProfiles.new(controls)
 var settings := {}
 ## Tests set this (a Dictionary like `Controls.read` returns) to fly without a controller.
 var sticks_override = null
@@ -55,7 +57,8 @@ func _ready() -> void:
 	settings = AppSettings.load_settings()
 	settings["fpv_aspect"] = clamp_aspect(settings["fpv_aspect"])
 	_load_controls()
-	controls_menu.setup(controls, CONTROLS_PATH)
+	controls_menu.setup(profiles, CONTROLS_PATH)
+	controls_menu.closed.connect(_on_controls_closed)
 	video.effects = settings["video_effects"]
 	controls_menu.set_video_effects(settings["video_effects"])
 	controls_menu.video_effects_toggled.connect(func(on: bool) -> void: _on_setting_changed("video_effects", on))
@@ -70,6 +73,7 @@ func _ready() -> void:
 	main_menu.setup(settings, overridden)
 	main_menu.choice_changed.connect(_on_setting_changed)
 	main_menu.start_requested.connect(_on_menu_start)
+	main_menu.controls_requested.connect(func() -> void: main_menu.close(); controls_menu.open_from_menu())
 	main_menu.settings_requested.connect(func() -> void: main_menu.close(); settings_screen.open())
 	main_menu.quit_requested.connect(func() -> void: get_tree().quit())
 	settings_screen.setup(settings, overridden)
@@ -138,8 +142,14 @@ func _on_menu_start() -> void:
 	_start_session({"open_loop": MainMenu.effective_open_loop(settings)})
 
 
+## The controls screen opened from the main menu closed: show the menu again.
+func _on_controls_closed(from_menu: bool) -> void:
+	if from_menu:
+		main_menu.open()
+
+
 func _in_menu() -> bool:
-	return main_menu.is_open() or settings_screen.is_open()
+	return main_menu.is_open() or settings_screen.is_open() or controls_menu.is_menu_mode()
 
 
 ## The Picture setting arrives as a pass-through string (the config file, the environment, the command line):
@@ -177,9 +187,15 @@ func _layout_fpv() -> void:
 
 func _load_controls() -> void:
 	if FileAccess.file_exists(CONTROLS_PATH):
-		var text := FileAccess.get_file_as_string(CONTROLS_PATH)
-		if not controls.from_json(text):
+		if not profiles.from_json(FileAccess.get_file_as_string(CONTROLS_PATH)):
 			push_warning("%s is not a valid controls file; using the %s preset" % [CONTROLS_PATH, controls.preset_name])
+		return
+	# First run: start from the preset the connected controller's name suggests.
+	var pads := Input.get_connected_joypads()
+	var preset := Controls.preset_for_device(Input.get_joy_name(pads[0])) if not pads.is_empty() else ""
+	if preset != "":
+		controls.apply_preset(preset)
+		profiles.snapshot()
 
 
 func _process(delta: float) -> void:

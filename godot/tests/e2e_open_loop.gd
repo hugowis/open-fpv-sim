@@ -370,6 +370,16 @@ func _run() -> void:
 	_check(app.client.get_phase() == "stopped", "and ends the flight (phase: %s)" % app.client.get_phase())
 	_press(app, KEY_C)
 	_check(not app.chase_view, "keys do nothing while the menu is open")
+	app.main_menu.row("controls").pressed.emit()
+	_check(app.controls_menu.is_menu_mode() and not app.main_menu.is_open(), "the menu's Controls button opens the controls screen")
+	_press(app, KEY_C)
+	_check(not app.chase_view, "keys do nothing while the controls screen is open from the menu")
+	var cancel := InputEventKey.new()
+	cancel.keycode = KEY_ESCAPE
+	cancel.physical_keycode = KEY_ESCAPE
+	cancel.pressed = true
+	app.controls_menu._input(cancel)
+	_check(app.main_menu.is_open() and not app.controls_menu.is_open(), "Escape on it goes back to the menu")
 	var repo: String = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 	var weak: String = repo.path_join("quads").path_join("opendrone-5f-weak-link.toml")
 	app.settings["world_path"] = repo.path_join("worlds").path_join("circuit.toml")
