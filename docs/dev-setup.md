@@ -70,7 +70,7 @@ Wiring: SITL buffers the bytes it writes to its UARTs (UART1, the MSP/Configurat
 
 From Python: `s.get_osd().text` is the OSD as text (`present` is False without an OSD; Betaflight's symbols show as `?`), and `state.vtx` carries the VTX's band, channel, frequency and power; `stream_osd()` yields frames as they change.
 
-The OSD is drawn with Betaflight's own font: `tools/make_osd_font.py` converts the Configurator's `default.mcm` into the glyph atlas `godot/ui/osd_font.png`; `godot/ui/OSD_FONT_LICENSE.md` records the source commit and the licence.
+The OSD is drawn with Betaflight's own font: `tools/make_osd_font.py` converts the Configurator's `default.mcm` into the glyph atlas `godot/ui/osd_font.png`; `godot/ui/OSD_FONT_LICENSE.md` records the source commit and the licence. Betaflight sends a cell's severity as its font page: page 1 (INFO) is the atlas's bold face, and warnings (page 2) and criticals (page 3) are drawn from the bold glyphs tinted amber and red.
 
 Manual video check (needs a controller, real Betaflight with `OFS_SITL_LAUNCH` set, and the game):
 1. Fly with the game and see the OSD battery, flight time and craft name in the FPV view.
