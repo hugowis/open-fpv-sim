@@ -90,9 +90,10 @@ A game window on top of the same simulator: FPV and chase cameras, an HUD (phase
 and Betaflight flying through the simulated ExpressLRS/CRSF link into real firmware — failsafe, reboots and the
 Configurator port all behave as in the Python session. Betaflight's own OSD is drawn in the FPV view, the VTX is
 controlled by Betaflight over SmartAudio and shown in the HUD, and the battery reaches Betaflight so its OSD shows
-real voltage and warnings. The world (`worlds/flat.toml`: launch pad, gates, buildings, the pilot's spot and a parked
-quad's VTX) is a data file the simulator loads; its analog video link degrades the picture and the OSD together, like
-real goggles. A USB radio in joystick mode, a gamepad or the keyboard
+real voltage and warnings. The world is a data file the simulator loads — `worlds/flat.toml` (launch pad, gates,
+buildings, the pilot's spot and a parked quad's VTX), `worlds/park.toml` (a tight walled proximity loop) and
+`worlds/meadow.toml` (a big fast circuit) — and its analog video link degrades the picture and the OSD together,
+like real goggles. A USB radio in joystick mode, a gamepad or the keyboard
 flies it; the F2 screen sets the bindings, and they persist to `user://controls.json` (Godot's per-user data dir,
 `%APPDATA%\Godot\app_userdata\Open FPV Sim\` on Windows, `~/.local/share/godot/app_userdata/Open FPV Sim/` on Linux).
 
