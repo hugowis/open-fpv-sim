@@ -1,14 +1,24 @@
 extends CanvasLayer
-## The controls setup screen (F2): choose a preset, bind each channel by moving its stick or pressing its key or
-## button, flip an axis, set the deadzone. Every change is saved at once. The live bars show what each channel is
-## sending, so a wrong axis is obvious.
+## The controls setup screen (F2, or Controls in the main menu): pick a profile and a preset, bind each channel by
+## moving its stick or pressing its key or button, flip an axis, set deadbands and travel, calibrate the controller.
+## Every change is saved at once. The live bars and the stick view show what each channel is sending, so a wrong axis
+## is obvious.
+
+const SticksView = preload("res://ui/sticks_view.gd")
+const CalibrationWizard = preload("res://ui/calibration_wizard.gd")
+const Calibration = preload("res://scripts/calibration.gd")
+const Controls = preload("res://scripts/controls.gd")
+const AxisShaping = preload("res://scripts/axis_shaping.gd")
 
 const STICK_CHANNELS := ["roll", "pitch", "yaw", "throttle"]
+## The channels with their own deadband and travel.
+const SHAPED := ["roll", "pitch", "yaw"]
 const LABELS := {
 	"roll": "Roll", "pitch": "Pitch", "yaw": "Yaw", "throttle": "Throttle",
 	"aux1": "Aux 1 (arm)", "aux2": "Aux 2 (angle mode)", "aux3": "Aux 3", "aux4": "Aux 4",
 }
 const BIND_THRESHOLD := 0.6
+const HINT := "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
 const ASPECTS := ["4:3", "16:9", "window"]
 const DVR_EXPORTS := ["none", "frames", "mp4", "both"]
 const DVR_FEEDS := ["goggles", "clean", "both"]
@@ -28,10 +38,23 @@ signal dvr_export_changed(value: String)
 ## The "DVR feed" button changed which picture is recorded (the game applies and saves it).
 signal dvr_feed_changed(value: String)
 
-var controls = null  # Controls
+## The screen closed; `from_menu` is true when it was opened from the main menu (the game goes back there).
+signal closed(from_menu: bool)
+
+var store = null  # ControlProfiles
+var controls = null  # Controls, the active profile's live mapper
 var save_path := ""
 
 var _panel := PanelContainer.new()
+var _profile := OptionButton.new()
+var _profile_name := LineEdit.new()
+var _new := Button.new()
+var _delete := Button.new()
+var _calibrate := Button.new()
+var _pads := Label.new()
+var _sticks_view := SticksView.new()
+var _wizard := CalibrationWizard.new()
+var _from_menu := false
 var _preset := OptionButton.new()
 var _deadzone := HSlider.new()
 var _deadzone_label := Label.new()
@@ -44,7 +67,7 @@ var _dvr_export: Button = Button.new()
 var _dvr_export_index := 0
 var _dvr_feed: Button = Button.new()
 var _dvr_feed_index := 0
-var _rows := {}  # channel -> {description, bind, invert, live}
+var _rows := {}  # channel -> {description, bind, invert, live, deadband, travel}
 var _listening := ""
 
 
@@ -71,6 +94,27 @@ func _ready() -> void:
 	title.add_theme_font_size_override("font_size", 26)
 	box.add_child(title)
 
+	var profile_row := HBoxContainer.new()
+	profile_row.add_theme_constant_override("separation", 8)
+	box.add_child(profile_row)
+	var profile_label := Label.new()
+	profile_label.text = "Profile"
+	profile_row.add_child(profile_label)
+	_profile.item_selected.connect(_on_profile_selected)
+	profile_row.add_child(_profile)
+	_profile_name.placeholder_text = "name of a new profile"
+	_profile_name.custom_minimum_size.x = 180
+	profile_row.add_child(_profile_name)
+	_new.text = "New"
+	_new.pressed.connect(_on_new_profile)
+	profile_row.add_child(_new)
+	_delete.text = "Delete"
+	_delete.pressed.connect(_on_delete_profile)
+	profile_row.add_child(_delete)
+	_calibrate.text = "Calibrate..."
+	_calibrate.pressed.connect(_on_calibrate)
+	profile_row.add_child(_calibrate)
+
 	var preset_row := HBoxContainer.new()
 	box.add_child(preset_row)
 	var preset_label := Label.new()
@@ -83,7 +127,7 @@ func _ready() -> void:
 	preset_row.add_child(_preset)
 
 	var grid := GridContainer.new()
-	grid.columns = 5
+	grid.columns = 7
 	grid.add_theme_constant_override("h_separation", 14)
 	box.add_child(grid)
 	for channel in ["roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4"]:
@@ -91,7 +135,7 @@ func _ready() -> void:
 		name_label.text = LABELS[channel]
 		name_label.custom_minimum_size.x = 150
 		var description := Label.new()
-		description.custom_minimum_size.x = 260
+		description.custom_minimum_size.x = 200
 		var bind := Button.new()
 		bind.text = "Bind"
 		bind.pressed.connect(_start_listening.bind(channel))
@@ -103,14 +147,26 @@ func _ready() -> void:
 		live.max_value = 1.0
 		live.show_percentage = false
 		live.custom_minimum_size = Vector2(160, 18)
+		var row := {"description": description, "bind": bind, "invert": invert, "live": live}
 		for node in [name_label, description, bind, invert, live]:
 			grid.add_child(node)
-		_rows[channel] = {"description": description, "bind": bind, "invert": invert, "live": live}
+		for key in ["deadband", "travel"]:
+			if channel in SHAPED:
+				var cell := _slider_cell(channel, key)
+				grid.add_child(cell[0])
+				row[key] = cell[1]
+			else:
+				grid.add_child(Control.new())
+		_rows[channel] = row
+
+	_sticks_view.custom_minimum_size.y = 84
+	box.add_child(_sticks_view)
+	box.add_child(_pads)
 
 	var dz_row := HBoxContainer.new()
 	box.add_child(dz_row)
 	var dz_title := Label.new()
-	dz_title.text = "Deadzone"
+	dz_title.text = "Deadzone (default for sticks without their own)"
 	dz_row.add_child(dz_title)
 	_deadzone.min_value = 0.0
 	_deadzone.max_value = 0.3
@@ -141,23 +197,59 @@ func _ready() -> void:
 	_dvr_feed.pressed.connect(func(): _dvr_feed_index = (_dvr_feed_index + 1) % DVR_FEEDS.size(); _dvr_feed.text = "DVR feed: %s" % DVR_FEEDS[_dvr_feed_index]; dvr_feed_changed.emit(DVR_FEEDS[_dvr_feed_index]))
 	box.add_child(_dvr_feed)
 
-	_hint.text = "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
+	_hint.text = HINT
 	box.add_child(_hint)
+	var close := Button.new()
+	close.text = "Close"
+	close.pressed.connect(toggle)
+	box.add_child(close)
+	_wizard.finished.connect(_on_calibrated)
+	add_child(_wizard)
+	Input.joy_connection_changed.connect(_on_joy_changed)
 
 
-## Hands the screen the mapper it edits and where to save it.
-func setup(mapper, path: String) -> void:
-	controls = mapper
+## Hands the screen the profile store it edits (its mapper is the one the game flies with) and where to save it.
+func setup(profiles, path: String) -> void:
+	store = profiles
+	controls = profiles.controls
 	save_path = path
 	_refresh()
 
 
 func toggle() -> void:
 	_listening = ""
+	if _wizard.is_open():
+		_wizard.cancel()
 	visible = not visible
-	_hint.text = "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
+	_hint.text = HINT
 	if visible:
 		_refresh()
+	else:
+		var was_from_menu := _from_menu
+		_from_menu = false
+		if was_from_menu:
+			controls.reset_state()
+		closed.emit(was_from_menu)
+
+
+## Opens the screen from the main menu: it reads the sticks itself (no flight is running), takes Esc / B to close,
+## and `closed` tells the game to show the menu again.
+func open_from_menu() -> void:
+	if visible:
+		return
+	toggle()
+	_from_menu = true
+	_profile.grab_focus()
+
+
+## True while the screen was opened from the main menu.
+func is_menu_mode() -> bool:
+	return visible and _from_menu
+
+
+func _process(delta: float) -> void:
+	if _from_menu:
+		update_live(controls.read(Input, true, delta))
 
 
 func is_open() -> bool:
@@ -211,6 +303,7 @@ func listening_for() -> String:
 func update_live(sticks: Dictionary) -> void:
 	if not visible or sticks.is_empty():
 		return
+	_sticks_view.sticks = sticks
 	var values := {
 		"roll": sticks["roll"], "pitch": sticks["pitch"], "yaw": sticks["yaw"], "throttle": sticks["throttle"] * 2.0 - 1.0,
 		"aux1": sticks["aux"][0], "aux2": sticks["aux"][1], "aux3": sticks["aux"][2], "aux4": sticks["aux"][3],
@@ -223,8 +316,15 @@ func _refresh() -> void:
 	if controls == null or _rows.is_empty():
 		return
 	_preset.selected = {"radio": 0, "gamepad": 1, "keyboard": 2}.get(controls.preset_name, -1)
+	_profile.clear()
+	for name in store.names():
+		_profile.add_item(name)
+	_profile.selected = store.names().find(store.active)
+	_delete.disabled = store.names().size() < 2
 	_deadzone.set_value_no_signal(controls.deadzone)
 	_deadzone_label.text = "%.3f" % controls.deadzone
+	_refresh_shaping()
+	_refresh_pads()
 	for channel in _rows:
 		var binding: Dictionary = controls.bindings.get(channel, {"kind": "none"})
 		_rows[channel]["description"].text = controls.describe(channel)
@@ -234,6 +334,93 @@ func _refresh() -> void:
 		_rows[channel]["bind"].text = "Bind"
 
 
+## The deadband and travel sliders show the channel's own values, else the defaults.
+func _refresh_shaping() -> void:
+	for channel in SHAPED:
+		var own: Dictionary = controls.shaping.get(channel, {})
+		_set_slider(_rows[channel]["deadband"], float(own.get("deadband", controls.deadzone)))
+		_set_slider(_rows[channel]["travel"], float(own.get("travel", 1.0)))
+
+
+func _on_joy_changed(_device: int, _connected: bool) -> void:
+	_refresh_pads()
+
+
+func _refresh_pads() -> void:
+	var pads := Input.get_connected_joypads()
+	_pads.text = "Controllers: " + (", ".join(pads.map(func(d: int) -> String: return "%d %s" % [d, Input.get_joy_name(d)])) if not pads.is_empty() else "none connected")
+	_calibrate.disabled = pads.is_empty()
+
+
+## A labelled slider for one channel's `key` ("deadband" or "travel"). Returns [the cell, the slider].
+func _slider_cell(channel: String, key: String) -> Array:
+	var cell := HBoxContainer.new()
+	var label := Label.new()
+	label.text = "Deadband" if key == "deadband" else "Travel"
+	cell.add_child(label)
+	var slider := HSlider.new()
+	slider.min_value = 0.0 if key == "deadband" else AxisShaping.MIN_TRAVEL
+	slider.max_value = 0.3 if key == "deadband" else 1.0
+	slider.step = 0.005 if key == "deadband" else 0.01
+	slider.custom_minimum_size.x = 90
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.value_changed.connect(_on_shaping_changed.bind(channel, key))
+	cell.add_child(slider)
+	var value := Label.new()
+	value.custom_minimum_size.x = 44
+	cell.add_child(value)
+	slider.set_meta("value_label", value)
+	return [cell, slider]
+
+
+func _set_slider(slider: HSlider, value: float) -> void:
+	slider.set_value_no_signal(value)
+	(slider.get_meta("value_label") as Label).text = "%.2f" % slider.value
+
+
+func _on_shaping_changed(value: float, channel: String, key: String) -> void:
+	var own: Dictionary = controls.shaping.get(channel, {}).duplicate()
+	own[key] = AxisShaping.clean_travel(value) if key == "travel" else value
+	controls.shaping[channel] = own
+	_set_slider(_rows[channel][key], own[key])
+	_save()
+
+
+func _on_profile_selected(index: int) -> void:
+	if store.switch_to(_profile.get_item_text(index)):
+		_save()
+		_refresh()
+
+
+## A new profile named by the text field, else after the first connected controller, starting from the preset that
+## controller's name suggests (the radio preset when it says nothing).
+func _on_new_profile() -> void:
+	var pads := Input.get_connected_joypads()
+	var device_name: String = Input.get_joy_name(pads[0]) if not pads.is_empty() else ""
+	var preset := Controls.preset_for_device(device_name)
+	store.add(_profile_name.text if _profile_name.text.strip_edges() != "" else device_name, preset if preset != "" else "radio")
+	_profile_name.text = ""
+	_save()
+	_refresh()
+
+
+func _on_delete_profile() -> void:
+	if store.remove(store.active):
+		_save()
+		_refresh()
+
+
+func _on_calibrate() -> void:
+	if not _wizard.start():
+		_hint.text = "No controller is connected."
+
+
+func _on_calibrated(key: String, device_name: String, result: Dictionary) -> void:
+	Calibration.merge(controls.calibration, key, device_name, result)
+	_save()
+	_hint.text = "Calibrated %d axes of %s." % [result.size(), device_name]
+
+
 func _start_listening(channel: String) -> void:
 	_listening = channel
 	_rows[channel]["bind"].text = "..."
@@ -241,7 +428,13 @@ func _start_listening(channel: String) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not visible or _listening == "":
+	if not visible or _wizard.is_open():
+		return
+	if _from_menu and _listening == "" and event.is_action_pressed("ui_cancel"):
+		toggle()
+		get_viewport().set_input_as_handled()
+		return
+	if _listening == "":
 		return
 	var binding := {}
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -289,6 +482,7 @@ func _on_invert_toggled(pressed: bool, channel: String) -> void:
 func _on_deadzone_changed(value: float) -> void:
 	controls.deadzone = value
 	_deadzone_label.text = "%.3f" % value
+	_refresh_shaping()
 	_save()
 
 
@@ -297,4 +491,4 @@ func _save() -> void:
 		return
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file != null:
-		file.store_string(controls.to_json())
+		file.store_string(store.to_json())

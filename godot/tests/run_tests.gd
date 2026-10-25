@@ -13,6 +13,7 @@ const SUITES := [
 	"res://tests/test_settings_screen.gd",
 	"res://tests/test_main_menu.gd",
 	"res://tests/test_hud.gd",
+	"res://tests/test_calibration_wizard.gd",
 	"res://tests/test_controls_menu.gd",
 	"res://tests/test_extension.gd",
 	"res://tests/test_scene.gd",
