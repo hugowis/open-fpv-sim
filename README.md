@@ -99,13 +99,21 @@ flies it; the F2 screen sets the bindings, and they persist to `user://controls.
     cargo build -p ofs-sim -p ofs-godot
     godot --path godot                             # Godot 4.7; see docs/dev-setup.md for the binary
 
+The game opens in a **main menu**: pick a world and a quad (the `*.toml` files in `worlds/` and `quads/`, in the
+checkout and in the data dir), race or free flight (for a world with gates; free flight hides the lap clock and the
+next-gate highlight) and the flight controller (Betaflight is offered when `OFS_SITL_LAUNCH` is set, else the flight is
+open loop), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose. **Esc** in
+a flight comes back to it; **Settings** edits the settings below. `--menu=off` (or `OFS_MENU=off`) boots straight into
+the flight, as before.
+
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** or the F2
 DVR toggle record the FPV view, **K** cut the radio link (failsafe test), **I** record the sticks and link state
 to a replayable CSV, **N** start a new race (in a world with gates), **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
-closes the screens. Arm with the aux 1 switch; aux 2 selects Angle mode.
+closes the help and the F2 screen, then returns to the menu. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
-command-line flags after `--`. By default the game starts `ofs-sim` itself (from `target/release`, else
+command-line flags after `--`. The Settings screen reads and writes that `[client]` section and shows the effective value
+of each setting; a setting a flag or an `OFS_*` variable sets this run is locked there and names its source. By default the game starts `ofs-sim` itself (from `target/release`, else
 `target/debug`, else `PATH`) on `127.0.0.1:50051` and loads `quads/opendrone-5f-freestyle.toml` in
 `worlds/flat.toml` in real time.
 Overrides:
@@ -123,6 +131,10 @@ Overrides:
 | FPV aspect (4:3/16:9/window) | `OFS_FPV_ASPECT` | `--fpv-aspect=` |
 | DVR feed (goggles/clean/both, default goggles) | `OFS_DVR_FEED` | `--dvr-feed=` |
 | DVR export (none/frames/mp4/both, default none) | `OFS_DVR_EXPORT` | `--dvr-export=` |
+| start in the main menu (on/off, default on) | `OFS_MENU` | `--menu=` |
+| race mode in a world with gates (on/off, default on; off = free flight) | `OFS_RACE_START` | `--race-start=` |
+| fullscreen (default off) | `OFS_FULLSCREEN` | `--fullscreen` |
+| HUD shown at start (on/off, default on) | `OFS_HUD` | `--hud=` |
 
     godot --path godot -- --open-loop              # fly the model without Betaflight
 
