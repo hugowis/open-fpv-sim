@@ -132,6 +132,19 @@ the Godot open-loop end-to-end test on Apple silicon, on two real-time checks ("
 checks are paced by the wall clock and have now failed once on each runner type; the earlier failures of the job were
 tests that `main` gained (#100) or that were fixed in this branch (listed above).
 
+**The Godot flake, measured (#118, 2026-10-24).** Of the 42 `macos` runs from 2026-10-19 to 2026-10-24 whose Godot step ran,
+10 failed it (24 %), always in the open-loop end-to-end test, on one of three checks: `held_fields` is 0, the D-key DVR frame
+count, or the F2-toggle DVR frame count. Nine of the ten failures had at least one "Real-time overrun: fell more than 100 ms
+behind the wall clock" toast (2.8 on average), against 7 of the 32 passes (0.3 on average). The first Godot import's
+MoltenVK abort (exit 134, ignored by the script) is in 35 of the 42 runs, passing ones included, so it is not the cause. The
+mechanism: when the server falls behind, the state stream stalls, the client holds the previous field (`held_fields > 0`),
+a DVR that starts on a held field has no frame to repeat, and a single look at one frame misjudges the link. The server of
+that step was a debug build, which runs open loop at 10 to 22 times real time on a Ryzen 9 9900X3D (84 to 246 times in
+release): a shared 3-core runner leaves little of that. Two changes follow: the end-to-end test waits for a current field
+instead of judging one frame (PRs #120 and #121), and the `macos` job runs the Godot suites against a release `ofs-sim`
+(`OFS_SIM_BIN`). Judge the second by the overrun toasts and failures of the next runs; the issue stays open until the job
+has a clean record.
+
 ## A physical Mac
 Not run yet: no physical Mac has been tried. The checklist for the window, Metal renderer, gamepad probe, Gatekeeper
 quarantine and the source build is `docs/research/macos-manual.md`; its result table is the record to copy here.

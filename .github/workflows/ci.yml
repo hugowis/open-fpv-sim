@@ -98,7 +98,13 @@ jobs:
         with:
           path: build/godot-dl
           key: godot-${{ runner.os }}-${{ hashFiles('scripts/run-godot-tests.sh') }}
+      # The game flies a real-time session: the server must keep the wall clock. A debug server has a few times of
+      # headroom on this runner and fell more than 100 ms behind in 9 of the 10 macOS Godot failures between
+      # 2026-10-19 and 2026-10-24 (#118), which holds the picture and starves the DVR checks; a release one has ~8x more.
+      - run: cargo build --release -p ofs-sim --locked
       - run: bash scripts/run-godot-tests.sh all
+        env:
+          OFS_SIM_BIN: ${{ github.workspace }}/target/release/ofs-sim
 
   godot:
     runs-on: ubuntu-24.04
