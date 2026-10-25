@@ -114,19 +114,17 @@ single `MSP_MOTOR_TELEMETRY` sample shows two distinct rpm values among four mot
 Betaflight's value quantized in steps of about 14 rpm. Against the native SITL it failed in 5 runs out of 8 (never in 8
 through WSL); it now samples again, up to 20 times, until the values differ (0 failures in 8 native runs).
 
-Not checked: the Godot game against the native SITL, and a Windows CI job.
+Not checked: the Godot game against the native SITL.
 
 ## Decision
 **Go, as an experimental second path; WSL stays the supported one.** The question of #67 is answered: nothing in the
 SITL target is a blocker. Sockets, `pthread`, the monotonic clock and `nanosleep` all come from the Cygwin-based
 runtime of MSYS2, and the port items above are small (about 50 added lines in 6 files, and the 23-line stub file).
 
-What has to happen before native Windows can be the default path (not done here):
-1. **A CI job** that builds it (`windows-latest` with `msys2/setup-msys2`, about 4 minutes, cacheable on the two
-   patches and the pinned SHA) and runs `sitl_live` plus the Python SITL files against it. Until then the port can rot
-   when the patch or the pinned Betaflight changes.
+What has to happen before native Windows can be the default path:
+1. **A CI job** (done, #107: see "CI" below). Promote it into `publish.needs` after a clean record.
 2. **The stub file** (`win_stubs.c`): find why `--gc-sections` removes nothing on this PE target, or generate the list
-   in the build script; a new Betaflight tag will add names.
+   in the build script; a new Betaflight tag will add names. The CI job at least names them (see "CI").
 3. **Distribution**: the executable and two DLLs are built by each user; shipping a prebuilt zip is a separate decision that
    needs a licence check (Betaflight is GPL-3.0; the Cygwin runtime has its own terms).
 4. **The Godot game and `quads/*.toml`**: `fc.launch` is `betaflight_SITL.elf` in every quad file, so a native launch
@@ -135,3 +133,23 @@ What has to happen before native Windows can be the default path (not done here)
    above), and decide whether the golden-free SITL tests need a per-OS tolerance (the open-loop goldens are not
    affected).
 6. **`ucrt64`**, if a DLL-free executable matters (the multi-day port above).
+
+## CI (#107)
+The `windows-sitl` job of `.github/workflows/ci.yml` (spec `docs/superpowers/specs/2026-10-25-windows-sitl-ci-design.md`):
+`windows-latest`, `msys2/setup-msys2` on the runner's own MSYS2, `scripts/build-sitl-windows.sh` into `C:/ofs/betaflight`,
+then from the runner's PowerShell (no MSYS2 on `PATH`): `sitl_live` for `ofs-fc` and `ofs-sim`, `vtx_live`, the ten Python
+SITL files of the Linux job, and the headless benchmark (real-time factor in the job summary). `continue-on-error`, not in
+`publish.needs`, as the macOS job. The three build outputs (the `.exe` and the two DLLs) are cached on the build script and
+`third_party/betaflight/**`, and uploaded as the `betaflight-sitl-windows` artifact (14 days; shipping a zip is still the
+licence question above).
+
+**The stub check.** `win_stubs.c` is what makes the link succeed; a pinned tag that adds code the PE link keeps (and no SITL
+object defines) fails the link. The script runs make in the C locale, and on failure prints the undefined symbols and an
+Actions `::error` annotation: "win_stubs.c does not cover the link: undefined symbols: ...". Tested locally by building with a
+copy of the Windows patch whose stub file lacks `IORead`. A stub that is *called* aborts with its name and fails the live test.
+
+**Record** (fill in from the runs; promote after about ten clean ones):
+
+| Date | Build (cold) | Build (cache hit) | Whole job | Native real-time factor | Failures / flaky tests |
+|---|---|---|---|---|---|
+| not yet measured | | | | | |
