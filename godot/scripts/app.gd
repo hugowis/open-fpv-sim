@@ -60,6 +60,8 @@ func _ready() -> void:
 	controls_menu.aspect_changed.connect(_on_aspect_changed)
 	controls_menu.set_dvr_export(settings["dvr_export"])
 	controls_menu.dvr_export_changed.connect(_on_dvr_export_changed)
+	controls_menu.set_dvr_feed(settings["dvr_feed"])
+	controls_menu.dvr_feed_changed.connect(_on_dvr_feed_changed)
 	controls_menu.dvr_toggled.connect(_set_dvr)
 	fpv_texture.texture = fpv_viewport.get_texture()
 	clean_feed.setup(fpv_camera, lens, fpv_viewport.size)
@@ -237,11 +239,13 @@ func _set_dvr(on: bool) -> void:
 			hud.add_toast("DVR failed: the simulator is not connected", "error")
 			_sync_dvr()
 			return
-		var error: String = dvr.start(client, fpv_viewport)
+		var feed: String = settings.get("dvr_feed", "goggles")
+		var error: String = dvr.start(client, fpv_viewport, feed, clean_feed.viewport())
 		if error != "":
 			hud.add_toast("DVR failed: %s" % error, "error")
 			_sync_dvr()
 			return
+		clean_feed.set_active(feed != "goggles")  # the clean viewport renders only while a clean file is written
 		hud.add_toast("DVR: recording to user://recordings")
 	else:
 		_stop_dvr(false)
@@ -251,6 +255,7 @@ func _set_dvr(on: bool) -> void:
 ## The one stop path (D, the F2 box and entering the chase view): stops the recording, toasts how it went and, when
 ## it stopped normally, hands each recorded file to the export the `dvr_export` setting asks for.
 func _stop_dvr(chase: bool) -> void:
+	clean_feed.set_active(false)
 	var summary: Dictionary = dvr.stop()
 	if summary.is_empty():
 		hud.add_toast("DVR failed: the writer stopped abnormally%s" % (" (the chase camera is not recorded)" if chase else ""), "error")
@@ -261,8 +266,8 @@ func _stop_dvr(chase: bool) -> void:
 	else:
 		hud.add_toast("DVR: %s%s" % [saved, _dvr_drop_note(summary)])
 	var mode: String = settings.get("dvr_export", "none")
-	if mode == "none" or client == null:
-		return
+	if mode == "none" or client == null or int(summary.get("frames", 0)) == 0:
+		return  # nothing to export from an empty recording
 	for path in summary.get("paths", PackedStringArray()):
 		var error: String = client.dvr_export(path, mode)
 		if error != "":
@@ -311,6 +316,12 @@ func _on_dvr_export_changed(value: String) -> void:
 		hud.add_toast("Could not save the DVR export setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
+func _on_dvr_feed_changed(value: String) -> void:
+	settings["dvr_feed"] = value  # applies to the next recording
+	if not AppSettings.save_value("dvr_feed", value):
+		hud.add_toast("Could not save the DVR feed setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
 func set_radio_cut(cut: bool) -> void:
 	radio_cut = cut
 	if client != null:
@@ -329,7 +340,7 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	if phase in ["loading", "failed", "stopped"]:
 		inputs_recording = false  # a reloaded quad, or a lost session, has no recorder
 		if dvr != null and dvr.recording:
-			dvr.stop()  # a reloaded quad, or a lost session, has no picture to record
+			_stop_dvr(false)  # a reloaded quad, or a lost session, has no picture to record
 			_sync_dvr()
 	if phase == "loading":
 		radio_cut = false  # a reloaded quad has no faults

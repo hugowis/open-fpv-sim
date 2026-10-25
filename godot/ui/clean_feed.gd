@@ -33,6 +33,8 @@ func setup(source_camera: Camera3D, source_lens: CanvasLayer, size: Vector2i) ->
 
 func set_active(on: bool) -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
+	if on:
+		sync_camera()  # the first clean frame already uses the current pose
 
 
 func is_active() -> bool:

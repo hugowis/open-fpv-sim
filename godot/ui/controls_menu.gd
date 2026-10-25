@@ -11,6 +11,7 @@ const LABELS := {
 const BIND_THRESHOLD := 0.6
 const ASPECTS := ["4:3", "16:9", "window"]
 const DVR_EXPORTS := ["none", "frames", "mp4", "both"]
+const DVR_FEEDS := ["goggles", "clean", "both"]
 
 ## The "Video effects" box changed (the game applies and saves it).
 signal video_effects_toggled(on: bool)
@@ -23,6 +24,9 @@ signal dvr_toggled(on: bool)
 
 ## The "DVR export" button changed the export setting (the game applies and saves it).
 signal dvr_export_changed(value: String)
+
+## The "DVR feed" button changed which picture is recorded (the game applies and saves it).
+signal dvr_feed_changed(value: String)
 
 var controls = null  # Controls
 var save_path := ""
@@ -38,6 +42,8 @@ var _aspect: Button = Button.new()
 var _aspect_index := 0
 var _dvr_export: Button = Button.new()
 var _dvr_export_index := 0
+var _dvr_feed: Button = Button.new()
+var _dvr_feed_index := 0
 var _rows := {}  # channel -> {description, bind, invert, live}
 var _listening := ""
 
@@ -131,6 +137,10 @@ func _ready() -> void:
 	_dvr_export.pressed.connect(func(): _dvr_export_index = (_dvr_export_index + 1) % DVR_EXPORTS.size(); _dvr_export.text = "DVR export: %s" % DVR_EXPORTS[_dvr_export_index]; dvr_export_changed.emit(DVR_EXPORTS[_dvr_export_index]))
 	box.add_child(_dvr_export)
 
+	_dvr_feed.text = "DVR feed: goggles"
+	_dvr_feed.pressed.connect(func(): _dvr_feed_index = (_dvr_feed_index + 1) % DVR_FEEDS.size(); _dvr_feed.text = "DVR feed: %s" % DVR_FEEDS[_dvr_feed_index]; dvr_feed_changed.emit(DVR_FEEDS[_dvr_feed_index]))
+	box.add_child(_dvr_feed)
+
 	_hint.text = "Bind: then move the stick (or press the button or key). Esc cancels, F2 closes."
 	box.add_child(_hint)
 
@@ -176,6 +186,12 @@ func dvr_on() -> bool:
 func set_dvr_export(value: String) -> void:
 	_dvr_export_index = maxi(DVR_EXPORTS.find(value), 0)
 	_dvr_export.text = "DVR export: %s" % DVR_EXPORTS[_dvr_export_index]
+
+
+## Shows the DVR feed setting without emitting `dvr_feed_changed`.
+func set_dvr_feed(value: String) -> void:
+	_dvr_feed_index = maxi(DVR_FEEDS.find(value), 0)
+	_dvr_feed.text = "DVR feed: %s" % DVR_FEEDS[_dvr_feed_index]
 
 
 ## Shows the aspect setting without emitting `aspect_changed`.

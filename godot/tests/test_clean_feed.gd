@@ -69,6 +69,15 @@ func test_the_camera_follows_the_source() -> void:
 	_free(p)
 
 
+func test_activating_puts_the_camera_where_the_source_is() -> void:
+	var p := await _feed()
+	var source: Camera3D = p["camera"]
+	source.global_transform = Transform3D(Basis.from_euler(Vector3(0.1, 0.7, 0.0)), Vector3(1.0, 2.0, 3.0))
+	p["feed"].set_active(true)  # no sync_camera call: the first clean frame must already use this pose
+	ok(p["feed"].viewport().get_camera_3d().global_transform.is_equal_approx(source.global_transform), "the clean camera is at the source pose")
+	_free(p)
+
+
 func test_the_lens_settings_are_copied() -> void:
 	var p := await _feed()
 	var layers: Array = p["feed"].viewport().find_children("*", "CanvasLayer", false, false)

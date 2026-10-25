@@ -180,6 +180,26 @@ func test_the_dvr_export_button_cycles_and_shows_a_set_value_silently() -> void:
 	menu.queue_free()
 
 
+func test_the_dvr_feed_button_cycles_and_shows_a_set_value_silently() -> void:
+	var menu = (await _menu())[0]
+	var seen := []
+	menu.dvr_feed_changed.connect(func(value: String) -> void: seen.append(value))
+	eq(menu._dvr_feed.text, "DVR feed: goggles", "starts at goggles")
+	for i in 3:
+		menu._dvr_feed.pressed.emit()
+	eq(seen, ["clean", "both", "goggles"], "goggles -> clean -> both -> goggles")
+	eq(menu._dvr_feed.text, "DVR feed: goggles", "and the label follows")
+	seen.clear()
+	menu.set_dvr_feed("clean")
+	eq(menu._dvr_feed.text, "DVR feed: clean", "set from the settings")
+	eq(seen, [], "without a signal")
+	menu._dvr_feed.pressed.emit()
+	eq(seen, ["both"], "pressing continues the cycle from the set value")
+	menu.set_dvr_feed("zip")
+	eq(menu._dvr_feed.text, "DVR feed: goggles", "an unknown value falls back to goggles")
+	menu.queue_free()
+
+
 func test_a_junk_setting_resolves_to_the_4x3_label() -> void:
 	# The game clamps the pass-through setting before showing it (app.gd), so the label and the layout agree.
 	var clamped: String = App.clamp_aspect("vhs")

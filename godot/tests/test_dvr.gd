@@ -14,22 +14,40 @@ const QUAD := "res://../quads/opendrone-5f-freestyle.toml"
 
 ## A stand-in for OfsClient: records what the DVR feeds it.
 class MockClient:
-	var frames: Array = []
+	var frames: Array = []  # every frame, in write order
+	var fed: Array = []  # [feed, bytes] per write
+	var started_feeds: Array = []  # [feed, path, width, height] per successful start
+	var stopped_feeds: Array = []
 	var starts := 0
+	var fail_start_feed := ""  # this feed's dvr_start answers with an error
 
-	func dvr_start(_feed: String, _path: String, _width: int, _height: int) -> String:
+	func dvr_start(feed: String, path: String, width: int, height: int) -> String:
+		if feed == fail_start_feed:
+			return "cannot start %s" % feed
 		starts += 1
+		counts[feed] = 0
+		started_feeds.append([feed, path, width, height])
 		return ""
 
-	func dvr_write_frame(_feed: String, jpeg: PackedByteArray) -> void:
+	var counts := {}  # frames written to each feed since its last start
+
+	func dvr_write_frame(feed: String, jpeg: PackedByteArray) -> void:
 		frames.append(jpeg)
+		fed.append([feed, jpeg])
+		counts[feed] = counts.get(feed, 0) + 1
+
+	## The bytes written to one feed, in order.
+	func feed_frames(feed: String) -> Array:
+		return fed.filter(func(pair: Array) -> bool: return pair[0] == feed).map(func(pair: Array) -> PackedByteArray: return pair[1])
 
 	var fail_stop := false  # the writer stopped abnormally: dvr_stop answers with an empty Dictionary
+	var fail_stop_feed := ""  # only this feed's writer does
 
-	func dvr_stop(_feed: String) -> Dictionary:
-		if fail_stop:
+	func dvr_stop(feed: String) -> Dictionary:
+		stopped_feeds.append(feed)
+		if fail_stop or feed == fail_stop_feed:
 			return {}
-		return {"frames": frames.size(), "dropped_frames": 0, "bytes": 0}
+		return {"frames": counts.get(feed, 0), "dropped_frames": 0, "bytes": 0}
 
 	var exports: Array = []  # [path, mode] per dvr_export call
 	var export_results: Array = []
@@ -200,7 +218,7 @@ func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	await add_to_tree(viewport)
 	var mock := MockClient.new()
 	eq(dvr.start(mock, viewport), "", "starts against the stand-in")
-	dvr._last_jpeg = PackedByteArray([1, 2, 3])  # the held frame, as a previous encode left it
+	dvr._feeds[0]["jpeg"] = PackedByteArray([1, 2, 3])  # the held frame, as a previous encode left it
 	# A drop stretch: render_time_s holds at 0.04 while the boundaries advance through the held_fields count.
 	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "target_field": 3, "field_valid": false})
 	eq(mock.frames.size(), 1, "the held frame repeats on the next boundary")
@@ -323,6 +341,7 @@ func test_a_successful_stop_exports_the_recording_per_the_setting() -> void:
 	var client = s["client"]
 	app.settings["dvr_export"] = "both"
 	s["menu"]._dvr.button_pressed = true
+	_feed_field(s["dvr"], 1)
 	var path: String = s["dvr"].paths[0]
 	ok(path.is_absolute_path() and path.ends_with(".avi"), "the recording has an absolute path: %s" % path)
 	app._toggle_dvr()
@@ -365,6 +384,7 @@ func test_the_chase_stop_goes_through_the_same_stop_path() -> void:
 		app.add_child(node)
 	app.settings["dvr_export"] = "mp4"
 	s["menu"]._dvr.button_pressed = true
+	_feed_field(s["dvr"], 1)
 	var path: String = s["dvr"].paths[0]
 	app.set_chase_view(true)
 	eq(client.exports, [[path, "mp4"]], "the chase stop exports too")
@@ -479,6 +499,296 @@ func _synthetic_image() -> Image:
 	var image := Image.create(64, 48, false, Image.FORMAT_RGB8)
 	image.fill(Color(0.2, 0.6, 0.3))
 	return image
+
+
+## Feeds one current field to every feed from the synthetic image.
+func _feed_field(dvr: Node, field: int) -> void:
+	dvr.image_source = _synthetic_image
+	dvr.clean_image_source = _synthetic_image
+	dvr.capture({"render_time_s": 0.02 * field, "held_fields": 0, "target_field": field, "field_valid": true})
+
+
+## A DVR, a stand-in client and the two viewports (goggles 8x4, clean 6x6), started for `feed`.
+func _recorder(feed: String, clean := true) -> Dictionary:
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var goggles := SubViewport.new()
+	goggles.size = Vector2i(8, 4)
+	await add_to_tree(goggles)
+	var clean_viewport := SubViewport.new()
+	clean_viewport.size = Vector2i(6, 6)
+	await add_to_tree(clean_viewport)
+	var mock := MockClient.new()
+	var error: String = dvr.start(mock, goggles, feed, clean_viewport if clean else null)
+	return {"dvr": dvr, "mock": mock, "error": error, "goggles": goggles, "clean": clean_viewport}
+
+
+func _free_recorder(r: Dictionary) -> void:
+	r["dvr"].queue_free()
+	r["goggles"].queue_free()
+	r["clean"].queue_free()
+
+
+func test_both_feeds_start_two_files_with_one_stem() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	eq(r["error"], "", "starts")
+	eq(dvr.paths.size(), 2, "two files")
+	if dvr.paths.size() == 2:
+		ok(dvr.paths[0].ends_with(".avi") and not dvr.paths[0].ends_with("_clean.avi"), "the goggles file first: %s" % dvr.paths[0])
+		eq(dvr.paths[1], dvr.paths[0].trim_suffix(".avi") + "_clean.avi", "the clean file differs only by _clean")
+		eq(mock.started_feeds[0], ["goggles", dvr.paths[0], 8, 4], "goggles at its own size")
+		eq(mock.started_feeds[1], ["clean", dvr.paths[1], 6, 6], "clean at its own size")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_started_is_emitted_once_with_the_first_path() -> void:
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var goggles := SubViewport.new()
+	await add_to_tree(goggles)
+	var other := SubViewport.new()
+	await add_to_tree(other)
+	var seen := []
+	dvr.started.connect(func(path: String) -> void: seen.append(path))
+	eq(dvr.start(MockClient.new(), goggles, "both", other), "", "starts")
+	eq(seen.size(), 1, "one signal")
+	if seen.size() == 1:
+		eq(ProjectSettings.globalize_path(seen[0]), dvr.paths[0], "for the first file")
+	dvr.stop()
+	dvr.queue_free()
+	goggles.queue_free()
+	other.queue_free()
+
+
+func test_clean_only_starts_one_clean_file() -> void:
+	var r := await _recorder("clean")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	eq(r["error"], "", "starts")
+	eq(dvr.paths.size(), 1, "one file")
+	ok(dvr.paths[0].ends_with("_clean.avi"), "the clean one: %s" % dvr.paths[0])
+	eq(mock.started_feeds.size(), 1, "one writer")
+	eq(mock.started_feeds[0][0], "clean", "the clean feed")
+	_feed_field(dvr, 1)
+	eq(mock.feed_frames("clean").size(), 1, "the clean frame is written")
+	eq(mock.feed_frames("goggles").size(), 0, "and no goggles frame")
+	eq(dvr.stop()["paths"], dvr.paths, "the summary carries the one path")
+	_free_recorder(r)
+
+
+func test_both_feeds_write_one_frame_each_per_field() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	for field in [1, 2, 3]:
+		_feed_field(dvr, field)
+	eq(mock.feed_frames("goggles").size(), 3, "three goggles writes")
+	eq(mock.feed_frames("clean").size(), 3, "three clean writes")
+	_feed_field(dvr, 3)
+	eq(mock.feed_frames("goggles").size(), 3, "the same field again writes no goggles frame")
+	eq(mock.feed_frames("clean").size(), 3, "nor a clean one")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_a_held_field_repeats_both_feeds_last_frames() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	dvr.image_source = func() -> Image: return _solid(8, 4, Color.RED)
+	dvr.clean_image_source = func() -> Image: return _solid(6, 6, Color.BLUE)
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	dvr.capture({"render_time_s": 0.02, "held_fields": 1, "target_field": 2, "field_valid": false})
+	for feed in ["goggles", "clean"]:
+		var written: Array = mock.feed_frames(feed)
+		eq(written.size(), 2, "%s: a frame and its repeat" % feed)
+		if written.size() == 2:
+			eq(written[1], written[0], "%s: the held field repeats its own last JPEG" % feed)
+	ok(mock.feed_frames("goggles")[0] != mock.feed_frames("clean")[0], "and the two feeds hold different pictures")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_a_clean_feed_without_a_clean_viewport_is_refused() -> void:
+	for feed in ["clean", "both"]:
+		var r := await _recorder(feed, false)
+		ok(r["error"] != "", "%s: an error string" % feed)
+		ok(not r["dvr"].recording, "%s: not recording" % feed)
+		eq(r["mock"].starts, 0, "%s: no writer was started" % feed)
+		eq(r["dvr"].stop(), {}, "%s: nothing to stop" % feed)
+		_free_recorder(r)
+	var unknown := await _recorder("sideways")
+	ok(unknown["error"] != "" and not unknown["dvr"].recording, "an unknown feed is refused too")
+	_free_recorder(unknown)
+
+
+func test_a_second_feed_that_fails_to_start_leaves_no_half_started_recording() -> void:
+	var dvr: Node = Dvr.new()
+	await add_to_tree(dvr)
+	var goggles := SubViewport.new()
+	await add_to_tree(goggles)
+	var other := SubViewport.new()
+	await add_to_tree(other)
+	var mock := MockClient.new()
+	mock.fail_start_feed = "clean"
+	var error: String = dvr.start(mock, goggles, "both", other)
+	ok(error != "", "the error comes back: %s" % error)
+	ok(not dvr.recording, "not recording")
+	eq(mock.stopped_feeds, ["goggles"], "the first feed was stopped again")
+	eq(dvr.paths.size(), 0, "no paths are kept")
+	dvr.queue_free()
+	goggles.queue_free()
+	other.queue_free()
+
+
+func test_a_feed_that_fails_to_finalize_fails_the_stop_but_stops_the_other() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	_feed_field(dvr, 1)
+	mock.fail_stop_feed = "goggles"
+	eq(dvr.stop(), {}, "an abnormal first feed fails the stop")
+	eq(mock.stopped_feeds, ["goggles", "clean"], "the other feed was stopped anyway")
+	ok(not dvr.recording, "not recording")
+	_free_recorder(r)
+	var second := await _recorder("both")
+	second["mock"].fail_stop_feed = "clean"
+	eq(second["dvr"].stop(), {}, "an abnormal clean feed fails it too")
+	eq(second["mock"].stopped_feeds, ["goggles", "clean"], "both were stopped")
+	_free_recorder(second)
+
+
+func test_stop_returns_the_first_feeds_summary_with_all_the_paths() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	_feed_field(dvr, 1)
+	_feed_field(dvr, 2)
+	var summary: Dictionary = dvr.stop()
+	eq(summary.get("frames"), 2, "the goggles summary")
+	eq(summary.get("paths"), dvr.paths, "with both globalized paths, goggles first")
+	_free_recorder(r)
+
+
+func test_the_clean_frame_is_fitted_like_the_goggles_frame() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	dvr.image_source = func() -> Image: return _solid(16, 16, Color.GREEN)
+	dvr.clean_image_source = func() -> Image: return _solid(16, 4, Color.GREEN)  # a resize mid-recording
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	for pair in [["goggles", Vector2i(8, 4)], ["clean", Vector2i(6, 6)]]:
+		var written: Array = mock.feed_frames(pair[0])
+		eq(written.size(), 1, "%s: one frame" % pair[0])
+		if written.size() == 1:
+			var decoded := Image.new()
+			eq(decoded.load_jpg_from_buffer(written[0]), OK, "%s: decodes" % pair[0])
+			eq(decoded.get_size(), pair[1], "%s: at the size its file declared" % pair[0])
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_an_empty_clean_image_skips_only_the_clean_write() -> void:
+	var r := await _recorder("both")
+	var dvr: Node = r["dvr"]
+	var mock: MockClient = r["mock"]
+	dvr.image_source = _synthetic_image
+	dvr.clean_image_source = func() -> Image: return null  # the clean viewport has not rendered yet
+	dvr.capture({"render_time_s": 0.02, "held_fields": 0, "target_field": 1, "field_valid": true})
+	eq(mock.feed_frames("goggles").size(), 1, "the goggles frame is written")
+	eq(mock.feed_frames("clean").size(), 0, "the clean one is skipped")
+	dvr.clean_image_source = func() -> Image: return Image.new()
+	dvr.capture({"render_time_s": 0.04, "held_fields": 1, "target_field": 2, "field_valid": false})
+	eq(mock.feed_frames("goggles").size(), 2, "a held field still repeats goggles")
+	eq(mock.feed_frames("clean").size(), 0, "and has nothing to repeat for clean")
+	dvr.stop()
+	_free_recorder(r)
+
+
+func test_every_stop_path_turns_the_clean_feed_off() -> void:
+	# D, the F2 box, the chase view and a lost session all end with the clean viewport idle again.
+	for how in ["d", "box", "chase", "failed", "stopped"]:
+		var s := await _app_shell()
+		var app = s["app"]
+		app.fpv_camera = Camera3D.new()
+		app.chase_camera = Camera3D.new()
+		app.lens = MockOsd.new()
+		app.video = MockOsd.new()
+		for node in [app.fpv_camera, app.chase_camera, app.lens, app.video]:
+			app.add_child(node)
+		app.settings["dvr_feed"] = "both"
+		s["menu"]._dvr.button_pressed = true
+		ok(s["dvr"].recording and app.clean_feed.is_active(), "%s: a both recording renders the clean feed" % how)
+		match how:
+			"d": app._toggle_dvr()
+			"box": s["menu"]._dvr.button_pressed = false
+			"chase": app.set_chase_view(true)
+			_: app._on_phase_changed(how, "", "")
+		ok(not s["dvr"].recording, "%s: stopped" % how)
+		ok(not app.clean_feed.is_active(), "%s: the clean feed is idle again" % how)
+		app.free()
+		s["menu"].queue_free()
+		s["hud"].queue_free()
+		s["dvr"].queue_free()
+
+
+func test_the_goggles_feed_does_not_wake_the_clean_viewport() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	s["menu"]._dvr.button_pressed = true
+	ok(s["dvr"].recording and not app.clean_feed.is_active(), "goggles alone leaves the clean viewport off")
+	eq(s["client"].started_feeds.size(), 1, "one writer")
+	app._toggle_dvr()
+	app.settings["dvr_feed"] = "clean"
+	app._toggle_dvr()
+	ok(app.clean_feed.is_active(), "a clean recording wakes it")
+	eq(s["client"].started_feeds[1][0], "clean", "and writes the clean feed")
+	app._toggle_dvr()
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
+
+
+func test_both_files_are_exported_and_an_empty_recording_is_not() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	app.settings["dvr_feed"] = "both"
+	app.settings["dvr_export"] = "frames"
+	s["menu"]._dvr.button_pressed = true
+	var paths: PackedStringArray = s["dvr"].paths
+	_feed_field(s["dvr"], 1)
+	app._toggle_dvr()
+	eq(client.exports, [[paths[0], "frames"], [paths[1], "frames"]], "each file is exported, goggles first")
+	app._toggle_dvr()
+	app._toggle_dvr()  # no frame was captured this time
+	eq(client.exports.size(), 2, "a recording with no frames is not exported")
+	ok("0 frames saved" in " ".join(s["hud"].toast_texts()), "it still says so: %s" % str(s["hud"].toast_texts()))
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
+
+
+func test_a_lost_session_stop_toasts_and_exports() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	app.settings["dvr_export"] = "mp4"
+	s["menu"]._dvr.button_pressed = true
+	_feed_field(s["dvr"], 1)
+	var path: String = s["dvr"].paths[0]
+	app._on_phase_changed("failed", "link lost", "")
+	ok(not s["dvr"].recording, "stopped")
+	eq(client.exports, [[path, "mp4"]], "the file is exported")
+	ok("1 frames saved" in " ".join(s["hud"].toast_texts()), "and the stop is toasted: %s" % str(s["hud"].toast_texts()))
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
 
 
 ## m3e debt: the encode path was only checked by eye. A current field goes through Image -> save_jpg_to_buffer at

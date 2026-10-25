@@ -70,6 +70,14 @@ func test_the_aspect_setting_defaults_and_comes_from_the_env_and_the_command_lin
 	eq(AppSettings.resolve({}, {}, PackedStringArray(["--fpv-aspect=window"]))["fpv_aspect"], "window", "--fpv-aspect=window")
 
 
+func test_the_dvr_feed_setting_defaults_resolves_and_falls_back() -> void:
+	eq(AppSettings.defaults()["dvr_feed"], "goggles", "the goggles feed by default")
+	eq(AppSettings.resolve({}, {"OFS_DVR_FEED": "both"}, PackedStringArray())["dvr_feed"], "both", "OFS_DVR_FEED=both")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--dvr-feed=clean"]))["dvr_feed"], "clean", "--dvr-feed=clean")
+	eq(AppSettings.resolve({"dvr_feed": "clean"}, {}, PackedStringArray())["dvr_feed"], "clean", "the config file")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--dvr-feed=bogus"]))["dvr_feed"], "goggles", "an unknown value falls back to goggles")
+
+
 func test_the_dvr_export_setting_defaults_resolves_and_falls_back() -> void:
 	eq(AppSettings.defaults()["dvr_export"], "none", "no export by default")
 	eq(AppSettings.resolve({}, {"OFS_DVR_EXPORT": "mp4"}, PackedStringArray())["dvr_export"], "mp4", "OFS_DVR_EXPORT=mp4")

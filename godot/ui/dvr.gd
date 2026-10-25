@@ -4,7 +4,9 @@ extends Node
 ## times the captures to the field the client renders for (`target_field`, an integer index computed in Rust)
 ## and owns the UX. A boundary the client cannot show freshly (`held_fields > 0`: dropped fields held the picture back) repeats the held frame, so the recording
 ## freezes where the pilot froze. Records in the FPV view only (entering the chase view stops it, app.gd); a resize
-## or aspect switch while recording keeps going, each frame letterboxed to the starting size.
+## or aspect switch while recording keeps going, each frame letterboxed to the starting size. It can also record the
+## clean feed (the camera image without the OSD or video layer) alone or beside the goggles, in `REC_<ts>_clean.avi`;
+## both feeds are captured on the same field boundary.
 
 signal started(path: String)
 signal stopped(summary: Dictionary)
@@ -14,33 +16,52 @@ signal stopped(summary: Dictionary)
 const JPEG_QUALITY := 0.8
 
 var recording := false
-## The absolute .avi path of the current (or last) recording; `stop()`'s summary carries it as `paths`.
+## The absolute .avi paths of the current (or last) recording, goggles first; `stop()`'s summary carries them as `paths`.
 var paths := PackedStringArray()
 var _client: Object
-var _viewport: SubViewport
-## The picture size declared at start: every frame is fitted to it, because an AVI has one size for its whole length.
-var _size := Vector2i.ZERO
+## One entry per recorded feed, in start order: {feed, viewport, source, size, jpeg}. `size` is the picture size the feed
+## declared at start (every frame is fitted to it: an AVI has one size for its whole length), `jpeg` its last frame.
+var _feeds: Array = []
 var _last_target := -1
-var _last_jpeg := PackedByteArray()
-## Where a current field's picture comes from: the FPV SubViewport, unless a test sets this to a Callable returning
-## an Image (headless Godot renders nothing; the tests feed synthetic images through the same encode-and-write path).
+## Where a current field's picture comes from: the FPV SubViewport (goggles) or the clean one, unless a test sets
+## these to a Callable returning an Image (headless Godot renders nothing; the tests feed synthetic images through the
+## same encode-and-write path).
 var image_source := Callable()
+var clean_image_source := Callable()
 
 
-func start(client: Object, viewport: SubViewport) -> String:
-	var path := "user://recordings/REC_%s.avi" % _timestamp()
-	var absolute := ProjectSettings.globalize_path(path)
-	var error: String = client.dvr_start("goggles", absolute, viewport.size.x, viewport.size.y)
-	if error != "":
-		return error
+## Starts recording `feed`: "goggles" (the FPV composite), "clean" or "both" (the clean feed needs `clean_viewport`).
+## Returns an error string, and starts nothing, when any feed cannot start.
+func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewport: SubViewport = null) -> String:
+	var wanted := {"goggles": ["goggles"], "clean": ["clean"], "both": ["goggles", "clean"]}.get(feed, []) as Array
+	if wanted.is_empty():
+		return "unknown DVR feed: %s" % feed
+	if "clean" in wanted and clean_viewport == null:
+		return "the clean feed is not available"
+	var stem := "user://recordings/REC_%s" % _timestamp()
+	var started_feeds: Array = []
+	var started_paths := PackedStringArray()
+	var first_path := ""
+	for which in wanted:
+		var source_viewport: SubViewport = viewport if which == "goggles" else clean_viewport
+		var path := stem + (".avi" if which == "goggles" else "_clean.avi")
+		first_path = first_path if first_path != "" else path
+		var absolute := ProjectSettings.globalize_path(path)
+		var error: String = client.dvr_start(which, absolute, source_viewport.size.x, source_viewport.size.y)
+		if error != "":
+			for done in started_feeds:  # no half-started recording: stop what started and remove its empty file
+				client.dvr_stop(done["feed"])
+			for done_path in started_paths:
+				DirAccess.remove_absolute(done_path)
+			return error
+		started_feeds.append({"feed": which, "viewport": source_viewport, "size": source_viewport.size, "jpeg": PackedByteArray()})
+		started_paths.append(absolute)
 	recording = true
-	paths = PackedStringArray([absolute])
+	paths = started_paths
 	_client = client
-	_viewport = viewport
-	_size = viewport.size
+	_feeds = started_feeds
 	_last_target = -1
-	_last_jpeg = PackedByteArray()
-	started.emit(path)
+	started.emit(first_path)
 	return ""
 
 
@@ -57,17 +78,24 @@ func capture(view: Dictionary) -> void:
 	if target == _last_target:
 		return
 	_last_target = target
-	if held > 0:
-		if not _last_jpeg.is_empty():
-			_client.dvr_write_frame("goggles", _last_jpeg)
+	for entry in _feeds:
+		_capture_feed(entry, held > 0)
+
+
+func _capture_feed(entry: Dictionary, held: bool) -> void:
+	if held:
+		if not entry["jpeg"].is_empty():
+			_client.dvr_write_frame(entry["feed"], entry["jpeg"])
 		return
-	var image: Image = image_source.call() if image_source.is_valid() else _viewport.get_texture().get_image()
+	var source := image_source if entry["feed"] == "goggles" else clean_image_source
+	var image: Image = source.call() if source.is_valid() else entry["viewport"].get_texture().get_image()
 	if image == null or image.is_empty():
-		return  # headless or the texture not yet rendered: this field is simply not in the recording
-	_last_jpeg = fit_image(image, _size.x, _size.y).save_jpg_to_buffer(JPEG_QUALITY)
-	if _last_jpeg.is_empty():
+		return  # headless or the texture not yet rendered (the clean one's first frame): this field is not in this file
+	var size: Vector2i = entry["size"]
+	entry["jpeg"] = fit_image(image, size.x, size.y).save_jpg_to_buffer(JPEG_QUALITY)
+	if entry["jpeg"].is_empty():
 		return  # the encoder produced nothing: a 0-byte frame is never worth writing
-	_client.dvr_write_frame("goggles", _last_jpeg)
+	_client.dvr_write_frame(entry["feed"], entry["jpeg"])
 
 
 ## `image` itself when it already is width x height; otherwise a black width x height image with `image` scaled to fit
@@ -86,13 +114,24 @@ static func fit_image(image: Image, width: int, height: int) -> Image:
 	return fitted
 
 
+## Stops every feed. The first feed's summary comes back with `paths`; it is empty when any feed failed to finalize
+## (after all of them were stopped), so there is nothing to export.
 func stop() -> Dictionary:
 	if not recording:
 		return {}
 	recording = false
-	var summary: Dictionary = _client.dvr_stop("goggles")
-	if not summary.is_empty():
-		summary["paths"] = paths  # an abnormal stop stays empty: there is nothing to export
+	var summary := {}
+	var failed := false
+	for i in _feeds.size():
+		var one: Dictionary = _client.dvr_stop(_feeds[i]["feed"])
+		failed = failed or one.is_empty()
+		if i == 0:
+			summary = one
+	_feeds = []
+	if failed:
+		summary = {}
+	else:
+		summary["paths"] = paths
 	stopped.emit(summary)
 	return summary
 
