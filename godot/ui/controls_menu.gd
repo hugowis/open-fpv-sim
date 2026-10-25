@@ -46,6 +46,8 @@ var controls = null  # Controls, the active profile's live mapper
 var save_path := ""
 
 var _panel := PanelContainer.new()
+var _scroll := ScrollContainer.new()
+var _box := VBoxContainer.new()
 var _profile := OptionButton.new()
 var _profile_name := LineEdit.new()
 var _new := Button.new()
@@ -86,9 +88,11 @@ func _ready() -> void:
 	style.set_content_margin_all(18)
 	_panel.add_theme_stylebox_override("panel", style)
 	add_child(_panel)
-	var box := VBoxContainer.new()
+	var box := _box
 	box.add_theme_constant_override("separation", 10)
-	_panel.add_child(box)
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_panel.add_child(_scroll)
+	_scroll.add_child(box)
 	var title := Label.new()
 	title.text = "Controls"
 	title.add_theme_font_size_override("font_size", 26)
@@ -159,9 +163,13 @@ func _ready() -> void:
 				grid.add_child(Control.new())
 		_rows[channel] = row
 
-	_sticks_view.custom_minimum_size.y = 84
-	box.add_child(_sticks_view)
-	box.add_child(_pads)
+	var monitor := HBoxContainer.new()
+	monitor.add_theme_constant_override("separation", 18)
+	box.add_child(monitor)
+	monitor.add_child(_sticks_view)
+	_pads.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pads.custom_minimum_size.x = 600
+	monitor.add_child(_pads)
 
 	var dz_row := HBoxContainer.new()
 	box.add_child(dz_row)
@@ -224,6 +232,8 @@ func toggle() -> void:
 	_hint.text = HINT
 	if visible:
 		_refresh()
+		# Taller than the window: the screen scrolls instead of running off the top and bottom.
+		_scroll.custom_minimum_size.y = minf(_box.get_combined_minimum_size().y, get_viewport().get_visible_rect().size.y - 90.0)
 	else:
 		var was_from_menu := _from_menu
 		_from_menu = false
