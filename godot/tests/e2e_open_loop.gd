@@ -327,7 +327,7 @@ func _run() -> void:
 	app.dvr.started.connect(func(path: String): both_started.append(path))
 	await _current_field(app, 5.0)
 	_press(app, KEY_D)
-	_check(app.dvr.recording and app.clean_feed.is_active(), "D starts a both recording and wakes the clean feed")
+	_check(app.dvr.recording and app.clean_feed.is_active(), "D starts a both recording and wakes the clean feed: %s" % str(app.hud.toast_texts().slice(-2)))
 	var both_t0: float = app.client.get_telemetry()["time_s"]
 	var both_deadline := Time.get_ticks_msec() + 20_000
 	while (float(app.client.get_telemetry()["time_s"]) < both_t0 + 1.0 or app.dvr._feeds[0]["jpeg"].is_empty()) and Time.get_ticks_msec() < both_deadline:
