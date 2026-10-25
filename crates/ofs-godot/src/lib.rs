@@ -10,7 +10,7 @@ use godot::classes::{INode, Node};
 use godot::prelude::*;
 use ofs_client::dvr::DvrFeed;
 use ofs_client::dvr_export::Exporter;
-use ofs_client::{Client,Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
+use ofs_client::{Client, Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
 
 struct OfsExtension;
 

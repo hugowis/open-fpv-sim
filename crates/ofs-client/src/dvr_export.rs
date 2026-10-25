@@ -183,15 +183,29 @@ pub fn export_mp4(ffmpeg: &Path, avi: &Path) -> Result<PathBuf, String> {
     if output.status.success() {
         return Ok(mp4);
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let last = stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
-    Err(last.map_or_else(|| format!("ffmpeg failed: {}", output.status), str::to_string))
+    Err(last_line(&output.stderr).unwrap_or_else(|| format!("ffmpeg failed: {}", output.status)))
+}
+
+/// The last non-blank line of `stderr`, trimmed (invalid UTF-8 is replaced, not an error).
+fn last_line(stderr: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stderr).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dvr::DvrWriter;
+
+    #[test]
+    fn last_line_is_the_last_non_blank_line_trimmed() {
+        assert_eq!(last_line(b""), None);
+        assert_eq!(last_line(b"\n  \r\n\n"), None);
+        assert_eq!(last_line(b"first\nsecond  \n\n\n"), Some("second".to_string()));
+        assert_eq!(last_line(b"first\r\nUnknown encoder 'libx264'\r\n\r\n"), Some("Unknown encoder 'libx264'".to_string()));
+        assert_eq!(last_line(b"only"), Some("only".to_string()));
+        let non_utf8 = last_line(b"ok\nbad \xff\xfe byte\n").unwrap();
+        assert!(non_utf8.starts_with("bad ") && non_utf8.ends_with(" byte"), "{non_utf8}");
+    }
 
     #[test]
     fn a_failure_after_the_directory_was_made_removes_it() {
