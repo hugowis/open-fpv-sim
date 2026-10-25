@@ -55,6 +55,30 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
   4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761` on an otherwise idle machine — it is the slot's, +10 per simulator, see the ports table), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
 - **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views, the OSD, the three looks of the analog video link (`video_grain.png`, `video_unstable.png`, `video_lost.png`), and the help and controls screens (`start_fpv.png`, `start_chase.png`, `osd_fpv.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`, `menu.png`, `settings.png`); review them by eye. Without `--out=` they go to the project's user data dir.
 
+## Controller setup (#127)
+
+The F2 screen (or **Controls** in the main menu, where **Esc** or the B button comes back) holds everything about the handset. It
+persists to `user://controls.json`; a file from before profiles existed loads as the profile `Default`.
+
+- **Profiles.** The picker switches the whole setup (preset, bindings, deadzone, shaping); **New** makes one from the name
+  field (else the first controller's name), starting from the preset that name suggests (Xbox, PlayStation, 8BitDo...
+  -> gamepad; RadioMaster, Taranis, Jumper, EdgeTX... -> radio; anything else -> radio); **Delete** removes the active one
+  (the last cannot go).
+- **Calibrate...** (needs a controller connected). Leave everything alone for a second (the centres), then move every
+  stick to all its extremes and flip each switch, then **Done**. An axis that moved less than half its range is left as it
+  was. The result belongs to the controller (its GUID), not to a profile, so it applies to every profile that reads that
+  controller. A radio axis that reads -0.8..+0.9 then reaches exactly -1 and +1.
+- **Deadband and travel** (roll, pitch, yaw). Deadband is the dead zone around the centre, rescaled so the output still
+  reaches 1 (the **Deadzone** slider is the default for sticks without their own). Travel is the fraction of the throw that
+  gives full output: 0.8 on a gamepad whose sticks stop short. Order: calibrate, invert, deadband, travel. Rates and expo
+  are Betaflight's and are not offered here.
+- **Monitor.** The stick boxes and aux squares are what the client sends; the bars are per channel; the line under them lists the
+  controllers Godot sees.
+
+Manual check with real hardware (headless Godot has no joystick): plug in a radio in joystick mode and a gamepad; check
+the name shown, run Calibrate on each and confirm the bars reach both ends; create a profile per device and switch between
+them; unplug and replug (the calibration should still apply); check the preset a new profile picks.
+
 ## OSD, VTX and battery telemetry (M3a)
 
 Quad files are schema 6: the hardware lives in `library/` part files (see the "Component library" section of

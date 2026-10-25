@@ -5,6 +5,23 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Controller setup: calibration, shaping and profiles (#127)
+#### Added
+- **Calibration wizard** on the F2 screen: centres, then end points, per axis, once per controller (stored by the
+  controller's GUID, or its name when it has none). Calibrated sticks scale each side of the centre on its own, so an
+  off-centre radio axis or unequal throws reach exactly -1 and +1; a throttle or switch uses its whole range.
+- **Per-axis shaping**: a deadband and a travel slider on roll, pitch and yaw (the global deadzone stays as the default).
+  Invert was already there. Rates and expo stay Betaflight's.
+- **Named profiles**: pick, create and delete them on the F2 screen. A new one starts from the preset the controller's name
+  suggests (gamepad or radio), and so does a first run with a controller connected.
+- **A live monitor** on the F2 screen: the stick view and aux squares, and the connected controllers' names.
+- **Controls** in the main menu opens the same screen (Esc or B returns), so the handset can be set up before a flight.
+
+#### Changed
+- `user://controls.json` is now version 2 (`profiles`, `active`, `calibration`). A version 1 file loads unchanged as the
+  profile `Default`; the screen rewrites it as version 2 on the first change. The F2 screen scrolls in a window that is
+  shorter than it.
+
 ### Game content, first batch: a modelled quad and two new worlds (#130, #131)
 #### Added
 - **`worlds/park.toml`**: a proximity park, a tight four-gate diamond among walls, pillars and a hedge, made for slow
