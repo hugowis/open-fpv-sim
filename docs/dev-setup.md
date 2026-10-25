@@ -170,7 +170,7 @@ picture lags the world and judders at the field rate, like real analog glass. In
 and quality all freeze) for one field. The model and its constants are in `docs/research/video-link.md`.
 
 The **DVR** (keybind **D**, or its checkbox on the F2 controls screen — the same switch) records the FPV view as an
-MJPEG AVI into `user://recordings/` (`%APPDATA%\Godotpp_userdata\Open FPV Simecordings\` on Windows,
+MJPEG AVI into `user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
 `~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a dropped
 field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again (or unchecking the
 box) stops it. A window resize or an aspect switch does not stop it: frames are scaled to fit inside the size the
@@ -223,7 +223,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 2. Record a clip with D while flying the link through grain and static, press D again, and play the `.avi`
    from `user://recordings/` in VLC: the breakup, the OSD and the freezes are all in the file.
 3. Flip the Picture setting through 4:3, 16:9 and window on the F2 screen: the box changes shape, and a
-   recording running across the switch stops with a toast.
+   recording running across the switch keeps going, letterboxed to the size it started with.
 4. On the Tramp quad, open the OSD stick menu (as in the M3a check) and change the VTX power: the HUD VTX line
    snaps to the built-in table. A band/channel change does nothing — Tramp is frequency-only; the live test
    pins the frequency path.
