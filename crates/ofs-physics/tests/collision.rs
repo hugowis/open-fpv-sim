@@ -1,7 +1,7 @@
 use glam::{DQuat, DVec3};
 use ofs_core::consts::GRAVITY_MPS2;
 use ofs_core::{names, Bus, Scheduler};
-use ofs_physics::collision::{CollisionParams, TouchState, GROUND_OBJECT_INDEX};
+use ofs_physics::collision::{point_force, CollisionParams, TouchState, GROUND_OBJECT_INDEX};
 use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, RigidBody, WorldObject};
 
 /// A post 12 cm across, 3 m tall, standing at `north`, `east`.
@@ -353,4 +353,81 @@ fn a_single_penetration_is_corrected_exactly_as_before() {
     // The one-contact case must not change: the body moves by exactly the penetration, nothing more.
     let p = params(vec![], vec![(BODY_SPHERE, R)], 0.3);
     assert_eq!(corrected(&p, DVec3::new(0.3, 0.2, -R + 0.01)), DVec3::new(0.3, 0.2, -R + 0.01) + DVec3::NEG_Z * (R + (-R + 0.01)));
+}
+
+// ---- Static Coulomb friction of a landing point (`point_force`) ------------------------------------------------
+
+const MU: f64 = 0.6;
+const MASS: f64 = 0.65;
+const DT: f64 = 1.0 / 8000.0;
+
+/// A point mass of `MASS` resting on a plane through the origin whose outward normal is tilted `theta` from up
+/// (NED, so up is -z), carried by `point_force` alone. Starts at the normal equilibrium with `v0` along the
+/// downhill direction. Returns the samples (time, distance travelled downhill, downhill speed) every 0.5 s.
+fn incline(theta: f64, v0: f64, seconds: f64) -> Vec<(f64, f64, f64)> {
+    let g = GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: MU };
+    let normal = DVec3::new(-theta.sin(), 0.0, -theta.cos());
+    let gravity = DVec3::new(0.0, 0.0, GRAVITY_MPS2);
+    let downhill = (gravity - normal * gravity.dot(normal)).normalize_or(DVec3::X);
+    let mut pos = -normal * (MASS * GRAVITY_MPS2 * theta.cos() / g.stiffness_npm);
+    let start = pos;
+    let mut vel = downhill * v0;
+    let mut anchor = DVec3::ZERO;
+    let mut samples = Vec::new();
+    for step in 1..=(seconds / DT) as usize {
+        let depth = -pos.dot(normal);
+        let f = if depth > 0.0 { point_force(&g, normal, depth, vel, &mut anchor, DT) } else { DVec3::ZERO };
+        vel += (f / MASS + gravity) * DT;
+        pos += vel * DT;
+        if step % 4000 == 0 {
+            samples.push((step as f64 * DT, (pos - start).dot(downhill), vel.dot(downhill)));
+        }
+    }
+    samples
+}
+
+#[test]
+fn a_block_just_inside_the_friction_angle_stays_put() {
+    // tan(theta) = 0.95 mu: static friction holds. A viscous law would creep forever.
+    let samples = incline(0.95 * MU.atan(), 0.0, 10.0);
+    let (_, travelled, speed) = samples[samples.len() - 1];
+    // The tangential spring sags m g sin(theta) / k = 1 mm and its first swing overshoots into a brief slip: a few mm
+    // in all, then nothing.
+    assert!(travelled.abs() < 0.005, "it slid {travelled} m in 10 s");
+    assert!(speed.abs() < 1e-3, "and is still moving at {speed} m/s");
+    let (_, earlier, _) = samples[9];
+    assert!((travelled - earlier).abs() < 1e-5, "creeping: {earlier} -> {travelled} between 5 s and 10 s");
+}
+
+#[test]
+fn a_block_just_past_the_friction_angle_slides_at_g_sin_minus_mu_cos() {
+    let theta = 1.05 * MU.atan();
+    let samples = incline(theta, 0.0, 2.0);
+    let expected = GRAVITY_MPS2 * (theta.sin() - MU * theta.cos());
+    let (t1, _, v1) = samples[0];
+    let (t2, _, v2) = samples[3];
+    let a = (v2 - v1) / (t2 - t1);
+    assert!((a - expected).abs() < 0.03 * expected, "acceleration {a}, expected {expected}");
+}
+
+#[test]
+fn a_block_sliding_on_the_flat_decelerates_at_mu_g_and_then_stays() {
+    // 2 m/s stops in v / (mu g) = 0.34 s over v^2 / (2 mu g) = 0.34 m, and does not move again.
+    let samples = incline(0.0, 2.0, 2.0);
+    let expected = 4.0 / (2.0 * MU * GRAVITY_MPS2);
+    let (_, one_s, v1) = samples[1];
+    let (_, two_s, v2) = samples[3];
+    assert!((one_s - expected).abs() < 0.03 * expected, "stopped after {one_s} m, expected {expected}");
+    assert!(v1.abs() < 1e-3 && v2.abs() < 1e-3, "speeds {v1}, {v2}");
+    assert!((two_s - one_s).abs() < 1e-4, "it crept {} m after stopping", two_s - one_s);
+}
+
+#[test]
+fn a_separating_point_carries_no_force_and_forgets_its_anchor() {
+    let g = GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: MU };
+    let mut anchor = DVec3::new(0.001, 0.0, 0.0);
+    // 1 mm deep but leaving at 1 m/s: the damper would pull (40 N > 3 N of spring), so the force clamps to zero.
+    let f = point_force(&g, DVec3::NEG_Z, 0.001, DVec3::new(0.5, 0.0, -1.0), &mut anchor, DT);
+    assert_eq!(f, DVec3::ZERO);
+    assert_eq!(anchor, DVec3::ZERO);
 }

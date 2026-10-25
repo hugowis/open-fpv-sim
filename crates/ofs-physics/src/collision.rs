@@ -5,7 +5,7 @@
 use glam::DVec3;
 use ofs_core::shape::Aabb;
 
-use crate::rigid_body::{AirframeParams, BodyState};
+use crate::rigid_body::{AirframeParams, BodyState, GroundParams};
 
 /// Inward contact speeds below this reverse with restitution 0, so nothing jitters at rest.
 pub const RESTITUTION_SPEED_FLOOR_MPS: f64 = 0.2;
@@ -65,6 +65,31 @@ struct Contact {
     object: i32,
     /// The inward speed of the contact point when the contact was collected (for the events).
     inward: f64,
+}
+
+/// The force of one landing point `depth` inside a solid whose outward unit `normal` is given, moving at `v` (world,
+/// the point's own velocity): the spring-damper along the normal and static-and-sliding Coulomb friction across it.
+/// `anchor` is the point's tangential displacement since it stuck (world, in the tangent plane), the state a
+/// held point needs: friction is a spring-damper of the same stiffness and damping as the normal one on that
+/// displacement, capped at `friction_coeff` times the normal force. Under the cap the point sticks and the spring
+/// holds it (a slope below the friction angle holds a quad forever); at the cap it slides at `mu*N` and the
+/// anchor stays at the cap. A point that pulls away (no normal force) loses its anchor.
+pub fn point_force(g: &GroundParams, normal: DVec3, depth: f64, v: DVec3, anchor: &mut DVec3, dt: f64) -> DVec3 {
+    let v_n = v.dot(normal);
+    let n = (g.stiffness_npm * depth - g.damping_nspm * v_n).max(0.0);
+    if n == 0.0 {
+        *anchor = DVec3::ZERO;
+        return DVec3::ZERO;
+    }
+    let v_t = v - normal * v_n;
+    let d = *anchor + v_t * dt;
+    let d = d - normal * d.dot(normal);
+    let friction = -(d * g.stiffness_npm + v_t * g.damping_nspm);
+    let cap = g.friction_coeff * n;
+    // shortcut: the cap compares the whole tangential force, so a slide's anchor is clamped to cap/k, not to the
+    // exact Coulomb cone of the spring alone; fine at these stiffnesses, upgrade if k_t ever decouples from k.
+    *anchor = d.clamp_length_max(cap / g.stiffness_npm);
+    normal * n + friction.clamp_length_max(cap)
 }
 
 /// Applies the sphere contacts of one step to `s` and returns the (object index, inward speed) pairs of the
