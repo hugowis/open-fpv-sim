@@ -70,6 +70,14 @@ func test_the_aspect_setting_defaults_and_comes_from_the_env_and_the_command_lin
 	eq(AppSettings.resolve({}, {}, PackedStringArray(["--fpv-aspect=window"]))["fpv_aspect"], "window", "--fpv-aspect=window")
 
 
+func test_the_dvr_export_setting_defaults_resolves_and_falls_back() -> void:
+	eq(AppSettings.defaults()["dvr_export"], "none", "no export by default")
+	eq(AppSettings.resolve({}, {"OFS_DVR_EXPORT": "mp4"}, PackedStringArray())["dvr_export"], "mp4", "OFS_DVR_EXPORT=mp4")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--dvr-export=both"]))["dvr_export"], "both", "--dvr-export=both")
+	eq(AppSettings.resolve({"dvr_export": "frames"}, {}, PackedStringArray())["dvr_export"], "frames", "the config file")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--dvr-export=bogus"]))["dvr_export"], "none", "an unknown value falls back to none")
+
+
 func test_a_setting_saved_in_the_game_keeps_the_rest_of_the_file() -> void:
 	var path := "user://test_ofs_client.cfg"
 	DirAccess.remove_absolute(path)

@@ -57,6 +57,8 @@ func _ready() -> void:
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
 	controls_menu.set_aspect(settings["fpv_aspect"])
 	controls_menu.aspect_changed.connect(_on_aspect_changed)
+	controls_menu.set_dvr_export(settings["dvr_export"])
+	controls_menu.dvr_export_changed.connect(_on_dvr_export_changed)
 	controls_menu.dvr_toggled.connect(_set_dvr)
 	fpv_texture.texture = fpv_viewport.get_texture()
 	get_viewport().size_changed.connect(_layout_fpv)
@@ -123,6 +125,7 @@ func _process(delta: float) -> void:
 	var focused := get_window().has_focus()
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
+	_poll_dvr_exports()
 	if not chase_view:
 		var fpv: Dictionary = client.get_fpv_view()
 		if fpv.has("pose"):
@@ -200,9 +203,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func set_chase_view(chase: bool) -> void:
 	chase_view = chase
 	if chase and dvr != null and dvr.recording:
-		var summary: Dictionary = dvr.stop()
+		_stop_dvr(true)
 		_sync_dvr()
-		hud.add_toast("DVR stopped: the chase camera is not recorded (%d frames saved)" % summary.get("frames", 0), "warn")
 	(chase_camera if chase else fpv_camera).make_current()
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
@@ -237,12 +239,41 @@ func _set_dvr(on: bool) -> void:
 			return
 		hud.add_toast("DVR: recording to user://recordings")
 	else:
-		var summary: Dictionary = dvr.stop()
-		if summary.is_empty():
-			hud.add_toast("DVR failed: the writer stopped abnormally", "error")
-		else:
-			hud.add_toast("DVR: %d frames saved%s" % [summary.get("frames", 0), _dvr_drop_note(summary)])
+		_stop_dvr(false)
 	_sync_dvr()
+
+
+## The one stop path (D, the F2 box and entering the chase view): stops the recording, toasts how it went and, when
+## it stopped normally, hands each recorded file to the export the `dvr_export` setting asks for.
+func _stop_dvr(chase: bool) -> void:
+	var summary: Dictionary = dvr.stop()
+	if summary.is_empty():
+		hud.add_toast("DVR failed: the writer stopped abnormally%s" % (" (the chase camera is not recorded)" if chase else ""), "error")
+		return
+	var saved := "%d frames saved" % summary.get("frames", 0)
+	if chase:
+		hud.add_toast("DVR stopped: the chase camera is not recorded (%s)%s" % [saved, _dvr_drop_note(summary)], "warn")
+	else:
+		hud.add_toast("DVR: %s%s" % [saved, _dvr_drop_note(summary)])
+	var mode: String = settings.get("dvr_export", "none")
+	if mode == "none" or client == null:
+		return
+	for path in summary.get("paths", PackedStringArray()):
+		var error: String = client.dvr_export(path, mode)
+		if error != "":
+			hud.add_toast("DVR export failed: %s" % error, "warn")
+
+
+## Toasts the exports that finished since the last frame. A failure only warns: the AVI is never touched.
+func _poll_dvr_exports() -> void:
+	for done in client.dvr_export_poll():
+		var detail: String = done["detail"]
+		if done["ok"]:
+			hud.add_toast("DVR exported (%s): %s" % [done["kind"], detail.get_file()])
+		elif detail.begins_with("ffmpeg was not found"):
+			hud.add_toast("%s: the AVI was kept" % detail, "warn")
+		else:
+			hud.add_toast("DVR %s export failed: %s (the AVI was kept)" % [done["kind"], detail], "warn")
 
 
 func _sync_dvr() -> void:
@@ -267,6 +298,12 @@ func _on_aspect_changed(value: String) -> void:
 	_layout_fpv()
 	if not AppSettings.save_value("fpv_aspect", value):
 		hud.add_toast("Could not save the Picture setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
+func _on_dvr_export_changed(value: String) -> void:
+	settings["dvr_export"] = value
+	if not AppSettings.save_value("dvr_export", value):
+		hud.add_toast("Could not save the DVR export setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
 func set_radio_cut(cut: bool) -> void:

@@ -22,8 +22,24 @@ class MockClient:
 	func dvr_write_frame(_feed: String, jpeg: PackedByteArray) -> void:
 		frames.append(jpeg)
 
+	var fail_stop := false  # the writer stopped abnormally: dvr_stop answers with an empty Dictionary
+
 	func dvr_stop(_feed: String) -> Dictionary:
+		if fail_stop:
+			return {}
 		return {"frames": frames.size(), "dropped_frames": 0, "bytes": 0}
+
+	var exports: Array = []  # [path, mode] per dvr_export call
+	var export_results: Array = []
+
+	func dvr_export(path: String, mode: String) -> String:
+		exports.append([path, mode])
+		return ""
+
+	func dvr_export_poll() -> Array:
+		var out := export_results
+		export_results = []
+		return out
 
 
 class MockOsd extends CanvasLayer:
@@ -136,6 +152,35 @@ func test_two_feeds_record_independently() -> void:
 	client.free()
 
 
+func test_the_binding_exports_a_finished_recording_as_frames() -> void:
+	var client := await _client()
+	var path := OS.get_user_data_dir() + "/test_dvr_export.avi"
+	var out_dir := OS.get_user_data_dir() + "/test_dvr_export_frames"
+	DirAccess.remove_absolute(path)
+	for file in DirAccess.get_files_at(out_dir):
+		DirAccess.remove_absolute(out_dir.path_join(file))
+	DirAccess.remove_absolute(out_dir)
+	eq(client.dvr_start("goggles", path, 4, 2), "", "starts")
+	client.dvr_write_frame("goggles", PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, 1]))
+	client.dvr_stop("goggles")
+	ok(client.dvr_export(path, "gif") != "", "an unknown mode is refused")
+	eq(client.dvr_export(path, "frames"), "", "frames starts")
+	var results: Array = []
+	for i in 500:
+		results = client.dvr_export_poll()
+		if not results.is_empty():
+			break
+		OS.delay_msec(10)
+	eq(results.size(), 1, "one result arrives")
+	if results.size() == 1:
+		ok(results[0]["ok"], "it succeeded: %s" % str(results[0]))
+		eq(results[0]["kind"], "frames", "of kind frames")
+		eq(results[0]["path"], path, "for that recording")
+		eq(results[0]["detail"], out_dir, "into the frames directory")
+		eq(DirAccess.get_files_at(out_dir).size(), 1, "holding the frame")
+	client.free()
+
+
 func test_a_drop_stretch_repeats_the_held_frame_once_per_boundary() -> void:
 	var dvr: Node = Dvr.new()
 	await add_to_tree(dvr)
@@ -226,6 +271,95 @@ func test_entering_the_chase_view_stops_the_dvr() -> void:
 	app.free()
 	menu.queue_free()
 	hud.queue_free()
+	s["dvr"].queue_free()
+
+
+func _toast_color(hud: Node, index: int) -> Color:
+	return hud._toast_items[index]["label"].get_theme_color("font_color")
+
+
+func test_finished_exports_are_toasted_and_failures_only_warn() -> void:
+	var client := MockClient.new()
+	client.export_results = [
+		{"path": "/r/REC.avi", "kind": "frames", "ok": true, "detail": "/r/REC_frames"},
+		{"path": "/r/REC.avi", "kind": "mp4", "ok": false, "detail": "disk exploded"},
+		{"path": "/r/REC.avi", "kind": "mp4", "ok": false, "detail": "ffmpeg was not found on PATH"},
+	]
+	var s := await _app_shell(client)
+	var app = s["app"]
+	var hud = s["hud"]
+	app._poll_dvr_exports()
+	var texts: PackedStringArray = hud.toast_texts()
+	eq(texts.size(), 3, "one toast per result: %s" % str(texts))
+	ok("exported" in texts[0] and "REC_frames" in texts[0], "the first is an export: %s" % texts[0])
+	eq(_toast_color(hud, 0), Hud.WHITE, "an info toast")
+	ok("disk exploded" in texts[1], "the second carries the error: %s" % texts[1])
+	eq(_toast_color(hud, 1), Hud.YELLOW, "a warning, never an error")
+	eq(texts[2], "ffmpeg was not found on PATH: the AVI was kept", "a missing ffmpeg says the AVI is safe")
+	eq(_toast_color(hud, 2), Hud.YELLOW, "also a warning")
+	app._poll_dvr_exports()
+	eq(hud.toast_texts().size(), 3, "nothing new, nothing toasted")
+	app.free()
+	s["menu"].queue_free()
+	hud.queue_free()
+	s["dvr"].queue_free()
+
+
+func test_a_successful_stop_exports_the_recording_per_the_setting() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	app.settings["dvr_export"] = "both"
+	s["menu"]._dvr.button_pressed = true
+	var path: String = s["dvr"].paths[0]
+	ok(path.is_absolute_path() and path.ends_with(".avi"), "the recording has an absolute path: %s" % path)
+	app._toggle_dvr()
+	eq(client.exports, [[path, "both"]], "D stops, then exports that file")
+	app._toggle_dvr()
+	app.settings["dvr_export"] = "none"
+	app._toggle_dvr()
+	eq(client.exports.size(), 1, "the none setting exports nothing")
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
+
+
+func test_an_abnormal_stop_does_not_export() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	app.settings["dvr_export"] = "frames"
+	s["menu"]._dvr.button_pressed = true
+	client.fail_stop = true
+	app._toggle_dvr()
+	eq(client.exports.size(), 0, "no summary, no export")
+	ok("abnormally" in " ".join(s["hud"].toast_texts()), "the failure is toasted")
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
+
+
+func test_the_chase_stop_goes_through_the_same_stop_path() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	app.fpv_camera = Camera3D.new()
+	app.chase_camera = Camera3D.new()
+	app.lens = MockOsd.new()
+	app.video = MockOsd.new()
+	for node in [app.fpv_camera, app.chase_camera, app.lens, app.video]:
+		app.add_child(node)
+	app.settings["dvr_export"] = "mp4"
+	s["menu"]._dvr.button_pressed = true
+	var path: String = s["dvr"].paths[0]
+	app.set_chase_view(true)
+	eq(client.exports, [[path, "mp4"]], "the chase stop exports too")
+	ok("chase" in " ".join(s["hud"].toast_texts()), "and keeps the chase toast: %s" % str(s["hud"].toast_texts()))
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
 	s["dvr"].queue_free()
 
 

@@ -9,6 +9,7 @@ use std::time::Duration;
 use godot::classes::{INode, Node};
 use godot::prelude::*;
 use ofs_client::dvr::DvrFeed;
+use ofs_client::dvr_export::Exporter;
 use ofs_client::{Client,Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
 
 struct OfsExtension;
@@ -23,12 +24,14 @@ unsafe impl ExtensionLibrary for OfsExtension {}
 pub struct OfsClient {
     base: Base<Node>,
     client: Option<Client>,
+    /// DVR export jobs; independent of any session, so a recording made before a reload still finishes exporting.
+    exporter: Exporter,
 }
 
 #[godot_api]
 impl INode for OfsClient {
     fn init(base: Base<Node>) -> Self {
-        Self { base, client: None }
+        Self { base, client: None, exporter: Exporter::new() }
     }
 
     fn process(&mut self, _delta: f64) {
@@ -341,6 +344,41 @@ impl OfsClient {
         d.set("dropped_frames", summary.dropped_frames as i64);
         d.set("bytes", summary.bytes as i64);
         d
+    }
+
+    /// Exports the finished recording `path` (an absolute .avi path) in the background: `mode` is "frames" (an image
+    /// sequence next to it), "mp4" (needs ffmpeg on the PATH) or "both". "" when it started, otherwise why not.
+    /// Results arrive through `dvr_export_poll`.
+    #[func]
+    fn dvr_export(&self, path: GString, mode: GString) -> GString {
+        let (frames, mp4) = match mode.to_string().as_str() {
+            "frames" => (true, false),
+            "mp4" => (false, true),
+            "both" => (true, true),
+            other => return GString::from(format!("unknown export mode {other}").as_str()),
+        };
+        self.exporter.spawn(PathBuf::from(path.to_string()), frames, mp4);
+        GString::new()
+    }
+
+    /// The exports that finished since the last call: an Array of `{path, kind ("frames" or "mp4"), ok, detail}`
+    /// (`detail` is the output path, or the error).
+    #[func]
+    fn dvr_export_poll(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for done in self.exporter.poll() {
+            let mut d = VarDictionary::new();
+            d.set("path", &GString::from(done.avi.to_string_lossy().as_ref()));
+            d.set("kind", &GString::from(done.kind));
+            d.set("ok", done.result.is_ok());
+            let detail = match &done.result {
+                Ok(path) => path.to_string_lossy().into_owned(),
+                Err(e) => e.clone(),
+            };
+            d.set("detail", &GString::from(detail.as_str()));
+            out.push(&d.to_variant());
+        }
+        out
     }
 
     /// The newest OSD frame: `seq`, `time_s`, `present`, `cols`, `rows` and `cells` (a PackedInt32Array, row-major,

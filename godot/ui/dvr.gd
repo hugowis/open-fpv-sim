@@ -14,6 +14,8 @@ signal stopped(summary: Dictionary)
 const JPEG_QUALITY := 0.8
 
 var recording := false
+## The absolute .avi path of the current (or last) recording; `stop()`'s summary carries it as `paths`.
+var paths := PackedStringArray()
 var _client: Object
 var _viewport: SubViewport
 ## The picture size declared at start: every frame is fitted to it, because an AVI has one size for its whole length.
@@ -27,10 +29,12 @@ var image_source := Callable()
 
 func start(client: Object, viewport: SubViewport) -> String:
 	var path := "user://recordings/REC_%s.avi" % _timestamp()
-	var error: String = client.dvr_start("goggles", ProjectSettings.globalize_path(path), viewport.size.x, viewport.size.y)
+	var absolute := ProjectSettings.globalize_path(path)
+	var error: String = client.dvr_start("goggles", absolute, viewport.size.x, viewport.size.y)
 	if error != "":
 		return error
 	recording = true
+	paths = PackedStringArray([absolute])
 	_client = client
 	_viewport = viewport
 	_size = viewport.size
@@ -87,6 +91,8 @@ func stop() -> Dictionary:
 		return {}
 	recording = false
 	var summary: Dictionary = _client.dvr_stop("goggles")
+	if not summary.is_empty():
+		summary["paths"] = paths  # an abnormal stop stays empty: there is nothing to export
 	stopped.emit(summary)
 	return summary
 
