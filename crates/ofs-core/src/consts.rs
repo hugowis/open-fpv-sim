@@ -5,6 +5,13 @@ pub const AIR_DENSITY_KGPM3: f64 = 1.225;
 /// no thermal model drives it.
 pub const DEFAULT_AMBIENT_C: f64 = 25.0;
 
+/// The earth's magnetic field a world gets without saying: a round 50 µT (the field spans roughly 25 to 65 µT) at the
+/// inclination (60°, down) and declination (2° east) of the field Betaflight SITL's virtual compass synthesises, so the
+/// simulated compass and Betaflight's describe the same field direction (docs/superpowers/specs/2026-10-25-compass-design.md).
+pub const DEFAULT_MAG_FIELD_UT: f64 = 50.0;
+pub const DEFAULT_MAG_INCLINATION_DEG: f64 = 60.0;
+pub const DEFAULT_MAG_DECLINATION_DEG: f64 = 2.0;
+
 /// One analog (PAL) video field: the video link model runs once per field, and the goggles' picture ages a field
 /// at a time. The single source for every crate that needs it (m3e debt: it was written down in three places).
 pub const VIDEO_FIELD_RATE_HZ: u32 = 50;
