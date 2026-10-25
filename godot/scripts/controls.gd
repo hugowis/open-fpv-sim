@@ -5,12 +5,19 @@ extends RefCounted
 ## roll/pitch/yaw/aux are used as they are, throttle becomes (value + 1) / 2. Sign conventions, as Betaflight sees
 ## them: roll +1 is right, pitch +1 is stick forward (nose down), yaw +1 is right, throttle 1 is full, aux +1 is the
 ## switch on (aux1 arms, aux2 selects Angle mode in the reference quad).
+## Per-axis corrections (docs/superpowers/specs/2026-10-26-controller-setup-design.md): `calibration` maps a
+## controller (its guid) to the end points and centre of each of its axes, `shaping` gives roll, pitch and yaw their own
+## deadband and travel. Rates and expo stay Betaflight's.
 ##
 ## `read` takes the input source as a parameter (the `Input` singleton in the game, a fake in the tests).
 
 const CHANNELS := ["roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4"]
 const STICK_CHANNELS := ["roll", "pitch", "yaw"]
 const PRESET_NAMES := ["radio", "gamepad", "keyboard"]
+const AxisShaping = preload("res://scripts/axis_shaping.gd")
+## Substrings of a controller's name (lower case) that say which preset suits it.
+const GAMEPAD_NAMES := ["xbox", "playstation", "dualshock", "dualsense", "ps4", "ps5", "wireless controller", "gamepad", "switch pro", "8bitdo"]
+const RADIO_NAMES := ["radiomaster", "taranis", "jumper", "tx12", "tx16", "zorro", "boxer", "frsky", "flysky", "opentx", "edgetx", "radio", "transmitter"]
 
 ## device -1 means "the first connected controller".
 var bindings: Dictionary = {}
@@ -18,6 +25,11 @@ var deadzone := 0.03
 ## Keyboard throttle: how far the throttle stick moves per second (throttle goes 0..1).
 var throttle_ramp_per_s := 0.6
 var preset_name := ""
+## roll/pitch/yaw -> {deadband, travel}, either key optional (deadband falls back to `deadzone`, travel to 1).
+var shaping: Dictionary = {}
+## Controller key (`device_key`) -> {name, axes: {"<index>": {min, center, max}}}. Belongs to the controllers, not to
+## a profile: presets and profile switches leave it alone.
+var calibration: Dictionary = {}
 
 var _ramp: Dictionary = {}
 var _toggle: Dictionary = {}
@@ -69,6 +81,48 @@ static func _button(index: int) -> Dictionary:
 	return {"kind": "button", "device": -1, "index": index}
 
 
+## "gamepad" or "radio" for a controller name Godot reports, "" when the name says nothing.
+static func preset_for_device(device_name: String) -> String:
+	var n := device_name.to_lower()
+	for marker in GAMEPAD_NAMES:
+		if n.contains(marker):
+			return "gamepad"
+	for marker in RADIO_NAMES:
+		if n.contains(marker):
+			return "radio"
+	return ""
+
+
+## What identifies a controller across plugs: its guid, else its name ("" for no such device).
+static func device_key(input, device: int) -> String:
+	var guid: String = input.get_joy_guid(device) if input.has_method("get_joy_guid") else ""
+	return guid if guid != "" else (input.get_joy_name(device) if input.has_method("get_joy_name") else "")
+
+
+## Keeps the well-formed controllers and axes of a calibration table (from a file): finite numbers, min <= centre <= max.
+static func clean_calibration(table) -> Dictionary:
+	var out := {}
+	if typeof(table) != TYPE_DICTIONARY:
+		return out
+	for key in table:
+		var entry = table[key]
+		if typeof(entry) != TYPE_DICTIONARY or typeof(entry.get("axes")) != TYPE_DICTIONARY:
+			continue
+		var axes := {}
+		for axis in entry["axes"]:
+			var cal = entry["axes"][axis]
+			if not str(axis).is_valid_int() or typeof(cal) != TYPE_DICTIONARY:
+				continue
+			var low := float(cal.get("min", NAN))
+			var mid := float(cal.get("center", NAN))
+			var high := float(cal.get("max", NAN))
+			if is_finite(low) and is_finite(mid) and is_finite(high) and low <= mid and mid <= high:
+				axes[str(int(axis))] = {"min": low, "center": mid, "max": high}
+		if not axes.is_empty():
+			out[str(key)] = {"name": str(entry.get("name", "")), "axes": axes}
+	return out
+
+
 static func _pair(neg: int, pos: int, scale: float) -> Dictionary:
 	return {"kind": "key_pair", "neg": neg, "pos": pos, "scale": scale}
 
@@ -78,6 +132,7 @@ func apply_preset(name: String) -> void:
 	preset_name = name if name in PRESET_NAMES else "radio"
 	bindings = p["bindings"].duplicate(true)
 	deadzone = p["deadzone"]
+	shaping = {}
 	reset_state()
 
 
@@ -112,8 +167,13 @@ func describe(channel: String) -> String:
 	return "not bound"
 
 
+## One profile's worth: preset name, deadzone, bindings, shaping.
+func to_profile() -> Dictionary:
+	return {"preset": preset_name, "deadzone": deadzone, "bindings": bindings.duplicate(true), "shaping": shaping.duplicate(true)}
+
+
 func to_json() -> String:
-	return JSON.stringify({"version": 1, "preset": preset_name, "deadzone": deadzone, "bindings": bindings}, "\t")
+	return JSON.stringify(to_profile(), "\t")
 
 
 ## Loads bindings saved by `to_json`. Returns false (changing nothing) when the text is not a valid controls file.
@@ -121,8 +181,13 @@ func from_json(text: String) -> bool:
 	var json := JSON.new()
 	if json.parse(text) != OK:
 		return false
-	var data = json.data
-	if typeof(data) != TYPE_DICTIONARY or typeof(data.get("bindings")) != TYPE_DICTIONARY:
+	return typeof(json.data) == TYPE_DICTIONARY and from_profile(json.data)
+
+
+## Loads a profile (a parsed `to_profile`, or a version 1 file, which has no shaping). False, changing nothing, when
+## it is not a valid one.
+func from_profile(data: Dictionary) -> bool:
+	if typeof(data.get("bindings")) != TYPE_DICTIONARY:
 		return false
 	var loaded := {}
 	for channel in CHANNELS:
@@ -135,9 +200,27 @@ func from_json(text: String) -> bool:
 		loaded[channel] = clean
 	bindings = loaded
 	deadzone = clampf(float(data.get("deadzone", 0.03)), 0.0, 0.5)
+	shaping = _clean_shaping(data.get("shaping"))
 	preset_name = str(data.get("preset", "custom"))
 	reset_state()
 	return true
+
+
+## Keeps roll, pitch and yaw entries; clamps their numbers and drops anything else.
+static func _clean_shaping(raw) -> Dictionary:
+	var out := {}
+	if typeof(raw) != TYPE_DICTIONARY:
+		return out
+	for channel in STICK_CHANNELS:
+		if typeof(raw.get(channel)) != TYPE_DICTIONARY:
+			continue
+		var entry := {}
+		if typeof(raw[channel].get("deadband")) in [TYPE_FLOAT, TYPE_INT]:
+			entry["deadband"] = clampf(float(raw[channel]["deadband"]), 0.0, 0.5)
+		if typeof(raw[channel].get("travel")) in [TYPE_FLOAT, TYPE_INT]:
+			entry["travel"] = AxisShaping.clean_travel(float(raw[channel]["travel"]))
+		out[channel] = entry
+	return out
 
 
 static func _clean_binding(b: Dictionary) -> Dictionary:
@@ -173,7 +256,7 @@ func read(input, focused := true, delta := 0.0) -> Dictionary:
 			v = -1.0 if channel == "throttle" or channel.begins_with("aux") else 0.0
 		values[channel] = clampf(v, -1.0, 1.0) if is_finite(v) else 0.0
 	var out := {
-		"roll": _dead(values["roll"]), "pitch": _dead(values["pitch"]), "yaw": _dead(values["yaw"]),
+		"roll": _shaped("roll", values["roll"]), "pitch": _shaped("pitch", values["pitch"]), "yaw": _shaped("yaw", values["yaw"]),
 		"throttle": (values["throttle"] + 1.0) / 2.0,
 		"aux": [values["aux1"], values["aux2"], values["aux3"], values["aux4"]],
 		"status": "",
@@ -189,10 +272,9 @@ func read(input, focused := true, delta := 0.0) -> Dictionary:
 	return out
 
 
-func _dead(v: float) -> float:
-	if absf(v) <= deadzone:
-		return 0.0
-	return signf(v) * (absf(v) - deadzone) / (1.0 - deadzone)
+func _shaped(channel: String, v: float) -> float:
+	var s: Dictionary = shaping.get(channel, {})
+	return AxisShaping.shape(v, float(s.get("deadband", deadzone)), float(s.get("travel", 1.0)))
 
 
 ## The channel's value in [-1, 1], or NAN when its controller is not there.
@@ -207,6 +289,8 @@ func _channel_value(channel: String, input, delta: float) -> float:
 			var v: float = input.get_joy_axis(device, int(b["index"]))
 			if not is_finite(v):
 				return NAN
+			var cal: Dictionary = calibration.get(device_key(input, device), {}).get("axes", {}).get(str(int(b["index"])), {})
+			v = AxisShaping.calibrate(v, cal, channel in STICK_CHANNELS)
 			return -v if b.get("invert", false) else v
 		"button":
 			var device := _device(b, input)
