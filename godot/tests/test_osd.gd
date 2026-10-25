@@ -10,8 +10,8 @@ func _osd() -> CanvasLayer:
 	return osd
 
 
-## A 3x2 frame: row 0 is " A " with the A blinking, row 1 is "B C" with B addressed on font page 2 (which falls
-## back to page 0: the atlas ships two pages).
+## A 3x2 frame: row 0 is " A " with the A blinking, row 1 is "B C" with B addressed on font page 2 (a WARNING,
+## drawn from the bold page and tinted).
 func _frame(overrides := {}) -> Dictionary:
 	var cells := PackedInt32Array([0x20, 0x41 | (1 << 10), 0x20, 0x42 | (2 << 8), 0x20, 0x43])
 	var f := {"seq": 1, "time_s": 0.0, "present": true, "cols": 3, "rows": 2, "cells": cells}
@@ -25,8 +25,19 @@ func test_the_font_atlas_has_the_expected_layout() -> void:
 	eq(Osd.glyph_rect(0, 65), Rect2(12, 72, 12, 18), "glyph 'A' is column 1, row 4")
 	eq(Osd.glyph_rect(1, 0), Rect2(0, 288, 12, 18), "page 1 starts one glyph-block down")
 	eq(Osd.glyph_rect(1, 255), Rect2(180, 558, 12, 18), "the last glyph of page 1")
-	eq(Osd.glyph_rect(2, 65), Osd.glyph_rect(0, 65), "page 2 falls back to page 0")
-	eq(Osd.glyph_rect(3, 0), Osd.glyph_rect(0, 0), "so does page 3")
+	eq(Osd.glyph_rect(2, 65), Osd.glyph_rect(1, 65), "page 2 (WARNING) uses the bold glyphs")
+	eq(Osd.glyph_rect(3, 0), Osd.glyph_rect(1, 0), "so does page 3 (CRITICAL)")
+
+
+func test_warnings_and_criticals_are_the_bold_glyphs_in_amber_and_red() -> void:
+	eq([Osd.glyph_page(0), Osd.glyph_page(1), Osd.glyph_page(2), Osd.glyph_page(3)], [0, 1, 1, 1], "atlas page behind each wire page")
+	eq(Osd.glyph_tint(0), Color.WHITE, "normal text is untinted")
+	eq(Osd.glyph_tint(1), Color.WHITE, "so is INFO")
+	var warning := Osd.glyph_tint(2)
+	var critical := Osd.glyph_tint(3)
+	ok(warning.r > 0.9 and warning.g > 0.5 and warning.g < 0.9 and warning.b < 0.3, "WARNING is amber: %s" % warning)
+	ok(critical.r > 0.9 and critical.g < 0.4 and critical.b < 0.4, "CRITICAL is red: %s" % critical)
+	ok(warning != critical, "and they differ")
 
 
 func test_nothing_is_drawn_without_a_present_frame() -> void:
@@ -49,7 +60,7 @@ func test_blank_cells_are_not_drawn_and_blinking_cells_follow_the_blink_phase() 
 	var osd := await _osd()
 	osd.set_frame(_frame())
 	ok(osd.blink_visible(), "blink starts visible")
-	eq(osd.drawn_cell_count(), 3, "A (blinking, on), B (page 2, drawn from page 0) and C; the three blanks are skipped")
+	eq(osd.drawn_cell_count(), 3, "A (blinking, on), B (page 2, a warning) and C; the three blanks are skipped")
 	osd.advance_blink(0.6)
 	ok(not osd.blink_visible(), "the phase flips after half a period")
 	eq(osd.drawn_cell_count(), 2, "the blinking A is off")

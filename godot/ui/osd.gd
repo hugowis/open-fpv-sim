@@ -8,6 +8,10 @@ const GLYPH_W := 12
 const GLYPH_H := 18
 const ATLAS_COLS := 16
 const BLINK_HALF_PERIOD_S := 0.5
+## Betaflight sends a cell's severity as its font page (NORMAL 0, INFO 1, WARNING 2, CRITICAL 3). The atlas has the
+## default face (page 0) and the bold one (page 1), so a WARNING and a CRITICAL draw bold, in amber and in red.
+const WARNING_TINT := Color(1.0, 0.72, 0.1)
+const CRITICAL_TINT := Color(1.0, 0.25, 0.25)
 
 var _canvas := Control.new()
 var _frame: Dictionary = {}
@@ -62,11 +66,27 @@ static func font_pages() -> int:
 	return int(FONT.get_size().y / (16.0 * GLYPH_H))
 
 
-## Where glyph `code` of font `page` is in the atlas (pages beyond the atlas fall back to page 0: Betaflight
-## addresses up to four pages, the analog font ships two).
+## The atlas page that draws wire page `page`: the severity pages 2 and 3 use the bold face.
+static func glyph_page(page: int) -> int:
+	return mini(page, 1)
+
+
+## The colour wire page `page` is drawn in.
+static func glyph_tint(page: int) -> Color:
+	match page:
+		2:
+			return WARNING_TINT
+		3:
+			return CRITICAL_TINT
+	return Color.WHITE
+
+
+## Where glyph `code` of font `page` is in the atlas (an atlas page the PNG does not hold falls back to page 0).
 @warning_ignore("integer_division")
 static func glyph_rect(page: int, code: int) -> Rect2:
-	var p := page if page < font_pages() else 0
+	var p := glyph_page(page)
+	if p >= font_pages():
+		p = 0
 	return Rect2((code % ATLAS_COLS) * GLYPH_W, (code / ATLAS_COLS) * GLYPH_H + p * ATLAS_COLS * GLYPH_H, GLYPH_W, GLYPH_H)
 
 
@@ -101,4 +121,5 @@ func _draw_grid() -> void:
 		for col in cols:
 			var packed := cells[row * cols + col]
 			if _is_drawn(packed):
-				_canvas.draw_texture_rect_region(FONT, Rect2(box.position + Vector2(col, row) * cell_size, cell_size), glyph_rect((packed >> 8) & 0x3, packed & 0xFF))
+				var page := (packed >> 8) & 0x3
+				_canvas.draw_texture_rect_region(FONT, Rect2(box.position + Vector2(col, row) * cell_size, cell_size), glyph_rect(page, packed & 0xFF), glyph_tint(page))
