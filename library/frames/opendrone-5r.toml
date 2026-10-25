@@ -1,0 +1,51 @@
+# OpenDrone 5" race frame (220 mm) with its stack and a 6S 1300 mAh pack - estimates scaled from opendrone-5f.
+schema_version = 1
+name = "OpenDrone 5R frame"
+
+[frame]
+mass_kg = 0.54
+inertia_kgm2 = [0.0020, 0.0020, 0.0036]
+cda_m2 = [0.008, 0.008, 0.018]
+angular_damping_nms = 6e-05
+# Betaflight Quad-X order: M1 rear-right, M2 front-right, M3 rear-left, M4 front-left (FRD: x fwd, y right, z down)
+motor_positions_frd_m = [[-0.078, 0.078, 0.0], [0.078, 0.078, 0.0], [-0.078, -0.078, 0.0], [0.078, -0.078, 0.0]]
+# +1 = clockwise seen from above. Betaflight default: M1 CW, M2 CCW, M3 CCW, M4 CW.
+motor_spin = [1, -1, -1, 1]
+contact_points_frd_m = [[-0.078, 0.078, 0.03], [0.078, 0.078, 0.03], [-0.078, -0.078, 0.03], [0.078, -0.078, 0.03]]
+
+[ground]
+stiffness_npm = 2500.0
+damping_nspm = 33.0
+friction_coeff = 0.6
+
+[provenance."frame.mass_kg"]
+source = "estimated"
+note = "all-up weight of a 6S 1300 mAh race quad (frame 105 g, four 2306 motors 128 g, stack 45 g, camera and VTX 25 g, props 16 g, pack 180 g, wiring and straps 41 g); a sum of class-typical masses, not weighed"
+[provenance."frame.inertia_kgm2"]
+source = "estimated"
+note = "0.3 * mass * (arm radius)^2 about x and y, and 1.8 times that about z: the opendrone-5f relation scaled to this size; not measured"
+[provenance."frame.cda_m2"]
+source = "estimated"
+note = "opendrone-5f's drag areas scaled by the square of the size; not measured"
+[provenance."frame.angular_damping_nms"]
+source = "estimated"
+note = "opendrone-5f's value scaled by the inertia; not measured"
+[provenance."frame.motor_positions_frd_m"]
+source = "estimated"
+note = "220 mm wheelbase: 0.078 m = 220 mm / 2 / sqrt(2); not measured"
+[provenance."frame.motor_spin"]
+source = "datasheet"
+link = "https://betaflight.com/docs/development/Mixer"
+note = "Betaflight Quad-X order"
+[provenance."frame.contact_points_frd_m"]
+source = "estimated"
+note = "legs under the arms, 3 cm below the arms"
+[provenance."ground.stiffness_npm"]
+source = "estimated"
+note = "opendrone-5f's 3000 N/m scaled by the mass; not measured"
+[provenance."ground.damping_nspm"]
+source = "estimated"
+note = "chosen with the stiffness so the contact's damping ratio is opendrone-5f's 0.45; not measured"
+[provenance."ground.friction_coeff"]
+source = "estimated"
+note = "opendrone-5f's value"

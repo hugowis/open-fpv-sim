@@ -60,7 +60,7 @@ fn character(cfg: &QuadConfig) -> Character {
 }
 
 /// (quad, thrust-to-weight, hover throttle) with a full pack, sag included: what each quad file's header says.
-const EXPECTED: [(&str, f64, f64); 1] = [("opendrone-3t-toothpick", 4.2, 0.44)];
+const EXPECTED: [(&str, f64, f64); 2] = [("opendrone-3t-toothpick", 4.2, 0.44), ("opendrone-5r-race", 14.8, 0.19)];
 
 #[test]
 fn each_new_quad_has_the_character_its_parts_explain() {

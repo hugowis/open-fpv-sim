@@ -64,6 +64,21 @@ Every other parameter equals `opendrone-5f`'s. The mount's natural frequency mus
 | `ground.damping_nspm` | 6.5 | estimated | chosen with the stiffness so the contact's damping ratio is opendrone-5f's 0.45; not measured |
 | `ground.friction_coeff` | 0.6 | estimated | opendrone-5f's value |
 
+## `frames/opendrone-5r.toml` — OpenDrone 5R frame
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `frame.mass_kg` | 0.54 | estimated | all-up weight of a 6S 1300 mAh race quad (frame 105 g, four 2306 motors 128 g, stack 45 g, camera and VTX 25 g, props 16 g, pack 180 g, wiring and straps 41 g); a sum of class-typical masses, not weighed |
+| `frame.inertia_kgm2` | [0.002, 0.002, 0.0036] | estimated | 0.3 * mass * (arm radius)^2 about x and y, and 1.8 times that about z: the opendrone-5f relation scaled to this size; not measured |
+| `frame.cda_m2` | [0.008, 0.008, 0.018] | estimated | opendrone-5f's drag areas scaled by the square of the size; not measured |
+| `frame.angular_damping_nms` | 6e-05 | estimated | opendrone-5f's value scaled by the inertia; not measured |
+| `frame.motor_positions_frd_m` | [-0.078, 0.078, 0.0], [0.078, 0.078, 0.0], [-0.078, -0.078, 0.0], [0.078, -0.078, 0.0] | estimated | 220 mm wheelbase: 0.078 m = 220 mm / 2 / sqrt(2); not measured |
+| `frame.motor_spin` | [1, -1, -1, 1] | datasheet | Betaflight Quad-X order (https://betaflight.com/docs/development/Mixer) |
+| `frame.contact_points_frd_m` | the four motor positions at z = 0.03 | estimated | legs under the arms, 3 cm below the arms |
+| `ground.stiffness_npm` | 2500.0 | estimated | opendrone-5f's 3000 N/m scaled by the mass; not measured |
+| `ground.damping_nspm` | 33.0 | estimated | chosen with the stiffness so the contact's damping ratio is opendrone-5f's 0.45; not measured |
+| `ground.friction_coeff` | 0.6 | estimated | opendrone-5f's value |
+
 ## `motors/opendrone-openmotor-2207.toml` — OpenMotor 2207 1950KV
 
 | Parameter | Value | Source | Note |
@@ -88,6 +103,18 @@ Every other parameter equals `opendrone-5f`'s. The mount's natural frequency mus
 | `motor.thermal.heat_capacity_jpk` | 5.0 | estimated | lumped RC estimate from the motor's copper and steel mass; not measured |
 | `motor.thermal.resistance_kpw` | 3.0 | estimated | lumped RC estimate, with prop wash over the bell; not measured |
 
+## `motors/opendrone-motor-2306.toml` — OpenDrone 2306 2450KV
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `motor.kv_rpm_per_v` | 2450.0 | estimated | a 2306 motor for a 5-inch 6S race quad; a class-typical value, not a datasheet figure |
+| `motor.resistance_ohm` | 0.06 | estimated | a 2306 motor for a 5-inch 6S race quad; a class-typical phase resistance, not measured |
+| `motor.no_load_current_a` | 1.5 | estimated | a 2306 motor for a 5-inch 6S race quad; a class-typical value, not measured |
+| `motor.rotor_inertia_kgm2` | 6.5e-06 | estimated | scaled from opendrone-openmotor-2207's by the bell's size; not measured |
+| `motor.pole_pairs` | 7 | estimated | 14-pole motor (12N14P); matches Betaflight's motor_poles default of 14 |
+| `motor.thermal.heat_capacity_jpk` | 17.0 | estimated | lumped RC estimate from the motor's copper and steel mass; not measured |
+| `motor.thermal.resistance_kpw` | 1.4 | estimated | lumped RC estimate, with prop wash over the bell; not measured |
+
 ## `props/opendrone-5in-prop.toml` — OpenDrone 5in prop
 
 | Parameter | Value | Source | Note |
@@ -107,6 +134,17 @@ Every other parameter equals `opendrone-5f`'s. The mount's natural frequency mus
 | `prop.inertia_kgm2` | 7e-07 | estimated | a 1.5 g two-blade prop as a rod of its length, 1/12 * m * L^2; not measured |
 | `prop.ct_table` | C_T = 0.09, flat over 0–60000 rpm | estimated | flat-table estimate, a little under opendrone-5in-prop's 0.11 for the lower Reynolds number of a small blade; not measured |
 | `prop.cp_table` | C_P = 0.05, flat over 0–60000 rpm | estimated | flat-table estimate, a little above opendrone-5in-prop's 0.045 (small blades are less efficient); not measured |
+| `prop.imbalance_kgm` | 0.0 | estimated | no measurement; 0 until a vibration measurement exists |
+| `prop.windmill_j0` | 1.0 | estimated | zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured |
+
+## `props/opendrone-5in-race-prop.toml` — OpenDrone 5in race prop
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `prop.diameter_m` | 0.127 | estimated | 5 inch |
+| `prop.inertia_kgm2` | 5.5e-06 | estimated | a 4.5 g two-blade race prop, 1/12 * m * L^2 with a hub allowance; not measured |
+| `prop.ct_table` | C_T = 0.125, flat over 0–60000 rpm | estimated | flat-table estimate: a steeper pitch than opendrone-5in-prop's 0.11 gives more thrust per rev^2; not measured |
+| `prop.cp_table` | C_P = 0.055, flat over 0–60000 rpm | estimated | flat-table estimate: the steeper pitch also takes more power per rev^3 than opendrone-5in-prop's 0.045; not measured |
 | `prop.imbalance_kgm` | 0.0 | estimated | no measurement; 0 until a vibration measurement exists |
 | `prop.windmill_j0` | 1.0 | estimated | zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured |
 
@@ -130,6 +168,17 @@ Every other parameter equals `opendrone-5f`'s. The mount's natural frequency mus
 | `esc.thermal.heat_capacity_jpk` | 2.0 | estimated | lumped RC estimate (a couple of grams of board and FETs); not measured |
 | `esc.thermal.resistance_kpw` | 10.0 | estimated | lumped RC estimate; not measured |
 | `esc.thermal.r_on_ohm` | 0.008 | estimated | a pair of FETs per phase, order of magnitude; not measured |
+| `esc.thermal.switching_loss_coeff` | 0.0024 | estimated | 0.5 * (rise + fall time 100 ns) * 48 kHz switching, per volt and amp, as opendrone-4in1-esc; not measured |
+
+## `escs/opendrone-4in1-esc-60a.toml` — OpenDrone 4-in-1 ESC (60 A)
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `esc.response_tau_s` | 0.002 | estimated | opendrone-4in1-esc's value |
+| `esc.current_limit_a` | 60.0 | estimated | a 60 A-per-motor race stack, class-typical; the 6S race quad draws about 50 A per motor at full throttle |
+| `esc.thermal.heat_capacity_jpk` | 4.0 | estimated | lumped RC estimate (four grams of board and FETs); not measured |
+| `esc.thermal.resistance_kpw` | 6.0 | estimated | lumped RC estimate; not measured |
+| `esc.thermal.r_on_ohm` | 0.003 | estimated | a pair of FETs per phase, order of magnitude; not measured |
 | `esc.thermal.switching_loss_coeff` | 0.0024 | estimated | 0.5 * (rise + fall time 100 ns) * 48 kHz switching, per volt and amp, as opendrone-4in1-esc; not measured |
 
 ## `batteries/opendrone-6s-1300.toml` — OpenDrone 6S 1300 mAh
