@@ -1,0 +1,10 @@
+# The barometer every shipped quad flew with before the barometer became a part: M1's noise estimate.
+schema_version = 1
+name = "OpenDrone barometer (generic)"
+
+[baro]
+noise_std_pa = 2.0
+
+[provenance."baro.noise_std_pa"]
+source = "estimated"
+note = "M1 estimate of a flight-controller MEMS barometer's pressure noise per sample (about 0.17 m of height); not measured"

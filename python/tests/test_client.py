@@ -27,7 +27,7 @@ def test_open_loop_rest_then_climb(sim):
 def test_a_loaded_quad_reports_where_its_numbers_came_from(sim):
     assert sim.parts == []
     sim.load(QUAD, open_loop_fc=True)
-    assert [p.kind for p in sim.parts] == ["frame", "motor", "prop", "esc", "battery", "vtx"]
+    assert [p.kind for p in sim.parts] == ["frame", "motor", "prop", "esc", "battery", "imu", "baro", "vtx"]
     assert all(p.provenance for p in sim.parts), "every part parameter has provenance"
     motor = sim.parts[1]
     assert motor.provenance["motor.kv_rpm_per_v"].source == "estimated"

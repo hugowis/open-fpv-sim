@@ -1,0 +1,22 @@
+# The IMU every shipped quad flew with before the IMU became a part: M1's noise estimates, zero bias.
+schema_version = 1
+name = "OpenDrone IMU (generic 6-axis)"
+
+[imu]
+gyro_noise_std_radps = 0.002
+gyro_bias_radps = [0.0, 0.0, 0.0]
+accel_noise_std_mps2 = 0.05
+accel_bias_mps2 = [0.0, 0.0, 0.0]
+
+[provenance."imu.gyro_noise_std_radps"]
+source = "estimated"
+note = "M1 estimate of a flight-controller MEMS gyro's white noise per base-rate sample (0.11 dps); not measured"
+[provenance."imu.gyro_bias_radps"]
+source = "estimated"
+note = "zero: a bias belongs to one unit, not to the part; use the fault.imu.* seams to bias a run"
+[provenance."imu.accel_noise_std_mps2"]
+source = "estimated"
+note = "M1 estimate of a flight-controller MEMS accelerometer's white noise per base-rate sample; not measured"
+[provenance."imu.accel_bias_mps2"]
+source = "estimated"
+note = "zero: a bias belongs to one unit, not to the part; use the fault.imu.* seams to bias a run"

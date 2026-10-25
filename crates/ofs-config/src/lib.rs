@@ -10,12 +10,13 @@ pub use world::{AntennaKind, Polarization, WorldConfig};
 
 pub mod part;
 
-/// 5: quads assemble from library parts (M4a) — frame/motor/prop/esc/battery/vtx hardware moves to
+/// 6: `imu = "id"` and `baro = "id"` reference library parts (#42); a schema-5 file's inline `[imu]`/`[baro]` tables
+/// still load. 5: quads assemble from library parts (M4a) — frame/motor/prop/esc/battery/vtx hardware moves to
 /// `library/`, every part parameter carries provenance. 4: the real radio link and [collision] (M3c).
 /// 3: [esc_telemetry]/[osd]/[vtx] (M3a). 2: the required [radio] section (M2).
-pub const SCHEMA_VERSION: u32 = 5;
-/// Oldest schema this build still reads: only 5 (the hardware sections live in library/ part files, so older
-/// files cannot be mapped onto it).
+pub const SCHEMA_VERSION: u32 = 6;
+/// Oldest schema this build still reads: 5 (the hardware sections live in library/ part files, so older files
+/// cannot be mapped onto it).
 pub const MIN_SCHEMA_VERSION: u32 = 5;
 
 /// The resolved quad: the aircraft's own sections merged with the library parts it referenced.
@@ -59,8 +60,8 @@ struct QuadFile {
     props: Vec<String>,
     escs: Vec<String>,
     battery: BatteryWiring,
-    imu: ImuSection,
-    baro: BaroSection,
+    imu: PartOrInline<ImuSection>,
+    baro: PartOrInline<BaroSection>,
     home: HomeSection,
     initial: InitialSection,
     fc: FcSection,
@@ -71,6 +72,14 @@ struct QuadFile {
     osd: Option<OsdSection>,
     #[serde(default)]
     vtx: Option<VtxWiring>,
+}
+
+/// A sensor in a quad file: a library part id (schema 6) or the inline table schema 5 wrote.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum PartOrInline<T> {
+    Part(String),
+    Inline(T),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +121,10 @@ pub struct PartRefs {
     pub props: Vec<String>,
     pub escs: Vec<String>,
     pub battery: String,
+    /// `None` for a schema-5 quad that writes `[imu]` inline.
+    pub imu: Option<String>,
+    /// `None` for a schema-5 quad that writes `[baro]` inline.
+    pub baro: Option<String>,
     pub vtx: Option<String>,
 }
 
@@ -727,7 +740,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
         Some(4) => {
-            let message = "unsupported schema_version 4 (this build reads schema 5); schema 5 moves the [frame], \
+            let message = "unsupported schema_version 4 (this build reads schemas 5 and 6); schema 5 moves the [frame], \
                            [ground], [motor], [prop], [esc], [battery] and [vtx] hardware sections into library/ part \
                            files with per-parameter provenance and the quad references them by id — see the \
                            \"Component library\" section of README.md".to_string();
@@ -735,7 +748,7 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         }
         Some(v @ ..=3) => {
             let message = format!(
-                "unsupported schema_version {v} (this build reads schema {SCHEMA_VERSION}); schema 4 removes radio.rssi_dbm, radio.snr_db, \
+                "unsupported schema_version {v} (this build reads schemas {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 4 removes radio.rssi_dbm, radio.snr_db, \
                  radio.loss_good, radio.loss_bad, radio.p_good_to_bad and radio.p_bad_to_good, and adds radio.tx_power_mw, the \
                  [[radio.antennas]] list and the optional [collision] section, see quads/opendrone-5f-freestyle.toml"
             );
@@ -817,6 +830,14 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         }
     }
     let battery_path = resolve("batteries", &file.battery.part, "battery.part", &mut problems);
+    let imu_path = match &file.imu {
+        PartOrInline::Part(id) => resolve("imus", id, "imu", &mut problems),
+        PartOrInline::Inline(_) => None,
+    };
+    let baro_path = match &file.baro {
+        PartOrInline::Part(id) => resolve("barometers", id, "baro", &mut problems),
+        PartOrInline::Inline(_) => None,
+    };
     let mut vtx_path = None;
     if let Some(wiring) = &file.vtx {
         vtx_path = resolve("vtx", &wiring.part, "vtx.part", &mut problems);
@@ -856,6 +877,24 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         capacity_fade_per_cycle: battery_part.battery.capacity_fade_per_cycle,
         resistance_growth_per_cycle: battery_part.battery.resistance_growth_per_cycle,
     };
+    let imu = match (imu_path, file.imu) {
+        (Some(path), PartOrInline::Part(id)) => {
+            let p = part::load_imu(&path)?;
+            part_provenance.push(provenance("imu", &id, &p.name, &p.provenance));
+            (p.imu, Some(id))
+        }
+        (_, PartOrInline::Inline(section)) => (section, None),
+        (None, PartOrInline::Part(_)) => unreachable!("the imu id resolved"),
+    };
+    let baro = match (baro_path, file.baro) {
+        (Some(path), PartOrInline::Part(id)) => {
+            let p = part::load_baro(&path)?;
+            part_provenance.push(provenance("baro", &id, &p.name, &p.provenance));
+            (p.baro, Some(id))
+        }
+        (_, PartOrInline::Inline(section)) => (section, None),
+        (None, PartOrInline::Part(_)) => unreachable!("the baro id resolved"),
+    };
     let vtx = match (vtx_path, &file.vtx) {
         (Some(vtx_path), Some(wiring)) => {
             let vtx_part = part::load_vtx(&vtx_path)?;
@@ -888,8 +927,8 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
         props,
         escs,
         battery,
-        imu: file.imu,
-        baro: file.baro,
+        imu: imu.0,
+        baro: baro.0,
         home: file.home,
         initial: file.initial,
         fc: file.fc,
@@ -903,6 +942,8 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
             props: file.props,
             escs: file.escs,
             battery: file.battery.part,
+            imu: imu.1,
+            baro: baro.1,
             vtx: file.vtx.as_ref().map(|v| v.part.clone()),
         },
         part_provenance,
@@ -1221,6 +1262,11 @@ impl QuadConfig {
                 c.check(spheres.iter().flatten().all(|v| v.is_finite()), "collision.spheres_frd_m", "values must be finite");
                 c.check(spheres.iter().all(|s| s[3] > 0.0), "collision.spheres_frd_m", "radii must be > 0");
             }
+        }
+        for (field, id) in [("imu", &self.parts.imu), ("baro", &self.parts.baro)] {
+            // Schema 5 wrote inline tables and schema 6 references parts; a file must not mix its schema and its form.
+            c.check(id.is_none() || self.schema_version >= 6, field, "a part reference needs schema_version = 6");
+            c.check(id.is_some() || self.schema_version < 6, field, "schema 6 references a library part by id (`imu = \"id\"`), not an inline table");
         }
         if self.schema_version < 3 && (self.esc_telemetry.is_some() || self.osd.is_some() || self.vtx.is_some()) {
             c.check(false, "schema_version", "the [esc_telemetry], [osd] and [vtx] sections need schema_version = 3");

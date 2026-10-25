@@ -57,7 +57,7 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
 
 ## OSD, VTX and battery telemetry (M3a)
 
-Quad files are schema 5: the hardware lives in `library/` part files (see the "Component library" section of
+Quad files are schema 6: the hardware lives in `library/` part files (see the "Component library" section of
 README.md) and the quad keeps its own wiring — including three video sections (all optional; see
 `quads/opendrone-5f-freestyle.toml`):
 - `[esc_telemetry]` — UART 3. The simulated battery is encoded as KISS ESC-telemetry frames (the diff sets `battery_meter = ESC` and `current_meter = ESC`), so Betaflight's battery meter, OSD elements and warnings run on the simulated battery.
@@ -121,8 +121,8 @@ Manual check (with the game, real Betaflight optional):
 
 ## World collision and the ExpressLRS link (M3c)
 
-Quad files are **schema 5**: since M4a the hardware lives in `library/` part files that the quad references by id
-(see the "Component library" section of README.md), and a schema-4 file is refused at load with a message naming
+Quad files are **schema 6**: since M4a the hardware lives in `library/` part files that the quad references by id
+(see the "Component library" section of README.md; the IMU and barometer joined at schema 6, and schema-5 inline `[imu]`/`[baro]` tables still load), and a schema-4 file is refused at load with a message naming
 the move. Schema 4's own change survives: the fixed link figures (`radio.rssi_dbm`, `radio.snr_db` and the loss
 parameters `loss_good`, `loss_bad`, `p_good_to_bad`, `p_bad_to_good`) are gone — RSSI, SNR and packet loss come
 from the world's geometry now — and `radio.tx_power_mw`, the `[[radio.antennas]]` list and the collision data

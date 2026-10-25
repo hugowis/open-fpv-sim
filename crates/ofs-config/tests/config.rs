@@ -53,7 +53,7 @@ fn write_part(dir: &Path, kind: &str, id: &str, text: &str) {
 #[test]
 fn reference_quad_loads_and_validates() {
     let cfg = load(Path::new(QUAD)).unwrap();
-    assert_eq!(cfg.schema_version, 5);
+    assert_eq!(cfg.schema_version, 6);
     assert_eq!(cfg.radio.kind, RadioKind::Elrs);
     assert_eq!((cfg.radio.packet_rate_hz, cfg.radio.uart), (500, 2));
     assert_eq!(cfg.radio.telemetry_slot_divisor, 4);
@@ -78,6 +78,8 @@ fn a_loaded_quad_keeps_each_parts_provenance_once_per_referenced_id() {
             ("prop", "opendrone-5in-prop"),
             ("esc", "opendrone-4in1-esc"),
             ("battery", "opendrone-6s-1300"),
+            ("imu", "opendrone-imu"),
+            ("baro", "opendrone-baro"),
             ("vtx", "opendrone-smartaudio-1w"),
         ],
         "the single motor, prop and esc ids are listed once, not once per position"
@@ -85,6 +87,64 @@ fn a_loaded_quad_keeps_each_parts_provenance_once_per_referenced_id() {
     assert!(cfg.part_provenance.iter().all(|p| !p.name.is_empty() && !p.parameters.is_empty()));
     let motor = &cfg.part_provenance[1];
     assert_eq!(motor.parameters["motor.kv_rpm_per_v"].source.as_str(), "estimated");
+}
+
+#[test]
+fn the_shipped_imu_and_baro_parts_are_the_numbers_the_quads_carried() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    assert_eq!((cfg.parts.imu.as_deref(), cfg.parts.baro.as_deref()), (Some("opendrone-imu"), Some("opendrone-baro")));
+    assert_eq!((cfg.imu.gyro_noise_std_radps, cfg.imu.accel_noise_std_mps2), (0.002, 0.05));
+    assert_eq!((cfg.imu.gyro_bias_radps, cfg.imu.accel_bias_mps2), ([0.0; 3], [0.0; 3]));
+    assert_eq!(cfg.baro.noise_std_pa, 2.0);
+    let imu = cfg.part_provenance.iter().find(|p| p.kind == "imu").unwrap();
+    assert_eq!(imu.parameters["imu.gyro_noise_std_radps"].source.as_str(), "estimated");
+}
+
+#[test]
+fn a_quad_can_reference_the_datasheet_imu() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("imu = \"opendrone-imu\"", "imu = \"tdk-icm-42688p\"");
+    let cfg = load(&write_quad(dir.path(), &text)).unwrap();
+    assert_eq!(cfg.parts.imu.as_deref(), Some("tdk-icm-42688p"));
+    assert_eq!(cfg.imu.gyro_noise_std_radps, 0.00309);
+}
+
+#[test]
+fn a_schema_5_quad_with_inline_imu_and_baro_tables_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = quad_text()
+        .replace("schema_version = 6", "schema_version = 5")
+        .replace("imu = \"opendrone-imu\"\nbaro = \"opendrone-baro\"\n", "")
+        .replace(
+            "[sim]",
+            "[imu]\ngyro_noise_std_radps = 0.003\ngyro_bias_radps = [0.0, 0.0, 0.0]\naccel_noise_std_mps2 = 0.06\n\
+             accel_bias_mps2 = [0.0, 0.0, 0.0]\n\n[baro]\nnoise_std_pa = 3.0\n\n[sim]",
+        );
+    let cfg = load(&write_quad(dir.path(), &old)).unwrap();
+    assert_eq!((cfg.imu.gyro_noise_std_radps, cfg.baro.noise_std_pa), (0.003, 3.0));
+    assert_eq!((cfg.parts.imu, cfg.parts.baro), (None, None));
+    assert!(cfg.part_provenance.iter().all(|p| p.kind != "imu" && p.kind != "baro"), "an inline table has no provenance");
+}
+
+#[test]
+fn a_part_reference_needs_schema_6_and_an_inline_table_is_refused_at_6() {
+    let dir = tempfile::tempdir().unwrap();
+    let at_5 = quad_text().replace("schema_version = 6", "schema_version = 5");
+    let err = load(&write_quad(dir.path(), &at_5)).unwrap_err().to_string();
+    assert!(err.contains("imu: a part reference needs schema_version = 6") && err.contains("baro:"), "{err}");
+    let inline_at_6 = quad_text()
+        .replace("baro = \"opendrone-baro\"\n", "")
+        .replace("[sim]", "[baro]\nnoise_std_pa = 3.0\n\n[sim]");
+    let err = load(&write_quad(dir.path(), &inline_at_6)).unwrap_err().to_string();
+    assert!(err.contains("baro: schema 6 references a library part"), "{err}");
+}
+
+#[test]
+fn an_unknown_imu_id_lists_what_the_directory_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = quad_text().replace("imu = \"opendrone-imu\"", "imu = \"no-such-imu\"");
+    let err = load(&write_quad(dir.path(), &text)).unwrap_err().to_string();
+    assert!(err.contains("no-such-imu") && err.contains("opendrone-imu") && err.contains("tdk-icm-42688p"), "{err}");
 }
 
 #[test]
@@ -100,7 +160,7 @@ fn the_bounding_radius_is_the_farthest_collision_sphere_edge() {
 fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
     let dir = tempfile::tempdir().unwrap();
     let old = quad_text()
-        .replace("schema_version = 5", "schema_version = 4")
+        .replace("schema_version = 6", "schema_version = 4")
         .replace("frame = \"opendrone-5f\"", "[frame]\nmass_kg = 0.65");
     let err = load(&write_quad(dir.path(), &old)).unwrap_err();
     let message = err.to_string();
@@ -464,11 +524,11 @@ fn unknown_field_is_a_parse_error_naming_it() {
 #[test]
 fn unsupported_schema_version_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 5", "schema_version = 4");
+    let text = quad_text().replace("schema_version = 6", "schema_version = 4");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("schema_version 4"), "{err}");
     assert!(err.to_string().contains("library"), "{err}");
-    let text = quad_text().replace("schema_version = 5", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 6", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err();
     assert!(err.to_string().contains("schema_version 1"), "{err}");
     assert!(err.to_string().contains("radio.rssi_dbm") && err.to_string().contains("[collision]"), "{err}");
@@ -535,7 +595,7 @@ fn a_quad_without_a_radio_is_a_parse_error_naming_it() {
 fn the_reference_quad_has_the_video_sections() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = load(&write_quad(dir.path(), &quad_text())).unwrap();
-    assert_eq!(cfg.schema_version, 5);
+    assert_eq!(cfg.schema_version, 6);
     let esc = cfg.esc_telemetry.as_ref().expect("[esc_telemetry]");
     assert_eq!((esc.uart, esc.rate_hz), (3, 100));
     let osd = cfg.osd.as_ref().expect("[osd]");
@@ -619,13 +679,11 @@ fn invalid_fields(text: &str) -> Vec<String> {
 #[test]
 fn non_finite_vectors_are_rejected() {
     let text = quad_text()
-        .replace("gyro_bias_radps = [0.0, 0.0, 0.0]", "gyro_bias_radps = [0.0, nan, 0.0]")
-        .replace("accel_bias_mps2 = [0.0, 0.0, 0.0]", "accel_bias_mps2 = [-inf, 0.0, 0.0]")
         .replace("position_ned_m = [0.0, 0.0, -0.03]", "position_ned_m = [0.0, nan, -0.03]")
         .replace("yaw_deg = 0.0", "yaw_deg = inf")
         .replace("alt_m = 30.0", "alt_m = nan");
     let fields = invalid_fields(&text);
-    for field in ["imu.gyro_bias_radps", "imu.accel_bias_mps2", "initial.position_ned_m", "initial.yaw_deg", "home.alt_m"] {
+    for field in ["initial.position_ned_m", "initial.yaw_deg", "home.alt_m"] {
         assert!(fields.iter().any(|f| f == field), "{field} missing from {fields:?}");
     }
 }
@@ -638,11 +696,15 @@ fn non_finite_part_vectors_are_rejected() {
         .replace("motor_positions_frd_m = [[-0.08, 0.08, 0.0]", "motor_positions_frd_m = [[nan, 0.08, 0.0]")
         .replace("contact_points_frd_m = [[-0.08, 0.08, 0.03]", "contact_points_frd_m = [[-0.08, inf, 0.03]");
     write_part(dir.path(), "frames", "opendrone-5f", &part);
+    let imu = part_text("imus", "opendrone-imu")
+        .replace("gyro_bias_radps = [0.0, 0.0, 0.0]", "gyro_bias_radps = [0.0, nan, 0.0]")
+        .replace("accel_bias_mps2 = [0.0, 0.0, 0.0]", "accel_bias_mps2 = [-inf, 0.0, 0.0]");
+    write_part(dir.path(), "imus", "opendrone-imu", &imu);
     let fields: Vec<String> = match load(&path) {
         Err(ConfigError::Invalid { problems, .. }) => problems.into_iter().map(|p| p.field).collect(),
         other => panic!("expected Invalid, got {other:?}"),
     };
-    for field in ["frame.motor_positions_frd_m", "frame.contact_points_frd_m"] {
+    for field in ["frame.motor_positions_frd_m", "frame.contact_points_frd_m", "imu.gyro_bias_radps", "imu.accel_bias_mps2"] {
         assert!(fields.iter().any(|f| f == field), "{field} missing from {fields:?}");
     }
 }
@@ -700,7 +762,7 @@ fn an_esc_sensor_battery_needs_the_forced_cell_count() {
 #[test]
 fn the_schema_1_hint_reads_as_one_sentence() {
     let dir = tempfile::tempdir().unwrap();
-    let text = quad_text().replace("schema_version = 5", "schema_version = 1");
+    let text = quad_text().replace("schema_version = 6", "schema_version = 1");
     let err = load(&write_quad(dir.path(), &text)).unwrap_err().to_string();
     assert!(!err.contains("  "), "run-on spaces in: {err}");
 }
@@ -717,7 +779,7 @@ fn shipped_with(edit: impl FnOnce(&mut String)) -> Result<ofs_config::QuadConfig
 
 #[test]
 fn a_schema_3_quad_file_is_refused_with_the_field_changes() {
-    let err = shipped_with(|t| *t = t.replace("schema_version = 5", "schema_version = 3")).unwrap_err();
+    let err = shipped_with(|t| *t = t.replace("schema_version = 6", "schema_version = 3")).unwrap_err();
     let message = err.to_string();
     assert!(message.contains("schema_version 3"), "{message}");
     assert!(message.contains("radio.rssi_dbm"), "{message}");

@@ -1,7 +1,8 @@
 # The component library's provenance
 
-Every value shipped in `library/` is an M1 estimate, recorded in the open. Since M4a a quad file (schema 5)
-references parts instead of carrying hardware — one TOML per part under `library/` (see the "Component
+Every value shipped in `library/` is an M1 estimate, recorded in the open, except the datasheet noise densities of
+the ICM-42688-P. Since M4a a quad file references parts instead of carrying hardware (the IMU and the barometer
+joined in schema 6) — one TOML per part under `library/` (see the "Component
 library" section of README.md) — and every parameter of a part file must carry a `[provenance]` entry: a
 `source` (`datasheet`, `measured` or `estimated`), an optional `link` and an optional `note`. The loader
 refuses a part file whose data skips an entry, and one whose provenance names a parameter that does not
@@ -108,6 +109,43 @@ uses it (a quad opts in with `part = "opendrone-6s-1300-aged"` in its `[battery]
 | `battery.cycles` | 150 | estimated | a worn pack; not measured |
 | `battery.capacity_fade_per_cycle` | 0.001 | estimated | 0.1 % of the capacity per cycle, an order of magnitude; not measured |
 | `battery.resistance_growth_per_cycle` | 0.004 | estimated | 0.4 % of R0 per cycle, an order of magnitude; not measured |
+
+## `imus/opendrone-imu.toml` — OpenDrone IMU (generic 6-axis)
+
+The numbers every shipped quad carried inline before the IMU became a part (#42), so a quad that references it flies
+exactly as before. A bias belongs to one unit rather than to the part number, so both biases are zero; the `fault.imu.*`
+seams bias a run.
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `imu.gyro_noise_std_radps` | 0.002 | estimated | M1 estimate of the white noise per base-rate sample (0.11 dps); not measured |
+| `imu.gyro_bias_radps` | [0.0, 0.0, 0.0] | estimated | zero, see above |
+| `imu.accel_noise_std_mps2` | 0.05 | estimated | M1 estimate of the white noise per base-rate sample; not measured |
+| `imu.accel_bias_mps2` | [0.0, 0.0, 0.0] | estimated | zero, see above |
+
+## `imus/tdk-icm-42688p.toml` — TDK InvenSense ICM-42688-P
+
+The IMU of many current flight controllers, and the library's one datasheet-sourced sensor. The simulator draws white
+noise once per base-rate sample (8 kHz), so a noise density becomes a per-sample deviation by the square root of the
+Nyquist bandwidth, 4000 Hz (63.25 √Hz); that bandwidth is the simulator's assumption, not the chip's. Source: TDK
+InvenSense product page (https://invensense.tdk.com/products/icm-42688-p/), datasheet DS-000347 v1.9, low-noise mode.
+Full-scale ranges (gyro ±15.6 to ±2000 dps, accelerometer ±2 to ±16 g) are not parameters: the model does not clip.
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `imu.gyro_noise_std_radps` | 0.00309 | datasheet | 2.8 mdps/√Hz = 4.887e-5 rad/s/√Hz, times √4000 Hz |
+| `imu.gyro_bias_radps` | [0.0, 0.0, 0.0] | estimated | the datasheet gives a zero-rate-output tolerance, not a typical bias |
+| `imu.accel_noise_std_mps2` | 0.0434 | datasheet | 70 µg/√Hz (TDK lists 65 on X/Y and 70 on Z; the larger is used) = 6.865e-4 m/s²/√Hz, times √4000 Hz |
+| `imu.accel_bias_mps2` | [0.0, 0.0, 0.0] | estimated | a zero-g offset belongs to one unit |
+
+## `barometers/opendrone-baro.toml` — OpenDrone barometer (generic)
+
+The number every shipped quad carried inline. No datasheet barometer part ships yet: the noise of real parts depends on
+the oversampling mode and the bandwidth, and adding one is a data-only change to a new file under `barometers/`.
+
+| Parameter | Value | Source | Note |
+|---|---|---|---|
+| `baro.noise_std_pa` | 2.0 | estimated | M1 estimate of the pressure noise per sample (about 0.17 m of height); not measured |
 
 ## `vtx/opendrone-smartaudio-1w.toml` — OpenDrone SmartAudio VTX (1 W)
 
