@@ -3,6 +3,31 @@
 All notable changes, by release of the Python package `open-fpv-sim` (the simulator is built from this
 repository). The format follows Keep a Changelog.
 
+## Unreleased
+
+No protocol, server or Python change. **Rust and Godot API:** `Client::dvr_start`, `dvr_write_frame` and `dvr_stop`,
+and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop`, now take a feed name (`"goggles"` or
+`"clean"`); `OfsClient.dvr_export(path, mode)` and `dvr_export_poll()` are new.
+
+### A DVR that survives a resize (#34)
+#### Changed
+- **A window resize or an aspect switch no longer stops the recording.** Frames are scaled to fit inside the size the
+  recording started with and centred on black bars. Entering the chase view, a reload and a lost session still stop it.
+
+### A clean-feed DVR (#35)
+#### Added
+- **`dvr_feed` (`goggles`, `clean`, `both`)**, a button on the F2 screen, `OFS_DVR_FEED` and `--dvr-feed=`. `clean`
+  records the camera image without the OSD and the video-link effects into `REC_<ts>_clean.avi`; `both` writes it
+  beside the goggles file `REC_<ts>.avi`. Both files write on every field, so their frame counts are equal. An invalid
+  value means `goggles`.
+
+### Image-sequence and MP4 export (#37)
+#### Added
+- **`dvr_export` (`none`, `frames`, `mp4`, `both`)**, a button on the F2 screen, `OFS_DVR_EXPORT` and `--dvr-export=`.
+  After a recording with frames, `frames` copies the AVI's JPEGs unchanged to `<name>_frames/frame_000001.jpg...` and
+  `mp4` runs the `ffmpeg` on `PATH` (it needs libx264; without ffmpeg a toast says so and the AVI is kept). Nothing is
+  overwritten, and the work runs on a worker thread. An invalid value means `none`.
+
 ## 0.4.0 — 2026-10-24
 
 **Upgrade:** protocol 14 (rebuild/reinstall the client and server together); a protocol-13 Python client or server

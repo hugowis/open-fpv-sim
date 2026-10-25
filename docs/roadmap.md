@@ -49,7 +49,10 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
   ray is not obstructed separately; one body-shadow lobe of up to 8 dB.
 - Every video constant is an estimate; the receiver's thresholds are world data (`[video]`) but none is measured.
-- The DVR stops when the picture's size changes mid-recording, and it records what the pilot sees (no clean feed).
+- DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
+  recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs
+  a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
+  then). H.264 export needs an ffmpeg with libx264 on `PATH`. No audio.
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
@@ -139,7 +142,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 ### Video and OSD
 - OSD font pages 2–3 (warnings, criticals) and the full HD/digital OSD element set.
 - Digital video systems (parent spec §2).
-- A DVR that survives a resize; a clean-feed DVR; audio; image-sequence and ffmpeg export.
+- DVR audio (#36).
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.
