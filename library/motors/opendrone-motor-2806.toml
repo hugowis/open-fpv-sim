@@ -1,0 +1,36 @@
+# OpenDrone 2806.5 1300KV motor (7-inch 6S long-range class) - class-typical estimates, no datasheet.
+schema_version = 1
+name = "OpenDrone 2806.5 1300KV"
+
+[motor]
+kv_rpm_per_v = 1300.0
+resistance_ohm = 0.085
+no_load_current_a = 0.8
+rotor_inertia_kgm2 = 1.1e-05
+pole_pairs = 7
+
+[motor.thermal]
+heat_capacity_jpk = 25.0
+resistance_kpw = 1.2
+
+[provenance."motor.kv_rpm_per_v"]
+source = "estimated"
+note = "a 2806.5 motor for a 7-inch 6S long-range quad; a class-typical value, not a datasheet figure"
+[provenance."motor.resistance_ohm"]
+source = "estimated"
+note = "a 2806.5 motor for a 7-inch 6S long-range quad; a class-typical phase resistance, not measured"
+[provenance."motor.no_load_current_a"]
+source = "estimated"
+note = "a 2806.5 motor for a 7-inch 6S long-range quad; a class-typical value, not measured"
+[provenance."motor.rotor_inertia_kgm2"]
+source = "estimated"
+note = "scaled from opendrone-openmotor-2207's by the bell's size; not measured"
+[provenance."motor.pole_pairs"]
+source = "estimated"
+note = "14-pole motor (12N14P); matches Betaflight's motor_poles default of 14"
+[provenance."motor.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate from the motor's copper and steel mass; not measured"
+[provenance."motor.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate, with prop wash over the bell; not measured"

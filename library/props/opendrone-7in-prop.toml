@@ -1,0 +1,30 @@
+# OpenDrone 7" long-range propeller (a low-pitch, 7 x 4 class blade) - estimates. Units are in the key suffixes (SI), tables are indexed by rpm.
+schema_version = 1
+name = "OpenDrone 7in prop"
+
+[prop]
+diameter_m = 0.178
+inertia_kgm2 = 2e-05
+ct_table = [[0.0, 0.12], [60000.0, 0.12]]
+cp_table = [[0.0, 0.05], [60000.0, 0.05]]
+imbalance_kgm = 0.0
+windmill_j0 = 1.0
+
+[provenance."prop.diameter_m"]
+source = "estimated"
+note = "7 inch (177.8 mm)"
+[provenance."prop.inertia_kgm2"]
+source = "estimated"
+note = "a 9 g two-blade prop as a rod of its length, 1/12 * m * L^2; not measured"
+[provenance."prop.ct_table"]
+source = "estimated"
+note = "flat-table estimate: a large, low-pitch blade turns well at low rpm; slightly above opendrone-5in-prop's 0.11; not measured"
+[provenance."prop.cp_table"]
+source = "estimated"
+note = "flat-table estimate: a little above opendrone-5in-prop's 0.045 for the longer blade; not measured"
+[provenance."prop.imbalance_kgm"]
+source = "estimated"
+note = "no measurement; 0 until a vibration measurement exists"
+[provenance."prop.windmill_j0"]
+source = "estimated"
+note = "zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured"

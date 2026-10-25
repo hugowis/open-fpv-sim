@@ -60,7 +60,7 @@ fn character(cfg: &QuadConfig) -> Character {
 }
 
 /// (quad, thrust-to-weight, hover throttle) with a full pack, sag included: what each quad file's header says.
-const EXPECTED: [(&str, f64, f64); 2] = [("opendrone-3t-toothpick", 4.2, 0.44), ("opendrone-5r-race", 14.8, 0.19)];
+const EXPECTED: [(&str, f64, f64); 3] = [("opendrone-3t-toothpick", 4.2, 0.44), ("opendrone-5r-race", 14.8, 0.19), ("opendrone-7lr-longrange", 6.3, 0.24)];
 
 #[test]
 fn each_new_quad_has_the_character_its_parts_explain() {
@@ -69,6 +69,14 @@ fn each_new_quad_has_the_character_its_parts_explain() {
         assert!((c.twr / twr - 1.0).abs() < 0.08, "{stem}: thrust-to-weight {:.1}, expected about {twr}", c.twr);
         assert!((c.hover - hover).abs() < 0.03, "{stem}: hover throttle {:.2}, expected about {hover}", c.hover);
     }
+}
+
+#[test]
+fn the_quads_order_by_thrust_and_by_hover_throttle() {
+    let [t, r, l] = EXPECTED.map(|(stem, ..)| character(&quad(stem)));
+    let f = character(&quad("opendrone-5f-freestyle"));
+    assert!(r.twr > f.twr && f.twr > l.twr && l.twr > t.twr, "race {} > freestyle {} > long-range {} > toothpick {}", r.twr, f.twr, l.twr, t.twr);
+    assert!(t.hover > l.hover && l.hover > r.hover, "the toothpick works hardest to hover, the race quad least: {} {} {}", t.hover, l.hover, r.hover);
 }
 
 #[test]
