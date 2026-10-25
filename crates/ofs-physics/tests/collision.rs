@@ -307,3 +307,50 @@ fn the_same_impacts_give_bit_identical_states() {
     };
     assert_eq!(scripted(), scripted());
 }
+
+/// One `resolve` on a motionless body at `pos`, so only the position correction acts (no approach, no impulse).
+fn corrected(p: &AirframeParams, pos: DVec3) -> DVec3 {
+    let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect::<Vec<_>>();
+    let mut touch = TouchState::new(p.objects.len());
+    let mut s = state(pos, DVec3::ZERO);
+    ofs_physics::collision::resolve(p, &bounds, R, &mut s, &[], &mut touch, 0.0);
+    s.pos_ned_m
+}
+
+#[test]
+fn a_corner_penetration_is_resolved_in_one_step() {
+    // The ground (z >= 0) and a wall whose near face is x = 0: the sphere's centre is 1 cm deep into the ground
+    // and 0.8 cm into the wall. Moving out of the deepest contact only (the old behaviour) left the whole 0.8 cm
+    // in the wall for the next step.
+    let wall = vec![WorldObject {
+        name: "wall".into(),
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5) },
+    }];
+    let p = params(wall, vec![(BODY_SPHERE, R)], 0.3);
+    let pos = corrected(&p, DVec3::new(-R + 0.008, 0.0, -R + 0.01));
+    assert!((pos - DVec3::new(-R, 0.0, -R)).length() < 1e-9, "out of both: {pos}");
+}
+
+#[test]
+fn a_sphere_wedged_between_two_posts_converges_out_of_both() {
+    // Two posts 14 cm apart (centres at east = +-0.07), the sphere between them and 5 cm short of their line: its
+    // two contact normals oppose each other partly (n1.n2 = -0.32), so one projection pass overshoots one post.
+    // The true exit is straight back to x = -0.0714. Four passes leave less than 0.1 mm in either post.
+    let post = |east: f64| WorldObject {
+        name: "post".into(),
+        shape: ofs_core::shape::Shape::Cylinder { center: DVec3::new(0.0, east, -1.5), radius: 0.06, half_height: 1.5 },
+    };
+    let p = params(vec![post(0.07), post(-0.07)], vec![(BODY_SPHERE, R)], 0.3);
+    let pos = corrected(&p, DVec3::new(-0.05, 0.0, -1.5));
+    for east in [0.07, -0.07] {
+        let gap = (pos - DVec3::new(0.0, east, -1.5)).with_z(0.0).length() - 0.06 - R;
+        assert!(gap > -1e-4, "still {} mm inside the post at {east}: {pos}", -gap * 1000.0);
+    }
+}
+
+#[test]
+fn a_single_penetration_is_corrected_exactly_as_before() {
+    // The one-contact case must not change: the body moves by exactly the penetration, nothing more.
+    let p = params(vec![], vec![(BODY_SPHERE, R)], 0.3);
+    assert_eq!(corrected(&p, DVec3::new(0.3, 0.2, -R + 0.01)), DVec3::new(0.3, 0.2, -R + 0.01) + DVec3::NEG_Z * (R + (-R + 0.01)));
+}

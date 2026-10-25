@@ -1,5 +1,5 @@
 //! Impulse contact of the collision spheres against the world's objects and the ground plane, applied after
-//! integration: the body is moved out along the deepest contact's normal, then normal and friction impulses are
+//! integration: the body is moved out of every penetrating contact, then normal and friction impulses are
 //! resolved one contact at a time, deepest first, in a fixed order, so the result is deterministic. At 8 kHz the
 //! quad moves a few millimetres per step at racing speed, so no sphere passes through a 12 cm post between steps.
 use glam::DVec3;
@@ -13,6 +13,12 @@ pub const RESTITUTION_SPEED_FLOOR_MPS: f64 = 0.2;
 pub const EVENT_MIN_SPEED_MPS: f64 = 1.0;
 /// A touching object raises no further event until it has been out of contact for this long.
 pub const EVENT_REARM_S: f64 = 0.020;
+/// The position correction sweeps the contacts at most this many times: one pass resolves contacts whose normals
+/// are orthogonal, and the passes after it converge the ones that partly oppose.
+const CORRECTION_PASSES: usize = 4;
+/// A contact with less penetration than this left is resolved (and a lone contact is moved exactly once, so a
+/// single penetration is corrected bit-identically to a single sweep).
+const CORRECTION_EPS_M: f64 = 1.0e-9;
 /// The ground plane's index in a collision event (objects count from 0).
 pub const GROUND_OBJECT_INDEX: i32 = -1;
 
@@ -88,11 +94,25 @@ pub fn resolve(
             .total_cmp(&a.penetration)
             .then(a.object.cmp(&b.object))
     });
-    // Position correction: the body leaves the deepest contact along its normal, by its penetration. There may
-    // be no sphere contact at all (only points touch), in which case the spring-damper does the pushing.
-    if let Some(deepest) = contacts.first() {
-        s.pos_ned_m += deepest.normal * deepest.penetration;
+    // Position correction: the body leaves every penetrating contact, in the sorted order, each by the
+    // penetration still left after the shifts so far (a corner resolves in one pass; contacts whose normals
+    // oppose partly converge over the passes). There may be no sphere contact at all (only points touch), in
+    // which case the spring-damper does the pushing.
+    let mut shift = DVec3::ZERO;
+    for _ in 0..CORRECTION_PASSES {
+        let mut moved = false;
+        for c in &contacts {
+            let left = c.penetration - shift.dot(c.normal);
+            if left > CORRECTION_EPS_M {
+                shift += c.normal * left;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
     }
+    s.pos_ned_m += shift;
     let inv_mass = 1.0 / p.mass_kg;
     let inv_inertia = DVec3::new(1.0 / p.inertia_kgm2.x, 1.0 / p.inertia_kgm2.y, 1.0 / p.inertia_kgm2.z);
     for c in &contacts {
