@@ -191,10 +191,12 @@ falls back to the default:
 - **Feed.** `goggles` is the picture the pilot sees (analog noise, OSD, receiver artefacts): `REC_<ts>.avi`. `clean`
   is the camera image alone, without the video-link effects and the OSD: `REC_<ts>_clean.avi`. `both` writes the two
   files side by side. The feed applies to the next recording. Both feeds write on every field, so their files keep
-  equal frame counts; a feed that has no picture yet writes black, then repeats its last frame. The clean feed needs
-  a real renderer (it is not available headless), and its first frame appears one render after the recording starts.
-- **Export.** After a recording stops with at least one frame (by D, a reload or a lost session, but not when the
-  start failed), each file is exported as the setting asks. `frames` copies the AVI's JPEG frames unchanged to
+  equal frame counts unless the stop toast reports dropped frames (each file has its own writer queue); a feed that
+  has no picture yet writes black, then repeats its last frame. The clean viewport renders only while a clean
+  recording runs and has no picture of the new recording on its first field, so that first clean frame is black. The
+  headless tests feed synthetic images instead of the viewports.
+- **Export.** After any stop that saved frames (D, the F2 box, entering the chase view, a reload or a lost session),
+  each file is exported as the setting asks; an abnormal stop and a start that failed export nothing. `frames` copies the AVI's JPEG frames unchanged to
   `<name>_frames/frame_000001.jpg`, `frame_000002.jpg`, ... (the directory must not already exist; it also works on
   an AVI that was never finalised by a crash). `mp4` runs `ffmpeg` from `PATH`; the ffmpeg must be built with
   libx264. The encode is `ffmpeg -nostdin -n -loglevel error -i <name>.avi -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v

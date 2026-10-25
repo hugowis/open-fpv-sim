@@ -121,6 +121,8 @@ Overrides:
 | world file | `OFS_WORLD` | `--world=` |
 | video effects (on/off) | `OFS_VIDEO_EFFECTS` | `--video-effects=` |
 | FPV aspect (4:3/16:9/window) | `OFS_FPV_ASPECT` | `--fpv-aspect=` |
+| DVR feed (goggles/clean/both, default goggles) | `OFS_DVR_FEED` | `--dvr-feed=` |
+| DVR export (none/frames/mp4/both, default none) | `OFS_DVR_EXPORT` | `--dvr-export=` |
 
     godot --path godot -- --open-loop              # fly the model without Betaflight
 

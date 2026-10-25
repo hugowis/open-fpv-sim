@@ -5,9 +5,9 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
-No protocol, server or Python change. **Rust and Godot API:** `Client::dvr_start`, `dvr_write_frame` and `dvr_stop`,
-and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop`, now take a feed name (`"goggles"` or
-`"clean"`); `OfsClient.dvr_export(path, mode)` and `dvr_export_poll()` are new.
+No protocol, server or Python change. **Rust and Godot API:** `Client::dvr_start`, `dvr_write_frame` and `dvr_stop`
+now take a `DvrFeed` (`Goggles` or `Clean`), and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop` take
+the feed name (`"goggles"` or `"clean"`); `OfsClient.dvr_export(path, mode)` and `dvr_export_poll()` are new.
 
 ### A DVR that survives a resize (#34)
 #### Changed
@@ -18,8 +18,9 @@ and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop`, now take 
 #### Added
 - **`dvr_feed` (`goggles`, `clean`, `both`)**, a button on the F2 screen, `OFS_DVR_FEED` and `--dvr-feed=`. `clean`
   records the camera image without the OSD and the video-link effects into `REC_<ts>_clean.avi`; `both` writes it
-  beside the goggles file `REC_<ts>.avi`. Both files write on every field, so their frame counts are equal. An invalid
-  value means `goggles`.
+  beside the goggles file `REC_<ts>.avi`. Both files write on every field (a black clean frame stands in where the
+  clean picture does not exist yet), so their frame counts are equal unless the stop toast reports dropped frames. An
+  invalid value means `goggles`.
 
 ### Image-sequence and MP4 export (#37)
 #### Added
