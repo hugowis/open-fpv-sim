@@ -5,6 +5,12 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### A DVR start never fails on a taken name
+#### Fixed
+- **A recording started in the same millisecond as another failed with "already exists"** (the `REC_<ts>` stamp has
+  millisecond resolution, and D pressed twice in a frame, or a script, reuses it; the open-loop end-to-end hit it about
+  one run in three). The DVR now appends `_2`, `_3`, ... to the stem until neither the goggles nor the clean file exists.
+
 ### More pre-assembled quads: a toothpick, a race quad and a long-range quad (#129)
 #### Added
 - **Three quads that fly differently**, each built from library parts with its own Betaflight diff: `opendrone-3t-toothpick`

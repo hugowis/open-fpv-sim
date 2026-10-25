@@ -528,8 +528,9 @@ func _feed_field(dvr: Node, field: int) -> void:
 
 
 ## A DVR, a stand-in client and the two viewports (goggles 8x4, clean 6x6), started for `feed`.
-func _recorder(feed: String, clean := true) -> Dictionary:
+func _recorder(feed: String, clean := true, clock := Callable()) -> Dictionary:
 	var dvr: Node = Dvr.new()
+	dvr.clock = clock
 	await add_to_tree(dvr)
 	var goggles := SubViewport.new()
 	goggles.size = Vector2i(8, 4)
@@ -561,6 +562,26 @@ func test_both_feeds_start_two_files_with_one_stem() -> void:
 		eq(mock.started_feeds[1], ["clean", dvr.paths[1], 6, 6], "clean at its own size")
 	dvr.stop()
 	_free_recorder(r)
+
+
+func test_a_start_on_a_taken_name_picks_a_free_one() -> void:
+	# Two starts in one millisecond (D pressed twice in a frame) share a timestamp; the second must not fail.
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://recordings"))
+	var taken := PackedStringArray()
+	for file in ["REC_test_taken.avi", "REC_test_taken_2_clean.avi"]:  # the second blocks only the clean file of _2
+		var path := ProjectSettings.globalize_path("user://recordings/" + file)
+		FileAccess.open(path, FileAccess.WRITE).close()
+		taken.append(path)
+	var r := await _recorder("both", true, func() -> String: return "test_taken")
+	var dvr: Node = r["dvr"]
+	eq(r["error"], "", "starts although the timestamp is taken")
+	if dvr.paths.size() == 2:
+		ok(dvr.paths[0].ends_with("REC_test_taken_3.avi"), "skips a stem whose goggles or clean file exists: %s" % dvr.paths[0])
+		eq(dvr.paths[1], dvr.paths[0].trim_suffix(".avi") + "_clean.avi", "one stem for both files")
+	dvr.stop()
+	_free_recorder(r)
+	for path in taken:
+		DirAccess.remove_absolute(path)
 
 
 func test_started_is_emitted_once_with_the_first_path() -> void:

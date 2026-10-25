@@ -31,6 +31,8 @@ var _first_field := false
 ## same encode-and-write path).
 var image_source := Callable()
 var clean_image_source := Callable()
+## Test seam: a Callable returning the timestamp part of the file name (the system clock when unset).
+var clock := Callable()
 
 
 ## Starts recording `feed`: "goggles" (the FPV composite), "clean" or "both" (the clean feed needs `clean_viewport`).
@@ -41,7 +43,7 @@ func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewp
 		return "unknown DVR feed: %s" % feed
 	if "clean" in wanted and clean_viewport == null:
 		return "the clean feed is not available"
-	var stem := "user://recordings/REC_%s" % _timestamp()
+	var stem := _free_stem(wanted)
 	var started_feeds: Array = []
 	var started_paths := PackedStringArray()
 	var first_path := ""
@@ -164,7 +166,20 @@ func stop() -> Dictionary:
 	return summary
 
 
+## The path stem (no extension) of a recording none of whose files exists yet: the muxer never overwrites, so two starts
+## within one millisecond (the timestamp's resolution) would otherwise fail the second. Appends _2, _3, ... on a clash.
+func _free_stem(wanted: Array) -> String:
+	var base := "user://recordings/REC_%s" % _timestamp()
+	var stem := base
+	var n := 2
+	while wanted.any(func(feed: String) -> bool: return FileAccess.file_exists(stem + ("_clean.avi" if feed == "clean" else ".avi"))):
+		stem = "%s_%d" % [base, n]
+		n += 1
+	return stem
+
+
 func _timestamp() -> String:
-	# Plus a millisecond uniqueness suffix: start/stop/start within one second gets a new name (a same-name start
-	# would fail: the muxer never overwrites a recording).
+	if clock.is_valid():
+		return clock.call()
+	# Plus a millisecond uniqueness suffix: most starts within one second get a new name on their own.
 	return "%s_%03d" % [Time.get_datetime_string_from_system(true).replace(":", "").replace("-", "").replace("T", "_"), Time.get_ticks_msec() % 1000]
