@@ -10,6 +10,10 @@ The atlas's second page (page 1, the bold face Betaflight uses for its INFO-seve
 sha256 `fa2291ade88ef76912ae7f2bdf0eb23223b8d9c78b4b586501fe5ec779058614`, under the same GNU General Public License
 v3.0 (not "or later") as default.mcm.
 
+Betaflight sends a cell's severity as its font page, so a WARNING arrives on page 2 and a CRITICAL on page 3. The atlas
+has no pages for them: `godot/ui/osd.gd` draws both from page 1's bold glyphs, tinted amber and red at draw time. No glyph
+art from any other source is in this repository.
+
 Betaflight Configurator is licensed under the GNU General Public License v3.0 (its repository reports GPL-3.0). This
 project is GPL-3.0-or-later; the atlas is a derivative of the font and stays under the GPL-3.0 terms of its source.
 

@@ -61,6 +61,11 @@ func _run() -> void:
 	put.call(1, 1, "ACRO")
 	put.call(1, 22, "R1 5658")
 	put.call(8, 9, "LOW BATTERY")
+	put.call(9, 9, "RSSI LOW")
+	put.call(10, 9, "FAILSAFE")
+	for i in 8:  # the warning (page 2) and the critical (page 3), drawn amber and red
+		cells[9 * 30 + 9 + i] |= 2 << 8
+		cells[10 * 30 + 9 + i] |= 3 << 8
 	put.call(14, 1, "24.6 0.5 1.2A")
 	put.call(15, 1, "01:23 LQ100 12M")
 	app.osd.set_frame({"seq": 1, "time_s": 0.0, "present": true, "cols": 30, "rows": 16, "cells": cells})

@@ -17,6 +17,11 @@ repository). The format follows Keep a Changelog.
   tables; the five shipped quads are converted. Schema-5 quads with inline tables still load (without provenance for
   those two); a part reference at schema 5, or an inline table at schema 6, is a validation error naming the field.
   `PartRefs` gains `imu` and `baro` (`None` for an inline table).
+### OSD warnings and criticals (part of #32)
+#### Changed
+- **The Godot OSD draws Betaflight's warning and critical severities.** Cells on font page 2 (WARNING) and page 3
+  (CRITICAL) were drawn like ordinary text; they now use the bold glyphs in amber and red. No new glyph art or licence
+  change. The HD/digital element set of #32 is not done: it needs an HD SITL build (see `docs/roadmap.md`).
 
 No protocol, server or Python change. **Rust and Godot API:** `Client::dvr_start`, `dvr_write_frame` and `dvr_stop`
 now take a `DvrFeed` (`Goggles` or `Clean`), and the Godot `OfsClient.dvr_start`, `dvr_write_frame` and `dvr_stop` take
