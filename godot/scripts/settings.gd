@@ -18,6 +18,10 @@ const ENV_NAMES := {
 	"OFS_FPV_ASPECT": "fpv_aspect",
 	"OFS_DVR_EXPORT": "dvr_export",
 	"OFS_DVR_FEED": "dvr_feed",
+	"OFS_MENU": "menu",
+	"OFS_RACE_START": "race_start",
+	"OFS_FULLSCREEN": "fullscreen",
+	"OFS_HUD": "hud_visible",
 }
 ## Command-line flag -> setting (`--name=value`; `--open-loop` alone means true).
 const FLAG_NAMES := {
@@ -32,6 +36,10 @@ const FLAG_NAMES := {
 	"--fpv-aspect": "fpv_aspect",
 	"--dvr-export": "dvr_export",
 	"--dvr-feed": "dvr_feed",
+	"--menu": "menu",
+	"--race-start": "race_start",
+	"--fullscreen": "fullscreen",
+	"--hud": "hud_visible",
 }
 ## What `dvr_feed` may be: the goggles picture (OSD and video breakup), the clean camera image, or both files.
 const DVR_FEEDS := ["goggles", "clean", "both"]
@@ -63,6 +71,10 @@ static func defaults() -> Dictionary:
 		"fpv_aspect": "4:3",
 		"dvr_export": "none",
 		"dvr_feed": "goggles",
+		"menu": true,
+		"race_start": true,
+		"fullscreen": false,
+		"hud_visible": true,
 		"sitl_launch": "",
 		"open_loop": false,
 		"seed": 1,
@@ -111,17 +123,36 @@ static func _coerce(default, value):
 	return value
 
 
+## For each setting a flag or an environment variable sets this run, what sets it (`--flag` or `OFS_NAME`): the one
+## `resolve` lets win. The settings screen locks those rows, since a saved value could not take effect.
+static func overrides(env: Dictionary, args: PackedStringArray) -> Dictionary:
+	var out := {}
+	for name in env:
+		if ENV_NAMES.has(name):
+			out[ENV_NAMES[name]] = name
+	for arg in args:
+		var flag := arg.split("=", true, 1)[0]
+		if FLAG_NAMES.has(flag):
+			out[FLAG_NAMES[flag]] = flag
+	return out
+
+
+## The OFS_* variables that are set.
+static func read_env() -> Dictionary:
+	var env := {}
+	for name in ENV_NAMES:
+		if OS.has_environment(name):
+			env[name] = OS.get_environment(name)
+	return env
+
+
 static func load_settings() -> Dictionary:
 	var config := {}
 	var file := ConfigFile.new()
 	if file.load(CONFIG_PATH) == OK:
 		for key in file.get_section_keys("client") if file.has_section("client") else PackedStringArray():
 			config[key] = file.get_value("client", key)
-	var env := {}
-	for name in ENV_NAMES:
-		if OS.has_environment(name):
-			env[name] = OS.get_environment(name)
-	return resolve(config, env, OS.get_cmdline_user_args())
+	return resolve(config, read_env(), OS.get_cmdline_user_args())
 
 
 ## Stores one setting in the `[client]` section of user://ofs_client.cfg (for settings changed in the game, like
