@@ -39,7 +39,7 @@ var _back := Button.new()
 func _ready() -> void:
 	visible = false
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.7)
+	dim.color = Color(0.06, 0.07, 0.09)  # opaque, like the menu it opens from
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(dim)
 	var panel := PanelContainer.new()

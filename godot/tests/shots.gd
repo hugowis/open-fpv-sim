@@ -37,6 +37,7 @@ func _save(name: String) -> void:
 
 func _run() -> void:
 	OS.set_environment("OFS_OPEN_LOOP", "1")
+	OS.set_environment("OFS_MENU", "off")
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", OS.get_user_data_dir().path_join("shots-data"))
 	var app = load("res://main.tscn").instantiate()

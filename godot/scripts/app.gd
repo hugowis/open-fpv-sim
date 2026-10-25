@@ -5,6 +5,7 @@ extends Node3D
 const Controls = preload("res://scripts/controls.gd")
 const AppSettings = preload("res://scripts/settings.gd")
 const ControlsMenu = preload("res://ui/controls_menu.gd")
+const MainMenu = preload("res://ui/main_menu.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -30,6 +31,8 @@ const TIPS := {
 @onready var fpv_texture: TextureRect = $FpvBox/FpvTexture
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
+@onready var main_menu: CanvasLayer = $MainMenu
+@onready var settings_screen: CanvasLayer = $SettingsScreen
 @onready var dvr: Node = $Dvr
 @onready var clean_feed: Node = $CleanFeed
 
@@ -55,18 +58,29 @@ func _ready() -> void:
 	controls_menu.setup(controls, CONTROLS_PATH)
 	video.effects = settings["video_effects"]
 	controls_menu.set_video_effects(settings["video_effects"])
-	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
+	controls_menu.video_effects_toggled.connect(func(on: bool) -> void: _on_setting_changed("video_effects", on))
 	controls_menu.set_aspect(settings["fpv_aspect"])
-	controls_menu.aspect_changed.connect(_on_aspect_changed)
+	controls_menu.aspect_changed.connect(func(value: String) -> void: _on_setting_changed("fpv_aspect", value))
 	controls_menu.set_dvr_export(settings["dvr_export"])
-	controls_menu.dvr_export_changed.connect(_on_dvr_export_changed)
+	controls_menu.dvr_export_changed.connect(func(value: String) -> void: _on_setting_changed("dvr_export", value))
 	controls_menu.set_dvr_feed(settings["dvr_feed"])
-	controls_menu.dvr_feed_changed.connect(_on_dvr_feed_changed)
+	controls_menu.dvr_feed_changed.connect(func(value: String) -> void: _on_setting_changed("dvr_feed", value))
 	controls_menu.dvr_toggled.connect(_set_dvr)
+	var overridden := AppSettings.overrides(AppSettings.read_env(), OS.get_cmdline_user_args())
+	main_menu.setup(settings, overridden)
+	main_menu.choice_changed.connect(_on_setting_changed)
+	main_menu.start_requested.connect(_on_menu_start)
+	main_menu.settings_requested.connect(func() -> void: main_menu.close(); settings_screen.open())
+	main_menu.quit_requested.connect(func() -> void: get_tree().quit())
+	settings_screen.setup(settings, overridden)
+	settings_screen.setting_changed.connect(_on_setting_changed)
+	settings_screen.closed.connect(main_menu.open)
 	fpv_texture.texture = fpv_viewport.get_texture()
 	clean_feed.setup(fpv_camera, lens, fpv_viewport.size)
 	get_viewport().size_changed.connect(_layout_fpv)
 	_layout_fpv()
+	if settings["fullscreen"]:
+		_set_fullscreen(true)
 	if not ClassDB.class_exists("OfsClient"):
 		hud.show_fatal("The OfsClient extension is not loaded.\nBuild it with `cargo build -p ofs-godot` (docs/dev-setup.md) and restart.")
 		set_process(false)
@@ -78,12 +92,54 @@ func _ready() -> void:
 	client.event_received.connect(_on_event)
 	client.request_failed.connect(_on_request_failed)
 	client.session_ready.connect(_on_session_ready)
-	var error: String = client.start(AppSettings.to_client_dict(settings))
+	if settings["menu"]:
+		_show_menu()
+	else:
+		_start_session()
+
+
+## Starts the simulator client with the settings (plus `choices`, for what this start decides on its own).
+func _start_session(choices := {}) -> void:
+	var session := settings.duplicate()
+	session.merge(choices, true)
+	# A new session numbers its worlds from the start, and has no faults or recordings yet.
+	_world_version = -1
+	_fpv_render_time = -1.0
+	_link_was_lost = false
+	radio_cut = false
+	inputs_recording = false
+	hud.set_hud_visible(settings["hud_visible"])
+	var error: String = client.start(AppSettings.to_client_dict(session))
 	if error != "":
 		push_error("OfsClient.start: " + error)
 		hud.show_fatal("Could not start the simulator client: %s
 Check the [client] section of user://ofs_client.cfg and the OFS_* variables, then restart." % error)
 		set_process(false)
+		return
+	set_process(true)
+
+
+## Ends the flight (the simulator and the Betaflight it started stop with it) and shows the main menu.
+func _show_menu() -> void:
+	if dvr.recording:
+		_stop_dvr(false)
+		_sync_dvr()
+	client.stop()
+	set_process(false)
+	fpv_box.visible = false
+	hud.visible = false
+	main_menu.open()
+
+
+func _on_menu_start() -> void:
+	main_menu.close()
+	fpv_box.visible = true
+	hud.visible = true
+	_start_session({"open_loop": MainMenu.effective_open_loop(settings)})
+
+
+func _in_menu() -> bool:
+	return main_menu.is_open() or settings_screen.is_open()
 
 
 ## The Picture setting arrives as a pass-through string (the config file, the environment, the command line):
@@ -154,6 +210,9 @@ func _process(delta: float) -> void:
 		_world_version = world_version
 		world.build(client.get_world())
 	var telemetry: Dictionary = client.get_telemetry()
+	# Free flight flies a course as scenery: no lap clock, no gate highlight.
+	if not settings["race_start"] and telemetry.has("race_present"):
+		telemetry["race_present"] = false
 	# The gate to fly through next, from the state just read; none before there is a race, and none once it is over.
 	var racing: bool = telemetry.get("race_present", false) and not telemetry.get("race_finished", false)
 	world.set_next_gate(int(telemetry.get("race_next_gate", 0)) if racing else -1)
@@ -173,6 +232,10 @@ func _process(delta: float) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if _in_menu():
+		if event.physical_keycode == KEY_F11:
+			_set_fullscreen(DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN)
 		return
 	match event.physical_keycode:
 		KEY_P:
@@ -199,12 +262,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_F2:
 			controls_menu.toggle()
 		KEY_F11:
-			var mode := DisplayServer.window_get_mode()
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if mode == DisplayServer.WINDOW_MODE_FULLSCREEN else DisplayServer.WINDOW_MODE_FULLSCREEN)
+			_set_fullscreen(DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN)
 		KEY_ESCAPE:
+			# Help and the F2 screen close first; with neither open, Esc returns to the menu.
+			var closing: bool = hud.help_visible() or controls_menu.is_open()
 			hud.set_help_visible(false)
 			if controls_menu.is_open() and controls_menu.listening_for() == "":
 				controls_menu.toggle()
+			if not closing and client != null:
+				_show_menu()
+
+
+func _set_fullscreen(on: bool) -> void:
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if on else DisplayServer.WINDOW_MODE_WINDOWED)
 
 
 func set_chase_view(chase: bool) -> void:
@@ -297,30 +367,28 @@ func _dvr_drop_note(summary: Dictionary) -> String:
 	return "" if dropped == 0 else " (%d dropped)" % dropped
 
 
-func _on_video_effects_toggled(on: bool) -> void:
-	video.effects = on
-	settings["video_effects"] = on
-	if not AppSettings.save_value("video_effects", on):
-		hud.add_toast("Could not save the Video effects setting to %s" % AppSettings.CONFIG_PATH, "warn")
-
-
-func _on_aspect_changed(value: String) -> void:
-	settings["fpv_aspect"] = value
-	_layout_fpv()
-	if not AppSettings.save_value("fpv_aspect", value):
-		hud.add_toast("Could not save the Picture setting to %s" % AppSettings.CONFIG_PATH, "warn")
-
-
-func _on_dvr_export_changed(value: String) -> void:
-	settings["dvr_export"] = value
-	if not AppSettings.save_value("dvr_export", value):
-		hud.add_toast("Could not save the DVR export setting to %s" % AppSettings.CONFIG_PATH, "warn")
-
-
-func _on_dvr_feed_changed(value: String) -> void:
-	settings["dvr_feed"] = value  # applies to the next recording
-	if not AppSettings.save_value("dvr_feed", value):
-		hud.add_toast("Could not save the DVR feed setting to %s" % AppSettings.CONFIG_PATH, "warn")
+## The one path for a setting changed in the game (the F2 screen, the menu or the settings screen): remember it, apply it
+## where the client can at once, show it on the F2 screen and save it to user://ofs_client.cfg. A new `dvr_feed` applies
+## to the next recording; the rest of the settings (server, open loop, ...) to the next start.
+func _on_setting_changed(key: String, value) -> void:
+	settings[key] = value
+	match key:
+		"video_effects":
+			video.effects = value
+			controls_menu.set_video_effects(value)
+		"fpv_aspect":
+			_layout_fpv()
+			controls_menu.set_aspect(value)
+		"dvr_export":
+			controls_menu.set_dvr_export(value)
+		"dvr_feed":
+			controls_menu.set_dvr_feed(value)
+		"fullscreen":
+			_set_fullscreen(value)
+		"hud_visible":
+			hud.set_hud_visible(value)
+	if not AppSettings.save_value(key, value):
+		hud.add_toast("Could not save the %s setting to %s" % [key, AppSettings.CONFIG_PATH], "warn")
 
 
 func set_radio_cut(cut: bool) -> void:
