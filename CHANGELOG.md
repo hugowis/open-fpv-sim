@@ -5,6 +5,20 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Static friction and a full position correction in the contact model (#65)
+#### Changed
+- **A landing point sticks.** Its friction was `mu*N*v_t/max(|v_t|, 5 cm/s)`, viscous below 5 cm/s, so a resting quad
+  crept down any slope. It is now static Coulomb friction: each touching point keeps a tangential anchor spring (the
+  stiffness and damping of its normal spring, no new parameter or schema change) capped at `mu*N`. A quad on a slope
+  within the friction angle stays put (a millimetre of sag, then nothing); past it, it slides at `g(sin - mu cos)`.
+  A quad sliding on its feet at 1 m/s stops at `mu*g` and stays stopped.
+- **The position correction leaves every penetrating contact, not just the deepest.** A sphere in the corner of the
+  ground and a wall is out of both in one step (before: the second waited for later steps); contacts whose normals
+  partly oppose converge over up to 4 sweeps. A lone contact is corrected exactly as before.
+- No golden digest changes (no golden flight touches down or hits anything); a new unit test pins the single-contact
+  correction bit-for-bit. Honest limit: a body resting on collision *spheres* on a slope still creeps `g*sin*dt`
+  (0.4 mm/s on 20 degrees) because that impulse follows the integration; `docs/research/collision.md` has the model.
+
 ### A DVR start never fails on a taken name
 #### Fixed
 - **A recording started in the same millisecond as another failed with "already exists"** (the `REC_<ts>` stamp has

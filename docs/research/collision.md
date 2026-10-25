@@ -49,8 +49,13 @@ integration:
    radius, must contain the quad's centre — the broad phase) and against the ground. The contact's normal is the
    signed distance's gradient at the sphere's centre (unit, pointing out of the solid); the contact point is the
    sphere's surface point along that normal, its deepest point into the solid.
-2. **Position correction.** The body moves out along the *deepest* contact's normal, by that contact's
-   penetration.
+2. **Position correction.** The body moves out of *every* penetrating contact. In the sorted order (deepest first,
+   ties by object index) each contact pushes the body along its normal by the penetration it still has after the
+   shifts so far, `penetration − shift·normal`, if that is above 1 nm; the sweep repeats up to 4 times, stopping when
+   a sweep moves nothing. Contacts whose normals are orthogonal (a sphere in the corner of the ground and a wall)
+   are out in the first sweep; contacts whose normals partly oppose (a sphere wedged between two posts) converge
+   over the sweeps (the unit test pins less than 0.1 mm left in either post). A lone contact moves the body by exactly its
+   penetration, as it always did. Translation only: the correction never turns the body.
 3. **Normal impulses**, one contact at a time, deepest first, ties by object index, in a fixed order — so the
    same inputs give bit-identical flights. A contact that approaches (`v_n < 0`, the contact point's velocity
    along the normal) gets the impulse
@@ -64,7 +69,10 @@ integration:
    the arithmetic at e = 0.5).
 4. **Friction.** Coulomb: an impulse against the contact point's tangential velocity, capped at `μ·j` — friction
    can never exceed the normal impulse times the coefficient. While the quad rests this holds it near μ·g of
-   deceleration; on a sliding hit it stops the slide.
+   deceleration; on a sliding hit it stops the slide. The normal impulse is non-zero every step under gravity, so
+   the cap is a stiction cap: a sphere that rests on a slope sticks. Its one limit is the order: the impulse
+   follows the integration, so each step the body still moves `g·sinθ·Δt²` down the slope, a creep of
+   `g·sinθ·Δt` — about 0.4 mm/s on a 20° slope, 1.2 mm/s at 90° — rather than exactly zero.
 
 The impulses act at the contact points; the position correction moves the body; neither adds a force to the
 integration, so there is no stability to trade against the step size.
@@ -75,6 +83,26 @@ The quad file's `contact_points_frd_m` (the legs, at z = +3 cm on the shipped qu
 and friction from `[ground]`, but they now act against every world object as well as the ground plane: against an
 object the depth is minus the signed distance of the point and the normal is the shape's gradient there. This is
 how the quad lands on the launch pad and *stays* on a roof.
+
+**Friction at a landing point is static Coulomb friction**, by an anchor spring (the Cundall–Strack contact model).
+The normal force is `N = max(k·depth − c·v_n, 0)` (`v_n` positive when leaving). Across the surface each touching
+point keeps a tangential displacement `d` since it stuck, integrated from its tangential velocity
+(`d += v_t·Δt`, then projected onto the tangent plane, which also follows a curved surface), and the friction is
+`F_t = −(k·d + c·v_t)` with the same `k` and `c` as the normal spring and damper — no new parameter. It is capped
+at `μ·N`: under the cap the point sticks and the spring holds it, at the cap it slides at `μ·N` and `d` is clamped
+to `μ·N/k`, so the spring part never exceeds the Coulomb limit. Losing contact (`N = 0`) drops the anchor. The
+anchors are the previous step's list, in point and then object order, so the flight stays deterministic.
+What it buys: a quad parked on a slope whose angle is within the friction angle (`tan θ ≤ μ`) stays put — it sags
+`m·g·sinθ/(n·k)`, a millimetre, and a brief slip while the spring swings in, then nothing — and one past it slides
+with `a = g(sinθ − μ·cosθ)`. The unit tests pin both on an incline (95 % and 105 % of the friction angle, within
+3 %), the flat deceleration `μ·g` and the stop that stays stopped. The old law, `μ·N·v_t/max(|v_t|, 5 cm/s)`, was
+viscous below 5 cm/s: a resting quad crept down any slope.
+
+The limits: the incline is a contact-maths test (the world's shapes are axis-aligned boxes and cylinders, there is no
+slope to fly onto); the anchor lives per (point, object), so a point sliding across an object's edge onto another
+starts over; the static sag is real (a millimetre or so), not a rigid hold; `friction_coeff` is one number for the
+ground and every object, and the spheres' and the points' share nothing but its value (`[collision]` for the
+spheres, `[ground]` for the points).
 
 Two mechanisms, because they answer two different questions: the spring-damper carries a resting weight stably
 (a landed quad must sit still for minutes, and the 3000 N/m spring sags 2 mm doing it), while the impulses bound
@@ -114,6 +142,8 @@ at the moment of first touch.
 |---|---|---|
 | Restitution (default) | 0.3 | estimated, user-tunable (`[collision]` `restitution`) |
 | Friction coefficient (default) | 0.5 | estimated, user-tunable (`[collision]` `friction_coeff`) |
+| Landing-point friction coefficient | 0.6 on the shipped quads | estimated, user-tunable (`[ground]` `friction_coeff`); its tangential stiffness and damping are the normal spring's |
+| Position correction sweeps | 4, 1 nm threshold | engineering choice: orthogonal contacts need 1, partly opposing ones converge in 2 to 4 |
 | Restitution speed floor | 0.2 m/s inward | estimated |
 | Event threshold | 1 m/s inward | estimated |
 | Event rearm | 20 ms out of contact | estimated |

@@ -212,7 +212,7 @@ fn sliding_on_the_ground_slows_at_mu_g() {
     let expected = 2.0 - 0.6 * GRAVITY_MPS2 * 0.2;
     assert!((vx - expected).abs() < 0.03, "vx {vx}, Coulomb friction expects {expected}");
     s.run_for(1.0).unwrap();
-    assert!(vec3(&s, names::BODY_VEL_NED).x.abs() < 0.05, "it stops (viscous below 5 cm/s)");
+    assert!(vec3(&s, names::BODY_VEL_NED).x.abs() < 1e-3, "it stops (static friction)");
 }
 
 #[test]
