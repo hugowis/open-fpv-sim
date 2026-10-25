@@ -16,6 +16,8 @@ const ENV_NAMES := {
 	"OFS_WORLD": "world_path",
 	"OFS_VIDEO_EFFECTS": "video_effects",
 	"OFS_FPV_ASPECT": "fpv_aspect",
+	"OFS_DVR_EXPORT": "dvr_export",
+	"OFS_DVR_FEED": "dvr_feed",
 }
 ## Command-line flag -> setting (`--name=value`; `--open-loop` alone means true).
 const FLAG_NAMES := {
@@ -28,7 +30,13 @@ const FLAG_NAMES := {
 	"--world": "world_path",
 	"--video-effects": "video_effects",
 	"--fpv-aspect": "fpv_aspect",
+	"--dvr-export": "dvr_export",
+	"--dvr-feed": "dvr_feed",
 }
+## What `dvr_feed` may be: the goggles picture (OSD and video breakup), the clean camera image, or both files.
+const DVR_FEEDS := ["goggles", "clean", "both"]
+## What `dvr_export` may be: nothing, an image sequence, an MP4 (needs ffmpeg), or both.
+const DVR_EXPORTS := ["none", "frames", "mp4", "both"]
 
 
 ## The repository root when the project runs from a checkout (godot/ sits one level below it).
@@ -53,6 +61,8 @@ static func defaults() -> Dictionary:
 		"world_path": root.path_join("worlds").path_join("flat.toml"),
 		"video_effects": true,
 		"fpv_aspect": "4:3",
+		"dvr_export": "none",
+		"dvr_feed": "goggles",
 		"sitl_launch": "",
 		"open_loop": false,
 		"seed": 1,
@@ -78,6 +88,12 @@ static func resolve(config: Dictionary, env: Dictionary, args: PackedStringArray
 		if FLAG_NAMES.has(parts[0]):
 			var key: String = FLAG_NAMES[parts[0]]
 			s[key] = _coerce(s[key], parts[1] if parts.size() > 1 else "true")
+	if not s["dvr_export"] in DVR_EXPORTS:
+		push_warning("%s is not a DVR export setting; using none" % s["dvr_export"])
+		s["dvr_export"] = "none"
+	if not s["dvr_feed"] in DVR_FEEDS:
+		push_warning("%s is not a DVR feed setting; using goggles" % s["dvr_feed"])
+		s["dvr_feed"] = "goggles"
 	return s
 
 

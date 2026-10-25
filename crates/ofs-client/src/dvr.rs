@@ -18,6 +18,24 @@ const FRAME_CHANNEL_CAPACITY: usize = 50;
 pub const DVR_FPS: u32 = 50;
 const AVIIF_KEYFRAME: u32 = 0x10;
 
+/// A recording feed: each has its own writer in the client. `Goggles` is the FPV composite; `Clean` is the
+/// camera without the video degradation or OSD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DvrFeed {
+    Goggles,
+    Clean,
+}
+
+impl DvrFeed {
+    pub fn parse(name: &str) -> Option<DvrFeed> {
+        match name {
+            "goggles" => Some(DvrFeed::Goggles),
+            "clean" => Some(DvrFeed::Clean),
+            _ => None,
+        }
+    }
+}
+
 /// What a finished recording holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DvrSummary {

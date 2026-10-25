@@ -169,18 +169,41 @@ picture lags the world and judders at the field rate, like real analog glass. In
 6 dB and 3 dB) the receiver fails to complete fields — a dropped field holds the previous picture (pose, OSD
 and quality all freeze) for one field. The model and its constants are in `docs/research/video-link.md`.
 
-The **DVR** (keybind **D**, or its checkbox on the F2 controls screen — the same switch) records the FPV view —
-exactly what the pilot sees — as an MJPEG AVI into `user://recordings/`
-(`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
-`~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a
-dropped field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again (or
-unchecking the box) stops it, and it stops on its own (with a toast counting the saved frames) when the
-picture's INTERNAL size changes: an aspect switch or a chase-camera toggle, and — because the window aspect
-renders at the window's own size — a plain window resize with the window aspect. With a boxed aspect the
-internal resolution is fixed (960×720 or 1280×720), so a plain window resize does not stop it. It records only
-the FPV view: press C first if the chase camera is up. The checkbox always shows the state that actually
-happened: D checks and unchecks it, and so does an automatic stop; a refused start (the chase camera up, or no
-simulator) leaves it unchecked.
+The **DVR** (keybind **D**, or its checkbox on the F2 controls screen — the same switch) records the FPV view as an
+MJPEG AVI into `user://recordings/` (`%APPDATA%\Godot\app_userdata\Open FPV Sim\recordings\` on Windows,
+`~/.local/share/godot/app_userdata/Open FPV Sim/recordings/` on Linux). It captures on field boundaries; a dropped
+field repeats the held frame, so the recording freezes where the pilot froze. Pressing D again (or unchecking the
+box) stops it. A window resize or an aspect switch does not stop it: frames are scaled to fit inside the size the
+recording started with and centred on black bars. Entering the chase view (C) stops it, and so does a reload or a
+lost session, each with a toast counting the saved frames. It records only the FPV view: press C first if the chase
+camera is up. The checkbox always shows the state that actually happened: D checks and unchecks it, and so does an
+automatic stop; a refused start (the chase camera up, or no simulator) leaves it unchecked.
+
+Two settings on the F2 screen (each a button that cycles its values) choose what is recorded and what happens
+afterwards; they follow the usual order (defaults < `ofs_client.cfg` < environment < flags), and an invalid value
+falls back to the default:
+
+| Setting | F2 button | Values (default first) | Environment | Flag |
+|---|---|---|---|---|
+| `dvr_feed` | `DVR feed: ...` | `goggles`, `clean`, `both` | `OFS_DVR_FEED` | `--dvr-feed=` |
+| `dvr_export` | `DVR export: ...` | `none`, `frames`, `mp4`, `both` | `OFS_DVR_EXPORT` | `--dvr-export=` |
+
+- **Feed.** `goggles` is the picture the pilot sees (analog noise, OSD, receiver artefacts): `REC_<ts>.avi`. `clean`
+  is the camera image alone, without the video-link effects and the OSD: `REC_<ts>_clean.avi`. `both` writes the two
+  files side by side. The feed applies to the next recording. Both feeds write on every field, so their files keep
+  equal frame counts unless the stop toast reports dropped frames (each file has its own writer queue); a feed that
+  has no picture yet writes black, then repeats its last frame. The clean viewport renders only while a clean
+  recording runs and has no picture of the new recording on its first field, so that first clean frame is black. The
+  headless tests feed synthetic images instead of the viewports.
+- **Export.** After any stop that saved frames (D, the F2 box, entering the chase view, a reload or a lost session),
+  each file is exported as the setting asks; an abnormal stop and a start that failed export nothing. `frames` copies the AVI's JPEG frames unchanged to
+  `<name>_frames/frame_000001.jpg`, `frame_000002.jpg`, ... (the directory must not already exist; it also works on
+  an AVI that was never finalised by a crash). `mp4` runs `ffmpeg` from `PATH`; the ffmpeg must be built with
+  libx264. The encode is `ffmpeg -nostdin -n -loglevel error -i <name>.avi -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v
+  libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart <name>.mp4`: H.264 with an even size, quality 18, and the
+  index at the front for streaming. If ffmpeg is missing, a warning toast says so and the AVI is kept. An export
+  never overwrites a file or directory; it runs on a worker thread and toasts when it is done. The AVI is always
+  kept.
 
 The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of
 the SmartAudio one: `[vtx] kind = "tramp"` on UART6 (Betaflight serial 5, function mask 8192 = `VTX_TRAMP`).
@@ -202,7 +225,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 2. Record a clip with D while flying the link through grain and static, press D again, and play the `.avi`
    from `user://recordings/` in VLC: the breakup, the OSD and the freezes are all in the file.
 3. Flip the Picture setting through 4:3, 16:9 and window on the F2 screen: the box changes shape, and a
-   recording running across the switch stops with a toast.
+   recording running across the switch keeps going, letterboxed to the size it started with.
 4. On the Tramp quad, open the OSD stick menu (as in the M3a check) and change the VTX power: the HUD VTX line
    snaps to the built-in table. A band/channel change does nothing — Tramp is frequency-only; the live test
    pins the frequency path.

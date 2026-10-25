@@ -295,7 +295,7 @@ func _run() -> void:
 	var menu_deadline := Time.get_ticks_msec() + 20_000
 	# Half a simulated second, and until the recorder has encoded a frame: a runner that stalls (a real-time overrun) can
 	# spend the half second on held fields.
-	while (float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 or app.dvr._last_jpeg.is_empty()) and Time.get_ticks_msec() < menu_deadline:
+	while (float(app.client.get_telemetry()["time_s"]) < menu_t0 + 0.5 or app.dvr._feeds[0]["jpeg"].is_empty()) and Time.get_ticks_msec() < menu_deadline:
 		await process_frame
 	app.controls_menu._dvr.button_pressed = false
 	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "unchecking the box stops it")
@@ -312,6 +312,35 @@ func _run() -> void:
 	_check(not app.dvr.recording and not app.controls_menu.dvr_on(), "D stops it and the box follows")
 	_press(app, KEY_ESCAPE)
 	_check(not app.controls_menu.is_open(), "Escape closes the controls screen")
+
+	# Both feeds at once (#35): a goggles and a clean file from the same field boundaries. Synthetic images stand in
+	# for the two viewports; the clean feed's own viewport is switched on and off by the app as in play.
+	app.dvr.clean_image_source = func() -> Image:
+		var image := Image.create(maxi(size.x, 16), maxi(size.y, 16), false, Image.FORMAT_RGB8)
+		image.fill(Color(0.6, 0.5, 0.4))
+		return image
+	app.settings["dvr_feed"] = "both"
+	var both_started: Array = []
+	app.dvr.started.connect(func(path: String): both_started.append(path))
+	await _current_field(app, 5.0)
+	_press(app, KEY_D)
+	_check(app.dvr.recording and app.clean_feed.is_active(), "D starts a both recording and wakes the clean feed")
+	var both_t0: float = app.client.get_telemetry()["time_s"]
+	var both_deadline := Time.get_ticks_msec() + 20_000
+	while (float(app.client.get_telemetry()["time_s"]) < both_t0 + 1.0 or app.dvr._feeds[0]["jpeg"].is_empty()) and Time.get_ticks_msec() < both_deadline:
+		await process_frame
+	var both_paths: PackedStringArray = app.dvr.paths
+	_press(app, KEY_D)
+	_check(not app.dvr.recording and not app.clean_feed.is_active(), "D again stops it and the clean feed goes idle")
+	_check(both_started.size() == 1, "started fired once: %s" % str(both_started))
+	_check(both_paths.size() == 2 and both_paths[1] == both_paths[0].trim_suffix(".avi") + "_clean.avi", "two files with one stem: %s" % str(both_paths))
+	if both_paths.size() == 2:
+		_check(FileAccess.file_exists(both_paths[0]) and FileAccess.file_exists(both_paths[1]), "both files exist")
+		var goggles_frames := _avi_frames(both_paths[0])
+		var clean_frames := _avi_frames(both_paths[1])
+		_check(goggles_frames.size() >= 1, "the goggles file holds frames: %d" % goggles_frames.size())
+		_check(goggles_frames.size() == clean_frames.size(), "both files hold the same number of frames: %d / %d" % [goggles_frames.size(), clean_frames.size()])
+	app.settings["dvr_feed"] = "goggles"
 
 	# A reload drops the recorder without an event: the indicator must go with it (the sticks recording is last so a
 	# reload here disturbs nothing above).

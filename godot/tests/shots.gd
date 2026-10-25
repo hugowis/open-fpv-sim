@@ -1,7 +1,7 @@
 extends SceneTree
 ## Renders the game to PNG files with a real renderer (a window opens briefly), to check the visuals by eye:
 ##   godot --path godot -s res://tests/shots.gd -- --out=C:/some/dir
-## Flies the open-loop drone forward for a moment, then saves start_fpv.png, start_chase.png, osd_fpv.png, hop_fpv.png,
+## Flies the open-loop drone forward for a moment, then saves start_fpv.png, start_chase.png, osd_fpv.png, clean_fpv.png, hop_fpv.png,
 ## hop_chase.png, video_grain.png, video_unstable.png, video_lost.png, help.png and controls.png.
 
 func _initialize() -> void:
@@ -65,6 +65,13 @@ func _run() -> void:
 	put.call(15, 1, "01:23 LQ100 12M")
 	app.osd.set_frame({"seq": 1, "time_s": 0.0, "present": true, "cols": 30, "rows": 16, "cells": cells})
 	await _save("osd_fpv")
+	# The DVR's clean feed beside it: the same view and lens, but no OSD text.
+	app.clean_feed.set_active(true)
+	await _frames(5)
+	var clean_image: Image = app.clean_feed.viewport().get_texture().get_image()
+	var clean_path := _out_dir().path_join("clean_fpv.png")
+	print("saved ", clean_path, " ", clean_image.get_size(), " ", clean_image.save_png(clean_path))
+	app.clean_feed.set_active(false)
 	# A short low hop so the picture moves: climb a little, then let the drone settle forward.
 	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.32, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
 	var until := Time.get_ticks_msec() + 1200

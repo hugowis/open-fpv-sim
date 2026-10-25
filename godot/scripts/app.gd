@@ -31,6 +31,7 @@ const TIPS := {
 @onready var hud: CanvasLayer = $Hud
 @onready var controls_menu: CanvasLayer = $ControlsMenu
 @onready var dvr: Node = $Dvr
+@onready var clean_feed: Node = $CleanFeed
 
 var client: Object = null  # OfsClient, from the extension
 var controls = Controls.new()
@@ -57,8 +58,13 @@ func _ready() -> void:
 	controls_menu.video_effects_toggled.connect(_on_video_effects_toggled)
 	controls_menu.set_aspect(settings["fpv_aspect"])
 	controls_menu.aspect_changed.connect(_on_aspect_changed)
+	controls_menu.set_dvr_export(settings["dvr_export"])
+	controls_menu.dvr_export_changed.connect(_on_dvr_export_changed)
+	controls_menu.set_dvr_feed(settings["dvr_feed"])
+	controls_menu.dvr_feed_changed.connect(_on_dvr_feed_changed)
 	controls_menu.dvr_toggled.connect(_set_dvr)
 	fpv_texture.texture = fpv_viewport.get_texture()
+	clean_feed.setup(fpv_camera, lens, fpv_viewport.size)
 	get_viewport().size_changed.connect(_layout_fpv)
 	_layout_fpv()
 	if not ClassDB.class_exists("OfsClient"):
@@ -103,18 +109,14 @@ static func fpv_box_for(window_size: Vector2, aspect: String, chase: bool) -> Di
 	return {"box": box, "internal": internal}
 
 
-## Sizes the FPV box and the viewport's internal resolution. A size change while the DVR records stops it
-## (Review Focus 5): stop before the resize so the comparison sees the old size.
+## Sizes the FPV box and the viewport's internal resolution. A recording keeps going: the DVR fits each frame to
+## the size it started with.
 func _layout_fpv() -> void:
 	var layout: Dictionary = fpv_box_for(fpv_box.size, settings["fpv_aspect"], chase_view)
-	var internal: Vector2i = layout["internal"]
-	if dvr != null and dvr.recording and fpv_viewport.size != internal:
-		var summary: Dictionary = dvr.stop()
-		_sync_dvr()
-		hud.add_toast("DVR stopped: the picture size changed (%d frames saved)" % summary.get("frames", 0), "warn")
 	fpv_texture.position = (layout["box"] as Rect2).position
 	fpv_texture.size = (layout["box"] as Rect2).size
-	fpv_viewport.size = internal
+	fpv_viewport.size = layout["internal"]
+	clean_feed.resize(layout["internal"])
 
 
 func _load_controls() -> void:
@@ -128,6 +130,7 @@ func _process(delta: float) -> void:
 	var focused := get_window().has_focus()
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
+	_poll_dvr_exports()
 	if not chase_view:
 		var fpv: Dictionary = client.get_fpv_view()
 		if fpv.has("pose"):
@@ -141,6 +144,8 @@ func _process(delta: float) -> void:
 		if render_time != _fpv_render_time:
 			_fpv_render_time = render_time
 			osd.set_frame(fpv.get("osd", {}))
+		if clean_feed.is_active():
+			clean_feed.sync_camera()
 		dvr.capture(fpv)
 	elif client.has_pose():
 		drone.transform = client.get_pose()
@@ -204,6 +209,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func set_chase_view(chase: bool) -> void:
 	chase_view = chase
+	if chase and dvr != null and dvr.recording:
+		_stop_dvr(true)
+		_sync_dvr()
 	(chase_camera if chase else fpv_camera).make_current()
 	lens.set_enabled(not chase)
 	osd.set_enabled(not chase)
@@ -231,19 +239,52 @@ func _set_dvr(on: bool) -> void:
 			hud.add_toast("DVR failed: the simulator is not connected", "error")
 			_sync_dvr()
 			return
-		var error: String = dvr.start(client, fpv_viewport)
+		var feed: String = settings.get("dvr_feed", "goggles")
+		var error: String = dvr.start(client, fpv_viewport, feed, clean_feed.viewport())
 		if error != "":
 			hud.add_toast("DVR failed: %s" % error, "error")
 			_sync_dvr()
 			return
+		clean_feed.set_active(feed != "goggles")  # the clean viewport renders only while a clean file is written
 		hud.add_toast("DVR: recording to user://recordings")
 	else:
-		var summary: Dictionary = dvr.stop()
-		if summary.is_empty():
-			hud.add_toast("DVR failed: the writer stopped abnormally", "error")
-		else:
-			hud.add_toast("DVR: %d frames saved%s" % [summary.get("frames", 0), _dvr_drop_note(summary)])
+		_stop_dvr(false)
 	_sync_dvr()
+
+
+## The one stop path (D, the F2 box, entering the chase view and a lost or reloaded session): idles the clean feed,
+## stops the recording, toasts how it went and, when it stopped normally with frames, hands each recorded file to the
+## export the `dvr_export` setting asks for (every feed holds the same number of frames, so none is empty).
+func _stop_dvr(chase: bool) -> void:
+	clean_feed.set_active(false)
+	var summary: Dictionary = dvr.stop()
+	if summary.is_empty():
+		hud.add_toast("DVR failed: the writer stopped abnormally%s" % (" (the chase camera is not recorded)" if chase else ""), "error")
+		return
+	var saved := "%d frames saved" % summary.get("frames", 0)
+	if chase:
+		hud.add_toast("DVR stopped: the chase camera is not recorded (%s)%s" % [saved, _dvr_drop_note(summary)], "warn")
+	else:
+		hud.add_toast("DVR: %s%s" % [saved, _dvr_drop_note(summary)])
+	var mode: String = settings.get("dvr_export", "none")
+	if mode == "none" or client == null or int(summary.get("frames", 0)) == 0:
+		return  # nothing to export from an empty recording
+	for path in summary.get("paths", PackedStringArray()):
+		var error: String = client.dvr_export(path, mode)
+		if error != "":
+			hud.add_toast("DVR export failed: %s" % error, "warn")
+
+
+## Toasts the exports that finished since the last frame. A failure only warns: the AVI is never touched.
+func _poll_dvr_exports() -> void:
+	for done in client.dvr_export_poll():
+		var detail: String = done["detail"]
+		if done["ok"]:
+			hud.add_toast("DVR exported (%s): %s" % [done["kind"], detail.get_file()])
+		elif detail.begins_with("ffmpeg was not found"):
+			hud.add_toast("%s: the AVI was kept" % detail, "warn")
+		else:
+			hud.add_toast("DVR %s export failed: %s (the AVI was kept)" % [done["kind"], detail], "warn")
 
 
 func _sync_dvr() -> void:
@@ -270,6 +311,18 @@ func _on_aspect_changed(value: String) -> void:
 		hud.add_toast("Could not save the Picture setting to %s" % AppSettings.CONFIG_PATH, "warn")
 
 
+func _on_dvr_export_changed(value: String) -> void:
+	settings["dvr_export"] = value
+	if not AppSettings.save_value("dvr_export", value):
+		hud.add_toast("Could not save the DVR export setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
+func _on_dvr_feed_changed(value: String) -> void:
+	settings["dvr_feed"] = value  # applies to the next recording
+	if not AppSettings.save_value("dvr_feed", value):
+		hud.add_toast("Could not save the DVR feed setting to %s" % AppSettings.CONFIG_PATH, "warn")
+
+
 func set_radio_cut(cut: bool) -> void:
 	radio_cut = cut
 	if client != null:
@@ -288,7 +341,7 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 	if phase in ["loading", "failed", "stopped"]:
 		inputs_recording = false  # a reloaded quad, or a lost session, has no recorder
 		if dvr != null and dvr.recording:
-			dvr.stop()  # a reloaded quad, or a lost session, has no picture to record
+			_stop_dvr(false)  # a reloaded quad, or a lost session, has no picture to record
 			_sync_dvr()
 	if phase == "loading":
 		radio_cut = false  # a reloaded quad has no faults

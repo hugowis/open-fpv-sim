@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use godot::classes::{INode, Node};
 use godot::prelude::*;
+use ofs_client::dvr::DvrFeed;
+use ofs_client::dvr_export::Exporter;
 use ofs_client::{Client, Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
 
 struct OfsExtension;
@@ -22,12 +24,14 @@ unsafe impl ExtensionLibrary for OfsExtension {}
 pub struct OfsClient {
     base: Base<Node>,
     client: Option<Client>,
+    /// DVR export jobs; independent of any session, so a recording made before a reload still finishes exporting.
+    exporter: Exporter,
 }
 
 #[godot_api]
 impl INode for OfsClient {
     fn init(base: Base<Node>) -> Self {
-        Self { base, client: None }
+        Self { base, client: None, exporter: Exporter::new() }
     }
 
     fn process(&mut self, _delta: f64) {
@@ -309,33 +313,72 @@ impl OfsClient {
         d
     }
 
-    /// Starts a DVR recording to `path` (an absolute .avi path) at the viewport's pixel size; "" or why not.
+    /// Starts a DVR recording of `feed` ("goggles" or "clean") to `path` (an absolute .avi path) at the given pixel
+    /// size; "" or why not.
     #[func]
-    fn dvr_start(&self, path: GString, width: i64, height: i64) -> GString {
+    fn dvr_start(&self, feed: GString, path: GString, width: i64, height: i64) -> GString {
         let Some(client) = self.client.as_ref() else { return GString::from("no session") };
-        match client.dvr_start(path.to_string(), width.max(1) as u32, height.max(1) as u32) {
+        let name = feed.to_string();
+        let Some(feed) = DvrFeed::parse(&name) else { return GString::from(format!("unknown feed {name}").as_str()) };
+        match client.dvr_start(feed, path.to_string(), width.max(1) as u32, height.max(1) as u32) {
             Ok(()) => GString::new(),
             Err(e) => GString::from(e.as_str()),
         }
     }
 
     #[func]
-    fn dvr_write_frame(&self, jpeg: PackedByteArray) {
-        if let Some(client) = self.client.as_ref() {
-            client.dvr_write_frame(jpeg.to_vec());
+    fn dvr_write_frame(&self, feed: GString, jpeg: PackedByteArray) {
+        if let (Some(client), Some(feed)) = (self.client.as_ref(), DvrFeed::parse(&feed.to_string())) {
+            client.dvr_write_frame(feed, jpeg.to_vec());
         }
     }
 
-    /// Stops the recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
+    /// Stops the `feed` recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
     #[func]
-    fn dvr_stop(&self) -> VarDictionary {
+    fn dvr_stop(&self, feed: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
         let Some(client) = self.client.as_ref() else { return d };
-        let Ok(summary) = client.dvr_stop() else { return d };
+        let Some(feed) = DvrFeed::parse(&feed.to_string()) else { return d };
+        let Ok(summary) = client.dvr_stop(feed) else { return d };
         d.set("frames", summary.frames as i64);
         d.set("dropped_frames", summary.dropped_frames as i64);
         d.set("bytes", summary.bytes as i64);
         d
+    }
+
+    /// Exports the finished recording `path` (an absolute .avi path) in the background: `mode` is "frames" (an image
+    /// sequence next to it), "mp4" (needs ffmpeg on the PATH) or "both". "" when it started, otherwise why not.
+    /// Results arrive through `dvr_export_poll`.
+    #[func]
+    fn dvr_export(&self, path: GString, mode: GString) -> GString {
+        let (frames, mp4) = match mode.to_string().as_str() {
+            "frames" => (true, false),
+            "mp4" => (false, true),
+            "both" => (true, true),
+            other => return GString::from(format!("unknown export mode {other}").as_str()),
+        };
+        self.exporter.spawn(PathBuf::from(path.to_string()), frames, mp4);
+        GString::new()
+    }
+
+    /// The exports that finished since the last call: an Array of `{path, kind ("frames" or "mp4"), ok, detail}`
+    /// (`detail` is the output path, or the error).
+    #[func]
+    fn dvr_export_poll(&self) -> VarArray {
+        let mut out = VarArray::new();
+        for done in self.exporter.poll() {
+            let mut d = VarDictionary::new();
+            d.set("path", &GString::from(done.avi.to_string_lossy().as_ref()));
+            d.set("kind", &GString::from(done.kind));
+            d.set("ok", done.result.is_ok());
+            let detail = match &done.result {
+                Ok(path) => path.to_string_lossy().into_owned(),
+                Err(e) => e.clone(),
+            };
+            d.set("detail", &GString::from(detail.as_str()));
+            out.push(&d.to_variant());
+        }
+        out
     }
 
     /// The newest OSD frame: `seq`, `time_s`, `present`, `cols`, `rows` and `cells` (a PackedInt32Array, row-major,

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 
-use crate::dvr::{self, DvrSummary, DvrWriter};
+use crate::dvr::{self, DvrFeed, DvrSummary, DvrWriter};
 use crate::error::{ClientError, ErrorKind};
 use crate::fpv::{self, FpvBuffer, FpvView};
 use crate::interp::{Pose, StateBuffer};
@@ -32,7 +32,7 @@ pub struct Client {
     finished: Mutex<std_mpsc::Receiver<()>>,
     runtime: Option<tokio::runtime::Runtime>,
     seen: Mutex<Seen>,
-    dvr: Mutex<Option<DvrWriter>>,
+    dvr: Mutex<[Option<DvrWriter>; 2]>, // indexed by DvrFeed
 }
 
 /// Upper bound of the stick rate: a mistyped setting must not make the worker spin or flood the server.
@@ -89,7 +89,7 @@ impl Client {
                 configurator_address: String::new(),
                 quad_name: String::new(),
             }),
-            dvr: Mutex::new(None),
+            dvr: Mutex::new([None, None]),
         })
     }
 
@@ -187,26 +187,27 @@ impl Client {
         self.shared.world_version.load(Ordering::Acquire)
     }
 
-    /// Starts a DVR recording to `path` at the field rate with `width` × `height` pixels.
-    pub fn dvr_start(&self, path: String, width: u32, height: u32) -> Result<(), String> {
+    /// Starts a DVR recording of `feed` to `path` at the field rate with `width` × `height` pixels.
+    pub fn dvr_start(&self, feed: DvrFeed, path: String, width: u32, height: u32) -> Result<(), String> {
         let mut dvr = lock(&self.dvr);
-        if dvr.is_some() {
+        let slot = &mut dvr[feed as usize];
+        if slot.is_some() {
             return Err("already recording".into());
         }
-        *dvr = Some(DvrWriter::start(PathBuf::from(path), dvr::DVR_FPS, width, height)?);
+        *slot = Some(DvrWriter::start(PathBuf::from(path), dvr::DVR_FPS, width, height)?);
         Ok(())
     }
 
-    pub fn dvr_write_frame(&self, jpeg: Vec<u8>) {
+    pub fn dvr_write_frame(&self, feed: DvrFeed, jpeg: Vec<u8>) {
         let dvr = lock(&self.dvr);
-        if let Some(w) = dvr.as_ref() {
+        if let Some(w) = dvr[feed as usize].as_ref() {
             w.write_frame(jpeg);
         }
     }
 
-    /// Stops the recording; the summary reports frames, drops and bytes.
-    pub fn dvr_stop(&self) -> Result<DvrSummary, String> {
-        let writer = lock(&self.dvr).take().ok_or_else(|| "not recording".to_string())?;
+    /// Stops the `feed` recording; the summary reports frames, drops and bytes.
+    pub fn dvr_stop(&self, feed: DvrFeed) -> Result<DvrSummary, String> {
+        let writer = lock(&self.dvr)[feed as usize].take().ok_or_else(|| "not recording".to_string())?;
         writer.stop()
     }
 
