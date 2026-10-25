@@ -6,6 +6,8 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Mutex;
 
 /// How far into the file the `movi` fourcc is searched for: the header is 220 bytes, this leaves room for a
 /// recording from a muxer that wrote a few more.
@@ -14,8 +16,14 @@ const HEADER_SCAN: usize = 1024;
 /// Copies the AVI's `00dc` chunks, unmodified, to `<stem>_frames/frame_%06d.jpg` (numbered from 1) next to it.
 /// Returns that directory and the frame count. The chunks are found by scanning from `movi` to `idx1` or the end
 /// of the file rather than trusting the header sizes, so a recording that crashed (sizes still zero) exports; a
-/// chunk cut off by the end of the file is dropped. The directory must not exist.
+/// chunk cut off by the end of the file is dropped. The directory must not exist; it is made at the first frame, so
+/// an AVI without frames is an error that leaves nothing behind, and a failure later removes what this call made.
 pub fn export_frames(avi: &Path) -> Result<(PathBuf, u64), String> {
+    export_frames_with(avi, &mut |path, jpeg| File::create_new(path).and_then(|mut f| f.write_all(jpeg)))
+}
+
+/// `export_frames` with the frame writer injected (it is handed the new file's path and the JPEG bytes).
+fn export_frames_with(avi: &Path, write: &mut dyn FnMut(&Path, &[u8]) -> std::io::Result<()>) -> Result<(PathBuf, u64), String> {
     let name = |e: std::io::Error| format!("{}: {e}", avi.display());
     let file = File::open(avi).map_err(name)?;
     let len = file.metadata().map_err(name)?.len();
@@ -34,36 +42,106 @@ pub fn export_frames(avi: &Path) -> Result<(PathBuf, u64), String> {
 
     let stem = avi.file_stem().unwrap_or(OsStr::new("recording")).to_string_lossy();
     let dir = avi.with_file_name(format!("{stem}_frames"));
-    std::fs::create_dir(&dir).map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => {
-            format!("{} already exists: an export never overwrites another", dir.display())
-        }
-        _ => format!("{}: {e}", dir.display()),
-    })?;
-
+    let mut made = false;
     let mut count = 0u64;
     let mut chunk_head = [0u8; 8];
-    while pos + 8 <= len {
-        input.read_exact(&mut chunk_head).map_err(name)?;
-        let size = u32::from_le_bytes(chunk_head[4..].try_into().unwrap()) as u64;
-        if &chunk_head[..4] == b"idx1" || pos + 8 + size > len {
-            break;
+    let result = (|| {
+        while pos + 8 <= len {
+            input.read_exact(&mut chunk_head).map_err(name)?;
+            let size = u32::from_le_bytes(chunk_head[4..].try_into().unwrap()) as u64;
+            if &chunk_head[..4] == b"idx1" || pos + 8 + size > len {
+                break;
+            }
+            if &chunk_head[..4] == b"00dc" {
+                let mut jpeg = vec![0u8; size as usize];
+                input.read_exact(&mut jpeg).map_err(name)?;
+                if !made {
+                    std::fs::create_dir(&dir).map_err(|e| match e.kind() {
+                        std::io::ErrorKind::AlreadyExists => {
+                            format!("{} already exists: an export never overwrites another", dir.display())
+                        }
+                        _ => format!("{}: {e}", dir.display()),
+                    })?;
+                    made = true;
+                }
+                count += 1;
+                let path = dir.join(format!("frame_{count:06}.jpg"));
+                write(&path, &jpeg).map_err(|e| format!("{}: {e}", path.display()))?;
+            } else {
+                input.seek_relative(size as i64).map_err(name)?;
+            }
+            input.seek_relative((size & 1) as i64).map_err(name)?; // chunks are padded to even sizes
+            pos += 8 + size + (size & 1);
         }
-        if &chunk_head[..4] == b"00dc" {
-            let mut jpeg = vec![0u8; size as usize];
-            input.read_exact(&mut jpeg).map_err(name)?;
-            count += 1;
-            let path = dir.join(format!("frame_{count:06}.jpg"));
-            File::create_new(&path)
-                .and_then(|mut f| f.write_all(&jpeg))
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-        } else {
-            input.seek_relative(size as i64).map_err(name)?;
+        if count == 0 {
+            return Err(format!("{} holds no frames", avi.display()));
         }
-        input.seek_relative((size & 1) as i64).map_err(name)?; // chunks are padded to even sizes
-        pos += 8 + size + (size & 1);
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok((dir, count)),
+        Err(e) => {
+            if made {
+                std::fs::remove_dir_all(&dir).ok();
+            }
+            Err(e)
+        }
     }
-    Ok((dir, count))
+}
+
+/// An export job's outcome: `kind` is "frames" (`result` is the directory) or "mp4" (the file).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportDone {
+    pub avi: PathBuf,
+    pub kind: &'static str,
+    pub result: Result<PathBuf, String>,
+}
+
+/// Runs exports off the caller's thread (an MP4 takes seconds) and hands the outcomes back through `poll`.
+pub struct Exporter {
+    tx: Sender<ExportDone>,
+    rx: Mutex<Receiver<ExportDone>>,
+}
+
+impl Default for Exporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Exporter {
+    pub fn new() -> Exporter {
+        let (tx, rx) = channel();
+        Exporter { tx, rx: Mutex::new(rx) }
+    }
+
+    /// Exports `avi` as the requested kinds on a new thread, frames first, with ffmpeg from the `PATH`.
+    pub fn spawn(&self, avi: PathBuf, frames: bool, mp4: bool) {
+        self.spawn_with(if mp4 { find_ffmpeg() } else { None }, avi, frames, mp4);
+    }
+
+    /// `spawn` with ffmpeg given: `None` with `mp4` set reports "ffmpeg was not found on PATH".
+    pub fn spawn_with(&self, ffmpeg: Option<PathBuf>, avi: PathBuf, frames: bool, mp4: bool) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            if frames {
+                let result = export_frames(&avi).map(|(dir, _)| dir);
+                tx.send(ExportDone { avi: avi.clone(), kind: "frames", result }).ok();
+            }
+            if mp4 {
+                let result = match ffmpeg {
+                    Some(ffmpeg) => export_mp4(&ffmpeg, &avi),
+                    None => Err("ffmpeg was not found on PATH".to_string()),
+                };
+                tx.send(ExportDone { avi, kind: "mp4", result }).ok();
+            }
+        });
+    }
+
+    /// The outcomes that arrived since the last call.
+    pub fn poll(&self) -> Vec<ExportDone> {
+        self.rx.lock().map_or_else(|_| Vec::new(), |rx| rx.try_iter().collect())
+    }
 }
 
 /// The first `ffmpeg` (`ffmpeg.exe` on Windows) file in a `PATH`-style list of directories.
@@ -97,16 +175,45 @@ pub fn export_mp4(ffmpeg: &Path, avi: &Path) -> Result<PathBuf, String> {
     if mp4.exists() {
         return Err(format!("{} already exists: an export never overwrites another", mp4.display()));
     }
-    let output = Command::new(ffmpeg)
-        .args(ffmpeg_args(avi, &mp4))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .output()
-        .map_err(|e| format!("{}: {e}", ffmpeg.display()))?;
+    let mut command = Command::new(ffmpeg);
+    command.args(ffmpeg_args(avi, &mp4)).stdin(Stdio::null()).stdout(Stdio::null());
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW: no console flash from a GUI parent
+    let output = command.output().map_err(|e| format!("{}: {e}", ffmpeg.display()))?;
     if output.status.success() {
         return Ok(mp4);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     let last = stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
     Err(last.map_or_else(|| format!("ffmpeg failed: {}", output.status), str::to_string))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dvr::DvrWriter;
+
+    #[test]
+    fn a_failure_after_the_directory_was_made_removes_it() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-export-cleanup-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let avi = dir.join("rec.avi");
+        let writer = DvrWriter::start(avi.clone(), 50, 4, 2).unwrap();
+        writer.write_frame(b"AAA".to_vec());
+        writer.write_frame(b"BBB".to_vec());
+        writer.stop().unwrap();
+        let mut written = 0;
+        let err = export_frames_with(&avi, &mut |path, jpeg| {
+            written += 1;
+            if written == 2 {
+                return Err(std::io::Error::other("disk full"));
+            }
+            File::create_new(path).and_then(|mut f| f.write_all(jpeg))
+        })
+        .unwrap_err();
+        assert!(err.contains("disk full"), "{err}");
+        assert!(!dir.join("rec_frames").exists(), "the half-made directory is removed");
+        assert!(avi.exists());
+    }
 }

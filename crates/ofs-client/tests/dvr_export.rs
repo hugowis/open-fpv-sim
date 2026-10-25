@@ -1,8 +1,9 @@
 //! The DVR export: an image sequence copied out of the AVI, and the ffmpeg argument list. No test needs ffmpeg.
 use ofs_client::dvr::DvrWriter;
-use ofs_client::dvr_export::{export_frames, export_mp4, ffmpeg_args, find_ffmpeg_in};
+use ofs_client::dvr_export::{export_frames, export_mp4, ffmpeg_args, find_ffmpeg_in, Exporter};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 fn fresh_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ofs-dvr-export-{name}-{}", std::process::id()));
@@ -134,4 +135,36 @@ fn export_mp4_refuses_an_existing_mp4() {
     let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
     assert!(err.contains("rec.mp4") && err.contains("already exists"), "{err}");
     assert_eq!(std::fs::read(dir.join("rec.mp4")).unwrap(), b"mine");
+}
+
+#[test]
+fn an_avi_without_frames_is_an_error_and_no_directory_is_made() {
+    let dir = fresh_dir("noframes");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[]);
+    let err = export_frames(&avi).unwrap_err();
+    assert!(err.contains("holds no frames"), "{err}");
+    assert!(!dir.join("rec_frames").exists());
+}
+
+#[test]
+fn the_exporter_reports_a_frames_job_and_a_missing_ffmpeg() {
+    let dir = fresh_dir("exporter");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA", b"BBB"]);
+    let exporter = Exporter::new();
+    exporter.spawn_with(None, avi.clone(), true, true);
+    let mut done = Vec::new();
+    let start = Instant::now();
+    while done.len() < 2 && start.elapsed() < Duration::from_secs(5) {
+        done.extend(exporter.poll());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(done.len(), 2, "two results within 5 s");
+    let frames = done.iter().find(|d| d.kind == "frames").unwrap();
+    assert_eq!(frames.avi, avi);
+    assert_eq!(frames.result, Ok(dir.join("rec_frames")));
+    let mp4 = done.iter().find(|d| d.kind == "mp4").unwrap();
+    assert!(mp4.result.as_ref().unwrap_err().contains("ffmpeg"), "{:?}", mp4.result);
+    assert!(exporter.poll().is_empty(), "each result is delivered once");
 }
