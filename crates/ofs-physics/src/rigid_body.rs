@@ -63,6 +63,9 @@ pub struct RigidBody {
     /// `collision::resolve` each step.
     bounding_radius_m: f64,
     touch: TouchState,
+    /// The landing points' friction anchors (point index, object index, displacement) of the last step, in the
+    /// order they were made: a point that stuck keeps its anchor into the next step.
+    anchors: Vec<(usize, i32, DVec3)>,
     last_collision: Option<(i32, f64)>,
     collision_events: u64,
     s: BodyState,
@@ -104,6 +107,7 @@ impl RigidBody {
             bounds,
             bounding_radius_m,
             touch,
+            anchors: Vec::new(),
             last_collision: None,
             collision_events: 0,
             p,
@@ -133,27 +137,35 @@ impl RigidBody {
 
     /// Total contact force and torque about the centre of mass, both in NED, and the (object index, inward
     /// speed) touch of every landing point currently inside a solid — the ground plane (`GROUND_OBJECT_INDEX`)
-    /// or a world object — for the collision events. The spring-damper and friction of `[ground]` act on every
-    /// landing contact point against the ground plane and against every world object; against an object the
-    /// depth is minus the signed distance and the normal is the shape's gradient there.
-    fn contact(&self, s: &BodyState) -> (DVec3, DVec3, Vec<(i32, f64)>) {
+    /// or a world object — for the collision events. The spring-damper and Coulomb friction of `[ground]`
+    /// (`collision::point_force`) act on every landing contact point against the ground plane and against every
+    /// world object; against an object the depth is minus the signed distance and the normal is the shape's
+    /// gradient there.
+    fn contact(&mut self, s: &BodyState, dt: f64) -> (DVec3, DVec3, Vec<(i32, f64)>) {
         let g = &self.p.ground;
+        let before = std::mem::take(&mut self.anchors);
+        let mut after: Vec<(usize, i32, DVec3)> = Vec::new();
         let mut force = DVec3::ZERO;
         let mut torque = DVec3::ZERO;
         let mut touches: Vec<(i32, f64)> = Vec::new();
-        for c in &self.p.contact_points_frd_m {
+        // One contact's force, with the anchor it had last step (or none); the anchor is kept for the next.
+        let mut act = |lever: DVec3, point: usize, object: i32, normal: DVec3, depth: f64, v: DVec3| {
+            let mut anchor = before.iter().find(|a| a.0 == point && a.1 == object).map_or(DVec3::ZERO, |a| a.2);
+            let f = collision::point_force(g, normal, depth, v, &mut anchor, dt);
+            if anchor != DVec3::ZERO {
+                after.push((point, object, anchor));
+            }
+            force += f;
+            torque += lever.cross(f);
+        };
+        for (k, c) in self.p.contact_points_frd_m.iter().enumerate() {
             let lever = s.att * *c;
             let v = s.vel_ned_mps + s.att * s.rate_frd_radps.cross(*c);
             let depth = s.pos_ned_m.z + lever.z; // ground plane is z = 0, NED z points down
             if depth > 0.0 {
                 // The ground's normal is up, -z: the inward speed is minus the velocity along it.
                 touches.push((collision::GROUND_OBJECT_INDEX, v.z.max(0.0)));
-                let normal = (g.stiffness_npm * depth + g.damping_nspm * v.z).max(0.0);
-                let v_t = DVec3::new(v.x, v.y, 0.0);
-                let friction = -v_t * (g.friction_coeff * normal / v_t.length().max(0.05));
-                let f = DVec3::new(0.0, 0.0, -normal) + friction;
-                force += f;
-                torque += lever.cross(f);
+                act(lever, k, collision::GROUND_OBJECT_INDEX, DVec3::NEG_Z, depth, v);
             }
             let point = s.pos_ned_m + lever;
             for (i, object) in self.p.objects.iter().enumerate() {
@@ -164,18 +176,12 @@ impl RigidBody {
                 if sd >= 0.0 {
                     continue;
                 }
-                let depth = -sd;
                 let n = object.shape.normal(point);
-                let v_n = v.dot(n);
-                touches.push((i as i32, (-v_n).max(0.0)));
-                let mag = (g.stiffness_npm * depth - g.damping_nspm * v_n).max(0.0);
-                let v_t = v - n * v_n;
-                let friction = -v_t * (g.friction_coeff * mag / v_t.length().max(0.05));
-                let f = n * mag + friction;
-                force += f;
-                torque += lever.cross(f);
+                touches.push((i as i32, (-v.dot(n)).max(0.0)));
+                act(lever, k, i as i32, n, -sd, v);
             }
         }
+        self.anchors = after;
         (force, torque, touches)
     }
 }
@@ -217,7 +223,7 @@ impl Model for RigidBody {
         }
         force_body -= 0.5 * AIR_DENSITY_KGPM3 * self.p.cda_m2 * v_body.abs() * v_body;
 
-        let (contact_force, contact_torque, point_touches) = self.contact(&s);
+        let (contact_force, contact_torque, point_touches) = self.contact(&s, dt);
         torque_body += to_body * contact_torque;
 
         // Translation: semi-implicit Euler.

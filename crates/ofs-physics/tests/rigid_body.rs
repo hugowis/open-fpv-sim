@@ -212,7 +212,7 @@ fn sliding_on_the_ground_slows_at_mu_g() {
     let expected = 2.0 - 0.6 * GRAVITY_MPS2 * 0.2;
     assert!((vx - expected).abs() < 0.03, "vx {vx}, Coulomb friction expects {expected}");
     s.run_for(1.0).unwrap();
-    assert!(vec3(&s, names::BODY_VEL_NED).x.abs() < 0.05, "it stops (viscous below 5 cm/s)");
+    assert!(vec3(&s, names::BODY_VEL_NED).x.abs() < 1e-3, "it stops (static friction)");
 }
 
 #[test]
@@ -335,4 +335,21 @@ fn the_gyroscopic_torque_does_no_work() {
     s.run_for(2.0).unwrap();
     let w = vec3(&s, names::BODY_RATE_FRD);
     assert!(((energy(w) - energy(w0)) / energy(w0)).abs() < 1e-3, "energy drift: {} -> {}", energy(w0), energy(w));
+}
+
+#[test]
+fn a_quad_sliding_on_its_feet_stops_in_v_squared_over_two_mu_g_and_stays() {
+    // 1 m/s along the ground on four feet (mu = 0.6): friction holds the sum of the four normal forces times mu,
+    // so it decelerates at mu g and stops after 0.085 m; static friction then holds it still (a viscous law below
+    // 5 cm/s would creep on).
+    let mut s0 = at(DVec3::new(0.0, 0.0, -0.03 + 0.5e-3));
+    s0.vel_ned_mps = DVec3::new(1.0, 0.0, 0.0);
+    let mut s = sim(params(vec![], feet()), s0);
+    s.run_for(1.0).unwrap();
+    let stopped = vec3(&s, names::BODY_POS_NED);
+    let expected = 1.0 / (2.0 * 0.6 * GRAVITY_MPS2);
+    assert!((stopped.x - expected).abs() < 0.1 * expected, "slid {} m, expected {expected}", stopped.x);
+    s.run_for(2.0).unwrap();
+    let later = vec3(&s, names::BODY_POS_NED);
+    assert!((later - stopped).length() < 1e-4, "crept {} m after stopping", (later - stopped).length());
 }
