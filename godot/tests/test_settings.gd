@@ -140,3 +140,18 @@ func test_saving_a_setting_keeps_the_comments_and_layout_of_a_hand_edited_file()
 	eq(back.get_value("client", "video_effects"), false, "the section is added")
 	ok(FileAccess.get_file_as_string(path).begins_with(bare), "the comment stays")
 	DirAccess.remove_absolute(path)
+
+
+func test_the_menu_race_fullscreen_and_hud_settings_come_from_every_source() -> void:
+	var d := AppSettings.defaults()
+	eq([d["menu"], d["race_start"], d["fullscreen"], d["hud_visible"]], [true, true, false, true], "menu on, race on, windowed, HUD shown")
+	var s := AppSettings.resolve({"menu": false}, {"OFS_RACE_START": "0", "OFS_FULLSCREEN": "1"}, PackedStringArray(["--hud=off"]))
+	eq([s["menu"], s["race_start"], s["fullscreen"], s["hud_visible"]], [false, false, true, false], "file, environment and flag")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--menu=off"]))["menu"], false, "--menu=off")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--fullscreen"]))["fullscreen"], true, "--fullscreen alone")
+
+
+func test_overrides_name_the_flag_or_variable_that_wins_this_run() -> void:
+	var o := AppSettings.overrides({"OFS_OPEN_LOOP": "1", "OFS_WORLD": "w.toml", "NOT_OURS": "x"}, PackedStringArray(["--open-loop", "--dvr-feed=clean", "--bogus=1", "positional"]))
+	eq(o, {"open_loop": "--open-loop", "world_path": "OFS_WORLD", "dvr_feed": "--dvr-feed"}, "the flag beats the variable, which beats the file")
+	eq(AppSettings.overrides({}, PackedStringArray()), {}, "nothing overridden")

@@ -25,7 +25,7 @@ const HELP_LINES := [
 	"I  record the sticks and link state to a CSV (replay with play_inputs)",
 	"N  start a new race (lap clock and laps back to zero)",
 	"H  show / hide this HUD",
-	"F1 this help        F2 controls setup        F11 fullscreen",
+	"F1 this help        F2 controls setup        F11 fullscreen        Esc back to the menu",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",
 ]
 

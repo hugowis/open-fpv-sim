@@ -52,6 +52,7 @@ func _run() -> void:
 		print("SKIP: OFS_SITL_LAUNCH is not set, so there is no Betaflight SITL to fly")
 		quit(0)
 		return
+	OS.set_environment("OFS_MENU", "off")
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", OS.get_user_data_dir().path_join("e2e-betaflight-data"))
 	var app = load("res://main.tscn").instantiate()

@@ -36,6 +36,7 @@ func _free_port() -> int:
 
 
 func _start(env: Dictionary) -> Node:
+	OS.set_environment("OFS_MENU", "off")
 	for name in env:
 		OS.set_environment(name, env[name])
 	var app = load("res://main.tscn").instantiate()

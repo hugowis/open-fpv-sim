@@ -18,6 +18,22 @@ repository). The format follows Keep a Changelog.
 - **`crates/ofs-config/tests/quads.rs` and `crates/ofs-sim/tests/quads.rs`**: every shipped quad loads and validates, every
   library part has a ledger section, and the three new quads show the thrust-to-weight and hover throttle their files claim.
 
+### A main menu and a settings screen (#123, #126)
+#### Added
+- **The game opens in a main menu**: choose a world and a quad (the `*.toml` files of `worlds/` and `quads/` in the
+  checkout and in the data dir), race or free flight (worlds with gates), and Betaflight or open loop (Betaflight when a
+  SITL launch command is set), then Start flying. The choices are the existing `world_path`, `quad_path`, `open_loop`
+  settings and a new `race_start`, saved to `ofs_client.cfg` as they change. **Esc** in a flight returns to the menu in the
+  same process (the simulator and the Betaflight it started stop; Start launches them again). Keyboard and gamepad
+  navigate it.
+- **A settings screen** (from the menu) for video effects, picture aspect, HUD shown at start, fullscreen, the DVR feed
+  and export, open loop, the simulator binary and address, the data directory and the SITL launch command. It is a view
+  of `[client]`: it shows the effective value and locks a row that a flag or an `OFS_*` variable sets this run, naming
+  the source. The F2 screen and this one share one apply-and-save path.
+- **Settings `menu`, `race_start`, `fullscreen`, `hud_visible`** with `OFS_MENU` / `--menu=`, `OFS_RACE_START` /
+  `--race-start=`, `OFS_FULLSCREEN` / `--fullscreen`, `OFS_HUD` / `--hud=`. `--menu=off` boots straight into the flight
+  (what the e2e suites use). Free flight (`race_start` off) hides the HUD's race line and the next-gate highlight.
+
 ### The IMU and the barometer as library parts (#42)
 #### Added
 - **`library/imus/` and `library/barometers/`**: `opendrone-imu` and `opendrone-baro` hold the numbers the shipped quads

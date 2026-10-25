@@ -66,7 +66,7 @@ and library, applies the journal tick for tick and compares the failure and the 
 - **Python (`python/ofs/`):** `ofs.launch()` starts a server and connects; `Sim` wraps the RPCs (load, run, sticks,
   faults, recording, inputs, inputs recording). `ofs.reader` reads recordings, `ofs.rerun` streams a live view.
 - **Godot (`godot/`):** `scripts/app.gd` drives the game; `OfsClient` (from `ofs-godot`) runs the client's worker
-  and hands GDScript the pose, telemetry, OSD and the delayed FPV composite; `ui/` holds the OSD, HUD, video and DVR.
+  and hands GDScript the pose, telemetry, OSD and the delayed FPV composite; `ui/` holds the OSD, HUD, video, DVR, the main menu and the settings screen (their choices are settings in the `ofs_client.cfg` chain; `scripts/catalog.gd` lists the worlds and quads).
 
 ## How to add…
 - **A part** (a motor, prop, battery…): a TOML in `library/<kind>/` named for its id, with `[provenance]` for every

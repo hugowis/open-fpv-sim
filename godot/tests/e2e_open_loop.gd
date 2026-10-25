@@ -3,6 +3,8 @@ extends SceneTree
 ## radio being cut. Needs the extension and the server built (target/debug), or OFS_SIM_BIN set.
 ##   godot --headless --path godot -s res://tests/e2e_open_loop.gd
 
+const Catalog = preload("res://scripts/catalog.gd")
+
 var failures := 0
 
 
@@ -79,6 +81,7 @@ func _avi_frames(path: String) -> Array:
 func _run() -> void:
 	var data_dir := OS.get_user_data_dir().path_join("e2e-data")
 	OS.set_environment("OFS_OPEN_LOOP", "1")
+	OS.set_environment("OFS_MENU", "off")  # the menu-less boot; the menu is exercised at the end
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", data_dir)
 	var app = load("res://main.tscn").instantiate()
@@ -324,7 +327,7 @@ func _run() -> void:
 	app.dvr.started.connect(func(path: String): both_started.append(path))
 	await _current_field(app, 5.0)
 	_press(app, KEY_D)
-	_check(app.dvr.recording and app.clean_feed.is_active(), "D starts a both recording and wakes the clean feed")
+	_check(app.dvr.recording and app.clean_feed.is_active(), "D starts a both recording and wakes the clean feed: %s" % str(app.hud.toast_texts().slice(-2)))
 	var both_t0: float = app.client.get_telemetry()["time_s"]
 	var both_deadline := Time.get_ticks_msec() + 20_000
 	while (float(app.client.get_telemetry()["time_s"]) < both_t0 + 1.0 or app.dvr._feeds[0]["jpeg"].is_empty()) and Time.get_ticks_msec() < both_deadline:
@@ -359,6 +362,34 @@ func _run() -> void:
 	_press(app, KEY_I)
 	var stopped_after: bool = await _wait_for(func(): return not app.inputs_recording, 10.0)
 	_check(stopped_after, "and the next I press stops it")
+
+	# The main menu (#123): Esc leaves the flight, Start flies the chosen settings again, in the same process. The
+	# choices are set on the settings (not through the rows) so the run does not rewrite user://ofs_client.cfg.
+	_press(app, KEY_ESCAPE)
+	_check(app.main_menu.is_open() and not app.fpv_box.visible, "Esc with nothing open returns to the menu")
+	_check(app.client.get_phase() == "stopped", "and ends the flight (phase: %s)" % app.client.get_phase())
+	_press(app, KEY_C)
+	_check(not app.chase_view, "keys do nothing while the menu is open")
+	var repo: String = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+	var weak: String = repo.path_join("quads").path_join("opendrone-5f-weak-link.toml")
+	app.settings["world_path"] = repo.path_join("worlds").path_join("circuit.toml")
+	app.settings["quad_path"] = weak
+	app.settings["race_start"] = false
+	app.main_menu.open()
+	_check(app.main_menu.row("world").text.contains("Circuit"), "the menu shows the world: %s" % app.main_menu.row("world").text)
+	_check(app.main_menu.row("mode").visible, "a world with gates offers race or free flight")
+	app.main_menu.row("start").pressed.emit()
+	var again: bool = await _wait_for(func(): return app.client.get_phase() == "flying", 30.0)
+	_check(again, "Start flies again in the same process (phase: %s %s)" % [app.client.get_phase(), app.client.get_phase_detail()])
+	var weak_name: String = Catalog.entry(weak)["label"]
+	_check(app.client.get_quad_name() == weak_name, "with the quad chosen in the menu: %s" % app.client.get_quad_name())
+	var course: bool = await _wait_for(func(): return app.client.get_telemetry().get("race_present", false), 10.0)
+	_check(course, "the circuit's course reaches the client")
+	await _wait_for(func(): return false, 0.3)
+	_check(app.hud.race_text() == "", "free flight hides the race line: '%s'" % app.hud.race_text())
+	app.settings["race_start"] = true
+	await _wait_for(func(): return false, 0.3)
+	_check(app.hud.race_text().begins_with("RACE"), "race mode shows it: '%s'" % app.hud.race_text())
 
 	app.queue_free()
 	await process_frame

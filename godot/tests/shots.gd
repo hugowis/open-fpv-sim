@@ -37,6 +37,7 @@ func _save(name: String) -> void:
 
 func _run() -> void:
 	OS.set_environment("OFS_OPEN_LOOP", "1")
+	OS.set_environment("OFS_MENU", "off")
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", OS.get_user_data_dir().path_join("shots-data"))
 	var app = load("res://main.tscn").instantiate()
@@ -106,6 +107,14 @@ func _run() -> void:
 	app.hud.set_help_visible(false)
 	app.controls_menu.toggle()
 	await _save("controls")
+	app.controls_menu.toggle()
+	app._show_menu()
+	await _frames(3)
+	await _save("menu")
+	app.main_menu.close()
+	app.settings_screen.open()
+	await _frames(3)
+	await _save("settings")
 	app.queue_free()
 	await _frames(2)
 	quit(0)
