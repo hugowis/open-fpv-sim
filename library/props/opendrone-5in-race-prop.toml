@@ -1,0 +1,30 @@
+# OpenDrone 5" race propeller (higher pitch than opendrone-5in-prop) - estimates. Units are in the key suffixes (SI), tables are indexed by rpm.
+schema_version = 1
+name = "OpenDrone 5in race prop"
+
+[prop]
+diameter_m = 0.127
+inertia_kgm2 = 5.5e-06
+ct_table = [[0.0, 0.125], [60000.0, 0.125]]
+cp_table = [[0.0, 0.055], [60000.0, 0.055]]
+imbalance_kgm = 0.0
+windmill_j0 = 1.0
+
+[provenance."prop.diameter_m"]
+source = "estimated"
+note = "5 inch"
+[provenance."prop.inertia_kgm2"]
+source = "estimated"
+note = "a 4.5 g two-blade race prop, 1/12 * m * L^2 with a hub allowance; not measured"
+[provenance."prop.ct_table"]
+source = "estimated"
+note = "flat-table estimate: a steeper pitch than opendrone-5in-prop's 0.11 gives more thrust per rev^2; not measured"
+[provenance."prop.cp_table"]
+source = "estimated"
+note = "flat-table estimate: the steeper pitch also takes more power per rev^3 than opendrone-5in-prop's 0.045; not measured"
+[provenance."prop.imbalance_kgm"]
+source = "estimated"
+note = "no measurement; 0 until a vibration measurement exists"
+[provenance."prop.windmill_j0"]
+source = "estimated"
+note = "zero-torque advance ratio of a small propeller; order-of-magnitude estimate, not measured"

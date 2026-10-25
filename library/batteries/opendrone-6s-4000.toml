@@ -1,0 +1,31 @@
+# OpenDrone 6S 4000 mAh Li-ion pack - estimates. Hardware only; initial_soc and rate_hz are the quad's wiring.
+schema_version = 1
+name = "OpenDrone 6S 4000 mAh Li-ion"
+
+[battery]
+cells = 6
+capacity_mah = 4000.0
+r0_ohm = 0.06
+r1_ohm = 0.025
+c1_f = 4000.0
+ocv_table = [[0.0, 3.27], [0.05, 3.61], [0.1, 3.69], [0.2, 3.73], [0.3, 3.77], [0.4, 3.79],
+             [0.5, 3.82], [0.6, 3.87], [0.7, 3.92], [0.8, 3.97], [0.9, 4.06], [1.0, 4.20]]
+
+[provenance."battery.cells"]
+source = "estimated"
+note = "6S"
+[provenance."battery.capacity_mah"]
+source = "estimated"
+note = "a 6S1P pack of 4000 mAh 21700 cells, the long-range quad's usual size"
+[provenance."battery.r0_ohm"]
+source = "estimated"
+note = "about 10 mohm per cell, a Li-ion cell that is built for energy and not for current; not measured"
+[provenance."battery.r1_ohm"]
+source = "estimated"
+note = "opendrone-6s-1300's value scaled up for the energy cell; not measured"
+[provenance."battery.c1_f"]
+source = "estimated"
+note = "opendrone-6s-1300's value scaled by the capacity; not measured"
+[provenance."battery.ocv_table"]
+source = "estimated"
+note = "a generic LiPo curve, as opendrone-6s-1300 (a Li-ion cell sits lower at the top and flatter; not modelled)"

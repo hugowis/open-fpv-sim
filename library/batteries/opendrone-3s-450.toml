@@ -1,0 +1,31 @@
+# OpenDrone 3S 450 mAh pack - estimates. Hardware only; initial_soc and rate_hz are the quad's wiring.
+schema_version = 1
+name = "OpenDrone 3S 450 mAh"
+
+[battery]
+cells = 3
+capacity_mah = 450.0
+r0_ohm = 0.045
+r1_ohm = 0.018
+c1_f = 1000.0
+ocv_table = [[0.0, 3.27], [0.05, 3.61], [0.1, 3.69], [0.2, 3.73], [0.3, 3.77], [0.4, 3.79],
+             [0.5, 3.82], [0.6, 3.87], [0.7, 3.92], [0.8, 3.97], [0.9, 4.06], [1.0, 4.20]]
+
+[provenance."battery.cells"]
+source = "estimated"
+note = "3S"
+[provenance."battery.capacity_mah"]
+source = "estimated"
+note = "a common toothpick pack size"
+[provenance."battery.r0_ohm"]
+source = "estimated"
+note = "about 15 mohm per cell, a small high-rate pack; not measured"
+[provenance."battery.r1_ohm"]
+source = "estimated"
+note = "opendrone-6s-1300's value scaled up for the smaller pack; not measured"
+[provenance."battery.c1_f"]
+source = "estimated"
+note = "opendrone-6s-1300's value scaled by the capacity; not measured"
+[provenance."battery.ocv_table"]
+source = "estimated"
+note = "a generic LiPo curve, as opendrone-6s-1300 (a Li-ion cell sits lower at the top and flatter; not modelled)"

@@ -1,0 +1,32 @@
+# OpenDrone 20 A 4-in-1 / AIO ESC (AM32) - behavioural estimates scaled from opendrone-4in1-esc.
+schema_version = 1
+name = "OpenDrone 4-in-1 ESC (20 A)"
+
+[esc]
+response_tau_s = 0.002
+current_limit_a = 20.0
+
+[esc.thermal]
+heat_capacity_jpk = 2.0
+resistance_kpw = 10.0
+r_on_ohm = 0.008
+switching_loss_coeff = 0.0024
+
+[provenance."esc.thermal.heat_capacity_jpk"]
+source = "estimated"
+note = "lumped RC estimate (a couple of grams of board and FETs); not measured"
+[provenance."esc.thermal.resistance_kpw"]
+source = "estimated"
+note = "lumped RC estimate; not measured"
+[provenance."esc.thermal.r_on_ohm"]
+source = "estimated"
+note = "a pair of FETs per phase, order of magnitude; not measured"
+[provenance."esc.thermal.switching_loss_coeff"]
+source = "estimated"
+note = "0.5 * (rise + fall time 100 ns) * 48 kHz switching, per volt and amp, as opendrone-4in1-esc; not measured"
+[provenance."esc.response_tau_s"]
+source = "estimated"
+note = "opendrone-4in1-esc's value"
+[provenance."esc.current_limit_a"]
+source = "estimated"
+note = "a 20 A-per-motor AIO board, class-typical"
