@@ -153,10 +153,11 @@ impl OfsClient {
         self.send(Command::SetInputsRecording(on));
     }
 
-    /// Starts a fresh race: no clock, no laps, gate 0 next (a `race_reset` event confirms it). An error without gates.
+    /// Starts a fresh race: no clock, no laps, gate 0 next (a `race_reset` event confirms it), on the world's course
+    /// called `course` (an empty String: the one being raced). An error without gates or for an unknown course.
     #[func]
-    fn reset_race(&self) {
-        self.send(Command::ResetRace);
+    fn reset_race(&self, course: GString) {
+        self.send(Command::ResetRace(course.to_string()));
     }
 
     /// The current phase (see `phase_changed`).
@@ -209,7 +210,9 @@ impl OfsClient {
     /// (the antenna in use) and `video_rssi` (a Dictionary of dBm by antenna name), and the lap clock's
     /// `race_present` (the world has gates), `race_running`, `race_finished` (the lap limit is reached), `race_lap_limit`
     /// (0 = none), `race_next_gate`, `race_gate_count`, `race_laps`,
-    /// `race_lap_s` (the current lap so far), `race_last_lap_s` and `race_best_lap_s` (both 0 until a lap completes).
+    /// `race_lap_s` (the current lap so far), `race_last_lap_s` and `race_best_lap_s` (both 0 until a lap completes),
+    /// `race_course` (a String, empty for a world without courses), `race_course_index`, `race_mode` ("laps" or
+    /// "time_attack"), `race_time_limit_s` and `race_time_left_s` (time attack: the clock, and what is left of it).
     #[func]
     fn get_telemetry(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -278,6 +281,11 @@ impl OfsClient {
         d.set("race_lap_s", r.current_lap_s);
         d.set("race_last_lap_s", r.last_lap_s);
         d.set("race_best_lap_s", r.best_lap_s);
+        d.set("race_course", &GString::from(r.course.as_str()));
+        d.set("race_course_index", i64::from(r.course_index));
+        d.set("race_mode", &GString::from(r.mode.as_str()));
+        d.set("race_time_limit_s", r.time_limit_s);
+        d.set("race_time_left_s", r.time_left_s);
         d.set("age_s", t.age_s);
         d
     }
@@ -400,8 +408,10 @@ impl OfsClient {
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
     /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
-    /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}), in course
-    /// order.
+    /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}) as declared,
+    /// `courses` (Array of {`name`, `gates`: Array of gate names in course order, `mode` ("laps" or "time_attack"),
+    /// `laps` (0 = none), `time_limit_s`}; empty for a world without `[[courses]]`, which races all `gates` in order)
+    /// and `default_course` (the index a fresh session starts in).
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -464,6 +474,22 @@ impl OfsClient {
         d.set("objects", &objects);
         d.set("emitters", &emitters);
         d.set("gates", &gates);
+        let mut courses = VarArray::new();
+        for c in &world.courses {
+            let mut e = VarDictionary::new();
+            let mut names = VarArray::new();
+            for g in &c.gates {
+                names.push(&GString::from(g.as_str()).to_variant());
+            }
+            e.set("name", &GString::from(c.name.as_str()));
+            e.set("gates", &names);
+            e.set("mode", &GString::from(c.mode.as_str()));
+            e.set("laps", i64::from(c.laps));
+            e.set("time_limit_s", c.time_limit_s);
+            courses.push(&e.to_variant());
+        }
+        d.set("courses", &courses);
+        d.set("default_course", i64::from(world.default_course));
         d
     }
 
