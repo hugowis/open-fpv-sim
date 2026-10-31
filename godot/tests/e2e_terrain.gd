@@ -115,7 +115,7 @@ func sample_points(t: Dictionary) -> PackedVector2Array:
 				points.append(Vector2(cx + cell * f + 1e-3, cz - cell * f))
 				points.append(Vector2(cx + cell * f, cz - cell * f - 1e-3))
 			points.append(Vector2(cx + cell * 0.8, cz - cell * 0.2))  # off the diagonal, in the upper triangle
-			points.append(Vector2(cx + cell * 0.2, cz - cell * 0.8))  # and the upper
+			points.append(Vector2(cx + cell * 0.2, cz - cell * 0.8))  # and the lower
 	for i in nodes_n:  # the east and west edges, node by node
 		points.append(Vector2(x0, z0 - i * cell))
 		points.append(Vector2(x0 + (nodes_e - 1) * cell, z0 - i * cell))
