@@ -102,13 +102,13 @@ with `[fc] kind = "open_loop_stabilized"` (a valid kind, `crates/ofs-config/src/
 `launch`/`betaflight_diff` checks do not apply, around line 1396), provenance comments marking every parameter as
 copied from the 5F freestyle. `docs/scripted-flight.md` (line 91) already promises that such a file flies stabilized
 in Godot: angle-mode-like sticks without Betaflight, so a default install — no SITL launch — can pass every lesson,
-and the e2e suite can drive one open loop. Betaflight sessions fly the pilot's chosen quad. The file joins the menu's
+and the e2e suite can drive one open loop. Betaflight sessions fly the pilot's chosen quad. Loading the school quad takes one care: the server refuses an `open_loop_fc` override on an `open_loop_stabilized` quad (`crates/ofs-sim/src/server.rs:306-312` — "load with stabilize = true, or without the open_loop_fc override"), and the Godot bridge carries no `stabilize` key, so a lesson's choices always send `open_loop: false` when they name the school quad — the file's own stabilized kind flies; an inherited `open_loop: true` (an `OFS_OPEN_LOOP` boot, an open-loop menu pick) would be refused at Load. The file joins the menu's
 quad list (honest data, the catalog lists every `*.toml`) and `every_shipped_quad_loads_and_validates`
 (`crates/ofs-config/tests/quads.rs` line 18) — it must load and validate, which a copy of a shipped quad does.
 
 **D8. Lesson sessions are menu starts with choices, and they draw their own pylons.** Starting a lesson calls the
 existing `_start_session(choices)` (`app.gd` line 113) with `{world_path: worlds/circuit.toml, quad_path: the school
-quad when open loop, race_start: only the circuit lesson}` — choices merge into the session copy and are never saved
+quad when open loop, open_loop: false with it (D7), race_start: only the circuit lesson}` — choices merge into the session copy and are never saved
 to the cfg (`_on_menu_start` already works this way, line 145). The figure-eight pylons are two
 `MeshInstance3D` cylinders the app adds to the world node (named `Lesson_Pylon_A`/`Lesson_Pylon_B`, the world.gd
 `_add_built` idiom) and removes when the lesson ends; no world file changes. Free flight's race-hiding (line 241) is

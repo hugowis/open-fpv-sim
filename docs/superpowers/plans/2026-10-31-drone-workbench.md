@@ -273,7 +273,7 @@ func test_check_quad_loads_the_shipped_quad() -> void:
 struct OfsLibrary {}
 ```
 
-with `#[func]` wrappers converting types (`VarDictionary` for the dictionaries, `Array<VarDictionary>` for the lists; `GString` empty → `None` for the env parameters). Match the file's existing wrapper style around `parse_settings` (`crates/ofs-godot/src/lib.rs:578`). The `check_quad` `Err` arm maps `ofs_config::ConfigError` with `e.to_string()`.
+with `#[func]` wrappers converting types (`VarDictionary` for the dictionaries, `Array<VarDictionary>` for the lists; `GString` empty → `None` for the env parameters). Match the file's existing wrapper style around `parse_settings` (`crates/ofs-godot/src/lib.rs:583`). The `check_quad` `Err` arm maps `ofs_config::ConfigError` with `e.to_string()`.
 - [ ] **Step 4: Run** `bash scripts/run-godot-tests.sh unit` and `cargo clippy --workspace --all-targets --locked -- -D warnings` — Expected: PASS, no `SCRIPT ERROR` in the output.
 - [ ] **Step 5: Commit** `feat(godot): the OfsLibrary bridge - roots, the part listing and check_quad (#128)`.
 
@@ -470,7 +470,7 @@ static func roots(settings: Dictionary, kind: String) -> Array:
 - Create: `godot/tests/test_workbench_screen.gd`
 
 **Interfaces:**
-- Consumes: Task 3's model and renderer, Task 4's menu signal, the `CycleButton`/screen patterns of `ui/settings_screen.gd`.
+- Consumes: Task 3's model and renderer, Task 4's menu signal, the `CycleButton`/screen patterns of `ui/settings_screen.gd`, and #130's `QuadPreview` (`res://ui/quad_preview.gd` — the phase order lands #130 first; executing out of order, this line waits for that merge).
 - Produces: `WorkbenchScreen` (`CanvasLayer`): `signal closed`; `setup(settings: Dictionary)`; `open()` / `close()` / `is_open() -> bool`; `row(name: String) -> Control` for `{"start", "frame", "motors", "props", "escs", "battery", "vtx", "name", "save", "back"}` (the #157 seam: rows addressable by kind, DC8); `select_part(kind: String)`; `summary_text() -> String`; `verdict_text() -> String`; `details_text() -> String` (test handles).
 - Rows: a starting-quad `CycleButton` over `Catalog.with_current(Catalog.list(Catalog.roots(settings, "quads")), settings["quad_path"])` (changing it calls `start_from`, resetting the picks); one `CycleButton` per kind over the workbench listing (`"<name> (<id>)"` labels, id values); a name `LineEdit`; Save and Back. The details panel shows `select_part`'s part (every parameter, estimates marked); the summary shows AUW and one `summary_line` per pick; the verdict area shows the loader's refusal verbatim or "Saved to <path>" plus the summary. Esc and Back emit `closed`.
 
@@ -521,7 +521,7 @@ func test_back_and_esc_close() -> void:
 
 (Expose `name_edit() -> LineEdit` and `save_pressed()` for the tests, the `row()` pattern's spirit.)
 - [ ] **Step 2: Run** `bash scripts/run-godot-tests.sh unit` — Expected: FAIL (missing script).
-- [ ] **Step 3: Implement** the screen (a dim `ColorRect` and a centered `PanelContainer`, the `settings_screen.gd` look; focus order start → frame → … → save). In `app.gd` (menu wiring verified at `godot/scripts/app.gd:74-83`): add `@onready var workbench_screen: CanvasLayer = $WorkbenchScreen`, `workbench_screen.setup(settings)`, `workbench_screen.closed.connect(main_menu.open)` and `main_menu.workbench_requested.connect(func() -> void: main_menu.close(); workbench_screen.open())`.
+- [ ] **Step 3: Implement** the screen (a dim `ColorRect` and a centered `PanelContainer`, the `settings_screen.gd` look; focus order start → frame → … → save; beside the summary, #130's turning `QuadPreview`, re-pointed whenever `start_from` reseeds — the umbrella's second cross-task seam, waited for if #130 has not landed). In `app.gd` (menu wiring verified at `godot/scripts/app.gd:74-83`): add `@onready var workbench_screen: CanvasLayer = $WorkbenchScreen`, `workbench_screen.setup(settings)`, `workbench_screen.closed.connect(main_menu.open)` and `main_menu.workbench_requested.connect(func() -> void: main_menu.close(); workbench_screen.open())`.
 - [ ] **Step 4: Run** `bash scripts/run-godot-tests.sh unit` — Expected: PASS. Then `bash scripts/run-godot-tests.sh open-loop` — Expected: PASS (the menu-less boot and the existing menu round trip are untouched).
 - [ ] **Step 5: Commit** `feat(godot): the workbench screen (#128)`.
 

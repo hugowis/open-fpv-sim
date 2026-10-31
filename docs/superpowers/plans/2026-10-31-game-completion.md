@@ -19,7 +19,7 @@ One PR per task, one issue closed per PR, the epic checkbox ticked by the close 
 5. **#124 — a first-run tour** (`2026-10-31-first-run-tour`).
 6. **#125 — flight school** (`2026-10-31-flight-school`). Last: lessons that teach the full surface, and the race gates (#71's `[[gates]]`) and scripted flights are candidate lesson machinery.
 
-The pairs are independent — order is preference, not dependency; the two cross-task contracts are #128's repair seam for #157 and #130's preview scene, which #128's workbench re-hosts.
+The pairs are independent — order is preference, not dependency; the two cross-task contracts are #128's repair seam for #157 and #130's preview scene, which #128's workbench re-hosts. One shared surface needs coordination: `godot/main.tscn` — the tour, workbench and school screens all sit on CanvasLayer 8 (equal layers draw in tree order), and each new `[ext_resource]` takes the file's next free id, never a pasted one; every executor re-reads the scene before editing it.
 
 ## Manual QA
 

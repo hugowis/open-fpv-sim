@@ -78,7 +78,7 @@ while racing against the ghost; the capture, the playback and the persistence ar
    the props at a fixed idle. It lives under `FpvViewport` beside the drone, so the chase camera and the FPV camera
    — and the DVR, and the analog chain after them — see it without a second pipeline. Its pose each frame is the
    track at `race_lap_s` (the pilot's current-lap time: no clock sync needed, both clocks are the lap clock);
-   before the clock runs it sits at the track's start, past its finish it parks at the track's end.
+   before the clock runs it sits at the track's start, past its finish it parks at the track's end. When #130's model lands the ghost inherits it for free, and the wiring passes the session's quad path to its `set_quad`, so the ghost flies the racer's size rather than the authored 5F's.
 8. **The delta is the pilot's lap time minus the ghost's time where the ghost was nearest the pilot.** Each frame,
    a windowed search (±2 s around the last match, which only ever needs to wander) finds the stored pose nearest
    the drone's drawn position; `delta = race_lap_s − ghost_time_at_that_pose`, shown as `−0.8` (ahead) or `+1.2`

@@ -44,7 +44,9 @@ library parts, writes it where the menu loads it, and lets the pilot fly it.
 pattern: menu closes, screen opens, Esc/Back returns). The model lives in `godot/scripts/workbench.gd`
 (`RefCounted`, no engine calls beyond file access) so the headless tests drive it without the screen — the
 calibration split of PR #149 (`scripts/calibration.gd` vs the wizard panel). Pure provenance rendering is
-`godot/scripts/provenance_view.gd`, static functions over part dictionaries.
+`godot/scripts/provenance_view.gd`, static functions over part dictionaries. The screen also hosts #130's turning
+`QuadPreview` beside the summary (the phase's second cross-task seam, after the #157 repair seam below), re-pointed
+whenever the starting quad changes.
 
 **DC2. Listing and validation go through the bridge, not a GDScript TOML parser.** `ofs-config` gains
 `part::list(roots, kind_dir) -> Vec<ListedPart>` beside its loaders: every `*.toml` of `kind_dir` under each root
@@ -81,7 +83,7 @@ without a `[vtx]` section (none shipped) keeps having none; the VTX row is then 
 **DC5. Validation is the simulator's own, surfaced.** The workbench duplicates no rule and pre-implements no
 check. Save always writes the file, then calls `check_quad`; the screen shows the summary (loads clean) or the
 loader's refusal text **verbatim** — the same `ofs_config::load` ofs-sim runs at `Load`
-(`crates/ofs-sim/src/server.rs:288`, refused as `config`/`InvalidArgument` with the full message), so the workbench,
+(`crates/ofs-sim/src/server.rs:291`, refused as `config`/`InvalidArgument` with the full message), so the workbench,
 the menu's Start failure and a hand load all say the same thing. The refusal does not delete the file. With
 shipped parts the live cases are real: a 3S battery (`opendrone-3s-450`) in an assembly whose starting quad's diff
 sets `force_battery_cell_count = 6` refuses with the loader's message naming the line to fix
