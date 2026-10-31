@@ -25,8 +25,9 @@ pub enum Action {
     ClearFaults,
     PlayInputs(Inputs),
     StopInputs,
-    /// A fresh race was asked for (the race model applies it at the next tick).
-    ResetRace,
+    /// A fresh race was asked for, on the course with this index or the current one (the race model applies it at
+    /// the next tick).
+    ResetRace(Option<usize>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,7 +100,8 @@ impl Journal {
                     text.push_str(&format!("play {name}"));
                 }
                 Action::StopInputs => text.push_str("stop"),
-                Action::ResetRace => text.push_str("race_reset"),
+                Action::ResetRace(None) => text.push_str("race_reset"),
+                Action::ResetRace(Some(course)) => text.push_str(&format!("race_reset {course}")),
             }
             text.push('\n');
         }
@@ -270,7 +272,11 @@ fn parse_entry(line: &str, dir: &Path) -> Result<Entry, String> {
         },
         "clear" if rest.is_empty() => Action::ClearFaults,
         "stop" if rest.is_empty() => Action::StopInputs,
-        "race_reset" if rest.is_empty() => Action::ResetRace,
+        "race_reset" => match rest.as_slice() {
+            [] => Action::ResetRace(None),
+            [course] => Action::ResetRace(Some(course.parse().map_err(|_| format!("race_reset: '{course}' is not a course index"))?)),
+            _ => return Err("race_reset takes at most a course index".into()),
+        },
         "play" => {
             let [file] = rest.as_slice() else { return Err("play needs one file name".into()) };
             let path = dir.join(file);
@@ -318,7 +324,8 @@ mod tests {
         j.push(500, Action::ClearFaults);
         j.push(501, Action::Transmitter(false));
         j.push(502, Action::StopInputs);
-        j.push(503, Action::ResetRace);
+        j.push(503, Action::ResetRace(None));
+        j.push(504, Action::ResetRace(Some(1)));
         let back = round_trip(&j);
         assert_eq!(back.entries().len(), j.entries().len());
         for (a, b) in j.entries().iter().zip(back.entries()) {

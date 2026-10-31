@@ -8,7 +8,7 @@ const AppSettings = preload("res://scripts/settings.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const CycleButton = preload("res://ui/cycle_button.gd")
 
-## The pilot changed `key` (`world_path`, `quad_path`, `race_start` or `open_loop`) to `value`.
+## The pilot changed `key` (`world_path`, `quad_path`, `race_start`, `course` or `open_loop`) to `value`.
 signal choice_changed(key: String, value)
 
 ## Fly the chosen settings.
@@ -28,6 +28,7 @@ var _quit := Button.new()
 var _world := CycleButton.new()
 var _quad := CycleButton.new()
 var _mode := CycleButton.new()
+var _course := CycleButton.new()
 var _controller := CycleButton.new()
 var _hint := Label.new()
 
@@ -52,7 +53,7 @@ func _ready() -> void:
 	box.add_child(title)
 	_start.text = "Start flying"
 	_start.pressed.connect(func() -> void: start_requested.emit())
-	for node in [_start, _world, _quad, _mode, _controller, _settings_button, _quit]:
+	for node in [_start, _world, _quad, _mode, _course, _controller, _settings_button, _quit]:
 		box.add_child(node)
 	_settings_button.text = "Settings"
 	_settings_button.pressed.connect(func() -> void: settings_requested.emit())
@@ -61,6 +62,7 @@ func _ready() -> void:
 	_world.changed.connect(_on_world)
 	_quad.changed.connect(func(path) -> void: choice_changed.emit("quad_path", path))
 	_mode.changed.connect(func(race) -> void: choice_changed.emit("race_start", race))
+	_course.changed.connect(func(name) -> void: choice_changed.emit("course", name))
 	_controller.changed.connect(func(open_loop) -> void: choice_changed.emit("open_loop", open_loop))
 	_hint.modulate = Color(1, 1, 1, 0.6)
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -100,9 +102,9 @@ static func effective_open_loop(s: Dictionary) -> bool:
 	return s["open_loop"] or s["sitl_launch"] == ""
 
 
-## The row for `name` ("world", "quad", "mode", "controller", "start", "settings", "quit"), for tests.
+## The row for `name` ("world", "quad", "mode", "course", "controller", "start", "settings", "quit"), for tests.
 func row(name: String) -> Control:
-	return {"world": _world, "quad": _quad, "mode": _mode, "controller": _controller, "start": _start,
+	return {"world": _world, "quad": _quad, "mode": _mode, "course": _course, "controller": _controller, "start": _start,
 		"settings": _settings_button, "quit": _quit}[name]
 
 
@@ -124,6 +126,7 @@ func _refresh() -> void:
 	_controller.disabled = locks.has("open_loop") or no_firmware
 	_hint.text = "Betaflight needs a SITL launch command: set it in Settings." if no_firmware else ""
 	_refresh_mode()
+	_refresh_course()
 
 
 func _fill(button: CycleButton, label: String, key: String, items: Array) -> void:
@@ -145,6 +148,19 @@ func _refresh_mode() -> void:
 	_mode.disabled = locks.has("race_start")
 
 
+## The course row, for a world that declares at least two: "Default" (the world's own) and each course by name.
+func _refresh_course() -> void:
+	var names := _course_names(settings["world_path"])
+	_course.visible = names.size() >= 2
+	_course.setup(_title("Course", "course"), [""] + names, ["Default"] + names)
+	_course.set_value(settings["course"])
+	_course.disabled = locks.has("course")
+
+
+func _course_names(world_path: String) -> Array:
+	return [] if _worlds.is_empty() else _worlds[Catalog.index_of(_worlds, world_path)]["courses"]
+
+
 func _has_course(world_path: String) -> bool:
 	return not _worlds.is_empty() and _worlds[Catalog.index_of(_worlds, world_path)]["gates"] > 0
 
@@ -152,3 +168,4 @@ func _has_course(world_path: String) -> bool:
 func _on_world(path: String) -> void:
 	choice_changed.emit("world_path", path)
 	_mode.visible = _has_course(path)
+	_refresh_course()

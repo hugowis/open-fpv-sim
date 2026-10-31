@@ -626,12 +626,24 @@ impl Sim for SimService {
         .await
     }
 
-    async fn reset_race(&self, _req: Request<pb::Empty>) -> Result<Response<pb::Empty>, Status> {
-        self.blocking(|_shared, slot| {
+    async fn reset_race(&self, req: Request<pb::ResetRaceRequest>) -> Result<Response<pb::Empty>, Status> {
+        let course = req.into_inner().course;
+        self.blocking(move |_shared, slot| {
             let s = loaded(slot)?;
-            if !s.vehicle.reset_race() {
+            if s.vehicle.courses().is_empty() {
                 return Err(invalid_state("this world has no gates, so there is no race to reset"));
             }
+            let index = match course.as_str() {
+                "" => None,
+                name => match s.vehicle.courses().iter().position(|c| c.name == name) {
+                    Some(i) => Some(i),
+                    None => {
+                        let known: Vec<&str> = s.vehicle.courses().iter().map(|c| c.name.as_str()).collect();
+                        return Err(error("invalid_argument", Code::InvalidArgument, format!("this world has no course {name:?} (courses: {known:?})")));
+                    }
+                },
+            };
+            s.vehicle.reset_race(index);
             Ok(pb::Empty {})
         })
         .await

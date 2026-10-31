@@ -208,13 +208,16 @@ func _process(delta: float) -> void:
 	var world_version: int = client.get_world_version()
 	if world_version != _world_version:
 		_world_version = world_version
-		world.build(client.get_world())
+		var field: Dictionary = client.get_world()
+		world.build(field)
+		_pick_course(field)
 	var telemetry: Dictionary = client.get_telemetry()
 	# Free flight flies a course as scenery: no lap clock, no gate highlight.
 	if not settings["race_start"] and telemetry.has("race_present"):
 		telemetry["race_present"] = false
 	# The gate to fly through next, from the state just read; none before there is a race, and none once it is over.
 	var racing: bool = telemetry.get("race_present", false) and not telemetry.get("race_finished", false)
+	world.set_course(int(telemetry.get("race_course_index", 0)))
 	world.set_next_gate(int(telemetry.get("race_next_gate", 0)) if racing else -1)
 	if telemetry.has("motor_cmd"):
 		drone.set_motors(telemetry["motor_cmd"], delta)
@@ -254,7 +257,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_toggle_inputs_recording()
 		KEY_N:
 			if client != null:
-				client.reset_race()
+				if event.shift_pressed:
+					_next_course()
+				else:
+					client.reset_race("")
 		KEY_H:
 			hud.toggle_hud()
 		KEY_F1:
@@ -418,6 +424,29 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 		_fpv_render_time = -1.0
 	if phase == "failed":
 		hud.add_toast("Failed: %s" % detail.get_slice("\n", 0), "error")
+
+
+## A new session starts on the world's default course: if the pilot chose another one (the menu, or Shift+N earlier) and
+## this world has it, move there.
+func _pick_course(field: Dictionary) -> void:
+	var chosen: String = settings["course"]
+	var courses: Array = field.get("courses", [])
+	if chosen == "" or not courses.any(func(c): return c["name"] == chosen):
+		return
+	if courses[int(field.get("default_course", 0))]["name"] != chosen:
+		client.reset_race(chosen)
+
+
+## Shift+N: the next course of the world (all of them in turn), restarted. A world with fewer than two does nothing.
+func _next_course() -> void:
+	var courses: Array = client.get_world().get("courses", [])
+	if courses.size() < 2:
+		hud.add_toast("This world has a single course")
+		return
+	var current := int(client.get_telemetry().get("race_course_index", 0))
+	var next: String = courses[(current + 1) % courses.size()]["name"]
+	_on_setting_changed("course", next)
+	client.reset_race(next)
 
 
 func _on_session_ready(quad_name: String, configurator_address: String) -> void:

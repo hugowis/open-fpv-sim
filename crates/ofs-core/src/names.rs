@@ -27,6 +27,10 @@ pub const RACE_LAST_LAP_S: &str = "race.last_lap_s";
 pub const RACE_BEST_LAP_S: &str = "race.best_lap_s";
 /// 1 once the world's lap limit is reached: the clock has stopped and nothing more counts until a reset.
 pub const RACE_FINISHED: &str = "race.finished";
+/// The course being raced (an index into the world's courses).
+pub const RACE_COURSE: &str = "race.course";
+/// Simulated time the race clock started (gate 0's first pass).
+pub const RACE_START_S: &str = "race.start_s";
 
 pub const BATTERY_VOLTAGE: &str = "battery.voltage_v";
 pub const BATTERY_CURRENT: &str = "battery.current_a";
