@@ -1,8 +1,9 @@
 //! Radio propagation as pure functions: free-space path loss, antenna patterns, polarization, knife-edge
 //! diffraction around obstacles and the two-ray ground bounce. Positions and directions are NED metres (down is
-//! +z, the ground is the plane z = 0).
+//! +z, the ground is the plane z = 0 or the terrain the caller passes).
 use glam::DVec3;
 use ofs_core::shape::Shape;
+use ofs_core::terrain::Terrain;
 
 pub const SPEED_OF_LIGHT_MPS: f64 = 299_792_458.0;
 /// Antenna patterns never fall more than this below their peak (real nulls are filled by reflections).
@@ -155,13 +156,9 @@ pub struct Obstacle {
 /// Golden-section search steps: the bracket shrinks to 0.618^60 of the path, far below a millimetre.
 const SEARCH_STEPS: usize = 60;
 
-/// The point of the segment `a`..`b` that goes deepest into (or passes closest to) `shape`, as its fraction t of
-/// the way from `a`. A convex shape's signed distance is convex along a line, so a golden-section search finds the
-/// minimum exactly, however thin the object and however long the path.
-pub fn deepest_point(shape: &Shape, a: DVec3, b: DVec3) -> f64 {
-    let f = |t: f64| shape.signed_distance(a.lerp(b, t));
+/// The argument in `lo..hi` that minimizes `f`, by golden-section search (exact for a convex or unimodal `f`).
+fn golden_min(f: impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
     let ratio = (5f64.sqrt() - 1.0) / 2.0;
-    let (mut lo, mut hi) = (0.0, 1.0);
     for _ in 0..SEARCH_STEPS {
         let m1 = hi - ratio * (hi - lo);
         let m2 = lo + ratio * (hi - lo);
@@ -174,6 +171,13 @@ pub fn deepest_point(shape: &Shape, a: DVec3, b: DVec3) -> f64 {
     (lo + hi) * 0.5
 }
 
+/// The point of the segment `a`..`b` that goes deepest into (or passes closest to) `shape`, as its fraction t of
+/// the way from `a`. A convex shape's signed distance is convex along a line, so a golden-section search finds the
+/// minimum exactly, however thin the object and however long the path.
+pub fn deepest_point(shape: &Shape, a: DVec3, b: DVec3) -> f64 {
+    golden_min(|t| shape.signed_distance(a.lerp(b, t)), 0.0, 1.0)
+}
+
 /// Diffraction loss of one obstacle on the path `a`..`b`, capped at the obstacle's `rf_loss_db`.
 pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m: f64) -> f64 {
     if obstacle.rf_loss_db <= 0.0 {
@@ -184,6 +188,56 @@ pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m
     let depth = -obstacle.shape.signed_distance(a.lerp(b, t));
     let v = fresnel_v(depth, t * length, (1.0 - t) * length, wavelength_m);
     knife_edge_loss_db(v).min(obstacle.rf_loss_db)
+}
+
+/// The most the terrain takes off a path, in dB (a ridge in the way, like a solid wall).
+pub const TERRAIN_RF_LOSS_DB: f64 = 60.0;
+
+/// Diffraction loss of the terrain on the path `a`..`b`: the single knife edge that obstructs it most. The ray's
+/// clearance over the ground, as a Fresnel parameter v, is sampled twice per cell along the part of the path over
+/// the grid and the best sample refined by a golden-section search; the loss is capped at [`TERRAIN_RF_LOSS_DB`].
+pub fn terrain_loss_db(terrain: &Terrain, a: DVec3, b: DVec3, wavelength_m: f64) -> f64 {
+    let length = a.distance(b);
+    if length < 1e-9 {
+        return 0.0;
+    }
+    // The part [t0, t1] of the path over the grid (a slab test per axis).
+    let (nodes_n, nodes_e) = terrain.nodes();
+    let (origin, cell) = (terrain.origin_ne(), terrain.cell_m());
+    let (mut t0, mut t1) = (0.0f64, 1.0f64);
+    for (from, to, lo, hi) in [
+        (a.x, b.x, origin[0], origin[0] + (nodes_n - 1) as f64 * cell),
+        (a.y, b.y, origin[1], origin[1] + (nodes_e - 1) as f64 * cell),
+    ] {
+        if to == from {
+            if !(from >= lo && from <= hi) {
+                return 0.0;
+            }
+        } else {
+            let (s0, s1) = ((lo - from) / (to - from), (hi - from) / (to - from));
+            t0 = t0.max(s0.min(s1));
+            t1 = t1.min(s0.max(s1));
+        }
+    }
+    if t0 >= t1 {
+        return 0.0;
+    }
+    // Clear when even the lowest point of the path is above the highest ground by the clear-path Fresnel margin
+    // (v <= -0.78 wherever the edge is, since d1 * d2 <= (length / 2)^2).
+    let lowest = -a.lerp(b, t0).z.max(a.lerp(b, t1).z);
+    if lowest > terrain.max_height() + 0.78 * (wavelength_m * length / 8.0).sqrt() {
+        return 0.0;
+    }
+    let v = |t: f64| {
+        let p = a.lerp(b, t);
+        fresnel_v(p.z - terrain.ground_d(p.x, p.y), t * length, (1.0 - t) * length, wavelength_m)
+    };
+    // shortcut: at most 2048 samples, so a span over 1024 cells is sampled coarser than half a cell; refine, or lower the cap, if a world needs it.
+    let n = ((t1 - t0) * length / (cell / 2.0)).ceil().clamp(2.0, 2048.0) as usize;
+    let at = |k: usize| t0 + (t1 - t0) * k as f64 / (n - 1) as f64;
+    let (best, best_v) = (0..n).map(|k| (k, v(at(k)))).fold((0, f64::NEG_INFINITY), |m, c| if c.1 > m.1 { c } else { m });
+    let refined = golden_min(|t| -v(t), at(best.saturating_sub(1)), at((best + 1).min(n - 1)));
+    knife_edge_loss_db(best_v.max(v(refined))).min(TERRAIN_RF_LOSS_DB)
 }
 
 /// One end of a radio path.
@@ -214,17 +268,21 @@ fn ray_gain_db(tx: &Endpoint, tx_polarization: Polarization, rx: &Endpoint, out_
 
 /// The path from `tx` to `rx` at `freq_mhz`: the direct ray, plus (with `ground_bounce`) the ray reflected off the
 /// ground (coefficient -1, which reverses circular polarization), added with their phase difference; then the
-/// diffraction losses of the obstacles on the direct ray.
-pub fn path_gain(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], ground_bounce: bool) -> PathGain {
-    let obstruction_db = obstruction_db(obstacles, tx.position, rx.position, freq_mhz);
+/// diffraction losses of the obstacles and the terrain on the direct ray.
+pub fn path_gain(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], terrain: Option<&Terrain>, ground_bounce: bool) -> PathGain {
+    let obstruction_db = obstruction_db(obstacles, terrain, tx.position, rx.position, freq_mhz);
     PathGain { gain_db: unobstructed_gain_db(tx, rx, freq_mhz, ground_bounce) - obstruction_db, obstruction_db }
 }
 
-/// The diffraction losses of the obstacles on the direct ray from `a` to `b`, in dB. It depends on the two positions
-/// only, so receivers that share a position (the goggles' antennas) share it.
-pub fn obstruction_db(obstacles: &[Obstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+/// The diffraction losses of the obstacles and the terrain on the direct ray from `a` to `b`, in dB. It depends on
+/// the two positions only, so receivers that share a position (the goggles' antennas) share it.
+pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let lambda = wavelength_m(freq_mhz);
-    obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum()
+    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum();
+    match terrain {
+        Some(t) => objects + terrain_loss_db(t, a, b, lambda),
+        None => objects,
+    }
 }
 
 /// [`path_gain`] without the obstacles: the direct ray, plus the ground bounce.
