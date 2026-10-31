@@ -77,7 +77,7 @@ after the event, and the replay feeds records in the order they were logged. One
 - `Telemetry::audio_input(&self, active: bool) -> AudioInput` (`model.rs`): the one place the telemetry becomes an
   audio input (motor rpm and command, ground speed as airspeed, descent from the climb rate). `ofs-godot`'s
   `audio_render` calls it instead of building the struct inline: same values, so the live behaviour is unchanged.
-- `dvr_audio.rs`: `AudioLog` (create the sidecar with `File::create_new`, append `C` and `F` records through a
+- `dvr_audio.rs`: `AudioLog` (create the sidecar, truncating a leftover, append `C` and `F` records through a
   `BufWriter`, `finish` flushes), `write_pcm(sidecar, out) -> Result<u64 frames>` (the replay above, writing 16-bit
   little-endian samples to a `Write`, one chunk per frame so memory stays flat), and the parser. A truncated last
   line (a crash mid-write) is ignored; any other malformed line, or an unknown header, is an error naming the line.
