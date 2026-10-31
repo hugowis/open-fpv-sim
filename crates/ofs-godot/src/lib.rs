@@ -565,6 +565,7 @@ impl OfsClient {
 
     /// The ground's height in metres at the Godot-frame point (`x` east, `z` south): the simulator's own
     /// `Terrain::height_up`, 0 on flat ground or before the world arrives. The reference the drawn mesh is compared to.
+    /// Each call clones the world model (cheap: the terrain is `Arc`-shared), so this samples in tests and tools, not per frame.
     #[func]
     fn terrain_height(&self, x: f64, z: f64) -> f64 {
         self.client.as_ref().and_then(|c| c.world()).and_then(|w| w.terrain).map_or(0.0, |t| t.height_up(-z, x))

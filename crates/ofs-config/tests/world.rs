@@ -862,7 +862,8 @@ fn the_park_course_stands_on_its_relief() {
         let ground = t.height_up(g.center_ned_m[0], g.center_ned_m[1]);
         let above = -g.center_ned_m[2] - ground;
         assert!((0.9..=1.6).contains(&above), "{} centre is {above} m above the ground", g.name);
-        // The opening's lowest point: half the height and half the width, rolled.
+        // The opening's lowest point (half the height and half the width, rolled) clears the lowest ground across its width,
+        // not the highest: a gate's bottom may sit a centimetre or so under the ground at its high end.
         let (sr, cr) = g.roll_deg.to_radians().sin_cos();
         let drop = g.height_m / 2.0 * cr + g.width_m / 2.0 * sr.abs();
         let (_, across, _) = g.axes();
@@ -873,7 +874,7 @@ fn the_park_course_stands_on_its_relief() {
             })
             .fold(f64::INFINITY, f64::min);
         let opening_bottom = -g.center_ned_m[2] - drop;
-        assert!(opening_bottom >= lowest_ground, "{}: the opening's lowest point {opening_bottom} is below the ground {lowest_ground}", g.name);
+        assert!(opening_bottom >= lowest_ground, "{}: the opening's lowest point {opening_bottom} is below the lowest ground across its width {lowest_ground}", g.name);
         // Gate frame: the bar crowns the opening and the posts stand on the ground.
         if let Some(bar) = w.objects.iter().find(|o| o.name == format!("{}Bar", g.name)) {
             assert!((-bar.center_ned_m[2] - (-g.center_ned_m[2] + 1.15)).abs() < 1e-9, "{} bar is 1.15 m over the centre", g.name);

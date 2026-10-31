@@ -53,6 +53,8 @@ var phase_kind := ""
 var _link_was_lost := false
 var _fpv_render_time := -1.0
 var _world_version := -1
+## The courses of the world `_process` last fetched, so Shift+N need not rebuild the whole world (a terrain's mesh).
+var _world_courses: Array = []
 
 
 func _ready() -> void:
@@ -115,6 +117,7 @@ func _start_session(choices := {}) -> void:
 	session.merge(choices, true)
 	# A new session numbers its worlds from the start, and has no faults or recordings yet.
 	_world_version = -1
+	_world_courses = []
 	_fpv_render_time = -1.0
 	_link_was_lost = false
 	radio_cut = false
@@ -234,6 +237,7 @@ func _process(delta: float) -> void:
 	if world_version != _world_version:
 		_world_version = world_version
 		var field: Dictionary = client.get_world()
+		_world_courses = field.get("courses", [])
 		world.build(field)
 		_pick_course(field)
 	var telemetry: Dictionary = client.get_telemetry()
@@ -467,7 +471,7 @@ func _pick_course(field: Dictionary) -> void:
 
 ## Shift+N: the next course of the world (all of them in turn), restarted. A world with fewer than two does nothing.
 func _next_course() -> void:
-	var courses: Array = client.get_world().get("courses", [])
+	var courses := _world_courses
 	if courses.size() < 2:
 		hud.add_toast("This world has a single course")
 		return

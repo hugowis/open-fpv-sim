@@ -9,8 +9,8 @@ repository). The format follows Keep a Changelog.
 #### Added
 - **The Godot client draws the terrain the physics samples.** Protocol 16 carries the baked grid in `World.terrain`
   (origin, cell size, node counts, heights, digest); the client rebuilds its digest, and a grid that does not match fails
-  the load with a protocol error, then generates the mesh (`ofs_client::terrain_mesh`: vertices, normals, indices, cells
-  split along the same diagonal as the physics) and `world.gd` draws it with a flat ring out to the horizon and hides the
+  the load with a protocol error; a verified grid is turned into the mesh by the client (`ofs_client::terrain_mesh`:
+  vertices, normals, indices, cells split along the same diagonal as the physics) and `world.gd` draws it with a flat ring out to the horizon and hides the
   flat ground plane. Emitter posts stand on the ground under them (`ground_y`).
 - **`OfsClient.get_world()["terrain"]`** (origin, cell size, node counts, vertices, normals, indices, digest) and
   **`OfsClient.terrain_height(x, z)`**, the physics' height at a Godot position, the reference the drawn mesh is
@@ -19,7 +19,7 @@ repository). The format follows Keep a Changelog.
   nodes and between them, over `worlds/hills.toml`. `shots.gd` also saves `terrain.png`.
 - **The park has relief**: `worlds/park.toml` gets a `[terrain]` (seed 153, 3.5 m amplitude, 45 m wavelength, 160 m
   square, flat disc around home): gentle swells of about a metre on the course. The course is placed on the ground
-  (gates hang 1.1 m over it, the walls, posts, pillars and hedge are buried 0.2 m under the lowest ground below them).
+  (gates hang about 1.1 m over it, Gate2, rolled, 1.5 m; the walls, posts, pillars and hedge are buried 0.2 m under the lowest ground below them).
 - **Python**: the stubs are regenerated and the channel accepts messages of up to 16 MiB. The `World` dataclass does not
   carry the grid yet; the message does.
 
