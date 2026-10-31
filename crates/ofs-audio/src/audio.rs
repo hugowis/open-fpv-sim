@@ -3,6 +3,7 @@ use crate::synth::Synth;
 use crate::SAMPLE_RATE;
 
 const MAX_PENDING: usize = 16;
+const MAX_LEAD_S: f64 = 1.0;
 
 /// The sim-facing side: queued collisions, flight state in, samples out.
 pub struct Audio {
@@ -39,6 +40,10 @@ impl Audio {
         collision_speed_mps: f64,
         frames: usize,
     ) -> Vec<f32> {
+        // An event cannot lead its state by more than a second (also the clock going back after a reload).
+        if state_time_s.is_finite() {
+            self.pending.retain(|&t| t <= state_time_s + MAX_LEAD_S);
+        }
         let before = self.pending.len();
         // A NaN time compares false with everything, so it releases nothing.
         self.pending.retain(|&t| t > state_time_s || state_time_s.is_nan());

@@ -222,18 +222,21 @@ impl OfsClient {
     #[func]
     fn audio_render(&mut self, frames: i64, active: bool) -> PackedVector2Array {
         let frames = usize::try_from(frames.max(0)).unwrap_or(0).min(MAX_AUDIO_FRAMES);
-        let telemetry = self.client.as_ref().and_then(|c| c.telemetry()).filter(|_| active);
+        let telemetry = self.client.as_ref().and_then(|c| c.telemetry());
         let samples = match telemetry {
             Some(t) => {
+                // Inactive keeps the motors (zero gain), so their tones fade instead of being cut; and no state
+                // time, so a paused session releases no thud.
                 let input = AudioInput {
                     motor_rpm: t.motor_rpm.clone(),
                     motor_cmd: t.motor_cmd.clone(),
                     // Ground speed: the simulator has no wind model yet, so it is also the airspeed.
                     airspeed_mps: t.speed_mps,
                     descent_mps: -t.climb_mps,
-                    active: true,
+                    active,
                 };
-                self.audio.frame(&input, t.time_s, t.collision_speed_mps, frames)
+                let time_s = if active { t.time_s } else { f64::NAN };
+                self.audio.frame(&input, time_s, t.collision_speed_mps, frames)
             }
             None => self.audio.frame(&AudioInput::default(), f64::NAN, 0.0, frames),
         };

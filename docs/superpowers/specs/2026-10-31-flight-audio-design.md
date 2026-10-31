@@ -122,7 +122,8 @@ Godot-free crate with no knowledge of time other than the samples it is asked fo
   (the shipped 5 inch tri-blade) plus a weaker `f0` and a weaker second harmonic of the blade-pass. Gain per motor is
   `cmd^1.5 × motor_gain` (roughly the thrust curve, and silent for a disarmed quad with zero command), scaled by
   `1/sqrt(motors)` so four motors do not clip. A motor whose rpm and command disagree is audible as its own pitch:
-  motors are independent voices.
+  motors are independent voices. The shipped tone is the blade-pass fundamental plus its 2x and 3x harmonics, without
+  the `rpm / 60` component (a call made in implementation).
 - **Prop wash.** Noise whose level rises with the mean command squared, with how hard the motors are being asked to
   differ (command spread, a stand-in for manoeuvring), and strongly when the quad descends through its own wash:
   `wash = mean² × (0.25 + 0.75 × clamp(descent / 5 m/s))` plus `0.5 × spread × mean`, clamped to `[0, 1]`.

@@ -134,6 +134,9 @@ impl Synth {
                 slew(&mut v.gain, t.gain, k);
                 v.phase = (v.phase + v.freq_hz / rate).fract();
                 let a = v.phase * TAU;
+                // The tone is the blade-pass plus its 2x and 3x harmonics, without the rpm/60 component (a call made
+                // in implementation). shortcut: the harmonics alias above Nyquist once the blade-pass passes ~7.35 kHz,
+                // upgrade when #159 needs band-limited output.
                 mix += v.gain * (a.sin() + 0.35 * (2.0 * a).sin() + 0.15 * (3.0 * a).sin());
             }
 

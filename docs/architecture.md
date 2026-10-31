@@ -61,10 +61,11 @@ and the collision events, and nothing it does reaches the simulation.
 `ofs-audio` has three parts, none knowing Godot or time except as the samples it is asked for. `params` is a pure map
 from an `AudioInput` to `AudioParams` (a tone per motor at the blade-pass frequency, a prop-wash gain, a wind gain and
 cutoff), never non-finite; `thud_gain` maps a collision's speed to a hit. `Synth` turns those parameters into mono
-samples at 44.1 kHz, and the same parameter sequence gives identical samples. `Audio` is the facade the client owns: it
+samples at 44.1 kHz, and the same parameter sequence gives identical samples on one platform (`sin`, `exp` and `tanh`
+come from the platform's libm, so byte equality across operating systems is not promised). `Audio` is the facade the client owns: it
 holds the synth and the collisions waiting for the first state at or after their time, which carries the impact speed.
-`OfsClient.audio_render(frames, active)` feeds it from the latest telemetry (silence when `active` is false or there is
-no telemetry yet) and a loading phase resets it. In Godot, `godot/drone/flight_audio.gd` creates a `Flight` bus under
+`OfsClient.audio_render(frames, active)` feeds it from the latest telemetry (the motors fade out when `active` is false, and
+silence without telemetry) and a loading phase resets it. In Godot, `godot/drone/flight_audio.gd` creates a `Flight` bus under
 Master (the quad's microphone) and each frame pushes the samples an `AudioStreamGenerator` has room for; the `audio`
 setting mutes that bus.
 

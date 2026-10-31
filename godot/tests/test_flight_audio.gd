@@ -46,8 +46,22 @@ func test_pump_asks_the_client_for_the_frames_the_generator_has_room_for() -> vo
 	eq(fake.calls[0][1], true, "the node's active flag is passed")
 	ok(fake.calls[0][0] <= int(0.1 * fake.rate), "never more than the generator's 0.1 s: %d" % fake.calls[0][0])
 	node.active = false
+	node.set_enabled(false)
+	node.set_enabled(true)  # an empty buffer again, so there is room for a second call
 	node.pump()
-	ok(fake.calls.size() < 2 or fake.calls[1][1] == false, "inactive is passed on")
+	ok(fake.calls.size() >= 2 and fake.calls[1][1] == false, "inactive is passed on")
+	node.queue_free()
+
+
+func test_the_queue_stays_near_the_buffer_length_however_often_it_is_pumped() -> void:
+	var s := await _node()
+	var node = s[0]
+	var fake: FakeClient = s[1]
+	var queued := 0
+	for i in 20:
+		queued += node.pump()
+	var limit := int(FlightAudio.BUFFER_S * fake.rate) + 1
+	ok(queued <= limit, "nothing is pushed past 0.1 s while nothing plays: %d of %d" % [queued, limit])
 	node.queue_free()
 
 

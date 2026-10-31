@@ -73,3 +73,29 @@ fn inactive_input_fades_to_silence() {
     let off = a.frame(&spinning(false), 0.3, 0.0, frames(0.2));
     assert!(off[off.len() - frames(0.05)..].iter().all(|&s| s == 0.0));
 }
+
+#[test]
+fn pausing_keeps_the_motors_so_the_tones_fade_without_a_click() {
+    let mut a = Audio::new();
+    let on = a.frame(&spinning(true), 0.0, 0.0, frames(0.3));
+    let off = a.frame(&spinning(false), f64::NAN, 0.0, frames(0.3));
+    let max_jump = |s: &[f32]| s.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+    // The tone's own slope is the bound: the seam may not be steeper than the steady sound before it.
+    let steady = max_jump(&on[on.len() - frames(0.1)..]);
+    let seam = [&on[on.len() - 1..], &off[..]].concat();
+    assert!(max_jump(&seam) <= steady * 1.05, "no click across the pause: {} vs {steady}", max_jump(&seam));
+    // And it is a fade: the tone is still there a few milliseconds in (a cut would be silent at once).
+    assert!(rms(&off[frames(0.002)..frames(0.012)]) > 0.5 * rms(&on[on.len() - frames(0.01)..]));
+    assert!(off[off.len() - frames(0.05)..].iter().all(|&s| s == 0.0));
+}
+
+#[test]
+fn a_collision_far_ahead_of_its_state_is_dropped() {
+    let mut a = Audio::new();
+    let idle = AudioInput::default();
+    a.collision_event(100.0);
+    let early = a.frame(&idle, 5.0, 8.0, frames(0.1));
+    assert!(early.iter().all(|&s| s == 0.0));
+    let later = a.frame(&idle, 100.0, 8.0, frames(0.1));
+    assert!(later.iter().all(|&s| s == 0.0), "the stale event never plays");
+}
