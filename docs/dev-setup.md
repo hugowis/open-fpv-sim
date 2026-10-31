@@ -124,9 +124,9 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   it), `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`, `persistence` and `flat_radius_m` (exactly flat, d = 0,
   around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface and the
   Godot client draws the same grid (it comes in the `GetWorld` reply, `World.terrain`, protocol 16; the client checks its
-  digest and builds the mesh itself); the radio and video link ignore the relief until #154. `worlds/hills.toml` is
-  the big example (12 m hills); `worlds/park.toml` has gentle swells of about a metre with its course placed on the
-  ground. The steepest slope may not pass 60 degrees.
+  digest and builds the mesh itself); the radio and video link are obstructed by the relief (#154), and objects with
+  `rf_loss_db` stand on it. `worlds/hills.toml` is the big example (12 m hills); `worlds/park.toml` has gentle swells of
+  about a metre with its course placed on the ground. The steepest slope may not pass 60 degrees.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
 power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from

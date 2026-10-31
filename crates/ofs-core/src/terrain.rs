@@ -17,6 +17,7 @@ pub struct Terrain {
     nodes_e: usize,
     heights: Vec<f32>,
     max_slope: f64,
+    max_height: f64,
 }
 
 /// The plane of one triangle of a cell: height up `h0 + gn * u + ge * v` for the cell fractions (u north, v east),
@@ -44,7 +45,8 @@ impl Terrain {
         if heights.iter().any(|h| !h.is_finite()) {
             return Err("the terrain heights must be finite".to_string());
         }
-        let mut t = Terrain { origin_ne, cell_m, nodes_n, nodes_e, heights, max_slope: 0.0 };
+        let mut t = Terrain { origin_ne, cell_m, nodes_n, nodes_e, heights, max_slope: 0.0, max_height: f64::NEG_INFINITY };
+        t.max_height = (0..nodes_n * nodes_e).map(|k| t.node(k / nodes_e, k % nodes_e)).fold(f64::NEG_INFINITY, f64::max);
         let mut steepest: f64 = 0.0;
         for i in 0..nodes_n - 1 {
             for j in 0..nodes_e - 1 {
@@ -102,6 +104,11 @@ impl Terrain {
     /// The tangent of the steepest triangle.
     pub fn max_slope(&self) -> f64 {
         self.max_slope
+    }
+
+    /// The highest node, metres up (negative for a grid sunk below the plane).
+    pub fn max_height(&self) -> f64 {
+        self.max_height
     }
 
     /// FNV-1a of the exact grid: its size, cell size, origin and every height's bits.

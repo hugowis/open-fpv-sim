@@ -1,16 +1,19 @@
+use std::sync::Arc;
+
 use glam::DVec3;
 use ofs_core::shape::Shape;
+use ofs_core::terrain::Terrain;
 use ofs_core::{names, Bus, Scheduler, StepCtx, Wire};
 use ofs_radio::crsf::{stick_ticks, Decoder, Frame};
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{
-    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, NOISE_FLOOR_DBM, NO_SIGNAL_RSSI_DBM,
-    TELEMETRY_SLOT_DIVISOR,
+    packet_error_rate, rf_mode_index, sensitivity_dbm, tx_power_index_mw, ElrsLink, LinkParams, ELRS_FREQ_MHZ, NOISE_FLOOR_DBM,
+    NO_SIGNAL_RSSI_DBM, TELEMETRY_SLOT_DIVISOR,
 };
-use ofs_radio::parts::{Delivery, Link, TxFrame};
+use ofs_radio::parts::{Delivery, Link, LinkReport, TxFrame};
 use ofs_radio::receiver::ReceiverParams;
 use ofs_radio::telemetry::FcTelemetryHandle;
-use ofs_rf::propagation::{fspl_db, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_rf::propagation::{fspl_db, terrain_loss_db, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
 
 const BASE_HZ: u32 = 8000;
 
@@ -161,6 +164,55 @@ fn behind_a_building_the_rssi_drops_by_its_capped_knife_edge_loss() {
     packets(&mut blocked, 2);
     let drop = get(&open, names::RADIO_RSSI) - get(&blocked, names::RADIO_RSSI);
     assert!(drop > 24.0 && drop <= 25.0 + 1e-9, "the building costs its cap of 25 dB: {drop}");
+}
+
+/// A 41 x 41 terrain, constant along east, with a tent-shaped ridge (10 rows a side) whose crest is `crest_m` high
+/// along north row 20; `cell_m` scales it, so with 10 m cells the crest sits at north 100 m, mid-way on a 200 m link.
+fn ridge(crest_m: f32, cell_m: f64) -> Arc<Terrain> {
+    let height = |row: usize| (crest_m * (1.0 - row.abs_diff(20) as f32 / 10.0)).max(0.0);
+    let heights = (0..41 * 41).map(|k| height(k / 41)).collect();
+    Arc::new(Terrain::from_grid([-10.0 * cell_m, -20.0 * cell_m], cell_m, 41, 41, heights).unwrap())
+}
+
+/// The first packet's report of the ideal link to a quad at `quad`, with `terrain` under it.
+fn first_report(terrain: Option<Arc<Terrain>>, quad: DVec3) -> LinkReport {
+    let mut bus = Bus::new();
+    let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+    bus.set(tx, 1.0);
+    let mut link = ElrsLink::new(LinkParams { terrain, ..LinkParams::ideal(500) }, 1, &mut bus);
+    let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+    bus.set(pos, quad);
+    let ctx = StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 500.0 };
+    link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true }).report
+}
+
+#[test]
+fn a_ridge_between_the_handset_and_the_quad_cuts_the_uplink() {
+    let terrain = ridge(10.0, 10.0);
+    let quad = DVec3::new(200.0, 0.0, -2.0);
+    let (open, hidden) = (first_report(None, quad), first_report(Some(terrain.clone()), quad));
+    let handset = LinkParams::ideal(500).handset_position;
+    let expected = terrain_loss_db(&terrain, handset, quad, wavelength_m(ELRS_FREQ_MHZ));
+    assert!(expected > 20.0, "the 10 m crest is a deep knife edge over a 2 m path: {expected}");
+    close(open.uplink_rssi_dbm[0] - hidden.uplink_rssi_dbm[0], expected, 1e-6, "the uplink loses the knife-edge loss");
+    close(open.uplink_snr_db - hidden.uplink_snr_db, expected, 1e-6, "and its SNR");
+}
+
+#[test]
+fn the_ridge_cuts_the_telemetry_downlink_too() {
+    let terrain = ridge(10.0, 10.0);
+    let quad = DVec3::new(200.0, 0.0, -2.0);
+    let (open, hidden) = (first_report(None, quad), first_report(Some(terrain.clone()), quad));
+    let expected = terrain_loss_db(&terrain, quad, LinkParams::ideal(500).handset_position, wavelength_m(ELRS_FREQ_MHZ));
+    assert!(expected > 20.0, "{expected}");
+    close(open.downlink_rssi_dbm - hidden.downlink_rssi_dbm, expected, 1e-6, "the downlink crosses the same ridge");
+}
+
+#[test]
+fn the_same_link_without_a_ridge_in_the_way_is_unchanged() {
+    // 60 m up the ray clears the 10 m crest by 20 m, far beyond its first Fresnel zone: bit for bit what no terrain gives.
+    let quad = DVec3::new(200.0, 0.0, -60.0);
+    assert_eq!(first_report(Some(ridge(10.0, 10.0)), quad), first_report(None, quad));
 }
 
 #[test]

@@ -91,3 +91,12 @@ fn digest_changes_with_the_origin() {
     assert_ne!(at([0.0, 0.0]), at([1.0, 0.0]));
     assert_eq!(at([0.0, 1.0]), at([0.0, 1.0]));
 }
+
+#[test]
+fn max_height_is_the_highest_node() {
+    let mut h = vec![0.0f32; 9];
+    h[2] = 4.5;
+    h[6] = -2.0;
+    assert_eq!(grid(h, 3, 3).max_height(), 4.5);
+    assert_eq!(grid(vec![-3.0, -2.5, -4.0, -9.0], 2, 2).max_height(), -2.5);
+}

@@ -1,6 +1,7 @@
 //! Assembles a quad from its config into a scheduler and exposes sticks in, state out.
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use glam::{DQuat, DVec3};
@@ -49,6 +50,7 @@ use ofs_video::link::{
 };
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
+use ofs_core::terrain::Terrain;
 use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
 use ofs_video::vtx::{band_index, VtxModel, VtxParams, FREQUENCIES_MHZ};
 
@@ -657,7 +659,15 @@ pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
 /// The quad file's radio, wired to the flight controller's UART: the joystick handset (at the world's `[handset]`),
 /// the link the quad file names (ELRS or fixed) and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
 /// the FC's own CRSF telemetry back.
-fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, telemetry_in: Wire, bus: &mut Bus) -> RadioChain {
+fn radio_chain(
+    cfg: &QuadConfig,
+    opts: &BuildOptions,
+    terrain: Option<Arc<Terrain>>,
+    base_hz: u32,
+    uart: Wire,
+    telemetry_in: Wire,
+    bus: &mut Bus,
+) -> RadioChain {
     let r = &cfg.radio;
     let facing = opts.world.pilot.facing_deg;
     let handset = &opts.world.handset;
@@ -696,7 +706,8 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
                 axis: v3(a.mount_frd).normalize(),
             })
             .collect(),
-        obstacles: world_obstacles(&opts.world),
+        obstacles: world_obstacles(&opts.world, terrain.as_deref()),
+        terrain,
         fading: true,
         ground_bounce: true,
     };
@@ -728,13 +739,14 @@ fn radio_chain(cfg: &QuadConfig, opts: &BuildOptions, base_hz: u32, uart: Wire, 
     RadioChain::new(handset, link, receiver, base_hz, bus)
 }
 
-/// The world's objects as RF obstacles: those that take signal, rooted so nothing diffracts underneath them.
-pub fn world_obstacles(world: &WorldConfig) -> Vec<Obstacle> {
+/// The world's objects as RF obstacles: those that take signal, rooted on the ground (the terrain's, if any) so nothing
+/// diffracts underneath them.
+pub fn world_obstacles(world: &WorldConfig, terrain: Option<&Terrain>) -> Vec<Obstacle> {
     world
         .objects
         .iter()
         .filter(|o| o.rf_loss_db > 0.0)
-        .map(|o| Obstacle { shape: object_shape(o).rooted(), rf_loss_db: o.rf_loss_db })
+        .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss_db: o.rf_loss_db })
         .collect()
 }
 
@@ -764,7 +776,7 @@ pub(crate) fn emitter_freq_mhz(e: &world_cfg::EmitterSection) -> Result<f64, Sim
 }
 
 /// The video link's view of the world file and the quad's VTX antenna.
-pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkParams, SimError> {
+pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Terrain>>) -> Result<VideoLinkParams, SimError> {
     let facing = world.pilot.facing_deg;
     let antennas = world
         .receiver
@@ -780,7 +792,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
             },
         })
         .collect();
-    let obstacles = world_obstacles(world);
+    let obstacles = world_obstacles(world, terrain.as_deref());
     let emitters = world
         .emitters
         .iter()
@@ -801,6 +813,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig) -> Result<VideoLinkPar
             noise_floor_dbm: world.receiver.noise_floor_dbm,
             diversity: world.receiver.diversity,
             obstacles,
+            terrain,
             emitters,
         },
         vtx_antenna: Antenna {
@@ -943,6 +956,8 @@ pub fn build_seeded(
     // seconds, and the exact integrator does not care about the step.
     models.push(Box::new(Thermal::new(thermal_params(cfg, &opts.world), (base_hz / 100).max(1), &mut bus)));
 
+    // One grid for the physics and both links: they must agree on where the ground is.
+    let terrain = opts.world.terrain.as_ref().map(|t| Arc::new(t.build()));
     let f = &cfg.frame;
     let (restitution, friction_coeff) = cfg.collision_contact();
     let airframe = AirframeParams {
@@ -969,7 +984,7 @@ pub fn build_seeded(
             friction_coeff,
             spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
         },
-        terrain: opts.world.terrain.as_ref().map(|t| std::sync::Arc::new(t.build())),
+        terrain: terrain.clone(),
     };
     let terrain = airframe.terrain.clone();
     let initial = BodyState {
@@ -1014,7 +1029,7 @@ pub fn build_seeded(
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     let radio_tap = Wire::new(VIDEO_TAP_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    let chain = radio_chain(cfg, opts, base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
+    let chain = radio_chain(cfg, opts, terrain.clone(), base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
     let fc_telemetry = chain.fc_telemetry_handle();
     models.push(Box::new(chain));
 
@@ -1108,7 +1123,7 @@ pub fn build_seeded(
     let vtx_interference = VtxInterferenceHandle::default();
     if let Some(x) = &cfg.vtx {
         // Last in the tick: it reads the pose the physics wrote and the channel the VTX published.
-        let params = link_params(x, &opts.world)?;
+        let params = link_params(x, &opts.world, terrain.clone())?;
         models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, vtx_interference.clone(), &mut bus)));
     }
 
@@ -2233,7 +2248,7 @@ mod tests {
     #[test]
     fn the_link_parameters_follow_the_world_file() {
         let world = flat_world();
-        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world).unwrap();
+        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, None).unwrap();
         let w = &params.world;
         assert_eq!(w.pilot_position, DVec3::new(-3.0, 2.0, -1.7));
         assert_eq!(w.antennas.len(), 2);
@@ -2249,6 +2264,94 @@ mod tests {
         assert_eq!(params.pit_power_mw, 0.1);
         assert!(params.fading && params.ground_bounce);
         assert!((aim_ned(90.0, 0.0) - DVec3::Y).length() < 1e-12, "heading 90 is east");
+    }
+
+    /// A world with the baked default-ish hills (amplitude 8 m) and the grid it bakes to.
+    fn hilly_world() -> (WorldConfig, Terrain) {
+        let mut world = WorldConfig::open_field();
+        world.terrain = Some(ofs_config::TerrainSection { amplitude_m: 8.0, ..Default::default() });
+        let terrain = world.terrain.unwrap().build();
+        (world, terrain)
+    }
+
+    /// A 10 m building with an RF loss whose bottom sits at `bottom_d` (NED down) over the footprint at `at`.
+    fn building(at: (f64, f64), bottom_d: f64) -> world_cfg::ObjectSection {
+        let mut o = flat_world().objects.into_iter().find(|o| o.rf_loss_db > 0.0).unwrap();
+        o.shape = world_cfg::Shape::Box;
+        o.size_m = Some([10.0, 10.0, 10.0]);
+        o.center_ned_m = [at.0, at.1, bottom_d - 5.0];
+        o
+    }
+
+    /// The first spot on a coarse grid around home where the ground is at least 1 m above (`up`) or below the plane.
+    fn spot(terrain: &Terrain, up: bool) -> (f64, f64) {
+        let grid = (-40..=40).flat_map(|i| (-40..=40).map(move |j| (f64::from(i) * 5.0, f64::from(j) * 5.0)));
+        grid.into_iter().find(|&(n, e)| if up { terrain.ground_d(n, e) < -1.0 } else { terrain.ground_d(n, e) > 1.0 }).unwrap()
+    }
+
+    /// Is `p`, 100 m under the object's bottom, inside its obstacle (that is, is it rooted down to there)?
+    fn rooted_under(world: &WorldConfig, terrain: Option<&Terrain>, at: (f64, f64), bottom_d: f64) -> bool {
+        let obstacles = world_obstacles(world, terrain);
+        assert_eq!(obstacles.len(), 1);
+        obstacles[0].shape.signed_distance(DVec3::new(at.0, at.1, bottom_d + 100.0)) < 0.0
+    }
+
+    #[test]
+    fn objects_on_hilly_ground_root_to_the_terrain() {
+        let (mut world, terrain) = hilly_world();
+        let hill = spot(&terrain, true);
+        let hill_d = terrain.ground_d(hill.0, hill.1);
+        world.objects = vec![building(hill, hill_d)];
+        assert!(rooted_under(&world, Some(&terrain), hill, hill_d), "a building on the hill stands on the ground");
+        assert!(!rooted_under(&world, None, hill, hill_d), "on the plane it would hang above z = 0");
+
+        // Where the ground is lower than the plane, a building at z = 0 floats; one on the valley floor stands.
+        let valley = spot(&terrain, false);
+        world.objects = vec![building(valley, 0.0)];
+        assert!(!rooted_under(&world, Some(&terrain), valley, 0.0), "it floats above the valley");
+        assert!(rooted_under(&world, None, valley, 0.0), "the plane alone would say it stands");
+        let valley_d = terrain.ground_d(valley.0, valley.1);
+        world.objects = vec![building(valley, valley_d)];
+        assert!(rooted_under(&world, Some(&terrain), valley, valley_d));
+    }
+
+    #[test]
+    fn a_world_without_terrain_roots_exactly_as_before() {
+        let world = flat_world();
+        let expected: Vec<_> = world.objects.iter().filter(|o| o.rf_loss_db > 0.0).map(|o| (object_shape(o).rooted(), o.rf_loss_db)).collect();
+        let got: Vec<_> = world_obstacles(&world, None).into_iter().map(|o| (o.shape, o.rf_loss_db)).collect();
+        assert_eq!(got.len(), 4);
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn the_links_and_the_body_share_one_grid() {
+        let hills = world_cfg::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hills.toml"))).unwrap();
+        let vehicle = open_loop(&shipped_quad(), hills);
+        let terrain = vehicle.terrain.as_ref().expect("the hills world bakes a grid");
+        // The vehicle's own handle, the body's airframe, the ELRS link's parameters and the video link's world: no copies.
+        assert_eq!(Arc::strong_count(terrain), 4);
+    }
+
+    #[test]
+    fn a_world_without_terrain_has_no_terrain_in_the_links() {
+        let vehicle = open_loop(&shipped_quad(), flat_world());
+        assert!(vehicle.terrain.is_none());
+        assert!(link_params(shipped_quad().vtx.as_ref().unwrap(), &flat_world(), None).unwrap().world.terrain.is_none());
+    }
+
+    #[test]
+    fn a_hill_between_the_pilot_and_the_quad_cuts_the_video_in_the_real_world() {
+        // A 10 m ridge across the north-south line from the pilot, crest 100 m north of home.
+        let heights = (0..41usize * 41).map(|k| (10.0f32 * (1.0 - (k / 41).abs_diff(20) as f32 / 10.0)).max(0.0)).collect();
+        let ridge = Arc::new(Terrain::from_grid([-100.0, -200.0], 10.0, 41, 41, heights).unwrap());
+        let world = world_cfg::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hills.toml"))).unwrap();
+        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, Some(ridge)).unwrap();
+        let obstruction = |north: f64, east: f64| {
+            ofs_video::link::vtx_paths(&params, DVec3::new(north, east, -1.7), DQuat::IDENTITY, 5800.0)[0].obstruction_db
+        };
+        let (behind, beside) = (obstruction(200.0, 0.0), obstruction(0.0, 300.0));
+        assert!(behind > beside + 10.0, "behind the ridge {behind} dB, beside it {beside} dB");
     }
 
     /// The quad resting on the ground at `north`, `east` in the flat world (or the same world without objects).
