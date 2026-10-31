@@ -80,8 +80,9 @@ lz4 chunks, are still read through the iterator.
 ## Reading a recording while it is being written
 
 Can a file be opened while the session is still recording it? Probed on 2026-10-22 (Windows 11,
-Python 3.11, `mcap` 1.5.0, `pandas` 3.0.6, a debug server built from this repository) with a lockstep
-open-loop session recording every signal at the default rates. **Foxglove is not installed on that
+Python 3.11, `mcap` 1.5.0, `pandas` 3.0.6, a debug `ofs-sim` built from this repository at `60a8fe0`,
+the 0.3.0 branch of PR #119) with a lockstep open-loop session recording every signal at the
+default rates. **Foxglove is not installed on that
 machine — desktop and web were not run, and nothing here claims what Foxglove does.** The `mcap` CLI
 was not available either (no `mcap` on `PATH`; `pip install mcap-cli` found no distribution), so the
 readers below are the Python `mcap` library and `ofs.reader` — the exact tools `to_dataframe` is

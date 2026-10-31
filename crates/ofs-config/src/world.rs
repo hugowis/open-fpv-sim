@@ -648,11 +648,11 @@ impl WorldConfig {
             return;
         }
         let ground = t.build();
-        let max_deg = ground.max_slope().atan().to_degrees();
+        let slope = ground.max_slope();
         c.check(
-            max_deg <= MAX_TERRAIN_SLOPE_DEG,
+            within_slope_cap(slope),
             "terrain.amplitude_m",
-            format!("the steepest slope is {max_deg:.1} degrees, over the {MAX_TERRAIN_SLOPE_DEG} degree limit: lower amplitude_m or raise wavelength_m"),
+            format!("the steepest slope is {:.1} degrees, over the {MAX_TERRAIN_SLOPE_DEG} degree limit: lower amplitude_m or raise wavelength_m", slope.atan().to_degrees()),
         );
         // A d above 0 is already reported as below the flat ground; a non-finite place is reported as such.
         let below = |at: [f64; 3]| at.iter().all(|v| v.is_finite()) && at[2] <= 0.0 && at[2] > ground.ground_d(at[0], at[1]);
@@ -668,6 +668,13 @@ impl WorldConfig {
             );
         }
     }
+}
+
+/// The slope cap decides without libm: tan²60° = 3 exactly, and an IEEE multiply is correctly rounded, so
+/// `slope * slope <= 3.0` is the same bits on every OS. `atan` — which may differ by an ulp between OSes — is
+/// display only, for the message's degrees.
+fn within_slope_cap(slope: f64) -> bool {
+    slope * slope <= 3.0
 }
 
 /// Names become signal names and dictionary keys: letters, digits, `_` and `-`, unique within their list.
@@ -716,4 +723,23 @@ pub fn load(path: &Path) -> Result<WorldConfig, ConfigError> {
         return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
     }
     Ok(world)
+}
+
+#[cfg(test)]
+mod slope_cap_tests {
+    use super::within_slope_cap;
+
+    /// The cap decides at the f64 neighbours of tan 60 degrees = sqrt(3), the closest any world can get to the limit:
+    /// the last double below is inside, the rounded sqrt(3) itself squares (rounded) to under 3, the first above is out.
+    #[test]
+    fn the_cap_decides_exactly_at_the_ulp_neighbours_of_tan_60() {
+        let (below, at, above) = (
+            f64::from_bits(3.0f64.sqrt().to_bits() - 1),
+            3.0f64.sqrt(),
+            f64::from_bits(3.0f64.sqrt().to_bits() + 1),
+        );
+        assert!(within_slope_cap(below), "the last f64 below tan 60 degrees is inside the cap");
+        assert!(within_slope_cap(at), "the rounded sqrt(3) squares to under 3, so tan 60 itself is inside");
+        assert!(!within_slope_cap(above), "the first f64 above tan 60 degrees is outside the cap");
+    }
 }

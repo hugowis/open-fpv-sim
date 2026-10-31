@@ -4,6 +4,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -120,20 +121,28 @@ impl Exporter {
         self.spawn_with(if mp4 { find_ffmpeg() } else { None }, avi, frames, mp4);
     }
 
-    /// `spawn` with ffmpeg given: `None` with `mp4` set reports "ffmpeg was not found on PATH".
+    /// `spawn` with ffmpeg given: `None` with `mp4` set reports "ffmpeg was not found on PATH". A panic in the
+    /// thread is caught and reported as one export error instead of dying silently.
     pub fn spawn_with(&self, ffmpeg: Option<PathBuf>, avi: PathBuf, frames: bool, mp4: bool) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            if frames {
-                let result = export_frames(&avi).map(|(dir, _)| dir);
-                tx.send(ExportDone { avi: avi.clone(), kind: "frames", result }).ok();
-            }
-            if mp4 {
-                let result = match ffmpeg {
-                    Some(ffmpeg) => export_mp4(&ffmpeg, &avi),
-                    None => Err("ffmpeg was not found on PATH".to_string()),
-                };
-                tx.send(ExportDone { avi, kind: "mp4", result }).ok();
+            let outcomes = catch_panics(avi.clone(), move || {
+                let mut done = Vec::new();
+                if frames {
+                    let result = export_frames(&avi).map(|(dir, _)| dir);
+                    done.push(ExportDone { avi: avi.clone(), kind: "frames", result });
+                }
+                if mp4 {
+                    let result = match ffmpeg {
+                        Some(ffmpeg) => export_mp4(&ffmpeg, &avi),
+                        None => Err("ffmpeg was not found on PATH".to_string()),
+                    };
+                    done.push(ExportDone { avi, kind: "mp4", result });
+                }
+                done
+            });
+            for outcome in outcomes {
+                tx.send(outcome).ok();
             }
         });
     }
@@ -141,6 +150,23 @@ impl Exporter {
     /// The outcomes that arrived since the last call.
     pub fn poll(&self) -> Vec<ExportDone> {
         self.rx.lock().map_or_else(|_| Vec::new(), |rx| rx.try_iter().collect())
+    }
+}
+
+/// Runs an export job's body under a panic guard: the outcomes it returns pass through untouched, and a panic
+/// becomes one `ExportDone` of kind "export" whose error names the panic, so the poller always hears an outcome
+/// instead of waiting on a thread that died silently.
+fn catch_panics(avi: PathBuf, job: impl FnOnce() -> Vec<ExportDone>) -> Vec<ExportDone> {
+    match catch_unwind(AssertUnwindSafe(job)) {
+        Ok(outcomes) => outcomes,
+        Err(panic) => {
+            let message = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "an unknown panic".to_string());
+            vec![ExportDone { avi, kind: "export", result: Err(format!("the export panicked: {message}")) }]
+        }
     }
 }
 
@@ -169,7 +195,8 @@ pub fn ffmpeg_args(avi: &Path, mp4: &Path) -> Vec<OsString> {
 }
 
 /// Converts the AVI to `<stem>.mp4` next to it with the given ffmpeg. An existing mp4 is an error before
-/// anything is spawned; a failing ffmpeg is an error carrying the last line it wrote to stderr.
+/// anything is spawned; a failing ffmpeg is an error carrying the last line it wrote to stderr, and a failing
+/// run removes the partial it wrote, so the name is free for a retry.
 pub fn export_mp4(ffmpeg: &Path, avi: &Path) -> Result<PathBuf, String> {
     let mp4 = avi.with_extension("mp4");
     if mp4.exists() {
@@ -183,6 +210,7 @@ pub fn export_mp4(ffmpeg: &Path, avi: &Path) -> Result<PathBuf, String> {
     if output.status.success() {
         return Ok(mp4);
     }
+    let _ = std::fs::remove_file(&mp4); // the partial this run wrote (the pre-check saw no file): best-effort
     Err(last_line(&output.stderr).unwrap_or_else(|| format!("ffmpeg failed: {}", output.status)))
 }
 
@@ -205,6 +233,16 @@ mod tests {
         assert_eq!(last_line(b"only"), Some("only".to_string()));
         let non_utf8 = last_line(b"ok\nbad \xff\xfe byte\n").unwrap();
         assert!(non_utf8.starts_with("bad ") && non_utf8.ends_with(" byte"), "{non_utf8}");
+    }
+
+    #[test]
+    fn catch_panics_turns_a_panic_into_one_reported_export_error() {
+        let outcomes = catch_panics(PathBuf::from("a.avi"), || panic!("synthetic boom"));
+        assert_eq!(outcomes.len(), 1, "one outcome, not a thread that dies silently");
+        assert_eq!(outcomes[0].avi, PathBuf::from("a.avi"));
+        assert_eq!(outcomes[0].kind, "export");
+        let err = outcomes[0].result.as_ref().unwrap_err();
+        assert!(err.contains("synthetic boom"), "{err}");
     }
 
     #[test]

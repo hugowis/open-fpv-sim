@@ -96,6 +96,22 @@ fn a_recorded_vehicle_flight_reproduces_its_digests() {
             "weak-link",
             flight("opendrone-5f-weak-link.toml", 3, &dir.path().join("b.mcap")),
         ),
+        (
+            "toothpick",
+            flight("opendrone-3t-toothpick.toml", 4, &dir.path().join("c.mcap")),
+        ),
+        (
+            "race",
+            flight("opendrone-5r-race.toml", 5, &dir.path().join("d.mcap")),
+        ),
+        (
+            "longrange",
+            flight(
+                "opendrone-7lr-longrange.toml",
+                6,
+                &dir.path().join("e.mcap"),
+            ),
+        ),
     ];
     let text: String = current
         .iter()

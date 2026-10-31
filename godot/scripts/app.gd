@@ -389,7 +389,7 @@ func _poll_dvr_exports() -> void:
 		elif detail.begins_with("ffmpeg was not found"):
 			hud.add_toast("%s: the AVI was kept" % detail, "warn")
 		else:
-			hud.add_toast("DVR %s export failed: %s (the AVI was kept)" % [done["kind"], detail], "warn")
+			hud.add_toast("DVR export failed (%s): %s (the AVI was kept)" % [done["kind"], detail], "warn")
 
 
 func _sync_dvr() -> void:

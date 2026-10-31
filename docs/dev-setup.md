@@ -12,7 +12,7 @@
 | All Rust tests | `cargo test --workspace` |
 | Live SITL tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1` |
 | Live video tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-video --test vtx_live -- --ignored --test-threads=1`, and `python -m pytest python/tests/test_sitl_video.py` |
-| Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL) |
+| Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL; the game does not need the port free — `--server 127.0.0.1:0` has its launcher take whatever the OS picks, read back from the server) |
 | Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` (after `python -m pip install -e "python[dev]"`, which brings the recording, Parquet and Rerun extras the tests use) |
 | Live Python tests in WSL | from `python/`: `OFS_SIM_BIN=$HOME/ofs/target/debug/ofs-sim OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf PYTHONPATH=. uv run --no-project --with grpcio,protobuf,pytest,mcap,pandas,pyarrow,'rerun-sdk>=0.39,<0.40' python -m pytest tests` (a Linux-built `ofs-sim`) |
 | Build the Python package | `python -m build python --outdir dist` (wheel and sdist; CI publishes them on `v*` tags only) |
@@ -371,7 +371,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 ## Native Windows SITL (experimental, no WSL)
 The pinned Betaflight SITL also builds and runs as a native Windows program, through the Cygwin-based `msys`
 environment of MSYS2 (issue #67; the findings are in `docs/research/sitl-native-windows.md`). It measured about
-2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path. CI builds it and runs the live tests against it (the `windows-sitl` job, not yet a required check).
+2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path. CI builds it and runs the live tests against it (the `windows-sitl` job, in `publish.needs` since 2026-10-31).
 Windows may ask whether to allow `betaflight_SITL.exe` on the network the first time it starts (it listens on its
 Betaflight ports on every interface): answer Cancel, the simulator talks to it over loopback, which is not filtered.
 
