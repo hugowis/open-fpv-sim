@@ -128,7 +128,7 @@ Overrides:
 | Setting | Environment | Flag |
 |---|---|---|
 | server binary | `OFS_SIM_BIN` | `--sim=` |
-| server address | `OFS_SERVER_ADDR` | `--server=` |
+| server address (port 0 = the OS picks) | `OFS_SERVER_ADDR` | `--server=` |
 | quad file | `OFS_QUAD` | `--quad=` |
 | data dir | `OFS_DATA_DIR` | `--data-dir=` |
 | open loop (no firmware) | `OFS_OPEN_LOOP` | `--open-loop` |

@@ -12,7 +12,7 @@
 | All Rust tests | `cargo test --workspace` |
 | Live SITL tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-fc -p ofs-sim --test sitl_live -- --ignored --test-threads=1` |
 | Live video tests | `OFS_SITL_LAUNCH=<cmd> cargo test -p ofs-video --test vtx_live -- --ignored --test-threads=1`, and `python -m pytest python/tests/test_sitl_video.py` |
-| Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL) |
+| Server | `cargo run -p ofs-sim -- --listen 127.0.0.1:50051 --data-dir .ofs-data` (Ctrl-C stops it and its SITL; the game does not need the port free — `--server 127.0.0.1:0` has its launcher take whatever the OS picks, read back from the server) |
 | Python tests | `cargo build -p ofs-sim && python -m pytest python/tests -v` (after `python -m pip install -e "python[dev]"`, which brings the recording, Parquet and Rerun extras the tests use) |
 | Live Python tests in WSL | from `python/`: `OFS_SIM_BIN=$HOME/ofs/target/debug/ofs-sim OFS_SITL_LAUNCH=$HOME/ofs/betaflight/obj/main/betaflight_SITL.elf PYTHONPATH=. uv run --no-project --with grpcio,protobuf,pytest,mcap,pandas,pyarrow,'rerun-sdk>=0.39,<0.40' python -m pytest tests` (a Linux-built `ofs-sim`) |
 | Build the Python package | `python -m build python --outdir dist` (wheel and sdist; CI publishes them on `v*` tags only) |

@@ -5,6 +5,14 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### The game's launcher takes an automatic server port (the #110 follow-up)
+#### Added
+- **`server_addr` port 0 lets the game start beside anything on the fixed port**: with `--server 127.0.0.1:0`
+  (the `server address` setting, or `OFS_SERVER_ADDR`) the Godot client's launcher passes `ofs-sim --port-file`
+  and connects to the OS-picked port the server reports there, as Python's `ofs.launch()` has since #110 — a
+  process holding `127.0.0.1:50051` no longer breaks game launch, and two clients can fly at once. Every fixed
+  address behaves exactly as before.
+
 ### DVR export: a failed retry and a panicking export (#137)
 #### Fixed
 - **A failed MP4 export clears its partial file so a retry works, and a panicking export reports instead of going
