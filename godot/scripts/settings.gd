@@ -23,6 +23,7 @@ const ENV_NAMES := {
 	"OFS_COURSE": "course",
 	"OFS_FULLSCREEN": "fullscreen",
 	"OFS_HUD": "hud_visible",
+	"OFS_AUDIO": "audio",
 }
 ## Command-line flag -> setting (`--name=value`; `--open-loop` alone means true).
 const FLAG_NAMES := {
@@ -42,6 +43,7 @@ const FLAG_NAMES := {
 	"--course": "course",
 	"--fullscreen": "fullscreen",
 	"--hud": "hud_visible",
+	"--audio": "audio",
 }
 ## What `dvr_feed` may be: the goggles picture (OSD and video breakup), the clean camera image, or both files.
 const DVR_FEEDS := ["goggles", "clean", "both"]
@@ -78,6 +80,7 @@ static func defaults() -> Dictionary:
 		"course": "",  # the course to race in a world with several; empty = the world's own default
 		"fullscreen": false,
 		"hud_visible": true,
+		"audio": true,
 		"sitl_launch": "",
 		"open_loop": false,
 		"seed": 1,

@@ -13,6 +13,7 @@ const ROWS := [
 	{"key": "fpv_aspect", "label": "Picture", "kind": "choice", "values": ControlsMenu.ASPECTS, "live": true},
 	{"key": "hud_visible", "label": "HUD shown at start", "kind": "bool", "live": true},
 	{"key": "fullscreen", "label": "Fullscreen", "kind": "bool", "live": true},
+	{"key": "audio", "label": "Sound", "kind": "bool", "live": true},
 	{"key": "dvr_feed", "label": "DVR feed", "kind": "choice", "values": AppSettings.DVR_FEEDS, "live": true},
 	{"key": "dvr_export", "label": "DVR export", "kind": "choice", "values": AppSettings.DVR_EXPORTS, "live": true},
 	{"key": "open_loop", "label": "Open loop (no Betaflight)", "kind": "bool", "live": false},

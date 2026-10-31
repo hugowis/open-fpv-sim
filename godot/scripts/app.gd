@@ -7,6 +7,7 @@ const ControlProfiles = preload("res://scripts/control_profiles.gd")
 const AppSettings = preload("res://scripts/settings.gd")
 const ControlsMenu = preload("res://ui/controls_menu.gd")
 const MainMenu = preload("res://ui/main_menu.gd")
+const FlightAudio = preload("res://drone/flight_audio.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -38,6 +39,7 @@ const TIPS := {
 @onready var clean_feed: Node = $CleanFeed
 
 var client: Object = null  # OfsClient, from the extension
+var flight_audio: Node = null
 var controls = Controls.new()
 var profiles = ControlProfiles.new(controls)
 var settings := {}
@@ -92,6 +94,11 @@ func _ready() -> void:
 	client = ClassDB.instantiate("OfsClient")
 	client.name = "OfsClient"
 	add_child(client)
+	flight_audio = FlightAudio.new()
+	flight_audio.name = "FlightAudio"
+	add_child(flight_audio)
+	flight_audio.setup(client)
+	flight_audio.set_enabled(settings["audio"])
 	client.phase_changed.connect(_on_phase_changed)
 	client.event_received.connect(_on_event)
 	client.request_failed.connect(_on_request_failed)
@@ -203,6 +210,8 @@ func _process(delta: float) -> void:
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
 	_poll_dvr_exports()
+	flight_audio.active = client.get_phase() == "flying"
+	flight_audio.pump()
 	if not chase_view:
 		var fpv: Dictionary = client.get_fpv_view()
 		if fpv.has("pose"):
@@ -409,6 +418,9 @@ func _on_setting_changed(key: String, value) -> void:
 			_set_fullscreen(value)
 		"hud_visible":
 			hud.set_hud_visible(value)
+		"audio":
+			if flight_audio != null:
+				flight_audio.set_enabled(value)
 	if not AppSettings.save_value(key, value):
 		hud.add_toast("Could not save the %s setting to %s" % [key, AppSettings.CONFIG_PATH], "warn")
 

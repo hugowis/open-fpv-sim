@@ -158,3 +158,11 @@ func test_overrides_name_the_flag_or_variable_that_wins_this_run() -> void:
 	var o := AppSettings.overrides({"OFS_OPEN_LOOP": "1", "OFS_WORLD": "w.toml", "NOT_OURS": "x"}, PackedStringArray(["--open-loop", "--dvr-feed=clean", "--bogus=1", "positional"]))
 	eq(o, {"open_loop": "--open-loop", "world_path": "OFS_WORLD", "dvr_feed": "--dvr-feed"}, "the flag beats the variable, which beats the file")
 	eq(AppSettings.overrides({}, PackedStringArray()), {}, "nothing overridden")
+
+
+func test_the_sound_setting_defaults_on_and_comes_from_every_source() -> void:
+	eq(AppSettings.defaults()["audio"], true, "sound on by default")
+	eq(AppSettings.resolve({"audio": false}, {}, PackedStringArray())["audio"], false, "the config file")
+	eq(AppSettings.resolve({}, {"OFS_AUDIO": "off"}, PackedStringArray())["audio"], false, "OFS_AUDIO=off")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--audio=false"]))["audio"], false, "--audio=false")
+	eq(AppSettings.overrides({}, PackedStringArray(["--audio=false"])), {"audio": "--audio"}, "the flag is reported as an override")

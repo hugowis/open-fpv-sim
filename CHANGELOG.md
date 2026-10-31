@@ -30,6 +30,22 @@ repository). The format follows Keep a Changelog.
   hilly world (release, 8 kHz), still far above real time; the numbers are in `docs/research/collision.md`.
 - **Not yet**: until #155 the Godot client draws a flat ground in a world with `[terrain]`, so the picture and the
   physics disagree there; the radio and the video link ignore the terrain until #154.
+### Procedural flight audio (#158)
+#### Added
+- **The sim has sound.** The Godot client plays the quad's microphone: a tone per motor from its eRPM (the blade-pass
+  frequency, louder with the motor's command, so a motor that disagrees with the others is heard as its own pitch), prop
+  wash noise that follows the mean command, the spread between motors and the descent, wind noise that rises with airspeed
+  (ground speed for now: the sim has no wind yet) and a thud on every collision, louder with the impact speed.
+- **A "Sound" entry in Settings** (setting `audio`, `OFS_AUDIO`, `--audio`; on by default). It mutes the `Flight` audio bus
+  and persists in `[client]` of `user://ofs_client.cfg` like the other settings.
+- **The `ofs-audio` crate**: the pure sound-parameter functions (`params`, `thud_gain`) and a deterministic `Synth`, with no
+  Godot and no I/O. Part 2 (#159, the DVR audio track) will render the same synth offline from a recording.
+- `OfsClient.get_telemetry()` carries `motor_rpm`; `OfsClient.audio_render(frames, active)` and `audio_sample_rate()` feed
+  the generator.
+
+#### Notes
+- The sound is derived on the client from the state stream and the collision events. The server does not produce or carry it
+  and it is outside the lockstep digest, so recordings and goldens are unchanged. No protocol change (still 15).
 
 ### Controller setup: calibration, shaping and profiles (#127)
 #### Added

@@ -80,6 +80,12 @@ fn telemetry_is_derived_from_a_state_message() {
 }
 
 #[test]
+fn telemetry_carries_the_motor_rpm() {
+    let t = Telemetry::from_pb(&pb::State { motor_rpm: vec![100.0, 200.0], ..Default::default() });
+    assert_eq!(t.motor_rpm, vec![100.0, 200.0]);
+}
+
+#[test]
 fn default_telemetry_age_is_infinity() {
     // No frame yet: the age must be INFINITY (the doc comment's contract), not 0.0 ("just arrived").
     assert_eq!(FcTelemetry::default().telemetry_age_s, f64::INFINITY);
