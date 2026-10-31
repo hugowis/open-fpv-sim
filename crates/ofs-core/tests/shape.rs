@@ -1,5 +1,6 @@
 use glam::DVec3;
 use ofs_core::shape::Shape;
+use ofs_core::terrain::Terrain;
 
 fn close_dir(v: DVec3, expected: DVec3, what: &str) {
     assert!((v - expected).length() < 1e-12, "{what}: expected {expected}, got {v}");
@@ -110,5 +111,38 @@ impl Center for Shape {
         match *self {
             Shape::Box { center, .. } | Shape::Cylinder { center, .. } => center,
         }
+    }
+}
+
+fn hill() -> Terrain {
+    Terrain::from_grid([-2.0, -2.0], 1.0, 5, 5, vec![8.0; 25]).unwrap()
+}
+
+fn box_with_bottom_at(z: f64) -> Shape {
+    Shape::Box { center: DVec3::new(0.0, 0.0, z - 1.0), half: DVec3::new(1.0, 1.0, 1.0) }
+}
+
+#[test]
+fn rooted_on_a_hill_roots_a_box_standing_on_it() {
+    let b = box_with_bottom_at(-8.0).rooted_on(Some(&hill()));
+    assert!(b.signed_distance(DVec3::new(0.0, 0.0, 92.0)) < 0.0);
+}
+
+#[test]
+fn rooted_on_leaves_a_floating_box_alone() {
+    let b = box_with_bottom_at(-12.0);
+    assert_eq!(b.rooted_on(Some(&hill())), b);
+}
+
+#[test]
+fn rooted_on_roots_a_buried_box() {
+    let b = box_with_bottom_at(0.0).rooted_on(Some(&hill()));
+    assert!(b.signed_distance(DVec3::new(0.0, 0.0, 100.0)) < 0.0);
+}
+
+#[test]
+fn rooted_on_none_is_rooted() {
+    for b in [box_with_bottom_at(0.0), box_with_bottom_at(-12.0)] {
+        assert_eq!(b.rooted_on(None), b.rooted());
     }
 }

@@ -10,9 +10,11 @@
 //! Betaflight's own failsafe takes over. Deterministic: every packet draws the same count of numbers from the
 //! model's own seeded stream, whatever the inputs.
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use glam::{DQuat, DVec3};
 use ofs_core::rng::model_rng;
+use ofs_core::terrain::Terrain;
 use ofs_core::{names, Bus, Signal, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
 use ofs_rf::propagation::{mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKind, Endpoint, Obstacle, Polarization};
@@ -90,6 +92,8 @@ pub struct LinkParams {
     /// The receiver's antennas on the quad (axes in the body frame, FRD).
     pub quad_antennas: Vec<Antenna>,
     pub obstacles: Vec<Obstacle>,
+    /// The ground that can hide the quad from the handset: the physics' own grid, shared: never a copy of the heights.
+    pub terrain: Option<Arc<Terrain>>,
     /// Fading and the ground bounce; tests that check the bare link budget turn them off.
     pub fading: bool,
     pub ground_bounce: bool,
@@ -111,6 +115,7 @@ impl LinkParams {
             handset_antennas: vec![dipole],
             quad_antennas: vec![dipole],
             obstacles: Vec::new(),
+            terrain: None,
             fading: false,
             ground_bounce: false,
         }
@@ -233,6 +238,7 @@ impl Link for ElrsLink {
                 &Endpoint { position: pos, antenna: rx_ant },
                 freq,
                 &self.params.obstacles,
+                self.params.terrain.as_deref(),
                 self.params.ground_bounce,
             );
             let fade = if self.params.fading {
@@ -264,6 +270,7 @@ impl Link for ElrsLink {
                 &Endpoint { position: self.params.handset_position, antenna: *rx_ant },
                 freq,
                 &self.params.obstacles,
+                self.params.terrain.as_deref(),
                 self.params.ground_bounce,
             );
             let fade = if self.params.fading {

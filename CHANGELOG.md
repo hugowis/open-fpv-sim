@@ -5,6 +5,29 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Terrain in the radio and video line of sight (#154, part 2 of 3 of #27)
+#### Added
+- **The terrain hides the quad.** The ELRS link and the video link (the goggles' picture and the interference paths) take
+  a knife-edge diffraction loss from the heightfield of #153, the same `Terrain` grid the physics samples (one shared
+  `Arc`, no copy). The dominant edge is the point of the straight ray that sits deepest under the ground in Fresnel
+  terms (the parameter v, found by sampling twice per cell and refining the best sample); its loss is
+  `J(v)` of ITU-R P.526, capped at 60 dB (`TERRAIN_RF_LOSS_DB`, an estimate: a ridge is not a solid wall). Behind an 8 m
+  ridge 20 m from each end the loss is 36.8 dB at 5.8 GHz and 33.0 dB at 2.4 GHz.
+- **Objects stand on the hills.** `rf_loss_db` objects are rooted on the terrain (the ground under their footprint)
+  instead of the plane d = 0, so a building on a slope blocks the signal down to the ground, not to a floating base.
+- Tests: synthetic ridges in `ofs-rf` (the closed form, the cap, a clear ray, a ray outside the grid, NaN), the ELRS and
+  video links against the same link on flat ground, the shared grid, and `crates/ofs-sim/tests/terrain_link.rs`: on
+  `worlds/hills.toml` the quad 1.5 m over the ground 110 m out in clear view hears -59.9 dBm and 14.8 dB video SNR, and
+  167 m out behind a hill -78.1 dBm and -3.1 dB (the same spot without the relief: -58.5 dBm, 18.0 dB).
+
+#### Changed
+- **A world without `[terrain]` is unchanged, bit for bit**: the radio goldens, the bus digest and the flat-world pin
+  still pass. No protocol change.
+- **Not yet**: until #155 the Godot client still draws a flat ground in a world with `[terrain]`, so you can lose the
+  picture behind a hill the picture does not show. Limits: the ground bounce is still the plane d = 0 (not the
+  terrain), only the single dominant edge counts (no Deygout or Epstein-Peterson sum over several ridges), the terrain's
+  loss adds to the objects', and sampling is capped at 2048 points, so a span over 1024 cells is sampled coarser than half a cell.
+
 ### The terrain slope cap decides exactly (the #161 follow-up)
 #### Fixed
 - **A world within an ulp of the 60 degree terrain limit now validates identically on every OS**: the cap decides
@@ -51,7 +74,7 @@ repository). The format follows Keep a Changelog.
 - **Cost**: sampling roughly doubles the (tiny) physics cost, about +4 ms of wall time per simulated second on a
   hilly world (release, 8 kHz), still far above real time; the numbers are in `docs/research/collision.md`.
 - **Not yet**: until #155 the Godot client draws a flat ground in a world with `[terrain]`, so the picture and the
-  physics disagree there; the radio and the video link ignore the terrain until #154.
+  physics disagree there; the radio and the video link ignore the terrain until #154 (done, see above).
 ### Procedural flight audio (#158)
 #### Added
 - **The sim has sound.** The Godot client plays the quad's microphone: a tone per motor from its eRPM (the blade-pass

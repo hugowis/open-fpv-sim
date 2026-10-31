@@ -1,5 +1,6 @@
 use glam::DVec3;
 use ofs_core::shape::Shape;
+use ofs_core::terrain::Terrain;
 use ofs_rf::propagation::*;
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
@@ -140,8 +141,8 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
             let d = 100.0 + f64::from(i) * 0.5;
             let tx = Endpoint { position: DVec3::new(d, 0.0, -10.0), antenna: omni(DVec3::NEG_Z, polarization) };
             let rx = Endpoint { position: DVec3::new(0.0, 0.0, -1.7), antenna: omni(DVec3::NEG_Z, polarization) };
-            let with = path_gain(&tx, &rx, freq, &[], true).gain_db;
-            let without = path_gain(&tx, &rx, freq, &[], false).gain_db;
+            let with = path_gain(&tx, &rx, freq, &[], None, true).gain_db;
+            let without = path_gain(&tx, &rx, freq, &[], None, false).gain_db;
             gains.push(with - without);
         }
         let max = gains.iter().cloned().fold(f64::MIN, f64::max);
@@ -158,7 +159,7 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
 fn the_direct_path_adds_gains_and_subtracts_the_path_loss() {
     let tx = Endpoint { position: DVec3::new(100.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
     let rx = Endpoint { position: DVec3::new(0.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
-    let p = path_gain(&tx, &rx, 5800.0, &[], false);
+    let p = path_gain(&tx, &rx, 5800.0, &[], None, false);
     close(p.gain_db, 2.0 + 2.0 - fspl_db(100.0, 5800.0), 1e-9, "two broadside omnis");
     assert_eq!(p.obstruction_db, 0.0);
 }
@@ -171,4 +172,198 @@ fn adjacent_channel_rejection_follows_its_curve() {
     close(adjacent_channel_rejection_db(40.0), 25.0, 1e-12, "40 MHz");
     close(adjacent_channel_rejection_db(37.0), 22.75, 1e-12, "37 MHz (the next Raceband channel)");
     close(adjacent_channel_rejection_db(500.0), 40.0, 1e-12, "far away");
+}
+
+// Terrain: a 41 x 41 grid, 1 m cells, north 0..40 and east -20..20; the fixtures are constant along east, so the
+// crest line is a north row.
+fn grid(row_height: impl Fn(usize) -> f32) -> Terrain {
+    Terrain::from_grid([0.0, -20.0], 1.0, 41, 41, (0..41 * 41).map(|k| row_height(k / 41)).collect()).unwrap()
+}
+
+fn tent(row: usize, crest_row: usize, crest_m: f32) -> f32 {
+    (crest_m * (1.0 - row.abs_diff(crest_row) as f32 / 10.0)).max(0.0)
+}
+
+fn ridge(crest_row: usize, crest_m: f32) -> Terrain {
+    grid(|r| tent(r, crest_row, crest_m))
+}
+
+fn v_at(terrain: &Terrain, a: DVec3, b: DVec3, lambda: f64, t: f64) -> f64 {
+    let (p, length) = (a.lerp(b, t), a.distance(b));
+    fresnel_v(p.z - terrain.ground_d(p.x, p.y), t * length, (1.0 - t) * length, lambda)
+}
+
+/// The loss from a dense scan of the whole ray: no early-out, no refinement.
+fn scanned_loss(terrain: &Terrain, a: DVec3, b: DVec3, lambda: f64, points: usize) -> f64 {
+    let v = (0..=points).map(|k| v_at(terrain, a, b, lambda, k as f64 / points as f64)).fold(f64::NEG_INFINITY, f64::max);
+    knife_edge_loss_db(v).min(TERRAIN_RF_LOSS_DB)
+}
+
+fn along_north(z: f64) -> (DVec3, DVec3) {
+    (DVec3::new(0.0, 0.0, z), DVec3::new(40.0, 0.0, z))
+}
+
+#[test]
+fn a_ray_well_above_the_ridge_loses_nothing() {
+    let (a, b) = along_north(-40.0);
+    assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), 0.0);
+}
+
+#[test]
+fn grazing_the_crest_costs_about_6_db() {
+    let (a, b) = along_north(-10.0);
+    close(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), 6.03, 0.3, "grazing the crest");
+}
+
+#[test]
+fn a_ray_below_the_crest_matches_the_knife_edge_formula() {
+    let lambda = wavelength_m(5800.0);
+    let (a, b) = along_north(-2.0);
+    let expected = knife_edge_loss_db(fresnel_v(8.0, 20.0, 20.0, lambda));
+    close(terrain_loss_db(&ridge(20, 10.0), a, b, lambda), expected, 0.05, "8 m into the path, midway");
+}
+
+#[test]
+fn the_loss_rises_gradually_as_the_ray_sinks() {
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let loss_at = |z: f64| {
+        let (a, b) = along_north(z);
+        terrain_loss_db(&ridge, a, b, lambda)
+    };
+    // At 5.8 GHz the first Fresnel zone is half a metre wide, so the transition is a metre deep: whole metres
+    // jump, tenths of a metre do not.
+    let metres: Vec<f64> = (-14..=-2).map(|z| loss_at(f64::from(z))).collect();
+    assert!(metres.windows(2).all(|w| w[1] >= w[0]), "monotone: {metres:?}");
+    let tenths: Vec<f64> = (0..=40).map(|k| loss_at(-12.0 + f64::from(k) * 0.1)).collect();
+    assert!(tenths.windows(2).all(|w| w[1] >= w[0] && w[1] - w[0] < 3.0), "gradual: {tenths:?}");
+    let (above, at, below) = (loss_at(-10.25), loss_at(-10.0), loss_at(-9.75));
+    assert!(above < at && at < below, "grazing sits between 0.25 m clear and 0.25 m in: {above} {at} {below}");
+}
+
+#[test]
+fn a_ray_that_never_meets_the_ridge_loses_nothing() {
+    let (a, b) = (DVec3::new(30.0, 0.0, -2.0), DVec3::new(40.0, 0.0, -2.0));
+    assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), 0.0);
+}
+
+#[test]
+fn the_dominant_of_two_ridges_sets_the_loss() {
+    let lambda = wavelength_m(5800.0);
+    let two = grid(|r| tent(r, 12, 6.0).max(tent(r, 28, 10.0)));
+    let (a, b) = along_north(-2.0);
+    let first = knife_edge_loss_db(fresnel_v(4.0, 12.0, 28.0, lambda));
+    let second = knife_edge_loss_db(fresnel_v(8.0, 28.0, 12.0, lambda));
+    assert!(first < second, "the fixture has a clear winner: {first} {second}");
+    close(terrain_loss_db(&two, a, b, lambda), first.max(second), 0.05, "the larger edge, not their sum");
+}
+
+#[test]
+fn a_flat_terrain_changes_nothing_for_a_raised_ray() {
+    let flat = grid(|_| 0.0);
+    let (a, b) = along_north(-2.0);
+    assert_eq!(terrain_loss_db(&flat, a, b, wavelength_m(5800.0)), 0.0);
+    let antenna = omni(DVec3::NEG_Z, Polarization::Rhcp);
+    let (tx, rx) = (Endpoint { position: b, antenna }, Endpoint { position: a, antenna });
+    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&flat), true), path_gain(&tx, &rx, 5800.0, &[], None, true));
+}
+
+#[test]
+fn a_ray_outside_the_footprint_loses_nothing() {
+    let (a, b) = (DVec3::new(0.0, 500.0, -2.0), DVec3::new(40.0, 500.0, -2.0));
+    assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), 0.0);
+}
+
+#[test]
+fn a_thin_crest_between_samples_is_found() {
+    let lambda = wavelength_m(5800.0);
+    let spike = grid(|r| if r == 20 { 10.0 } else { 0.0 });
+    let (a, b) = (DVec3::new(0.0, 0.5, -2.0), DVec3::new(40.0, 0.5, -2.0));
+    let expected = scanned_loss(&spike, a, b, lambda, 100_000);
+    assert!(expected > 20.0, "the scan sees the crest: {expected}");
+    close(terrain_loss_db(&spike, a, b, lambda), expected, 0.5, "a 1 m wide tent");
+}
+
+#[test]
+fn a_ray_sampled_with_the_early_out_agrees_with_without() {
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let mut previous = f64::INFINITY;
+    let mut first_clear = None;
+    for k in 0..=84 {
+        let z = -9.0 - f64::from(k) * 0.25;
+        let (a, b) = along_north(z);
+        let loss = terrain_loss_db(&ridge, a, b, lambda);
+        close(loss, scanned_loss(&ridge, a, b, lambda, 20_000), 0.05, &format!("z = {z}"));
+        assert!(loss <= previous, "monotone non-increasing at z = {z}: {loss} after {previous}");
+        previous = loss;
+        if loss == 0.0 && first_clear.is_none() {
+            first_clear = Some(z);
+        }
+    }
+    assert_eq!(previous, 0.0, "clear at -30 m");
+    let z = first_clear.expect("a clear altitude");
+    assert!(fresnel_v(z + 10.0, 20.0, 20.0, lambda) <= -0.78, "the first clear altitude clears the crest's first Fresnel zone");
+}
+
+#[test]
+fn a_ray_starting_underground_is_finite_and_capped() {
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let loss = terrain_loss_db(&ridge, DVec3::new(10.0, 0.0, 0.5), DVec3::new(40.0, 0.0, -2.0), lambda);
+    assert!(loss.is_finite() && (0.0..=TERRAIN_RF_LOSS_DB).contains(&loss), "{loss}");
+    let p = DVec3::new(20.0, 0.0, -2.0);
+    assert_eq!(terrain_loss_db(&ridge, p, p, lambda), 0.0);
+}
+
+#[test]
+fn a_vertical_ray_over_the_ridge_is_finite() {
+    let loss = terrain_loss_db(&ridge(20, 10.0), DVec3::new(20.0, 0.0, -1.0), DVec3::new(20.0, 0.0, -30.0), wavelength_m(5800.0));
+    assert!(loss.is_finite() && (0.0..=TERRAIN_RF_LOSS_DB).contains(&loss), "{loss}");
+}
+
+#[test]
+fn obstruction_db_adds_terrain_to_the_objects() {
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let (a, b) = along_north(-2.0);
+    let objects = obstruction_db(&[building], None, a, b, 5800.0);
+    assert!(objects > 1.0, "the building is in the way: {objects}");
+    let terrain = terrain_loss_db(&ridge, a, b, lambda);
+    assert!(terrain > 1.0, "so is the ridge: {terrain}");
+    assert_eq!(obstruction_db(&[building], Some(&ridge), a, b, 5800.0), objects + terrain);
+    assert_eq!(obstruction_db(&[building], None, a, b, 5800.0), objects);
+    assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda), "the objects alone are the one building's loss");
+}
+
+#[test]
+fn terrain_loss_with_a_nan_position_is_zero() {
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let ok = DVec3::new(40.0, 0.0, -2.0);
+    for bad in [DVec3::new(f64::NAN, 0.0, -2.0), DVec3::new(0.0, f64::NAN, -2.0), DVec3::new(0.0, 0.0, f64::NAN)] {
+        assert_eq!(terrain_loss_db(&ridge, bad, ok, lambda), 0.0);
+        assert_eq!(terrain_loss_db(&ridge, ok, bad, lambda), 0.0);
+    }
+}
+
+#[test]
+fn a_path_shorter_than_3_m_is_not_cleared_by_the_early_out_too_soon() {
+    // Half a metre long, 5 cm under the crest: fresnel_v clamps d1 and d2 to 1 m, so v is only about -0.44.
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let (a, b) = (DVec3::new(20.0, 0.0, -10.05), DVec3::new(20.5, 0.0, -10.05));
+    let scanned = scanned_loss(&ridge, a, b, lambda, 20_000);
+    assert!(scanned > 1.0, "the scan sees a loss: {scanned}");
+    close(terrain_loss_db(&ridge, a, b, lambda), scanned, 0.05, "a short path just under the crest");
+}
+
+#[test]
+fn a_ray_crossing_the_ridge_from_outside_the_footprint_uses_the_true_distances() {
+    let lambda = wavelength_m(5800.0);
+    let (a, b) = (DVec3::new(-40.0, 0.0, -2.0), DVec3::new(80.0, 0.0, -2.0));
+    let expected = knife_edge_loss_db(fresnel_v(8.0, 60.0, 60.0, lambda));
+    close(terrain_loss_db(&ridge(20, 10.0), a, b, lambda), expected, 0.05, "d1 = d2 = 60 m from the real ends");
+}
+
+#[test]
+fn the_terrain_loss_is_capped() {
+    // An end 80 m underground: v is about 500, far over the cap's 225.
+    let (a, b) = (DVec3::new(0.0, 0.0, 80.0), DVec3::new(40.0, 0.0, -2.0));
+    assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), TERRAIN_RF_LOSS_DB);
 }

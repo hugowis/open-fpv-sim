@@ -122,7 +122,7 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
 - `[terrain]` — an opt-in height grid for the ground: `seed`, `size_m` (the square of relief, centred on home, flat beyond
   it), `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`, `persistence` and `flat_radius_m` (exactly flat, d = 0,
   around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface; the Godot
-  client draws a flat ground and the radio and video link ignore the relief until #155 and #154. `worlds/hills.toml` is
+  client draws a flat ground until #155; the radio and video link are obstructed by the relief (#154), and objects with `rf_loss_db` stand on it. `worlds/hills.toml` is
   the example; the steepest slope may not pass 60 degrees.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
