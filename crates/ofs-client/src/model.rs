@@ -478,6 +478,8 @@ pub struct Telemetry {
     pub battery_current_a: f64,
     /// Motor commands in [0, 1], in Betaflight's motor order.
     pub motor_cmd: Vec<f64>,
+    /// Motor speeds in revolutions per minute, in the same order as `motor_cmd`.
+    pub motor_rpm: Vec<f64>,
     /// True when any motor is commanded above 2 %: armed Betaflight idles its motors at about 5 %.
     pub motors_spinning: bool,
     pub tx_enabled: bool,
@@ -518,6 +520,7 @@ impl Telemetry {
             battery_current_a: s.battery_current_a,
             motors_spinning: s.motor_cmd.iter().any(|c| *c > 0.02),
             motor_cmd: s.motor_cmd.clone(),
+            motor_rpm: s.motor_rpm.clone(),
             tx_enabled: radio.tx_enabled,
             link_up: radio.link_up,
             lq_pct: radio.lq_pct,

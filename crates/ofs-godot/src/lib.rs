@@ -8,9 +8,13 @@ use std::time::Duration;
 
 use godot::classes::{INode, Node};
 use godot::prelude::*;
+use ofs_audio::{Audio, AudioInput, SAMPLE_RATE};
 use ofs_client::dvr::DvrFeed;
 use ofs_client::dvr_export::Exporter;
-use ofs_client::{Client, Command, LaunchSpec, OsdFrame, OverrunPolicy, Settings, Sticks, Update};
+use ofs_client::{Client, Command, EventKind, LaunchSpec, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Update};
+
+/// The most frames one `audio_render` call produces; a bad argument must not allocate gigabytes.
+const MAX_AUDIO_FRAMES: usize = 1 << 16;
 
 struct OfsExtension;
 
@@ -26,12 +30,14 @@ pub struct OfsClient {
     client: Option<Client>,
     /// DVR export jobs; independent of any session, so a recording made before a reload still finishes exporting.
     exporter: Exporter,
+    /// The flight sound; fed by the telemetry and the collision events, drained by `audio_render`.
+    audio: Audio,
 }
 
 #[godot_api]
 impl INode for OfsClient {
     fn init(base: Base<Node>) -> Self {
-        Self { base, client: None, exporter: Exporter::new() }
+        Self { base, client: None, exporter: Exporter::new(), audio: Audio::new() }
     }
 
     fn process(&mut self, _delta: f64) {
@@ -42,6 +48,9 @@ impl INode for OfsClient {
         for update in updates {
             match update {
                 Update::Phase { phase, detail, kind } => {
+                    if phase == Phase::Loading {
+                        self.audio.reset();
+                    }
                     let kind = kind.map(|k| k.as_str()).unwrap_or("");
                     self.signals().phase_changed().emit(&GString::from(phase.as_str()), &GString::from(detail.as_str()), &GString::from(kind));
                 }
@@ -49,6 +58,9 @@ impl INode for OfsClient {
                     self.signals().session_ready().emit(&GString::from(quad_name.as_str()), &GString::from(configurator_address.as_str()));
                 }
                 Update::Event(event) => {
+                    if event.kind == EventKind::Collision {
+                        self.audio.collision_event(event.time_s);
+                    }
                     self.signals().event_received().emit(&GString::from(event.kind.as_str()), &GString::from(event.message.as_str()), event.time_s);
                 }
                 Update::Error(error) => {
@@ -197,8 +209,39 @@ impl OfsClient {
         Transform3D::new(Basis::from_quaternion(rotation), origin)
     }
 
+    /// The sample rate `audio_render` produces, in Hz.
+    #[func]
+    fn audio_sample_rate(&self) -> f64 {
+        f64::from(SAMPLE_RATE)
+    }
+
+    /// The next `frames` samples of the flight sound (motor whine, wind, collision thuds) as mono-in-stereo
+    /// (`Vector2(s, s)`), for an `AudioStreamGenerator` playback; call it with what the playback can accept.
+    /// `active` false (paused, in a menu) or no telemetry yet: silence. Negative `frames` count as 0 and one call
+    /// renders at most 65536 frames.
+    #[func]
+    fn audio_render(&mut self, frames: i64, active: bool) -> PackedVector2Array {
+        let frames = usize::try_from(frames.max(0)).unwrap_or(0).min(MAX_AUDIO_FRAMES);
+        let telemetry = self.client.as_ref().and_then(|c| c.telemetry()).filter(|_| active);
+        let samples = match telemetry {
+            Some(t) => {
+                let input = AudioInput {
+                    motor_rpm: t.motor_rpm.clone(),
+                    motor_cmd: t.motor_cmd.clone(),
+                    // Ground speed: the simulator has no wind model yet, so it is also the airspeed.
+                    airspeed_mps: t.speed_mps,
+                    descent_mps: -t.climb_mps,
+                    active: true,
+                };
+                self.audio.frame(&input, t.time_s, t.collision_speed_mps, frames)
+            }
+            None => self.audio.frame(&AudioInput::default(), f64::NAN, 0.0, frames),
+        };
+        samples.iter().map(|s| Vector2::new(*s, *s)).collect()
+    }
+
     /// The newest telemetry, or an empty Dictionary before the first state: `time_s`, `altitude_m`, `speed_mps`,
-    /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` (PackedFloat32Array), `motors_spinning`,
+    /// `climb_mps`, `battery_voltage_v`, `battery_current_a`, `motor_cmd` and `motor_rpm` (both PackedFloat32Array), `motors_spinning`,
     /// `tx_enabled`, `link_up`, `lq_pct`, `rssi_dbm`, `radio_snr_db`, `radio_antenna`, `downlink_lq_pct`,
     /// `fc_battery_v`, `fc_battery_a`, `fc_battery_mah`, `fc_roll_deg`, `fc_pitch_deg`, `fc_yaw_deg`,
     /// `fc_flight_mode`, `fc_frame_count`, `fc_telemetry_age_s`,
@@ -225,6 +268,8 @@ impl OfsClient {
         d.set("battery_voltage_v", t.battery_voltage_v);
         d.set("battery_current_a", t.battery_current_a);
         d.set("motor_cmd", &PackedFloat32Array::from(motors.as_slice()));
+        let rpm: Vec<f32> = t.motor_rpm.iter().map(|m| *m as f32).collect();
+        d.set("motor_rpm", &PackedFloat32Array::from(rpm.as_slice()));
         d.set("motors_spinning", t.motors_spinning);
         d.set("tx_enabled", t.tx_enabled);
         d.set("link_up", t.link_up);
