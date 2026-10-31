@@ -29,6 +29,21 @@ Every plan carries its by-hand checks (what a human must fly, hear or eyeball th
 
 Per #160's ordering, once both epics close: representation first — #28 (rotated boxes), #154 (terrain in the radio and video line of sight), #155 (terrain in the Godot world); consequence second — #156 (collisions), #157 (crash damage riding the `PropDamage`/`MotorFailure` seams, repaired in #128's workbench); #159 (audio in the DVR) is the independent lane its sibling #158 was. The lane is already moving: #154, #155 and #159 have open PRs (#168, #169 — which lands protocol 16 — and #170), so the wave's unstarted core is #28 → #156 → #157, and wire work after #169 merges numbers its protocol from 16. The parent issues close with their last child: #27 with #155, #29 with #157, #36 with #159. Riders for that wave's minors tail: #164 (the `battery_current_a` clamp), #165 (the measured magnetometer into SITL); #146 is now checkable — #167 merged as `b37aae5`; read the `windows-sitl` record since that merge, and if the flake survived the sweep, it rides too.
 
+## Deferred by the six pairs
+
+Big enough for their own issues, filed from the plan review:
+
+- **#172 — the menu's Start refuses an `open_loop_stabilized` quad under an open-loop setting** (`docs/scripted-flight.md` promises it flies; there is no `stabilize` option to ask for). The flight-school plan works around it in its own starts (its spec's D7).
+- **#173 — a `[look]` section in the world file** (dressable user worlds; a protocol bump) — the world-rendering spec's Design call 2 defers it.
+
+Documented in the specs' non-goals, no issue until asked for:
+
+- quad-model: textures and normal maps, per-family modelling beyond the uniform scale, blade-shape or prop-wash detail (a 7" frame shows a 7.1" prop; `QUAD_MODEL.md` marks the estimate).
+- best-lap-ghost: a ghost toggle setting, sharing/export/import of records, per-lap history beyond best and last — "if pilots ask".
+- workbench (its DC9): wiring editing, `imu`/`baro`/`mag` picks, mixed per-motor picks, a "save and fly" button, diff editing or patching, assembly rename/delete UI, `user://worlds` listing.
+- tour: re-offer after updates (ruled once-only), a second tour for new features, translation, audio, widget-anchored highlight boxes.
+- school (its D12): medal times, curriculum chaining, a demo of every lesson, stick-overlay coaching, other `race_reset` semantics, lesson-authoring UI beyond `lessons.gd`.
+
 ## Every other open issue — dispositions
 
 - **Platform lane (continues outside phase planning):** #107 — its build-and-gate half shipped (`windows-sitl` CI, promoted to gating by B6); the live-test half remains, fed by #105 (the DLL-free ucrt64 port, "which this build is not" per the roadmap B6 rewrote).
