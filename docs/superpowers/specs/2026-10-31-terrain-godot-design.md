@@ -47,7 +47,7 @@ scene, and one shipped world (`park`) gains relief so the feature arrives with s
    arrays under `terrain`; `world.gd` wraps them in an `ArrayMesh`. GDScript does no height maths.
 4. **Mesh layout is the sim's rule.** Vertex `i * nodes_e + j` is node (i, j) at Godot position
    `(origin_east + j * cell, height, -(origin_north + i * cell))`. Each cell is two triangles on the (i, j)-(i+1, j+1)
-   diagonal: (00, 10, 11) and (00, 01, 11), the sim's lower and upper triangle, wound clockwise seen from above (Godot's
+   diagonal: (00, 10, 11) and (00, 11, 01), the sim's lower and upper triangle (the upper one reordered so both are), wound clockwise seen from above (Godot's
    front face). Heights are the grid's f32s unchanged; only the horizontal coordinates round to f32 (at most about 1.5e-5 m
    at 300 m, so a height off by under 3e-5 m on the steepest allowed slope: the tests use 1e-4 m).
 5. **Shading normals are smooth, geometry is exact.** Vertex normals are central differences of the grid (for lighting
