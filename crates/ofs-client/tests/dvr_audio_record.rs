@@ -49,26 +49,33 @@ fn frames_carry_the_newest_telemetry_and_a_collision_precedes_the_next_frame() {
     probe.wait_phase(Phase::Flying, LONG);
     probe.client.set_sticks(Sticks { throttle: 0.9, aux: [1.0, -1.0, -1.0, -1.0], ..Default::default() });
     probe.wait("the drone climbs", LONG, |p| p.client.telemetry().is_some_and(|t| t.altitude_m > 1.0));
+    let collisions = |p: &Probe| p.event_kinds().iter().filter(|k| **k == EventKind::Collision).count();
+    let before = collisions(&probe);
     start(&probe.client, DvrFeed::Goggles, &avi).unwrap();
     probe.client.dvr_write_frame(DvrFeed::Goggles, vec![0xFF; 8]);
     // Fall back down: the landing is a collision event, which the next poll logs.
     probe.client.set_sticks(Sticks { aux: [1.0, -1.0, -1.0, -1.0], ..Default::default() });
-    probe.wait("a collision", LONG, |p| p.event_kinds().contains(&EventKind::Collision));
+    probe.wait("a collision after the recording started", LONG, |p| collisions(p) > before);
     let time_s = probe.client.telemetry().unwrap().time_s;
     probe.client.dvr_write_frame(DvrFeed::Goggles, vec![0xFF; 8]);
     probe.client.dvr_stop(DvrFeed::Goggles).unwrap();
 
     let lines = sidecar(&avi);
-    assert_eq!(lines.len(), 4, "{lines:?}");
     assert!(lines[1].starts_with("F ") && !lines[1].starts_with("F NaN"), "{lines:?}");
-    assert!(lines[2].starts_with("C "), "{lines:?}");
-    let event_time = probe.log.iter().find_map(|u| match u {
-        Update::Event(e) if e.kind == EventKind::Collision => Some(e.time_s),
-        _ => None,
-    });
-    assert_eq!(lines[2], format!("C {}", event_time.unwrap()));
-    let state_time: f64 = lines[3].split(' ').nth(1).unwrap().parse().unwrap();
-    assert!(state_time >= time_s - 0.5 && state_time <= time_s + 1.0, "{} vs {time_s}", lines[3]);
+    let last_f = lines.iter().rposition(|l| l.starts_with("F ")).unwrap();
+    let first_c = lines.iter().position(|l| l.starts_with("C ")).unwrap_or_else(|| panic!("a C line: {lines:?}"));
+    assert!(first_c < last_f, "a collision precedes the last frame: {lines:?}");
+    let events: Vec<String> = probe
+        .log
+        .iter()
+        .filter_map(|u| match u {
+            Update::Event(e) if e.kind == EventKind::Collision => Some(format!("C {}", e.time_s)),
+            _ => None,
+        })
+        .collect();
+    assert!(lines[first_c..last_f].iter().filter(|l| l.starts_with("C ")).all(|l| events.contains(l)), "{lines:?} vs {events:?}");
+    let state_time: f64 = lines[last_f].split(' ').nth(1).unwrap().parse().unwrap();
+    assert!(state_time >= time_s - 0.5 && state_time <= time_s + 1.0, "{} vs {time_s}", lines[last_f]);
 }
 
 #[test]

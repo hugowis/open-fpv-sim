@@ -8,13 +8,15 @@ repository). The format follows Keep a Changelog.
 ### Audio in the DVR (#159, part 2 of 2 of #36)
 #### Added
 - **The MP4 export has sound.** The flight sound of #158 is synthesised offline from what the recording saw and muxed as
-  an AAC track (128 kb/s, mono, 44.1 kHz). The audio is exactly as long as the recorded frames.
+  an AAC track (128 kb/s, mono, 44.1 kHz). The audio is as long as the recorded frames (to one AAC frame).
 - **A `<name>.audio` file beside each AVI** (`REC_<ts>.audio`, `REC_<ts>_clean.audio`): while a feed records, the client
-  logs the audio inputs, one `F` line per frame the writer accepted (motor rpm and command, ground speed, climb rate,
-  collision speed) and one `C` line per collision event. Text, LF, `ofs-dvr-audio 1` header; the file is never modified
-  after the recording stops.
+  logs the audio inputs, one `F` line per frame the writer accepted and one `C <event_time_s>` line per collision event. Text, LF,
+  `ofs-dvr-audio 1` header; an `F` line is `F <state_time_s> <collision_speed_mps> <airspeed_mps> <descent_mps> <n>
+  <rpm_1..rpm_n> <cmd_1..cmd_n>` (the n rpms, then the n commands); the file is never modified after the recording
+  stops. A crash costs at worst the last second or so of audio (the log is buffered), ending in a truncated line that is
+  ignored, and the clip ends at the shorter of audio and video.
 - **The export** replays that file through `ofs_audio::Audio` into a temporary raw PCM file next to the output
-  (`.<name>.pcm-<pid>.tmp`, always removed) and ffmpeg muxes it with `-f s16le -ar 44100 -ac 1 -i <pcm>`, `-c:a aac
+  (`.<name>.pcm-<pid>.tmp`, removed after the export) and ffmpeg muxes it with `-f s16le -ar 44100 -ac 1 -i <pcm>`, `-c:a aac
   -b:a 128k` and `-shortest`.
 - `Telemetry::audio_input` is the one place the telemetry becomes an audio input; the live sound and the DVR both use it.
 

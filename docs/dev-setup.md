@@ -237,11 +237,11 @@ falls back to the default:
   export never overwrites a file or directory; it runs on a worker thread and toasts when it is done. The AVI is
   always kept.
 - **Audio.** While a feed records, the client writes `<name>.audio` beside the AVI (`REC_<ts>.audio`,
-  `REC_<ts>_clean.audio`): the header `ofs-dvr-audio 1`, then an `F` line per frame the writer accepted (the newest
-  telemetry: state time, collision speed, airspeed, descent, motor count, rpm and command of each motor) and a `C`
-  line per collision event. Text, LF, shortest round-trip numbers; a crash leaves at worst a truncated last line,
-  which is ignored. The `mp4` export replays it through `ofs_audio::Audio` (the flight sound of the game, 882 samples
-  per frame) into a temporary raw PCM file next to the output, `.<name>.pcm-<pid>.tmp`, which is always removed (about
+  `REC_<ts>_clean.audio`): the header `ofs-dvr-audio 1`, then an `F` line per frame the writer accepted (`F <state_time_s> <collision_speed_mps> <airspeed_mps> <descent_mps> <n> <rpm_1..rpm_n> <cmd_1..cmd_n>`, from the
+  newest telemetry: the n rpms, then the n commands) and a `C <event_time_s>` line per collision event. Text, LF,
+  shortest round-trip numbers; a crash costs at worst the last second or so of audio (the log is buffered), ending in a
+  truncated line that is ignored, and the clip ends at the shorter of audio and video. The `mp4` export replays it through `ofs_audio::Audio` (the flight sound of the game, 882 samples
+  per frame) into a temporary raw PCM file next to the output, `.<name>.pcm-<pid>.tmp`, which is removed after the export (about
   26 MB for a five-minute flight). A recording without a `.audio` file, or with no frames in it, exports a silent
   MP4; a malformed one fails the export and keeps the AVI and the `.audio` file. The `frames` export is silent.
   The PCM is the same for the same file on one machine, not byte-identical across operating systems, and the AAC

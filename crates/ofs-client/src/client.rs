@@ -212,6 +212,9 @@ impl Client {
             return Err("already recording".into());
         }
         let avi = PathBuf::from(path);
+        if avi.extension().is_some_and(|e| e.eq_ignore_ascii_case("audio")) {
+            return Err(format!("{}: the .audio extension is reserved for the audio sidecar", avi.display()));
+        }
         let writer = DvrWriter::start(avi.clone(), dvr::DVR_FPS, width, height)?; // refuses an existing AVI
         match AudioLog::create(&Path::new(&avi).with_extension("audio")) {
             Ok(audio) => *slot = Some((writer, audio)),
@@ -285,6 +288,21 @@ mod tests {
         let mut defaults = Settings::new("quad.toml");
         clamp_rates(&mut defaults);
         assert_eq!((defaults.state_rate_hz, defaults.stick_rate_hz), (Settings::new("quad.toml").state_rate_hz, 250));
+    }
+
+    #[test]
+    fn an_avi_path_with_the_audio_extension_is_refused_and_creates_nothing() {
+        let dir = std::env::temp_dir().join(format!("ofs-client-reserved-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let client = Client::start(Settings { server_addr: "127.0.0.1:1".into(), ..Settings::new("quad.toml") }).unwrap();
+        for name in ["rec.audio", "rec.AUDIO"] {
+            let err = client.dvr_start(DvrFeed::Goggles, dir.join(name).display().to_string(), 4, 2).unwrap_err();
+            assert!(err.contains("reserved for the audio sidecar"), "{err}");
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert!(client.dvr_stop(DvrFeed::Goggles).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
