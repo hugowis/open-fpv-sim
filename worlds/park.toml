@@ -169,3 +169,15 @@ height_m = 2.2
 
 [race]
 laps = 5
+
+# Two ways to race the loop (docs/race-timing.md, "Courses"): "Diamond" is the default, the whole loop for the five
+# laps of [race]; "Hunt" flies the same gates as a time attack: as many laps as fit in a minute.
+[[courses]]
+name = "Diamond"
+gates = ["Gate0", "Gate1", "Gate2", "Gate3"]
+
+[[courses]]
+name = "Hunt"
+mode = "time_attack"
+time_limit_s = 60.0
+gates = ["Gate0", "Gate1", "Gate2", "Gate3"]

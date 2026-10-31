@@ -35,6 +35,7 @@ func test_lists_the_toml_files_of_every_root_sorted_by_label() -> void:
 	eq(items[0]["gates"], 2, "Alpha declares two gates")
 	eq(items[1]["gates"], 0, "a world without gates")
 	eq(items[0]["path"], DIR + "/repo/worlds/alpha.toml", "the path")
+	eq(items[0]["courses"], [], "no courses declared")
 	_fresh()
 
 
@@ -65,3 +66,21 @@ func test_roots_are_the_checkout_and_the_data_dir() -> void:
 	var roots := Catalog.roots({"data_dir": "C:/x/data"}, "quads")
 	eq(roots.size(), 2, "two roots")
 	ok(roots[0].ends_with("/quads") and roots[1] == "C:/x/data/quads", "roots: %s" % str(roots))
+
+func test_the_courses_of_a_world_are_listed_in_file_order() -> void:
+	_fresh()
+	_write(DIR + "/repo/worlds/park.toml", "name = \"Park\"
+[[gates]]
+name = \"G0\"
+[[courses]]
+name = \"Diamond\"
+gates = [\"G0\"]
+[[courses]]
+name = \"Hunt\"
+mode = \"time_attack\"
+[[emitters]]
+name = \"tx\"
+")
+	var item := Catalog.entry(DIR + "/repo/worlds/park.toml")
+	eq([item["label"], item["gates"], item["courses"]], ["Park", 1, ["Diamond", "Hunt"]], "the world's name stays its label, and a gate or emitter is not a course")
+	_fresh()

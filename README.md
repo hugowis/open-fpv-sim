@@ -28,7 +28,8 @@ What is in it:
   events, and the ExpressLRS link is geometric — its RSSI, SNR and LQ come from the world's geometry, so Betaflight
   fails safe on a real RX loss (M3c, `docs/research/collision.md` and `docs/research/elrs-link.md`).
 - A world can declare a race course: `[[gates]]` in the world file, with split and lap timing as events, a `race` block
-  in the state and a lap line on the HUD (M8a, `docs/race-timing.md`; `worlds/flat.toml` has three gates).
+  in the state and a lap line on the HUD (M8a, `docs/race-timing.md`; `worlds/flat.toml` has three gates). A world can
+  also name several courses over its gates, with a time-attack mode (`worlds/park.toml`: "Diamond" and "Hunt").
 - A Python script can fly a path: an opt-in angle-mode stabilizer for open-loop sessions (a test stand-in, not
   Betaflight) and a scripted pilot that flies a lap through the four gates of `worlds/circuit.toml` on it and on real
   Betaflight (M8b, `docs/scripted-flight.md`).
@@ -113,7 +114,7 @@ the flight, as before.
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** or the F2
 DVR toggle record the FPV view, **K** cut the radio link (failsafe test), **I** record the sticks and link state
-to a replayable CSV, **N** start a new race (in a world with gates), **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
+to a replayable CSV, **N** start a new race (in a world with gates), **Shift+N** the next course (in a world with several), **H** show/hide the HUD, **F1** help, **F2** controls setup, **F11** fullscreen, **Esc**
 closes the help and the F2 screen, then returns to the menu. Arm with the aux 1 switch; aux 2 selects Angle mode.
 
 Settings: built-in defaults < the `[client]` section of `user://ofs_client.cfg` < `OFS_*` environment variables <
@@ -138,6 +139,7 @@ Overrides:
 | DVR export (none/frames/mp4/both, default none) | `OFS_DVR_EXPORT` | `--dvr-export=` |
 | start in the main menu (on/off, default on) | `OFS_MENU` | `--menu=` |
 | race mode in a world with gates (on/off, default on; off = free flight) | `OFS_RACE_START` | `--race-start=` |
+| the course to race in a world with several (a name; empty = the world's default) | `OFS_COURSE` | `--course=` |
 | fullscreen (default off) | `OFS_FULLSCREEN` | `--fullscreen` |
 | HUD shown at start (on/off, default on) | `OFS_HUD` | `--hud=` |
 

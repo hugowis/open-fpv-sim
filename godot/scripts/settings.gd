@@ -20,6 +20,7 @@ const ENV_NAMES := {
 	"OFS_DVR_FEED": "dvr_feed",
 	"OFS_MENU": "menu",
 	"OFS_RACE_START": "race_start",
+	"OFS_COURSE": "course",
 	"OFS_FULLSCREEN": "fullscreen",
 	"OFS_HUD": "hud_visible",
 }
@@ -38,6 +39,7 @@ const FLAG_NAMES := {
 	"--dvr-feed": "dvr_feed",
 	"--menu": "menu",
 	"--race-start": "race_start",
+	"--course": "course",
 	"--fullscreen": "fullscreen",
 	"--hud": "hud_visible",
 }
@@ -73,6 +75,7 @@ static func defaults() -> Dictionary:
 		"dvr_feed": "goggles",
 		"menu": true,
 		"race_start": true,
+		"course": "",  # the course to race in a world with several; empty = the world's own default
 		"fullscreen": false,
 		"hud_visible": true,
 		"sitl_launch": "",

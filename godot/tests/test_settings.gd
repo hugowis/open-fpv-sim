@@ -149,6 +149,9 @@ func test_the_menu_race_fullscreen_and_hud_settings_come_from_every_source() -> 
 	eq([s["menu"], s["race_start"], s["fullscreen"], s["hud_visible"]], [false, false, true, false], "file, environment and flag")
 	eq(AppSettings.resolve({}, {}, PackedStringArray(["--menu=off"]))["menu"], false, "--menu=off")
 	eq(AppSettings.resolve({}, {}, PackedStringArray(["--fullscreen"]))["fullscreen"], true, "--fullscreen alone")
+	eq(d["course"], "", "no course chosen: the world's own")
+	eq(AppSettings.resolve({"course": "Hunt"}, {"OFS_COURSE": "Sprint"}, PackedStringArray())["course"], "Sprint", "OFS_COURSE beats the file")
+	eq(AppSettings.resolve({}, {}, PackedStringArray(["--course=Hunt"]))["course"], "Hunt", "--course=")
 
 
 func test_overrides_name_the_flag_or_variable_that_wins_this_run() -> void:

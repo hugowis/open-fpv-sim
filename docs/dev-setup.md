@@ -256,7 +256,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 14**. The fault catalog arrived in protocol 8, and its wire shapes live in
+The client and server speak **protocol 15**. The fault catalog arrived in protocol 8, and its wire shapes live in
 the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
 (`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
 `docs/research/faults.md` —
@@ -264,13 +264,15 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 14**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 15**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
 protocol 13), the loaded parts' provenance (`LoadReply.parts`, protocol 14; Python `sim.parts`), gate tilt and clipped
 passes (`Gate.pitch_deg`/`roll_deg`, `EVENT_KIND_GATE_HIT`, protocol 14), and the lap limit and race reset
-(`RaceState.finished`/`lap_limit`, `EVENT_KIND_RACE_FINISHED`/`RACE_RESET`, `ResetRace`, protocol 14).
+(`RaceState.finished`/`lap_limit`, `EVENT_KIND_RACE_FINISHED`/`RACE_RESET`, `ResetRace`, protocol 14), and named
+courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`course_index`/`mode`/`time_limit_s`/
+`time_left_s`, `ResetRace` taking a `ResetRaceRequest{course}`, protocol 15; Python `sim.reset_race(course)`).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

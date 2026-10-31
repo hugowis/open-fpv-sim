@@ -91,6 +91,30 @@ func test_gates_are_drawn_as_openings_facing_their_direction_of_travel() -> void
 	world.queue_free()
 
 
+func test_a_course_draws_its_own_gates_in_its_own_order() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var gate := func(n: String, z: float) -> Dictionary:
+		return {"name": n, "center": Vector3(0.0, 1.0, z), "heading_deg": 0.0, "width": 3.0, "height": 2.0}
+	world.build({"gates": [gate.call("A", -10.0), gate.call("B", -20.0), gate.call("C", -30.0)], "default_course": 0, "courses": [
+		{"name": "Line", "gates": ["A", "B", "C"]},
+		{"name": "Out", "gates": ["C", "A"]},
+	]})
+	eq(world.built_names(), PackedStringArray(["Gate_A", "Gate_B", "Gate_C"]), "the default course: all three")
+	world.set_course(1)
+	eq(world.built_names(), PackedStringArray(["Gate_C", "Gate_A"]), "the second course: its two gates in its order")
+	eq((world.get_node("Gate_C/Label") as Label3D).text, "START", "its first gate is the start, whatever the file says")
+	eq((world.get_node("Gate_A/Label") as Label3D).text, "1", "and the next is gate 1")
+	world.set_next_gate(1)
+	ok(((world.get_node("Gate_A/Opening") as MeshInstance3D).material_override as StandardMaterial3D).albedo_color.is_equal_approx(World.gate_color(1, 1)), "the highlight follows the course position")
+	world.set_course(0)
+	eq(world.built_names().size(), 3, "back to the first")
+	world.build({"gates": [gate.call("A", -10.0), gate.call("B", -20.0)]})
+	world.set_course(0)
+	eq(world.built_names(), PackedStringArray(["Gate_A", "Gate_B"]), "a world without courses draws all its gates, in file order")
+	world.queue_free()
+
+
 func test_a_tilted_gate_is_drawn_on_its_tilted_plane() -> void:
 	var upright := World.gate_basis(0.0)
 	ok(upright.z.distance_to(Vector3(0.0, 0.0, -1.0)) < 1e-6 and upright.y.distance_to(Vector3.UP) < 1e-6, "north, upright")
