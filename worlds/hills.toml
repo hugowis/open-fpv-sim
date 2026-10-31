@@ -1,4 +1,4 @@
-# Rolling hills: a launch pad on a 30 m flat disc, with seeded procedural hills rising around it (epic #153). The
+# Rolling hills: a launch pad on a 30 m flat disc, with seeded procedural hills rising around it (issue #153, epic #160). The
 # simulator's physics sees them (the ground contacts and the landing points follow the surface; `body.terrain_d_m`
 # is the ground under the quad); the Godot client draws a flat ground until #155. No objects and no gates: this is a
 # place to fly and land on slopes.

@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 use crate::Checker;
 
-/// The steepest triangle a terrain may have: hills, not cliffs (the contact maths wants a floor under the normal's
-/// vertical part).
+/// The steepest triangle a terrain may have: hills, not cliffs (the contact tests only the triangle under the centre;
+/// the cap bounds its fold miss at r/2 and the contact point's sideways offset at r sin(slope)).
 pub const MAX_TERRAIN_SLOPE_DEG: f64 = 60.0;
 
 /// Most nodes along a side (4 MB of f32 heights).

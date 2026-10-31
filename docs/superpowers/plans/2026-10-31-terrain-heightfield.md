@@ -138,7 +138,7 @@
 - Consumes: Tasks 3 and 4; the pinned test of Task 1 must still pass unmodified.
 
 - [ ] **Step 1:** `worlds/hills.toml`: model on `worlds/flat.toml`'s header and `[pilot]`/`[receiver]` (pilot beside the pad at `[-3.0, 2.0, -1.7]`, one omni + one patch antenna), no objects, no gates, `[terrain] seed = 7`, `size_m = 600.0`, `amplitude_m = 12.0`, `wavelength_m = 120.0`, `flat_radius_m = 30.0`. Header comment (copy the style of `meadow.toml`): rolling hills; the physics sees them; the Godot client draws a flat ground until #155; all values are estimates.
-- [ ] **Step 2:** Tests in `terrain_flight.rs`: 
+- [ ] **Step 2:** Tests in `terrain_flight.rs`:
   - `hills_world_loads_and_is_valid` (`ofs_config::load` of `worlds/hills.toml`).
   - `seeded_flight_over_hills_replays_exactly`: two vehicles from the hills world, race quad, open loop, seed 1, the same fixed stick script (throttle 0.7, pitch -0.3 for 4 s so it flies off the pad over the rising ground, then throttle 0 for 3 s so it falls onto a slope), run both; equal `digest()` at the end of each phase. A third vehicle with a different `terrain.seed` (modify the loaded `WorldConfig`) differs, and so does `WorldConfig::open_field()`.
   - `terrain_signal_only_with_terrain`: the `body.terrain_d_m` signal is in `v`'s bus (find how `vehicle.rs` exposes the bus, e.g. via the scheduler; adapt) for the hills world and absent for `open_field()`.

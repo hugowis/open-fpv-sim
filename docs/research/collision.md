@@ -147,15 +147,18 @@ angle of a hillside stays put and one past it slides at `g(sinθ − μ·cosθ)`
 expression collapses to the old one (`x − 0.0` and `x·1.0` are exact), which is why a world without `[terrain]` is
 bit-identical to before. The ground is still object index −1 in the events.
 
-**Two limits.**
-- *The sphere is tested against the plane of the one triangle under its centre*, not the true distance to the mesh.
-  A sphere sunk into the neighbouring triangle across a ridge or a valley fold is found a step later, off by at most
-  `r·(1 − cos(Δθ/2))` for a fold of angle Δθ: under a millimetre for a 2 cm sphere at the slope breaks of the
-  shipped hills.
-- *The triangle under the centre is picked by the centre's horizontal position.* A sphere or point at vertical
-  offset `h` below the surface is only `h·|n.z|` from its plane (half of `h` at 60 degrees), so on a steep slope it
-  can sink deeper vertically than it is pushed out along the normal before the contact sees it. The 60 degree cap on
-  a world's steepest triangle, checked when the world loads, keeps `|n.z| ≥ 0.5`: hills, not cliffs.
+**One limit.** *The sphere is tested against the plane of the one triangle under its centre*, not the true distance to
+the mesh. A sphere resting on triangle A with its centre exactly at the fold line misses a penetration of the neighbour
+B of `r·(1 − cos θ_B / cos θ_A)`, where `θ_A` and `θ_B` are the tilts of the two normals from vertical: with A flat and
+B tilted by Δθ that is `r·(1 − cos Δθ)`, and for a symmetric V fold it is 0. The miss is found when the centre crosses
+the fold, which for a sphere at rest may be never. At a ridge the error is a gap (the sphere floats on A's extended
+plane); it does not sink. Adjacent triangles of the shipped hills differ by a few degrees, so the error is about
+`r·Δθ·θ`: well under a millimetre for a 2 cm sphere (an order-of-magnitude estimate).
+
+The vertical-offset penetration is not a limit: `(−n.z)·(c.z − d_g)` is the exact perpendicular distance from the
+centre to the triangle's plane, and `n.z` can never be 0 (the un-normalised z is −1). What the 60 degree cap on a
+world's steepest triangle (checked when the world loads: hills, not cliffs) does is bound the fold miss at
+`r·(1 − cos 60°) = r/2` and the sideways offset of the true contact point from the one under the centre at `r·sin θ`.
 
 Also: a quad at rest on a slope sits about 7.6 degrees off the slope normal, because the 4 cm body sphere lets it keep its
 landing lean (an existing property of the collision model, not of the terrain). A hand-built grid with a non-zero border
@@ -229,7 +232,7 @@ at the moment of first touch.
 | Generated body sphere radius | 4 cm | estimated (it reaches 1 cm past the shipped quad's legs — carried debt) |
 | Generated spheres per prop tip | 6 | estimated |
 | Terrain generator defaults (`seed` 0, `size_m` 400, `cell_m` 1, `amplitude_m` 8, `wavelength_m` 100, `octaves` 3, `persistence` 0.5, `flat_radius_m` 25) | as listed | estimates of gentle rolling hills, user-tunable (`[terrain]`); `worlds/hills.toml` uses a 600 m square, 12 m amplitude, 120 m wavelength, 30 m flat disc |
-| Terrain slope cap | 60 degrees | engineering choice: keeps the vertical-offset penetration within `\|n.z\| ≥ 0.5` |
+| Terrain slope cap | 60 degrees | engineering choice: bounds the fold miss at r/2 and the contact point's sideways offset at r·sin θ |
 | Terrain grid limits | `cell_m` ≥ 0.25 m, at most 1025 nodes a side (4 MB), `size_m` ≤ 2000 m, `octaves` 1 to 6 | engineering choices bounding memory and bake time |
 
 ## Where it shows

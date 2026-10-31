@@ -35,11 +35,11 @@ fn sticks(throttle: f64, pitch: f64) -> Sticks {
 /// fly off the pad over the rising ground, then fall onto it. Returns the digest after each phase and the final position.
 fn fly(cfg: &QuadConfig, world: WorldConfig) -> (u64, u64, DVec3) {
     let mut v = vehicle_with(cfg, world, FcKind::OpenLoopStabilized);
-    v.set_sticks(&sticks(0.45, 0.6)).unwrap();
+    v.set_sticks(&sticks(0.45, -1.0)).unwrap();
     v.run_for(4.0).unwrap();
     let flown = v.digest();
     v.set_sticks(&sticks(0.0, 0.0)).unwrap();
-    v.run_for(3.0).unwrap();
+    v.run_for(6.0).unwrap();
     (flown, v.digest(), v.state().pos_ned_m)
 }
 
@@ -56,6 +56,10 @@ fn seeded_flight_over_hills_replays_exactly() {
     let a = fly(&cfg, hills());
     let away = a.2.x.hypot(a.2.y);
     assert!(away > 30.0, "the flight left the 30 m flat disc, {away} m from home");
+    let ground = hills().terrain.unwrap().build();
+    let ground_d = ground.ground_d(a.2.x, a.2.y);
+    assert!((a.2.z - ground_d).abs() < 0.1, "ended on the surface: z = {}, ground_d = {ground_d}", a.2.z);
+    assert!(ground_d < -0.5, "ended on relief, ground_d = {ground_d}");
     assert_eq!(a, fly(&cfg, hills()), "the same script over the same hills replays exactly");
 
     let mut other = hills();

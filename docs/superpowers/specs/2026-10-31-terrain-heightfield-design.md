@@ -100,7 +100,7 @@ Validation (in `WorldConfig::validate`, field paths like the rest): every number
 `cell_m` in [0.25, size_m], size a whole multiple of the cell, at most 1025 nodes a side (4 MB); `amplitude_m` in
 [0, 100]; `wavelength_m` >= 4 x `cell_m` (a feature needs cells); `octaves` 1..=6; `persistence` in (0, 1];
 `flat_radius_m` >= 0; **the steepest triangle no more than 60 degrees** (hills, not cliffs: the contact maths below
-is a vertical-offset approximation and wants a floor under `|n.z|`); the pilot's and the handset's positions must not
+tests the one triangle under the centre, and the cap bounds its fold miss and sideways offset); the pilot's and the handset's positions must not
 be below the terrain. Gates and objects are the author's business (they are placed in the same NED frame; the
 flat radius and a low amplitude keep a course clear).
 
@@ -124,11 +124,14 @@ old expressions (`x - 0.0` and `x * 1.0` are exact), so the flat world is bit-id
   of a hillside stays put and one past it slides, as the incline tests pin on a synthetic plane.
 - **Events**: the ground is still object index -1.
 
-Known limits (written in `docs/research/collision.md`): the sphere is tested against the plane of the one triangle
-under its centre, not the true distance to the mesh. A sphere sunk into a neighbouring triangle across a ridge or a
-valley fold is found a step later, off by at most `r (1 - cos(dtheta/2))`: under a millimetre for a 2 cm sphere at
-the slope breaks of the shipped hills. Vertical-offset penetration understates a steep slope's depth by `|n.z|` (60 degrees:
-half); the 60-degree validation bounds that.
+Known limit (written in `docs/research/collision.md`): the sphere is tested against the plane of the one triangle
+under its centre, not the true distance to the mesh. A sphere resting on triangle A with its centre exactly at the fold
+line misses a penetration of the neighbour B of `r (1 - cos(theta_B) / cos(theta_A))`, where theta_A and theta_B are the
+tilts of the two normals from vertical (A flat, B tilted by dtheta: `r (1 - cos dtheta)`; a symmetric V fold: 0). The
+miss is found when the centre crosses the fold, which for a sphere at rest may be never; at a ridge it is a gap, not a
+sink. Adjacent triangles of the shipped hills differ by a few degrees: well under a millimetre for a 2 cm sphere (an
+order-of-magnitude estimate). The vertical-offset penetration is exact (the perpendicular distance to the plane); the
+60-degree validation bounds the fold miss at `r/2` and the contact point's sideways offset at `r sin(theta)`.
 
 ### The digest
 
@@ -144,6 +147,8 @@ digest are untouched. The signal doubles as a seam for the audio and the damage 
 - #155: the client needs the grid. Either the `World` message carries `Terrain::heights()`, `origin_ne()`, `cell_m()` and
   `nodes()` (a protocol bump, theirs), or the client calls the generator. The first is the single-source choice; the sim
   already holds everything it needs. `Terrain::digest()` lets the client assert it received the sim's grid.
+  `Terrain::digest` hashes the grid dimensions, the cell size and the heights but not `origin_ne`; #155's handshake
+  should hash the origin too (changing the digest would re-pin the config test).
 
 ## Tests
 
