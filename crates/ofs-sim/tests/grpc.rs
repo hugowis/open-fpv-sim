@@ -885,4 +885,5 @@ wavelength_m = 64.0
     c.load(LoadRequest { world_path: world.to_string_lossy().into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
     let t = c.get_world(Empty {}).await.unwrap().into_inner().terrain.expect("a terrain");
     assert_eq!(t.heights.len(), 1025 * 1025);
+    assert!(t.heights.len() * 4 > 4 * 1024 * 1024, "the grid alone is past tonic's default limit");
 }
