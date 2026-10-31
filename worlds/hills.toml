@@ -1,0 +1,41 @@
+# Rolling hills: a launch pad on a 30 m flat disc, with seeded procedural hills rising around it (epic #153). The
+# simulator's physics sees them (the ground contacts and the landing points follow the surface; `body.terrain_d_m`
+# is the ground under the quad); the Godot client draws a flat ground until #155. No objects and no gates: this is a
+# place to fly and land on slopes.
+#
+# Positions are NED metres from home (north, east, down: up is negative).
+# All values are estimates.
+schema_version = 1
+name = "Rolling hills"
+
+[pilot]
+# Beside the launch pad, goggles 1.7 m up, looking north.
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = true
+
+# Diversity goggles: an upright omni and a patch aimed ahead, tilted 10 degrees up.
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+[[receiver.antennas]]
+name = "patch"
+kind = "patch"
+gain_dbi = 8.0
+beamwidth_deg = 60.0
+polarization = "rhcp"
+aim_az_deg = 0.0
+aim_el_deg = 10.0
+
+[terrain]
+seed = 7
+size_m = 600.0
+amplitude_m = 12.0
+wavelength_m = 120.0
+flat_radius_m = 30.0
