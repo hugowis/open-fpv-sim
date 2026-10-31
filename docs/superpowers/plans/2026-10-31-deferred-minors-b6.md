@@ -132,6 +132,6 @@ Two #137 deferrals in `crates/ofs-client/src/dvr_export.rs`. Today a failing ffm
 
 **Interfaces:** none.
 
-- [ ] **Step 1:** Verify which build ran the #48 evidence: the gate table in #119's body names the range `c2ba78c..60e8fe0` — confirm with `git show --stat 60e8fe0` that it is on the 0.3.0 branch, then replace "a debug server built from this repository" with "a debug `ofs-sim` built from this repository at `60e8fe0` (the 0.3.0 branch)". If the gate record does not support naming a commit, name the branch and say so — never invent precision in a research doc.
+- [ ] **Step 1:** Verify which build ran the #48 evidence: the gate table in #119's body names the range `c2ba78c..60a8fe0` — confirm with `git show --stat 60a8fe0` that it is on the 0.3.0 line, then replace "a debug server built from this repository" with "a debug `ofs-sim` built from this repository at `60a8fe0` (the 0.3.0 branch)". If the gate record does not support naming a commit, name the branch and say so — never invent precision in a research doc.
 - [ ] **Step 2:** Add the audio known-limits bullet to `docs/roadmap.md` §Video: flight audio (#158) uses ground speed as airspeed (no wind model yet), one thud for every collision kind, harmonics alias above about 7.35 kHz blade-pass, and its samples are only bit-identical on one platform (libm; #159's goldens must not expect byte equality).
 - [ ] **Step 3:** Commit `docs: name the mid-write evidence build; record the audio model's limits`.
