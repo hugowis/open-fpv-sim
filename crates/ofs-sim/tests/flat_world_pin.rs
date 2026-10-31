@@ -2,16 +2,17 @@
 //! `[terrain]` table can be shown to run bit-identically afterwards. The scenario climbs, then falls, lands, bounces and
 //! rests (0.3 throttle for 0.5 s, then none for 3 s: the race quad is too strong for 0.7 to ever come back down), so the contact spheres, landing points and friction all feed the digest.
 //!
-//! The Linux pin was recorded on Linux/WSL and the Windows one natively; macOS is unverified and uses the Linux constants.
+//! The Linux pin was recorded on Linux/WSL and the Windows one natively; macOS is not pinned.
+#![cfg(any(windows, target_os = "linux"))]
 use std::path::Path;
 
 use ofs_config::{load, FcKind, QuadConfig, WorldConfig};
 use ofs_sim::vehicle::{build, BuildOptions, Sticks};
 
-// libm differs per OS, so the digest does too: Windows has its own pin, everything else shares the Linux/WSL one.
-#[cfg(not(windows))]
+// libm differs per OS, so the digest does too: Windows has its own pin, Linux/WSL the other.
+#[cfg(target_os = "linux")]
 const PIN_CLIMB: u64 = 2546269408358881885;
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 const PIN_REST: u64 = 6789808347882939318;
 #[cfg(windows)]
 const PIN_CLIMB: u64 = 1897724010399850095;
