@@ -29,12 +29,26 @@ fn a_ramp_has_its_slope_and_normal() {
 
 #[test]
 fn the_two_triangles_of_a_cell_differ() {
+    // h00 = 0, h01 = 2 (east), h10 = 1 (north), h11 = 4, cell 1. Lower-right (u >= v; 00, 10, 11): rises 1 north
+    // and 3 east, so its up normal is (-1, -3, -1) normalised. Upper-left (00, 01, 11): rises 2 and 2: (-2, -2, -1).
     let t = grid(vec![0.0, 2.0, 1.0, 4.0], 2, 2);
     let (d_low, n_low) = t.surface(-2.0 + 0.75, -2.0 + 0.25);
     let (d_up, n_up) = t.surface(-2.0 + 0.25, -2.0 + 0.75);
     assert!((d_low + 1.5).abs() < 1e-12);
     assert!((d_up + 2.0).abs() < 1e-12);
-    assert!((n_low - n_up).length() > 0.1);
+    assert!((n_low - DVec3::new(-1.0, -3.0, -1.0).normalize()).abs().max_element() < 1e-12, "lower {n_low}");
+    assert!((n_up - DVec3::new(-2.0, -2.0, -1.0).normalize()).abs().max_element() < 1e-12, "upper {n_up}");
+    assert!((t.max_slope() - 10f64.sqrt()).abs() < 1e-12);
+}
+
+#[test]
+fn the_steepest_triangle_can_be_the_upper_one() {
+    // Only h01 is raised: the lower-right triangle (00, 10, 11) is flat, the upper-left one falls 3 north and rises 3
+    // east, so the steepest slope is sqrt(18) and comes from the upper triangle alone.
+    let t = grid(vec![0.0, 3.0, 0.0, 0.0], 2, 2);
+    assert!((t.max_slope() - 18f64.sqrt()).abs() < 1e-12, "max slope {}", t.max_slope());
+    let (_, n_up) = t.surface(-2.0 + 0.25, -2.0 + 0.75);
+    assert!((n_up - DVec3::new(3.0, -3.0, -1.0).normalize()).abs().max_element() < 1e-12, "upper {n_up}");
 }
 
 #[test]

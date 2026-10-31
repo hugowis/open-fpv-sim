@@ -32,6 +32,7 @@ fn params(objects: Vec<WorldObject>, spheres: Vec<(DVec3, f64)>, restitution: f6
         ground: GroundParams { stiffness_npm: 3000.0, damping_nspm: 40.0, friction_coeff: 0.6 },
         objects,
         collision: CollisionParams { restitution, friction_coeff: 0.5, spheres },
+        terrain: None,
     }
 }
 

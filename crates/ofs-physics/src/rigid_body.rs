@@ -1,8 +1,11 @@
 //! 6-DOF rigid body: prop thrust and reaction torque, rotor gyroscopic coupling, quadratic body drag,
-//! spring-damper contact against the ground plane and the world's objects.
+//! spring-damper contact against the ground (a plane or a terrain) and the world's objects.
+use std::sync::Arc;
+
 use glam::{DQuat, DVec3};
 use crate::collision::{self, CollisionParams, TouchState};
 use ofs_core::shape::{Aabb, Shape};
+use ofs_core::terrain::Terrain;
 use ofs_core::consts::{AIR_DENSITY_KGPM3, GRAVITY_MPS2};
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 
@@ -44,6 +47,8 @@ pub struct AirframeParams {
     pub objects: Vec<WorldObject>,
     /// The collision spheres and their contact behaviour.
     pub collision: CollisionParams,
+    /// The ground's height grid, or none for the flat plane d = 0.
+    pub terrain: Option<Arc<Terrain>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,6 +87,8 @@ pub struct RigidBody {
     collision_speed: Signal<f64>,
     collision_object: Signal<f64>,
     collision_count: Signal<f64>,
+    /// The ground's depth under the centre, registered only with a terrain so a flat world's bus is unchanged.
+    terrain_d: Option<Signal<f64>>,
 }
 
 impl RigidBody {
@@ -104,6 +111,7 @@ impl RigidBody {
             collision_speed: bus.signal(names::BODY_COLLISION_SPEED),
             collision_object: bus.signal(names::BODY_COLLISION_OBJECT),
             collision_count: bus.signal(names::BODY_COLLISION_COUNT),
+            terrain_d: p.terrain.is_some().then(|| bus.signal(names::BODY_TERRAIN_D)),
             bounds,
             bounding_radius_m,
             touch,
@@ -133,12 +141,15 @@ impl RigidBody {
             self.last_collision.map_or(f64::from(collision::GROUND_OBJECT_INDEX), |(object, _)| f64::from(object)),
         );
         bus.set(self.collision_count, self.collision_events as f64);
+        if let Some(sig) = self.terrain_d {
+            bus.set(sig, collision::ground_at(self.p.terrain.as_deref(), self.s.pos_ned_m.x, self.s.pos_ned_m.y).0);
+        }
     }
 
     /// Total contact force and torque about the centre of mass, both in NED, and the (object index, inward
-    /// speed) touch of every landing point currently inside a solid — the ground plane (`GROUND_OBJECT_INDEX`)
+    /// speed) touch of every landing point currently inside a solid — the ground (`GROUND_OBJECT_INDEX`)
     /// or a world object — for the collision events. The spring-damper and Coulomb friction of `[ground]`
-    /// (`collision::point_force`) act on every landing contact point against the ground plane and against every
+    /// (`collision::point_force`) act on every landing contact point against the ground and against every
     /// world object; against an object the depth is minus the signed distance and the normal is the shape's
     /// gradient there.
     fn contact(&mut self, s: &BodyState, dt: f64) -> (DVec3, DVec3, Vec<(i32, f64)>) {
@@ -161,13 +172,16 @@ impl RigidBody {
         for (k, c) in self.p.contact_points_frd_m.iter().enumerate() {
             let lever = s.att * *c;
             let v = s.vel_ned_mps + s.att * s.rate_frd_radps.cross(*c);
-            let depth = s.pos_ned_m.z + lever.z; // ground plane is z = 0, NED z points down
-            if depth > 0.0 {
-                // The ground's normal is up, -z: the inward speed is minus the velocity along it.
-                touches.push((collision::GROUND_OBJECT_INDEX, v.z.max(0.0)));
-                act(lever, k, collision::GROUND_OBJECT_INDEX, DVec3::NEG_Z, depth, v);
-            }
             let point = s.pos_ned_m + lever;
+            // The depth along the normal of the ground's triangle under the point; flat (d = 0, n = NEG_Z) it is
+            // exactly the old p.z.
+            let (ground_d, ground_n) = collision::ground_at(self.p.terrain.as_deref(), point.x, point.y);
+            let depth = (-ground_n.z) * (point.z - ground_d);
+            if depth > 0.0 {
+                // The inward speed is minus the velocity along the outward normal.
+                touches.push((collision::GROUND_OBJECT_INDEX, (-v.dot(ground_n)).max(0.0)));
+                act(lever, k, collision::GROUND_OBJECT_INDEX, ground_n, depth, v);
+            }
             for (i, object) in self.p.objects.iter().enumerate() {
                 if !self.bounds[i].contains(point) {
                     continue;

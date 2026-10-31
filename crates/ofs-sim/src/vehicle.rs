@@ -967,6 +967,7 @@ pub fn build_seeded(
             friction_coeff,
             spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
         },
+        terrain: None,
     };
     let initial = BodyState {
         pos_ned_m: v3(cfg.initial.position_ned_m),

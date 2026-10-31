@@ -4,6 +4,7 @@
 //! quad moves a few millimetres per step at racing speed, so no sphere passes through a 12 cm post between steps.
 use glam::DVec3;
 use ofs_core::shape::Aabb;
+use ofs_core::terrain::Terrain;
 
 use crate::rigid_body::{AirframeParams, BodyState, GroundParams};
 
@@ -182,6 +183,12 @@ fn apply(s: &mut BodyState, inv_mass: f64, inv_inertia: DVec3, lever: DVec3, imp
     s.rate_frd_radps += inv_inertia * (s.att.inverse() * lever.cross(impulse));
 }
 
+/// The ground's depth `d` (NED) and its outward (up) unit normal at (north, east): the terrain's, or the plane
+/// d = 0 with the normal up when there is none.
+pub fn ground_at(terrain: Option<&Terrain>, north: f64, east: f64) -> (f64, DVec3) {
+    terrain.map_or((0.0, DVec3::NEG_Z), |t| t.surface(north, east))
+}
+
 /// Every sphere's contacts with every near object and with the ground. `quad_radius` is the body's bounding
 /// radius, the broad phase's margin around the quad's centre.
 fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState) -> Vec<Contact> {
@@ -189,10 +196,11 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
     let omega = s.att * s.rate_frd_radps;
     for (centre_frd, radius) in &p.collision.spheres {
         let centre = s.pos_ned_m + s.att * *centre_frd;
-        // The ground plane is the solid z >= 0: its signed distance is -z, its normal is up.
-        let penetration = radius + centre.z;
+        // The ground is the solid below the plane of the triangle under the centre, whose signed distance there is
+        // n.z * (c.z - d). Flat (d = 0, n = NEG_Z) this is exactly radius + c.z.
+        let (ground_d, normal) = ground_at(p.terrain.as_deref(), centre.x, centre.y);
+        let penetration = radius + (-normal.z) * (centre.z - ground_d);
         if penetration > 0.0 {
-            let normal = DVec3::NEG_Z;
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
             contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: GROUND_OBJECT_INDEX, inward });
