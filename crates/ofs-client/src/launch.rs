@@ -19,12 +19,15 @@ pub(crate) fn wants_auto_port(listen: &str) -> bool {
     listen.parse::<SocketAddr>().is_ok_and(|addr| addr.port() == 0)
 }
 
-/// The launch error for a server that ended before it could be reached: its status and the log tail.
+/// The launch error for a server that ended before it could be reached: its status and the log tail, with the
+/// port-in-use question only when the address fixes the port (an OS-picked one cannot be taken already).
 pub(crate) fn exited_during_startup(program: &Path, listen: &str, status: ExitStatus, tail: &str) -> ClientError {
     let log = if tail.is_empty() { String::new() } else { format!("\n{tail}") };
+    let question =
+        if wants_auto_port(listen) { String::new() } else { format!(" Is the port in {listen} already taken?") };
     ClientError::new(
         ErrorKind::Launch,
-        format!("{} exited during startup ({status}). Is the port in {listen} already taken?{log}", program.display()),
+        format!("{} exited during startup ({status}).{question}{log}", program.display()),
     )
 }
 
