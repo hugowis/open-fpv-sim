@@ -56,6 +56,11 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
   then). H.264 export needs an ffmpeg with libx264 on `PATH`, and an export still running when the game quits is
   lost. No audio.
+- Flight audio (#158, `docs/superpowers/specs/2026-10-31-flight-audio-design.md`), played live in the client:
+  airspeed is ground speed (the simulation has no wind yet), a hard landing and an object hit sound the same
+  (one thud), and the tone is the blade-pass fundamental plus 2x and 3x harmonics, which alias above about
+  7.35 kHz blade-pass. The samples are bit-identical on one platform only (`sin`/`exp`/`tanh` come from the
+  platform libm), so #159's DVR-audio goldens must not expect byte equality across OSes.
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
