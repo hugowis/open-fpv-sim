@@ -366,7 +366,7 @@ Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach
 ## Native Windows SITL (experimental, no WSL)
 The pinned Betaflight SITL also builds and runs as a native Windows program, through the Cygwin-based `msys`
 environment of MSYS2 (issue #67; the findings are in `docs/research/sitl-native-windows.md`). It measured about
-2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path. CI builds it and runs the live tests against it (the `windows-sitl` job, not yet a required check).
+2.3 times faster than SITL in WSL 2 in one benchmark run. WSL stays the supported path. CI builds it and runs the live tests against it (the `windows-sitl` job, in `publish.needs` since 2026-10-31).
 Windows may ask whether to allow `betaflight_SITL.exe` on the network the first time it starts (it listens on its
 Betaflight ports on every interface): answer Cancel, the simulator talks to it over loopback, which is not filtered.
 

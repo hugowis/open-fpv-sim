@@ -67,10 +67,12 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   paced by the wall clock and flaked once), and promoting the macOS job into `publish.needs` after a record of clean
   `ci.yml` runs.
 - SITL runs natively on Windows, without WSL, from an MSYS2 build (`scripts/build-sitl-windows.sh`, #67,
-  `docs/research/sitl-native-windows.md`). It is experimental: no CI job builds it, the port needs a stub file for
-  hardware-only symbols (`--gc-sections` removes nothing on PE), the executable needs two Cygwin DLLs beside it, and it
-  has not been compared with the Linux SITL bit for bit. A DLL-free native Win32 (`ucrt64`) port is sized at several
-  days and not started.
+  `docs/research/sitl-native-windows.md`). It is experimental: the port needs a stub file for hardware-only symbols
+  (`--gc-sections` removes nothing on PE), the executable needs the two Cygwin runtime DLLs (`msys-2.0.dll`,
+  `msys-gcc_s-seh-1.dll`) beside it, and it has not been compared with the Linux SITL bit for bit. The `windows-sitl`
+  CI job builds it (MSYS2's msys environment, cached), live-tests the `.exe` from the runner's plain PowerShell, and
+  gates `publish` since 2026-10-31, after 13 consecutive green runs. A DLL-free native Win32 (`ucrt64`) port, which
+  this build is not, is sized at several days and not started (#105).
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
 - A session that ends while the quad is armed disarms Betaflight first (restoring the link, stepping until the motors
