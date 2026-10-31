@@ -31,6 +31,20 @@ func test_before_start_everything_is_inert() -> void:
 	client.queue_free()
 
 
+func test_audio_renders_silence_without_a_session() -> void:
+	var client := await _client()
+	eq(client.audio_sample_rate(), 44100.0, "sample rate")
+	var samples: PackedVector2Array = client.audio_render(441, true)
+	eq(samples.size(), 441, "one stereo sample per frame")
+	var silent := true
+	for s in samples:
+		silent = silent and s == Vector2.ZERO
+	ok(silent, "no session: silence")
+	eq(client.audio_render(0, true).size(), 0, "zero frames")
+	eq(client.audio_render(-5, true).size(), 0, "negative frames")
+	client.queue_free()
+
+
 func test_osd_and_vtx_getters_are_inert_before_start() -> void:
 	var client := await _client()
 	eq(client.get_osd(), {}, "no OSD frame")

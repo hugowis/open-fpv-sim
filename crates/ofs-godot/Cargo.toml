@@ -12,4 +12,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ofs-client.workspace = true
+ofs-audio.workspace = true
 godot = "0.5"

@@ -25,7 +25,8 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service, scripted inputs and the inputs recorder (`inputs.rs`, `inputs_recorder.rs`), the steering journal and the repro bundle (`journal.rs`, `repro.rs`). | all of the above |
 | `ofs-validate` | The validation harness: the submission format, its checker and the thrust-stand comparator (`docs/validation.md`). A command-line tool; nothing depends on it. | core, config, electrical, physics, sim |
 | `ofs-client` | The Rust client: a worker thread, the FPV composite, the DVR muxer. | core, proto |
-| `ofs-godot` | The Godot extension (`OfsClient`), a thin layer over `ofs-client`. | client |
+| `ofs-audio` | The flight sound: the pure parameter map (`params`, `thud_gain`) and the deterministic `Synth`, no Godot and no I/O. | — |
+| `ofs-godot` | The Godot extension (`OfsClient`), a thin layer over `ofs-client`, and the host of the flight sound. | client, audio |
 
 ## One tick
 The scheduler runs at the quad's base rate (8 kHz for the shipped quads). Each model declares a rate divisor and
@@ -51,6 +52,26 @@ Live sticks have one entry point on the server, `Vehicle::set_sticks`, which the
 `SetSticks` both reach. The **inputs recorder** (`crates/ofs-sim/src/inputs_recorder.rs`) sits there: while it runs it
 writes a CSV row whenever a stick changes, in `PlayInputs`' format, so a live flight can be replayed in lockstep
 (`StartInputsRecording`/`StopInputsRecording`, protocol 10).
+
+## Sound
+The flight sound is derived on the client. The server never produces or carries it, and it is outside the digest, the
+recording and the protocol: it reads the state stream (motor rpm and command, ground speed, climb rate, collision speed)
+and the collision events, and nothing it does reaches the simulation.
+
+`ofs-audio` has three parts, none knowing Godot or time except as the samples it is asked for. `params` is a pure map
+from an `AudioInput` to `AudioParams` (a tone per motor at the blade-pass frequency, a prop-wash gain, a wind gain and
+cutoff), never non-finite; `thud_gain` maps a collision's speed to a hit. `Synth` turns those parameters into mono
+samples at 44.1 kHz, and the same parameter sequence gives identical samples on one platform (`sin`, `exp` and `tanh`
+come from the platform's libm, so byte equality across operating systems is not promised). `Audio` is the facade the client owns: it
+holds the synth and the collisions waiting for the first state at or after their time, which carries the impact speed.
+`OfsClient.audio_render(frames, active)` feeds it from the latest telemetry (the motors fade out when `active` is false, and
+silence without telemetry) and a loading phase resets it. In Godot, `godot/drone/flight_audio.gd` creates a `Flight` bus under
+Master (the quad's microphone) and each frame pushes the samples an `AudioStreamGenerator` has room for; the `audio`
+setting mutes that bus.
+
+The constants (`AudioConfig`) are estimates. The DVR track (#159) will not tap the live bus, which carries the audio
+device's timing and is silent in headless runs: it will render the same `Synth` offline from a recording at the DVR's
+field times, so the file's audio is as deterministic as its video.
 
 ## When a session fails
 The `Vehicle` keeps a **journal** (`journal.rs`): every call that steers the run (sticks when they change, the

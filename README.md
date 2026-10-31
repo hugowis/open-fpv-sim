@@ -109,7 +109,8 @@ The game opens in a **main menu**: pick a world and a quad (the `*.toml` files i
 checkout and in the data dir), race or free flight (for a world with gates; free flight hides the lap clock and the
 next-gate highlight) and the flight controller (Betaflight is offered when `OFS_SITL_LAUNCH` is set, else the flight is
 open loop), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose. **Esc** in
-a flight comes back to it; **Settings** edits the settings below. `--menu=off` (or `OFS_MENU=off`) boots straight into
+a flight comes back to it; **Settings** edits the settings below, including **Sound**: the client plays the quad's motors, prop wash, wind and
+collision thuds, generated live from the flight state (no audio files), and the `audio` setting turns it off. `--menu=off` (or `OFS_MENU=off`) boots straight into
 the flight, as before.
 
 Keys: **P** pause/resume, **R** reload the quad (retry after an error), **C** FPV/chase camera, **D** or the F2
@@ -142,6 +143,7 @@ Overrides:
 | the course to race in a world with several (a name; empty = the world's default) | `OFS_COURSE` | `--course=` |
 | fullscreen (default off) | `OFS_FULLSCREEN` | `--fullscreen` |
 | HUD shown at start (on/off, default on) | `OFS_HUD` | `--hud=` |
+| sound (on/off, default on) | `OFS_AUDIO` | `--audio=` |
 
     godot --path godot -- --open-loop              # fly the model without Betaflight
 
