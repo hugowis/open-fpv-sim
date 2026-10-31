@@ -92,6 +92,8 @@ func _run() -> void:
 	_check(flying, "reaches the flying phase (phase: %s %s)" % [app.client.get_phase(), app.client.get_phase_detail()])
 	_check(app.client.get_quad_name().contains("OpenDrone"), "the quad name is known: %s" % app.client.get_quad_name())
 	_check(app.hud.toast_texts().size() > 0 and app.hud.toast_texts()[0].begins_with("Loaded"), "the HUD announces the quad: %s" % str(app.hud.toast_texts()))
+	var audible: bool = app.flight_audio != null and await _wait_for(func(): return app.flight_audio.active, 2.0)  # the app sets it on the next frame
+	_check(audible, "the flight audio node is live while flying")
 
 	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.9, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
 	var climbed: bool = await _wait_for(func(): return app.drone.position.y > 0.5, 20.0)

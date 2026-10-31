@@ -92,3 +92,14 @@ func test_escape_and_back_close_it() -> void:
 	ok(not screen.is_open(), "Back closes it")
 	eq(closed[0], 2, "twice announced")
 	screen.queue_free()
+
+
+func test_the_sound_row_is_a_live_check_box() -> void:
+	var s := await _screen()
+	var screen = s[0]
+	ok(screen.control("audio") is CheckBox, "a check box")
+	eq(screen.control("audio").button_pressed, true, "sound shown on by default")
+	eq(screen.note("audio"), "", "a live row says nothing")
+	screen.control("audio").button_pressed = false
+	eq(s[2], [["audio", false]], "toggling emits the key and the value")
+	screen.queue_free()
