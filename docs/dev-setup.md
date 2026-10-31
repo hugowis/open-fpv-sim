@@ -118,7 +118,7 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   The quad collides with them (`docs/research/collision.md`);
 - `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
   neighbouring channels. The shipped world has one, on R2, next to the quad's default R1.
-- `[terrain]` � an opt-in height grid for the ground: `seed`, `size_m` (the square of relief, centred on home, flat beyond
+- `[terrain]` — an opt-in height grid for the ground: `seed`, `size_m` (the square of relief, centred on home, flat beyond
   it), `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`, `persistence` and `flat_radius_m` (exactly flat, d = 0,
   around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface; the Godot
   client draws a flat ground and the radio and video link ignore the relief until #155 and #154. `worlds/hills.toml` is

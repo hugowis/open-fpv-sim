@@ -98,9 +98,9 @@ with `a = g(sinθ − μ·cosθ)`. The unit tests pin both on an incline (95 % a
 3 %), the flat deceleration `μ·g` and the stop that stays stopped. The old law, `μ·N·v_t/max(|v_t|, 5 cm/s)`, was
 viscous below 5 cm/s: a resting quad crept down any slope.
 
-The limits: the incline tests use a synthetic ramp (the world's shapes are axis-aligned boxes and cylinders; the slopes to
-land on are the terrain's, see "The ground"); the anchor lives per (point, object), so a point sliding across an object's edge onto another
-starts over; the static sag is real (a millimetre or so), not a rigid hold; `friction_coeff` is one number for the
+The limits: the incline tests use a synthetic ramp (the world's shapes are axis-aligned boxes and cylinders; the
+slopes to land on are the terrain's, see "The ground"); the anchor lives per (point, object), so a point sliding
+across an object's edge onto another starts over; the static sag is real (a millimetre or so), not a rigid hold; `friction_coeff` is one number for the
 ground and every object, and the spheres' and the points' share nothing but its value (`[collision]` for the
 spheres, `[ground]` for the points).
 
@@ -139,21 +139,23 @@ is `crates/ofs-core/src/terrain.rs` (the grid and its queries), `crates/ofs-conf
 `docs/superpowers/specs/2026-10-31-terrain-heightfield-design.md`.
 
 **The contact maths.** For the triangle under a point (north, east) the surface has depth `d_g` there and an up unit
-normal `n` (NED, so `n.z < 0`). The signed distance of a sphere's centre `c` to the triangle's plane is `n.z·(c.z − d_g)`,
-so a collision sphere penetrates by `radius + (−n.z)·(c.z − d_g)` and its contact normal is `n`. A landing point's depth
-is `(−n.z)·(p.z − d_g)` along `n`, handed to the same spring-damper and static-friction law as before: the spring pushes
+normal `n` (NED, so `n.z < 0`). The signed distance of a sphere's centre `c` to the triangle's plane (the exact
+perpendicular distance) is `n.z·(c.z − d_g)`, so a collision sphere penetrates by `radius + (−n.z)·(c.z − d_g)` and its
+contact normal is `n`. A landing point's depth is `(−n.z)·(p.z − d_g)` along `n`, handed to the same spring-damper and static-friction law as before: the spring pushes
 along the slope normal and the anchor spring works in the slope's tangent plane, so a quad parked within the friction
 angle of a hillside stays put and one past it slides at `g(sinθ − μ·cosθ)`. Flat (`d_g = 0`, `n` straight up) every
 expression collapses to the old one (`x − 0.0` and `x·1.0` are exact), which is why a world without `[terrain]` is
 bit-identical to before. The ground is still object index −1 in the events.
 
 **Two limits.**
-- *The sphere is tested against the plane of the one triangle under its centre*, not the true distance to the mesh. A
-  sphere sunk into the neighbouring triangle across a ridge or a valley fold is found a step later, off by at most
-  `r·(1 − cos(Δθ/2))` for a fold of angle Δθ: under a millimetre for a 2 cm sphere at the slope breaks of the shipped hills.
-- *Vertical-offset penetration understates a steep slope's depth by `|n.z|`* (half at 60 degrees), because it measures
-  the offset along the vertical, not along the normal. The 60 degree cap on a world's steepest triangle, checked when the
-  world loads, keeps `|n.z| ≥ 0.5`: hills, not cliffs.
+- *The sphere is tested against the plane of the one triangle under its centre*, not the true distance to the mesh.
+  A sphere sunk into the neighbouring triangle across a ridge or a valley fold is found a step later, off by at most
+  `r·(1 − cos(Δθ/2))` for a fold of angle Δθ: under a millimetre for a 2 cm sphere at the slope breaks of the
+  shipped hills.
+- *The triangle under the centre is picked by the centre's horizontal position.* A sphere or point at vertical
+  offset `h` below the surface is only `h·|n.z|` from its plane (half of `h` at 60 degrees), so on a steep slope it
+  can sink deeper vertically than it is pushed out along the normal before the contact sees it. The 60 degree cap on
+  a world's steepest triangle, checked when the world loads, keeps `|n.z| ≥ 0.5`: hills, not cliffs.
 
 Also: a quad at rest on a slope sits about 7.6 degrees off the slope normal, because the 4 cm body sphere lets it keep its
 landing lean (an existing property of the collision model, not of the terrain). A hand-built grid with a non-zero border
@@ -173,12 +175,14 @@ propeller maths, which call libm and differ in the last bits between operating s
 digest file per OS for the same reason). So that constant is per OS: Windows and Linux have theirs, macOS has none and
 the test is compiled out there. It proves "a world without `[terrain]` moved no bit where it is pinned"; the change
 has no platform-specific code, so it holds on macOS unpinned. A macOS difference cannot break replay: a lockstep digest
-is compared between two runs on one machine, never against another OS's constant, and the terrain adds no libm call.
+is compared between two runs on one machine, never against another OS's constant, and the terrain adds no libm call
+to the step loop or to the baked grid (load-time validation uses `hypot` and `atan` for the slope check only).
 
-**Cost.** Each ground site samples the grid once per contact: three loads and a few flops. Measured in release on WSL
-with the ignored timing test (`terrain_costs_little_in_release` in `crates/ofs-sim/tests/terrain_flight.rs`, run with
-`--release -- --ignored --nocapture`), the wall time per simulated second at 8 kHz, flat against `worlds/hills.toml`, on
-every shipped quad:
+**Cost.** Each ground site samples the grid once per contact: four node reads and a few flops. Measured in release
+on WSL with the ignored timing test (`terrain_costs_little_in_release` in `crates/ofs-sim/tests/terrain_flight.rs`,
+run with `--release -- --ignored --nocapture`), the wall time per simulated second at 8 kHz of the whole open-loop
+vehicle (motors, battery, sensors and the rest, not the contact solver alone), in 0.3 s hops, best of 5, flat
+against `worlds/hills.toml`, on every shipped quad:
 
 | Quad | Flat | Hills |
 |---|---|---|

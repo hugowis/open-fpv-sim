@@ -18,7 +18,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   touchdown both bounces and compresses the legs. The landing points hold on a slope by static friction (a
   millimetre of tangential sag, not a rigid hold) but the spheres' impulse friction creeps `g·sinθ·Δt` (0.4 mm/s on
   a 20° slope); the position correction translates the body out of every contact but never turns it.
-- The ground is the plane d = 0, boxes are axis-aligned, and objects never collide with each other.
+- The ground is the plane d = 0 unless the world has a `[terrain]` heightfield (#153); boxes are axis-aligned, and objects never collide with each other.
 
 ### Electrical
 - The thermal model has no airflow dependence (the thermal resistance is a constant) and nothing derates on
