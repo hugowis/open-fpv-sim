@@ -22,6 +22,21 @@ repository). The format follows Keep a Changelog.
   profile `Default`; the screen rewrites it as version 2 on the first change. The F2 screen scrolls in a window that is
   shorter than it.
 
+### An iBUS (FlySky) receiver (#8)
+#### Added
+- **`receiver = "ibus"`** in `[radio]`: a `Receiver` that sends the link's delivered channels as FlySky iBUS frames
+  (32 bytes, 14 channels in microseconds, checksum 0xFFFF minus the byte sum) on the flight controller's UART, about every
+  7 ms whatever the link's packet rate, and none while the link delivers nothing, so Betaflight's failsafe fires as with
+  CRSF. Codec and receiver in `crates/ofs-radio/src/ibus.rs`, tested against a frame computed by hand. The frame period
+  and the value range are estimates; `docs/research/ibus-receiver.md` has the sources.
+- **`quads/opendrone-5f-ibus.toml`** and its Betaflight diff (`serialrx_provider = IBUS`): the freestyle quad behind a
+  FlySky receiver, on a fixed link at 250 Hz (the FlySky air protocol is not modelled).
+
+#### Changed
+- **The SITL patch defines `USE_SERIALRX_IBUS`**: the shipped SITL had no iBUS driver. Rebuild it
+  (`scripts/build-sitl.sh`) to use an iBUS quad; the new live test reads iBUS sticks back over `MSP_RC`. Other quads fly
+  as before.
+
 ### Several courses and race modes per world (#132, protocol 15)
 #### Added
 - **`[[courses]]` in the world file**: a name, an ordered list of declared gate names, an optional `laps` and a `mode`.

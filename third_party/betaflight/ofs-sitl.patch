@@ -1128,13 +1128,14 @@ index 69d3250..a0f2bea 100644
  #undef USE_VTX_MSP
  #undef USE_CAMERA_CONTROL
  #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
-@@ -171,6 +169,24 @@
+@@ -171,6 +169,25 @@
  #undef USE_I2C
  #undef USE_SPI
  
 +// Open FPV Sim: peripherals simulated over TCP UARTs (CRSF receiver, ESC telemetry, MSP DisplayPort OSD, VTX control)
 +#define USE_SERIALRX
 +#define USE_SERIALRX_CRSF
++#define USE_SERIALRX_IBUS
 +#ifndef USE_ESC_SENSOR
 +#define USE_ESC_SENSOR
 +#endif

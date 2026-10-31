@@ -371,3 +371,10 @@ With `USE_ESC_SENSOR` and `USE_DSHOT_TELEMETRY` both compiled and the ESC-sensor
 
 - The §5 warning about stale objects bit again: an incremental `make` after editing only `sitl.c` produced a binary that linked but behaved as before; deleting `sitl.o` (or building clean via `scripts/build-sitl.sh`) is required. Any surprising runtime result on an incremental build: rebuild clean before believing it.
 - The WSL tree carries the spike edits (uncommitted; `build-sitl.sh` resets and re-applies `ofs-sitl.patch`, so the spike state is disposable). The M3d implementation turns these edits into generator scripts under `third_party/betaflight/tools/` plus patch regeneration, M0-style.
+
+## 11. iBUS receiver (#8)
+
+`target.h` re-enables only the serial receivers the simulator drives. The patch now also defines `USE_SERIALRX_IBUS`
+(rebuild with `scripts/build-sitl.sh`); with `serialrx_provider = IBUS` on UART2, iBUS frames in the state datagram's serial
+blocks read back over `MSP_RC` like CRSF's. Details and the live result: `docs/research/ibus-receiver.md`. SBUS, GHST and
+JETIEXBUS are still undefined.
