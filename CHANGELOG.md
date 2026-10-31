@@ -5,6 +5,13 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### The terrain slope cap decides exactly (the #161 follow-up)
+#### Fixed
+- **A world within an ulp of the 60 degree terrain limit now validates identically on every OS**: the cap decides
+  `slope * slope <= 3` (`tan²60° = 3` exactly, and an IEEE multiply is correctly rounded) instead of comparing
+  `atan`-computed degrees — `atan` is a libm call that may differ by an ulp between OSes, so a boundary world could
+  pass on one OS and fail on another. `atan` remains, display only, to name the degrees in the rejection message.
+
 ### The game's launcher takes an automatic server port (the #110 follow-up)
 #### Added
 - **`server_addr` port 0 lets the game start beside anything on the fixed port**: with `--server 127.0.0.1:0`
