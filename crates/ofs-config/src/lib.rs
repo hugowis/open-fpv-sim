@@ -8,6 +8,9 @@ use serde::Deserialize;
 pub mod world;
 pub use world::{AntennaKind, Polarization, WorldConfig};
 
+mod terrain;
+pub use terrain::{TerrainSection, MAX_TERRAIN_SLOPE_DEG};
+
 pub mod part;
 
 /// 7: an optional `mag = "id"` references a magnetometer library part (#31). 6: `imu = "id"` and `baro = "id"` reference library parts (#42); a schema-5 file's inline `[imu]`/`[baro]` tables

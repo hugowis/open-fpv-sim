@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use ofs_config::world::{self, AntennaKind, Shape, WorldConfig};
-use ofs_config::{load, ConfigError, Polarization};
+use ofs_config::{load, ConfigError, Polarization, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
 
 const WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml");
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
@@ -678,4 +678,154 @@ fn courses_need_gates_and_a_course_pick_needs_courses() {
     assert!(found.iter().any(|p| p.starts_with("courses: a course needs [[gates]]")), "{found:#?}");
     let found = problems(&with_courses("\n[race]\ncourse = \"Line\"\n"));
     assert!(found.iter().any(|p| p.starts_with("race.course: no course named")), "{found:#?}");
+}
+
+fn with_terrain(body: &str) -> String {
+    format!("{}
+[terrain]
+{body}
+", world_text())
+}
+
+fn terrain_of(body: &str) -> ofs_core::terrain::Terrain {
+    written_world(&with_terrain(body)).unwrap().terrain.expect("a [terrain] section").build()
+}
+
+#[test]
+fn a_bare_terrain_section_is_rolling_hills_and_absence_is_none() {
+    assert_eq!(written_world(&with_terrain("")).unwrap().terrain, Some(TerrainSection::default()));
+    assert_eq!(written_world(&world_text()).unwrap().terrain, None);
+    assert_eq!(WorldConfig::open_field().terrain, None);
+    let w = written_world(&with_terrain("seed = 7
+size_m = 200.0
+cell_m = 2.0
+amplitude_m = 3.0
+wavelength_m = 50.0
+octaves = 2
+persistence = 0.4
+flat_radius_m = 10.0")).unwrap();
+    let want = TerrainSection { seed: 7, size_m: 200.0, cell_m: 2.0, amplitude_m: 3.0, wavelength_m: 50.0, octaves: 2, persistence: 0.4, flat_radius_m: 10.0 };
+    assert_eq!(w.terrain, Some(want));
+    assert!(written_world(&with_terrain("sede = 1")).is_err(), "unknown keys are refused");
+}
+
+#[test]
+fn the_default_terrain_is_a_flat_pad_in_rolling_hills() {
+    let section = TerrainSection::default();
+    let t = section.build();
+    assert_eq!(t.heights().len(), 401 * 401);
+    assert_eq!(t.nodes(), (401, 401));
+    assert_eq!(t.origin_ne(), [-200.0, -200.0]);
+    assert_eq!(t.ground_d(0.0, 0.0), 0.0);
+    for (i, h) in t.heights().iter().enumerate() {
+        let (row, col) = (i / 401, i % 401);
+        let (n, e) = (row as f64 - 200.0, col as f64 - 200.0);
+        if (n * n + e * e).sqrt() <= section.flat_radius_m {
+            assert_eq!(*h, 0.0, "pad node ({row}, {col})");
+        }
+        if row == 0 || row == 400 || col == 0 || col == 400 {
+            assert_eq!(*h, 0.0, "border node ({row}, {col})");
+        }
+    }
+    // A point between nodes is flat once every node of its triangle is (a cell is a metre across).
+    for k in 0..360 {
+        let a = f64::from(k).to_radians();
+        let r = section.flat_radius_m - 2.0;
+        assert_eq!(t.ground_d(r * a.cos(), r * a.sin()), 0.0, "the pad at {k} degrees");
+    }
+    let tallest = t.heights().iter().fold(0.0f32, |m, h| m.max(h.abs()));
+    assert!(tallest > 1.0, "relief exists (tallest {tallest})");
+    assert!(t.max_slope() < MAX_TERRAIN_SLOPE_DEG.to_radians().tan(), "default slope {} deg", t.max_slope().atan().to_degrees());
+}
+
+#[test]
+fn a_seed_gives_one_grid_and_other_seeds_other_grids() {
+    let at = |seed: u64| TerrainSection { seed, ..Default::default() }.build().digest();
+    assert_eq!(at(1), at(1));
+    assert_ne!(at(1), at(2));
+}
+
+/// The cross-OS claim: IEEE basic operations and `sqrt` only, so this one constant holds on Windows, Linux and macOS.
+/// If it fails on one OS, the generator calls a libm function (`sin`, `exp`, `pow`, ...) or the compiler fused a
+/// multiply-add: fix the generator, do not add a per-OS constant.
+#[test]
+fn the_default_grid_digest_is_pinned_on_every_os() {
+    assert_eq!(TerrainSection::default().build().digest(), 0xa382_160e_6e73_4cbd, "the default section's baked grid changed");
+}
+
+#[test]
+fn every_terrain_rule_names_its_field() {
+    let cases: &[(&str, &str)] = &[
+        ("size_m = nan", "terrain.size_m: must be finite"),
+        ("cell_m = inf", "terrain.cell_m: must be finite"),
+        ("amplitude_m = nan", "terrain.amplitude_m: must be finite"),
+        ("wavelength_m = nan", "terrain.wavelength_m: must be finite"),
+        ("persistence = nan", "terrain.persistence: must be finite"),
+        ("flat_radius_m = nan", "terrain.flat_radius_m: must be finite"),
+        ("size_m = 0.0", "terrain.size_m: must be in (0, 2000]"),
+        ("size_m = 2001.0", "terrain.size_m: must be in (0, 2000]"),
+        ("cell_m = 0.1", "terrain.cell_m: must be in [0.25, size_m]"),
+        ("size_m = 100.0
+cell_m = 3.0", "terrain.size_m: must be a whole multiple of cell_m"),
+        ("size_m = 500.0
+cell_m = 0.25", "terrain.size_m: at most 1025 nodes a side"),
+        ("amplitude_m = -1.0", "terrain.amplitude_m: must be in [0, 100]"),
+        ("amplitude_m = 101.0", "terrain.amplitude_m: must be in [0, 100]"),
+        ("wavelength_m = 3.9", "terrain.wavelength_m: must be at least 4 cells"),
+        ("octaves = 0", "terrain.octaves: must be 1 to 6"),
+        ("octaves = 7", "terrain.octaves: must be 1 to 6"),
+        ("persistence = 0.0", "terrain.persistence: must be in (0, 1]"),
+        ("persistence = 1.5", "terrain.persistence: must be in (0, 1]"),
+        ("flat_radius_m = -1.0", "terrain.flat_radius_m: must be >= 0"),
+        ("amplitude_m = 100.0
+wavelength_m = 8.0", "terrain.amplitude_m: the steepest slope is"),
+    ];
+    for (body, expected) in cases {
+        let found = problems(&with_terrain(body));
+        assert!(found.iter().any(|p| p.starts_with(expected)), "[terrain] {body:?}: {expected} missing from {found:#?}");
+    }
+    // The boundaries themselves are fine.
+    for body in ["size_m = 2000.0
+cell_m = 2.0", "cell_m = 0.25
+size_m = 200.0", "wavelength_m = 4.0
+amplitude_m = 0.5", "octaves = 6", "persistence = 1.0", "amplitude_m = 0.0", "flat_radius_m = 0.0"] {
+        assert!(written_world(&with_terrain(body)).is_ok(), "[terrain] {body:?}: {:?}", written_world(&with_terrain(body)).err());
+    }
+}
+
+/// With no flat disc, seed 37's hills stand about 9.6 m high at (60, 40).
+const HILL: &str = "seed = 37
+amplitude_m = 50.0
+flat_radius_m = 0.0";
+
+#[test]
+fn a_pilot_inside_a_hill_is_refused() {
+    assert!(terrain_of(HILL).height_up(60.0, 40.0) > 1.7);
+    let text = with_terrain(HILL).replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [60.0, 40.0, -1.7]", 1);
+    let found = problems(&text);
+    assert!(found.iter().any(|p| p.starts_with("pilot.position_ned_m: the pilot must not be below the terrain")), "{found:#?}");
+    assert!(!found.iter().any(|p| p.starts_with("handset.position_ned_m")), "the derived handset repeats the pilot's fault: {found:#?}");
+}
+
+#[test]
+fn a_handset_inside_a_hill_is_refused() {
+    let text = with_terrain(HILL).replacen("[pilot]", "[handset]
+position_ned_m = [60.0, 40.0, -1.7]
+[[handset.antennas]]
+name = \"h\"
+kind = \"omni\"
+gain_dbi = 2.0
+polarization = \"linear\"
+
+[pilot]", 1);
+    let text = text.replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [0.0, 0.0, -1.7]", 1);
+    let found = problems(&text);
+    assert!(found.iter().any(|p| p.starts_with("handset.position_ned_m: the handset must not be below the terrain")), "{found:#?}");
+    assert!(!found.iter().any(|p| p.starts_with("pilot.position_ned_m")), "{found:#?}");
+}
+
+#[test]
+fn a_pilot_above_the_hills_is_fine() {
+    let text = with_terrain(HILL).replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [60.0, 40.0, -30.0]", 1);
+    assert!(written_world(&text).is_ok(), "{:?}", written_world(&text).err());
 }

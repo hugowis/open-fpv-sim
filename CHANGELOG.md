@@ -5,6 +5,31 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### A heightfield ground for the physics (#153, part 1 of 3 of #27)
+#### Added
+- **`[terrain]` in the world file**, opt-in: `seed`, `size_m`, `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`,
+  `persistence` and `flat_radius_m`, every key optional (a bare `[terrain]` is rolling hills). The loader bakes the
+  numbers once into a grid of heights, `ofs_core::terrain::Terrain`, which is the one source of truth: the physics
+  samples it, and the later client and radio lanes will read the same grid. The ground is a triangle mesh (each cell split
+  along one fixed diagonal), exact at the nodes; beyond the grid it is the plane d = 0. The generator is seeded value
+  noise using only `+ - * /` and `sqrt`, so a grid is bit-identical on every OS. A world is rejected when its steepest
+  triangle passes 60 degrees, or when the pilot or the handset would stand below the ground.
+- **`worlds/hills.toml`**: a launch pad on a 30 m flat disc with 12 m hills around it, no objects, no gates: a place to
+  land and slide on slopes.
+- **`body.terrain_d_m`**, the ground's depth under the body's centre, published in worlds with `[terrain]` only.
+- Tests: the baked grid's digest is pinned (one constant, every OS); a quad rests, holds or slides on a 20 degree ramp
+  by the friction angle; a seeded flight over `worlds/hills.toml` replays exactly; a world without `[terrain]` reproduces
+  a bus digest recorded before the change (Windows and Linux; not pinned on macOS).
+
+#### Changed
+- **The ground contacts follow the terrain**: the collision spheres and the landing points' spring-dampers and static
+  friction see the surface under them (its height and slope normal) instead of the plane d = 0, so the quad lands, rolls
+  and slides on hills. A world without `[terrain]` is unchanged, bit for bit, and so are its signal list and bus
+  digest. No protocol change.
+- **Cost**: sampling roughly doubles the (tiny) physics cost, about +4 ms of wall time per simulated second on a
+  hilly world (release, 8 kHz), still far above real time; the numbers are in `docs/research/collision.md`.
+- **Not yet**: until #155 the Godot client draws a flat ground in a world with `[terrain]`, so the picture and the
+  physics disagree there; the radio and the video link ignore the terrain until #154.
 ### Procedural flight audio (#158)
 #### Added
 - **The sim has sound.** The Godot client plays the quad's microphone: a tone per motor from its eRPM (the blade-pass

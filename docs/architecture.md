@@ -11,7 +11,7 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 ## The crates (`crates/`)
 | Crate | What it is | Depends on (ofs-*) |
 |---|---|---|
-| `ofs-core` | The typed signal bus, the `Model` trait, the scheduler, byte wires, constants and seeded RNG streams. Deterministic, no I/O. | — |
+| `ofs-core` | The typed signal bus, the `Model` trait, the scheduler, byte wires, constants, seeded RNG streams and the terrain height grid. Deterministic, no I/O. | — |
 | `ofs-config` | Quad, world and part files (TOML): parsing and validation that reports every problem at once. | core |
 | `ofs-physics` | 6-DOF rigid body, propellers, impulse collisions with the world. | core |
 | `ofs-electrical` | Battery, ESC and brushless motor. | core |
