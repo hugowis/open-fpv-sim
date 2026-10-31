@@ -178,3 +178,18 @@ fn dvr_feed_parse_knows_goggles_and_clean_only() {
     assert_eq!(DvrFeed::parse("Clean"), None);
     assert_eq!(DvrFeed::parse(""), None);
 }
+
+#[test]
+fn write_frame_reports_acceptance() {
+    let dir = std::env::temp_dir().join(format!("ofs-dvr-accept-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    let writer = DvrWriter::start(dir.join("rec.avi"), 50, 4, 2).unwrap();
+    assert!(writer.write_frame(b"AAA".to_vec()), "a frame with room in the queue is accepted");
+    // Saturation cannot be forced deterministically, so burst until the queue may fill: whatever returned
+    // false must be exactly what the summary counts as dropped, and the rest exactly what it counts as frames.
+    let accepted = 1 + (0..5000).filter(|_| writer.write_frame(vec![0xFF; 4096])).count() as u64;
+    let summary = writer.stop().unwrap();
+    assert_eq!(summary.frames, accepted);
+    assert_eq!(summary.frames + summary.dropped_frames, 5001);
+    std::fs::remove_dir_all(&dir).ok();
+}

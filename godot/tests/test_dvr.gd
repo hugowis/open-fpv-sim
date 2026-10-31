@@ -140,6 +140,7 @@ func test_a_recording_round_trips() -> void:
 	var client := await _client()
 	var path := OS.get_user_data_dir() + "/test_dvr_roundtrip.avi"
 	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
+	DirAccess.remove_absolute(path.get_basename() + ".audio")
 	eq(client.dvr_start("goggles", path, 4, 2), "", "starts")
 	for i in 10:
 		client.dvr_write_frame("goggles", PackedByteArray([0xFF, 0xD8, 0xFF, 0xD9, i]))  # a JPEG-shaped blob; the muxer does not validate
@@ -147,6 +148,11 @@ func test_a_recording_round_trips() -> void:
 	eq(int(summary.get("frames", -1)), 10, "ten frames")
 	eq(int(summary.get("dropped_frames", -1)), 0, "nothing dropped")
 	eq(_count_frames(path) / 2, 10, "ten 00dc chunks in movi and ten index entries")
+	var lines := FileAccess.get_file_as_string(path.get_basename() + ".audio").split("
+", false)
+	eq(lines[0], "ofs-dvr-audio 1", "the audio sidecar starts with its header")
+	eq(lines.size() - 1, 10, "one audio record per frame")
+	eq(lines.slice(1).count("F NaN 0 0 0 0"), 10, "silent: no telemetry in this session")
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f != null:
 		eq(f.get_buffer(4).get_string_from_ascii(), "RIFF", "it is a RIFF file")
@@ -158,6 +164,7 @@ func test_stop_without_start_and_double_start_are_honest() -> void:
 	eq(client.dvr_stop("goggles").size(), 0, "stop without start is empty")
 	var path := OS.get_user_data_dir() + "/test_dvr_double.avi"
 	DirAccess.remove_absolute(path)  # a previous run's file: a start never overwrites one
+	DirAccess.remove_absolute(path.get_basename() + ".audio")
 	eq(client.dvr_start("goggles", path, 4, 2), "", "first start")
 	ok(client.dvr_start("goggles", path, 4, 2) != "", "a second start fails")
 	client.dvr_stop("goggles")
@@ -168,8 +175,9 @@ func test_two_feeds_record_independently() -> void:
 	var client := await _client()
 	var p1 := OS.get_user_data_dir() + "/test_dvr_feed_goggles.avi"
 	var p2 := OS.get_user_data_dir() + "/test_dvr_feed_clean.avi"
-	DirAccess.remove_absolute(p1)
-	DirAccess.remove_absolute(p2)
+	for p in [p1, p2]:
+		DirAccess.remove_absolute(p)
+		DirAccess.remove_absolute(p.get_basename() + ".audio")
 	eq(client.dvr_start("goggles", p1, 4, 2), "", "goggles starts")
 	eq(client.dvr_start("clean", p2, 4, 2), "", "clean starts alongside it")
 	ok(client.dvr_start("clean", p2, 4, 2) != "", "a second clean start fails")
@@ -189,6 +197,7 @@ func test_the_binding_exports_a_finished_recording_as_frames() -> void:
 	var path := OS.get_user_data_dir() + "/test_dvr_export.avi"
 	var out_dir := OS.get_user_data_dir() + "/test_dvr_export_frames"
 	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(path.get_basename() + ".audio")
 	for file in DirAccess.get_files_at(out_dir):
 		DirAccess.remove_absolute(out_dir.path_join(file))
 	DirAccess.remove_absolute(out_dir)

@@ -31,6 +31,10 @@ impl AudioLog {
         let file = File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut log = AudioLog { out: BufWriter::new(file), error: None };
         log.put(format_args!("{HEADER}\n"));
+        // Flushed now, so a kill in the first second still leaves a file with its header.
+        if let Err(e) = log.out.flush() {
+            log.error.get_or_insert(format!("writing the audio log: {e}"));
+        }
         log.error.take().map_or(Ok(log), Err)
     }
 

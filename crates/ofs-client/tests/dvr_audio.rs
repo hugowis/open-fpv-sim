@@ -204,3 +204,11 @@ fn corrupt_numbers_are_an_error_or_harmless_never_a_panic() {
     assert_eq!(frames, 2);
     assert_eq!(out.len(), 2 * CHUNK_BYTES);
 }
+
+#[test]
+fn the_header_is_on_disk_at_once() {
+    let dir = fresh_dir("header");
+    let path = dir.join("rec.audio");
+    let _log = AudioLog::create(&path).unwrap(); // not finished: a kill right after the start
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "ofs-dvr-audio 1\n");
+}
