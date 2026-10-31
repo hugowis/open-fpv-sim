@@ -198,7 +198,7 @@ pub const TERRAIN_RF_LOSS_DB: f64 = 60.0;
 /// the grid and the best sample refined by a golden-section search; the loss is capped at [`TERRAIN_RF_LOSS_DB`].
 pub fn terrain_loss_db(terrain: &Terrain, a: DVec3, b: DVec3, wavelength_m: f64) -> f64 {
     let length = a.distance(b);
-    if length < 1e-9 {
+    if length.is_nan() || length < 1e-9 {
         return 0.0;
     }
     // The part [t0, t1] of the path over the grid (a slab test per axis).
@@ -223,9 +223,10 @@ pub fn terrain_loss_db(terrain: &Terrain, a: DVec3, b: DVec3, wavelength_m: f64)
         return 0.0;
     }
     // Clear when even the lowest point of the path is above the highest ground by the clear-path Fresnel margin
-    // (v <= -0.78 wherever the edge is, since d1 * d2 <= (length / 2)^2).
+    // (v <= -0.78 wherever the edge is, since d1 * d2 <= (length / 2)^2). `fresnel_v` clamps d1 and d2 to 1 m, so
+    // d1 * d2 can reach 1 at the ends of a path shorter than 3 m: the margin uses at least 3 m.
     let lowest = -a.lerp(b, t0).z.max(a.lerp(b, t1).z);
-    if lowest > terrain.max_height() + 0.78 * (wavelength_m * length / 8.0).sqrt() {
+    if lowest > terrain.max_height() + 0.78 * (wavelength_m * length.max(3.0) / 8.0).sqrt() {
         return 0.0;
     }
     let v = |t: f64| {

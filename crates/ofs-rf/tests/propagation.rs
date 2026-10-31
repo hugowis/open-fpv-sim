@@ -330,4 +330,40 @@ fn obstruction_db_adds_terrain_to_the_objects() {
     assert!(terrain > 1.0, "so is the ridge: {terrain}");
     assert_eq!(obstruction_db(&[building], Some(&ridge), a, b, 5800.0), objects + terrain);
     assert_eq!(obstruction_db(&[building], None, a, b, 5800.0), objects);
+    assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda), "the objects alone are the one building's loss");
+}
+
+#[test]
+fn terrain_loss_with_a_nan_position_is_zero() {
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let ok = DVec3::new(40.0, 0.0, -2.0);
+    for bad in [DVec3::new(f64::NAN, 0.0, -2.0), DVec3::new(0.0, f64::NAN, -2.0), DVec3::new(0.0, 0.0, f64::NAN)] {
+        assert_eq!(terrain_loss_db(&ridge, bad, ok, lambda), 0.0);
+        assert_eq!(terrain_loss_db(&ridge, ok, bad, lambda), 0.0);
+    }
+}
+
+#[test]
+fn a_path_shorter_than_3_m_is_not_cleared_by_the_early_out_too_soon() {
+    // Half a metre long, 5 cm under the crest: fresnel_v clamps d1 and d2 to 1 m, so v is only about -0.44.
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let (a, b) = (DVec3::new(20.0, 0.0, -10.05), DVec3::new(20.5, 0.0, -10.05));
+    let scanned = scanned_loss(&ridge, a, b, lambda, 20_000);
+    assert!(scanned > 1.0, "the scan sees a loss: {scanned}");
+    close(terrain_loss_db(&ridge, a, b, lambda), scanned, 0.05, "a short path just under the crest");
+}
+
+#[test]
+fn a_ray_crossing_the_ridge_from_outside_the_footprint_uses_the_true_distances() {
+    let lambda = wavelength_m(5800.0);
+    let (a, b) = (DVec3::new(-40.0, 0.0, -2.0), DVec3::new(80.0, 0.0, -2.0));
+    let expected = knife_edge_loss_db(fresnel_v(8.0, 60.0, 60.0, lambda));
+    close(terrain_loss_db(&ridge(20, 10.0), a, b, lambda), expected, 0.05, "d1 = d2 = 60 m from the real ends");
+}
+
+#[test]
+fn the_terrain_loss_is_capped() {
+    // An end 80 m underground: v is about 500, far over the cap's 225.
+    let (a, b) = (DVec3::new(0.0, 0.0, 80.0), DVec3::new(40.0, 0.0, -2.0));
+    assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), TERRAIN_RF_LOSS_DB);
 }
