@@ -92,8 +92,9 @@ the old code path's expected value; the radio goldens and `ofs-sim` radio golden
 
 ## Objects root to the terrain
 
-`Shape::rooted(self)` decides "stands on the ground" by `bottom_z >= -ON_GROUND_M`, the plane. It becomes
-`Shape::rooted(self, terrain: Option<&Terrain>)`: the shape stands on the ground when its bottom is at or below the
+`Shape::rooted(self)` decides "stands on the ground" by `bottom_z >= -ON_GROUND_M`, the plane. It stays (the plane, as a
+one-line delegate, so the many existing callers do not change) and a new
+`Shape::rooted_on(self, terrain: Option<&Terrain>)` holds the rule: the shape stands on the ground when its bottom is at or below the
 ground under its footprint's centre, within `ON_GROUND_M`: `bottom_z >= ground_d(centre) - ON_GROUND_M`, with
 `ground_d = 0` without terrain (the old test exactly). Then it continues `ROOT_DEPTH_M` below its top as before, which
 clears any hill (the amplitude cap is 100 m, the root 1000 m).
