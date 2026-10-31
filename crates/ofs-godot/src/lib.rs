@@ -11,7 +11,7 @@ use godot::prelude::*;
 use ofs_audio::{Audio, AudioInput, SAMPLE_RATE};
 use ofs_client::dvr::DvrFeed;
 use ofs_client::dvr_export::Exporter;
-use ofs_client::{Client, Command, EventKind, LaunchSpec, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Update};
+use ofs_client::{terrain_mesh, Client, Command, EventKind, LaunchSpec, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Update};
 
 /// The most frames one `audio_render` call produces; a bad argument must not allocate gigabytes.
 const MAX_AUDIO_FRAMES: usize = 1 << 16;
@@ -454,12 +454,17 @@ impl OfsClient {
     /// The loaded session's world in Godot's frame, or an empty Dictionary before it arrives: `name`,
     /// `pilot_position` (Vector3), `antennas` (Array of {`name`, `kind`, `aim`: Vector3}), `objects` (Array of {`name`,
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
-    /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`}) and
+    /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`,
+    /// `ground_y`: the terrain height under it, 0 on flat ground}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
     /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}) as declared,
     /// `courses` (Array of {`name`, `gates`: Array of gate names in course order, `mode` ("laps" or "time_attack"),
     /// `laps` (0 = none), `time_limit_s`}; empty for a world without `[[courses]]`, which races all `gates` in order)
-    /// and `default_course` (the index a fresh session starts in).
+    /// and `default_course` (the index a fresh session starts in). A world with a `[terrain]` also has `terrain`
+    /// (absent on flat ground): {`origin_x`, `origin_z`: Godot position of grid node (0, 0), `cell_m`, `nodes_n`,
+    /// `nodes_e`, `vertices` (PackedVector3Array, vertex `i * nodes_e + j` is node (i, j)), `normals`
+    /// (PackedVector3Array), `indices` (PackedInt32Array, clockwise triangles, the sim's own diagonal) and `digest`
+    /// (String, 16 hex digits)}.
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -492,6 +497,7 @@ impl OfsClient {
             e.set("position", vector3(x.position.x, x.position.y, x.position.z));
             e.set("freq_mhz", x.freq_mhz);
             e.set("power_mw", x.power_mw);
+            e.set("ground_y", x.ground_y);
             emitters.push(&e.to_variant());
         }
         let mut gates = VarArray::new();
@@ -538,7 +544,30 @@ impl OfsClient {
         }
         d.set("courses", &courses);
         d.set("default_course", i64::from(world.default_course));
+        if let Some(t) = &world.terrain {
+            let mesh = terrain_mesh(t);
+            let (nodes_n, nodes_e) = t.nodes();
+            let [origin_n, origin_e] = t.origin_ne();
+            let mut e = VarDictionary::new();
+            e.set("origin_x", origin_e);
+            e.set("origin_z", -origin_n);
+            e.set("cell_m", t.cell_m());
+            e.set("nodes_n", nodes_n as i64);
+            e.set("nodes_e", nodes_e as i64);
+            e.set("vertices", &mesh.positions.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect::<PackedVector3Array>());
+            e.set("normals", &mesh.normals.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect::<PackedVector3Array>());
+            e.set("indices", &mesh.indices.iter().map(|&i| i as i32).collect::<PackedInt32Array>());
+            e.set("digest", &GString::from(format!("{:016x}", t.digest()).as_str()));
+            d.set("terrain", &e);
+        }
         d
+    }
+
+    /// The ground's height in metres at the Godot-frame point (`x` east, `z` south): the simulator's own
+    /// `Terrain::height_up`, 0 on flat ground or before the world arrives. The reference the drawn mesh is compared to.
+    #[func]
+    fn terrain_height(&self, x: f64, z: f64) -> f64 {
+        self.client.as_ref().and_then(|c| c.world()).and_then(|w| w.terrain).map_or(0.0, |t| t.height_up(-z, x))
     }
 
     /// Counts world updates; when it changes, `get_world()` has a new world (or none, while a load is under way).

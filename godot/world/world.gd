@@ -1,13 +1,18 @@
 extends Node3D
-## The grey-box world. The sky, the sun and the ground plane with its metre grid are drawn here; the objects on the
-## field (launch pad, pylons, gates, buildings), the pilot's spot and other transmitters come from the world file the
-## simulator loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the
-## physics: the simulator collides the drone with these objects and its ground plane, and the video link's
-## occlusion is the simulator's too — this node only draws.
+## The grey-box world. The sky, the sun and the ground (a flat plane with its metre grid, or the terrain mesh the
+## simulator samples when the world has a `[terrain]`) are drawn here; the objects on the field (launch pad, pylons,
+## gates, buildings), the pilot's spot and other transmitters come from the world file the simulator loaded
+## (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the physics: the
+## simulator collides the drone with these objects and its ground, and the video link's occlusion is the
+## simulator's too — this node only draws.
 ##
 ## Godot's frame: +Y up, forward (north, where the drone starts facing) is -Z, +X is right (east).
 
 const GRID_SHADER := preload("res://world/grid.gdshader")
+
+## How far the flat ring around a terrain grid reaches, and the flat plane's side.
+const RING_EXTENT_M := 3000.0
+const GROUND_SIZE_M := 6000.0
 
 const PILOT_COLOR := Color(0.25, 0.55, 1.0)
 const EMITTER_COLOR := Color(0.85, 0.25, 0.85)
@@ -21,6 +26,8 @@ const PILOT_BODY_HEIGHT_M := 1.5
 
 ## The nodes `build` made, removed by the next `build`.
 var _built: Array[Node] = []
+## The flat ground plane: hidden while a terrain mesh stands in for it.
+var _ground: MeshInstance3D
 ## The opening materials of the gates `build` made, in course order, so `set_next_gate` can recolour them.
 var _gate_materials: Array[StandardMaterial3D] = []
 var _gate_nodes: Array[Node3D] = []
@@ -45,6 +52,9 @@ func build(world: Dictionary) -> void:
 	_built.clear()
 	_gate_materials.clear()
 	_gate_nodes.clear()
+	_ground.visible = not world.has("terrain")
+	if world.has("terrain"):
+		_add_terrain(world["terrain"])
 	_gates = world.get("gates", [])
 	_courses = world.get("courses", [])
 	_course = int(world.get("default_course", 0))
@@ -148,14 +158,61 @@ func _add_environment() -> void:
 
 func _add_ground() -> void:
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(6000.0, 6000.0)
+	plane.size = Vector2(GROUND_SIZE_M, GROUND_SIZE_M)
+	_ground = MeshInstance3D.new()
+	_ground.name = "Ground"
+	_ground.mesh = plane
+	_ground.material_override = _grid_material()
+	add_child(_ground)
+
+
+func _grid_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = GRID_SHADER
-	var ground := MeshInstance3D.new()
-	ground.name = "Ground"
-	ground.mesh = plane
-	ground.material_override = material
-	add_child(ground)
+	return material
+
+
+## The terrain `get_world()` describes: the grid's triangles as they came (surface 0), and a flat ring from its edge
+## outwards (surface 1), where the simulator's ground is the plane d = 0.
+func _add_terrain(t: Dictionary) -> void:
+	var grid := []
+	grid.resize(Mesh.ARRAY_MAX)
+	grid[Mesh.ARRAY_VERTEX] = t["vertices"]
+	grid[Mesh.ARRAY_NORMAL] = t["normals"]
+	grid[Mesh.ARRAY_INDEX] = t["indices"]
+	var cell: float = t["cell_m"]
+	var x0: float = t["origin_x"]
+	var z1: float = t["origin_z"]
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, grid)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, ring_arrays(x0, x0 + (int(t["nodes_e"]) - 1) * cell, z1 - (int(t["nodes_n"]) - 1) * cell, z1))
+	var instance := MeshInstance3D.new()
+	instance.name = "Terrain"
+	instance.mesh = mesh
+	instance.material_override = _grid_material()
+	_add_built(instance)
+
+
+## The surface arrays of the flat ring (y = 0) between the rectangle [x0, x1] x [z0, z1] and the one `extent` beyond
+## it: vertices 0-3 the outer corners and 4-7 the inner, both north-west, north-east, south-east, south-west (north is
+## -Z), eight triangles, every one clockwise seen from above (Godot's front face).
+static func ring_arrays(x0: float, x1: float, z0: float, z1: float, extent: float = RING_EXTENT_M) -> Array:
+	var vertices := PackedVector3Array()
+	for r in [extent, 0.0]:
+		vertices.append_array([Vector3(x0 - r, 0.0, z0 - r), Vector3(x1 + r, 0.0, z0 - r), Vector3(x1 + r, 0.0, z1 + r), Vector3(x0 - r, 0.0, z1 + r)])
+	var indices := PackedInt32Array()
+	for k in 4:
+		var next := (k + 1) % 4
+		indices.append_array([k, next, 4 + next, k, 4 + next, 4 + k])
+	var normals := PackedVector3Array()
+	normals.resize(8)
+	normals.fill(Vector3.UP)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	return arrays
 
 
 func _material(color: Color) -> StandardMaterial3D:
@@ -279,16 +336,17 @@ func _add_gate(index: int, g: Dictionary) -> void:
 	_gate_nodes.append(gate)
 
 
-## A post up to the transmitter, labelled with its frequency.
+## A post from the ground below it up to the transmitter, labelled with its frequency.
 func _add_emitter(e: Dictionary) -> void:
 	var at: Vector3 = e["position"]
+	var ground_y: float = e.get("ground_y", 0.0)
 	var marker := Node3D.new()
 	marker.name = "Emitter_" + String(e["name"])
-	marker.position = Vector3(at.x, 0.0, at.z)
+	marker.position = Vector3(at.x, ground_y, at.z)
 	var post := CylinderMesh.new()
 	post.top_radius = 0.05
 	post.bottom_radius = 0.05
-	post.height = maxf(at.y, 0.1)
+	post.height = maxf(at.y - ground_y, 0.1)
 	marker.add_child(_mesh("Post", post, EMITTER_COLOR, Vector3(0.0, post.height * 0.5, 0.0)))
 	var label := Label3D.new()
 	label.name = "Label"

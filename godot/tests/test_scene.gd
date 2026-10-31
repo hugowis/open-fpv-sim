@@ -263,3 +263,81 @@ func test_the_lens_toggles_and_feeds_its_shader() -> void:
 	lens.set_enabled(false)
 	ok(not lens.visible, "hidden for the chase view")
 	lens.queue_free()
+
+
+## A one-cell terrain like the one `OfsClient.get_world()` returns: 2 x 2 nodes 2 m apart, node (0, 0) at x 10, z -20
+## (vertex i * nodes_e + j, north the slow index so z falls with i), the cell's two triangles as terrain_mesh lays them.
+func _terrain_world() -> Dictionary:
+	return {"terrain": {
+		"origin_x": 10.0, "origin_z": -20.0, "cell_m": 2.0, "nodes_n": 2, "nodes_e": 2,
+		"vertices": PackedVector3Array([Vector3(10, 0, -20), Vector3(12, 0.5, -20), Vector3(10, 0, -22), Vector3(12, 1, -22)]),
+		"normals": PackedVector3Array([Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP]),
+		"indices": PackedInt32Array([0, 2, 3, 0, 3, 1]),
+		"digest": "0123456789abcdef",
+	}}
+
+
+## Every triangle of `indices` over `vertices` faces up under Godot's clockwise-front rule.
+func _all_face_up(vertices: PackedVector3Array, indices: PackedInt32Array) -> bool:
+	for t in indices.size() / 3:
+		if Plane(vertices[indices[3 * t]], vertices[indices[3 * t + 1]], vertices[indices[3 * t + 2]]).normal.y <= 0.0:
+			return false
+	return true
+
+
+func test_a_terrain_world_draws_a_mesh_and_hides_the_flat_ground() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var dict := _terrain_world()
+	world.build(dict)
+	ok(world.built_names().has("Terrain"), "the terrain is one of the built nodes")
+	var terrain: MeshInstance3D = world.get_node("Terrain")
+	ok(terrain.material_override is ShaderMaterial, "drawn by the grid shader")
+	var mesh := terrain.mesh as ArrayMesh
+	eq(mesh.get_surface_count(), 2, "the grid and the ring")
+	ok(not (world.get_node("Ground") as MeshInstance3D).visible, "the flat ground is hidden")
+	var grid := mesh.surface_get_arrays(0)
+	var t: Dictionary = dict["terrain"]
+	eq(grid[Mesh.ARRAY_VERTEX], t["vertices"], "surface 0 holds the dict's vertices")
+	eq(grid[Mesh.ARRAY_INDEX], t["indices"], "and its indices")
+	ok(_all_face_up(grid[Mesh.ARRAY_VERTEX], grid[Mesh.ARRAY_INDEX]), "every grid triangle is front-facing from above")
+	var ring := mesh.surface_get_arrays(1)
+	var rv: PackedVector3Array = ring[Mesh.ARRAY_VERTEX]
+	eq(rv.size(), 8, "the ring has an outer and an inner corner each")
+	eq((ring[Mesh.ARRAY_INDEX] as PackedInt32Array).size(), 24, "eight triangles")
+	ok(_all_face_up(rv, ring[Mesh.ARRAY_INDEX]), "every ring triangle is front-facing from above")
+	# The grid's rectangle: x from origin_x east over one cell, z from origin_z (the south edge) one cell north.
+	var inner := [rv[4], rv[5], rv[6], rv[7]]
+	eq(inner, [Vector3(10, 0, -22), Vector3(12, 0, -22), Vector3(12, 0, -20), Vector3(10, 0, -20)], "the ring's inner corners are the grid's")
+	eq([rv[0].x, rv[1].x, rv[0].z, rv[2].z], [-2990.0, 3012.0, -3022.0, 2980.0], "and the outer ones lie 3000 m beyond")
+	world.queue_free()
+
+
+func test_a_flat_world_after_a_hilly_one_shows_the_ground_again() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	world.build(_terrain_world())
+	world.build({})
+	ok(world.get_node_or_null("Terrain") == null, "the terrain is removed at once")
+	ok((world.get_node("Ground") as MeshInstance3D).visible, "the flat ground is back")
+	world.queue_free()
+
+
+func test_the_ring_arrays_wind_upward_around_any_rectangle() -> void:
+	var a: Array = World.ring_arrays(-5.0, 7.0, -40.0, -10.0, 100.0)
+	var v: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+	ok(_all_face_up(v, a[Mesh.ARRAY_INDEX]), "front-facing")
+	for p in v:
+		eq(p.y, 0.0, "at the sea-level of the plane")
+	eq(v[4], Vector3(-5, 0, -40), "the inner rectangle starts at its north-west corner")
+	eq(v[0], Vector3(-105, 0, -140), "and the outer one is `extent` beyond")
+
+
+func test_an_emitter_post_stands_on_the_ground_below_it() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	world.build({"emitters": [{"name": "hill", "position": Vector3(5.0, 4.0, -6.0), "freq_mhz": 5800.0, "power_mw": 25.0, "ground_y": 1.5}]})
+	var marker: Node3D = world.get_node("Emitter_hill")
+	eq(marker.position, Vector3(5.0, 1.5, -6.0), "the post starts on the ground")
+	eq(((marker.get_node("Post") as MeshInstance3D).mesh as CylinderMesh).height, 2.5, "and rises to the emitter")
+	world.queue_free()
