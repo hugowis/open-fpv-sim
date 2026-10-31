@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{Checker, ConfigError, Problem};
+use crate::{Checker, ConfigError, Problem, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
 
 pub const WORLD_SCHEMA_VERSION: u32 = 1;
 
@@ -64,6 +64,9 @@ pub struct WorldConfig {
     /// Named courses over the declared gates; absent = one course of all the gates in file order.
     #[serde(default)]
     pub courses: Vec<CourseSection>,
+    /// The ground's relief; absent = flat ground (the plane d = 0).
+    #[serde(default)]
+    pub terrain: Option<TerrainSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
 }
@@ -417,6 +420,7 @@ impl WorldConfig {
             gates: Vec::new(),
             race: RaceSection::default(),
             courses: Vec::new(),
+            terrain: None,
             source_path: PathBuf::new(),
         }
     }
@@ -533,6 +537,9 @@ impl WorldConfig {
             c.check(finite(&[a.aim_az_deg, a.aim_el()]), &field("aim_az_deg"), "aims must be finite");
             check_beamwidth(&mut c, a.kind, a.beamwidth_deg, &field("beamwidth_deg"));
         }
+        if let Some(t) = &self.terrain {
+            self.check_terrain(&mut c, t, handset_at);
+        }
         let mut names = HashSet::new();
         for (i, o) in self.objects.iter().enumerate() {
             let field = |f: &str| format!("objects[{i}].{f}");
@@ -629,6 +636,37 @@ impl WorldConfig {
             }
         }
         c.0
+    }
+}
+
+impl WorldConfig {
+    /// The terrain's rules. The grid is baked (for the slope cap and the places) only when the numbers passed.
+    fn check_terrain(&self, c: &mut Checker, t: &TerrainSection, handset_at: [f64; 3]) {
+        let before = c.0.len();
+        t.check(c);
+        if c.0.len() != before {
+            return;
+        }
+        let ground = t.build();
+        let max_deg = ground.max_slope().atan().to_degrees();
+        c.check(
+            max_deg <= MAX_TERRAIN_SLOPE_DEG,
+            "terrain.amplitude_m",
+            format!("the steepest slope is {max_deg:.1} degrees, over the {MAX_TERRAIN_SLOPE_DEG} degree limit: lower amplitude_m or raise wavelength_m"),
+        );
+        // A d above 0 is already reported as below the flat ground; a non-finite place is reported as such.
+        let below = |at: [f64; 3]| at.iter().all(|v| v.is_finite()) && at[2] <= 0.0 && at[2] > ground.ground_d(at[0], at[1]);
+        let pilot_at = self.pilot.position_ned_m;
+        let pilot_below = below(pilot_at);
+        c.check(!pilot_below, "pilot.position_ned_m", format!("the pilot must not be below the terrain (d = {}, the ground is at d = {})", pilot_at[2], ground.ground_d(pilot_at[0], pilot_at[1])));
+        // A derived handset inherits the pilot's fault: report the pilot only.
+        if self.handset.position_ned_m.is_some() || !pilot_below {
+            c.check(
+                !below(handset_at),
+                "handset.position_ned_m",
+                format!("the handset must not be below the terrain (d = {}, the ground is at d = {})", handset_at[2], ground.ground_d(handset_at[0], handset_at[1])),
+            );
+        }
     }
 }
 
