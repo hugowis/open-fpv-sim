@@ -410,8 +410,8 @@ impl OfsClient {
         GString::new()
     }
 
-    /// The exports that finished since the last call: an Array of `{path, kind ("frames" or "mp4"), ok, detail}`
-    /// (`detail` is the output path, or the error).
+    /// The exports that finished since the last call: an Array of `{path, kind ("frames", "mp4" or "export" for
+    /// a panicked job), ok, detail}` (`detail` is the output path, or the error).
     #[func]
     fn dvr_export_poll(&self) -> VarArray {
         let mut out = VarArray::new();

@@ -22,6 +22,49 @@ fn write_avi(path: &Path, frames: &[&[u8]]) {
     writer.stop().unwrap();
 }
 
+/// An ffmpeg stand-in that takes its last argument as the output path, writes `PARTIAL` into it, prints
+/// `synthetic ffmpeg failure` to stderr and exits 1: a conversion that dies halfway through its output.
+/// Windows runs no script under a `.exe` name, so there the flavor is a `.cmd` batch (the name never reaches
+/// the code under test: the path is handed straight to `export_mp4`).
+fn failing_ffmpeg(dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let path = dir.join("ffmpeg.cmd");
+        std::fs::write(
+            &path,
+            "@echo off\r\n\
+             set \"out=\"\r\n\
+             :loop\r\n\
+             if \"%~1\"==\"\" goto done\r\n\
+             set \"out=%~1\"\r\n\
+             shift\r\n\
+             goto loop\r\n\
+             :done\r\n\
+             echo PARTIAL> \"%out%\"\r\n\
+             echo synthetic ffmpeg failure 1>&2\r\n\
+             exit /b 1\r\n",
+        )
+        .unwrap();
+        path
+    }
+    #[cfg(unix)]
+    {
+        let path = dir.join("ffmpeg");
+        std::fs::write(
+            &path,
+            "#!/bin/sh\n\
+             for out in \"$@\"; do :; done\n\
+             printf 'PARTIAL\\n' > \"$out\"\n\
+             echo synthetic ffmpeg failure >&2\n\
+             exit 1\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+}
+
 #[test]
 fn frames_are_copied_verbatim_and_numbered_from_one() {
     let dir = fresh_dir("verbatim");
@@ -243,6 +286,20 @@ fn export_mp4_refuses_an_existing_mp4() {
     let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
     assert!(err.contains("rec.mp4") && err.contains("already exists"), "{err}");
     assert_eq!(std::fs::read(dir.join("rec.mp4")).unwrap(), b"mine");
+}
+
+#[test]
+fn a_failed_mp4_export_removes_its_partial_so_a_retry_runs_again() {
+    let dir = fresh_dir("mp4retry");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA"]);
+    let fake = failing_ffmpeg(&dir);
+    let err = export_mp4(&fake, &avi).unwrap_err();
+    assert!(err.contains("synthetic ffmpeg failure"), "{err}");
+    assert!(!dir.join("rec.mp4").exists(), "the partial the failed run wrote is removed");
+    let retry = export_mp4(&fake, &avi).unwrap_err();
+    assert!(!retry.contains("already exists"), "the retry is not refused on the dead partial: {retry}");
+    assert!(retry.contains("synthetic ffmpeg failure"), "the retry ran the conversion again: {retry}");
 }
 
 #[test]

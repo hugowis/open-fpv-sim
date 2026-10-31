@@ -40,6 +40,28 @@ repository). The format follows Keep a Changelog.
 - Not checked: nobody has listened to an exported clip (headless, no audio device). Play an MP4 in VLC: the sound should
   match the picture.
 
+### The terrain slope cap decides exactly (the #161 follow-up)
+#### Fixed
+- **A world within an ulp of the 60 degree terrain limit now validates identically on every OS**: the cap decides
+  `slope * slope <= 3` (`tan²60° = 3` exactly, and an IEEE multiply is correctly rounded) instead of comparing
+  `atan`-computed degrees — `atan` is a libm call that may differ by an ulp between OSes, so a boundary world could
+  pass on one OS and fail on another. `atan` remains, display only, to name the degrees in the rejection message.
+
+### The game's launcher takes an automatic server port (the #110 follow-up)
+#### Added
+- **`server_addr` port 0 lets the game start beside anything on the fixed port**: with `--server 127.0.0.1:0`
+  (the `server address` setting, or `OFS_SERVER_ADDR`) the Godot client's launcher passes `ofs-sim --port-file`
+  and connects to the OS-picked port the server reports there, as Python's `ofs.launch()` has since #110 — a
+  process holding `127.0.0.1:50051` no longer breaks game launch, and two clients can fly at once. Every fixed
+  address behaves exactly as before.
+
+### DVR export: a failed retry and a panicking export (#137)
+#### Fixed
+- **A failed MP4 export clears its partial file so a retry works, and a panicking export reports instead of going
+  silent**: the half-written `<stem>.mp4` a failing ffmpeg left behind no longer makes every retry die on
+  "already exists" (the file is removed only when the failed run itself wrote it; the never-overwrite rule stands),
+  and a panic in the export thread reaches `dvr_export_poll()` as an error instead of hanging the client's UI state.
+
 ### A heightfield ground for the physics (#153, part 1 of 3 of #27)
 #### Added
 - **`[terrain]` in the world file**, opt-in: `seed`, `size_m`, `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`,

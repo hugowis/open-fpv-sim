@@ -122,7 +122,7 @@ SITL target is a blocker. Sockets, `pthread`, the monotonic clock and `nanosleep
 runtime of MSYS2, and the port items above are small (about 50 added lines in 6 files, and the 23-line stub file).
 
 What has to happen before native Windows can be the default path:
-1. **A CI job** (done, #107: see "CI" below). Promote it into `publish.needs` after a clean record.
+1. **A CI job** (done, #107: see "CI" below; in `publish.needs` since 2026-10-31).
 2. **The stub file** (`win_stubs.c`): find why `--gc-sections` removes nothing on this PE target, or generate the list
    in the build script; a new Betaflight tag will add names. The CI job at least names them (see "CI").
 3. **Distribution**: the executable and two DLLs are built by each user; shipping a prebuilt zip is a separate decision that
@@ -138,8 +138,9 @@ What has to happen before native Windows can be the default path:
 The `windows-sitl` job of `.github/workflows/ci.yml` (spec `docs/superpowers/specs/2026-10-25-windows-sitl-ci-design.md`):
 `windows-latest`, `msys2/setup-msys2` on the runner's own MSYS2, `scripts/build-sitl-windows.sh` into `C:/ofs/betaflight`,
 then from the runner's PowerShell (no MSYS2 on `PATH`): `sitl_live` for `ofs-fc` and `ofs-sim`, `vtx_live`, the ten Python
-SITL files of the Linux job, and the headless benchmark (real-time factor in the job summary). `continue-on-error`, not in
-`publish.needs`, as the macOS job. The three build outputs (the `.exe` and the two DLLs) are cached on the build script and
+SITL files of the Linux job, and the headless benchmark (real-time factor in the job summary). It gates `publish`
+(promoted 2026-10-31, after 13 consecutive green runs; the macOS job is the one still non-blocking, #118). The three
+build outputs (the `.exe` and the two DLLs) are cached on the build script and
 `third_party/betaflight/**`, and uploaded as the `betaflight-sitl-windows` artifact (14 days; shipping a zip is still the
 licence question above).
 
@@ -148,14 +149,18 @@ object defines) fails the link. The script runs make in the C locale, and on fai
 Actions `::error` annotation: "win_stubs.c does not cover the link: undefined symbols: ...". Tested locally by building with a
 copy of the Windows patch whose stub file lacks `IORead`. A stub that is *called* aborts with its name and fails the live test.
 
-**Record** (fill in from the runs; promote after about ten clean ones):
+**Record** (fill in from the runs):
 
 | Date | Build (cold) | Build (cache hit) | Whole job | Native real-time factor | Failures / flaky tests |
 |---|---|---|---|---|---|
 | 2026-10-25 (run 40228666831, cold) | 83 s MSYS2 setup + 61 s build | n/a | 14 m 42 s | SITL 5.8x (recording), 6.7x (no recording); open loop 40.9x, 117x | none: `sitl_live` 7 + 13, `vtx_live` 1, Python 26 passed (1 skipped) |
 | 2026-10-25 (run 40231921016, cache hit) | n/a | no MSYS2 setup, no build | 9 m 15 s | not read | none |
 
-Four runs so far (two cold, one on the PR, one cache hit), all green. The 30 s benchmark rows are the best of 2 on a shared
-runner, so the SITL rows are about half of the 10.9x / 13.2x of the local machine (one run on one machine); the open-loop
-rows are far above them. The first main run pays the cold build once, because a cache saved on a branch or a pull request is
-not visible to `main`.
+The first four runs (two cold, one on the PR, one cache hit) were all green. The 30 s benchmark rows are the best of 2 on a
+shared runner, so the SITL rows are about half of the 10.9x / 13.2x of the local machine (one run on one machine); the
+open-loop rows are far above them. The first main run pays the cold build once, because a cache saved on a branch or a
+pull request is not visible to `main`.
+
+Promoted into `publish.needs` and out of `continue-on-error` on 2026-10-31, after 13 consecutive green runs: every `ci`
+run on `main` since the job landed (2026-10-25) — 9 runs, through run 41209520491 — plus the 4 green branch runs before
+that. The macOS job is the one still non-blocking (#118).

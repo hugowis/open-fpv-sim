@@ -829,3 +829,33 @@ fn a_pilot_above_the_hills_is_fine() {
     let text = with_terrain(HILL).replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [60.0, 40.0, -30.0]", 1);
     assert!(written_world(&text).is_ok(), "{:?}", written_world(&text).err());
 }
+
+/// The baked slopes really do straddle tan 60 = sqrt(3) by a whisker (the amplitude is the only difference), and the
+/// sections are built directly because `terrain_of` loads a world file and the over-cap one must not load.
+#[test]
+fn the_slope_cap_takes_a_world_just_under_tan_60_and_refuses_one_just_over() {
+    // The amplitude pair was tuned so the steepest slope is the closest this generator gets to the cap from below
+    // (2.4e-9 relative) and the first past it (4.7e-8 relative).
+    let body = |a: &str| format!("seed = 0
+size_m = 60.0
+cell_m = 1.0
+amplitude_m = {a}
+wavelength_m = 15.0
+octaves = 3
+persistence = 0.5
+flat_radius_m = 5.0");
+    let section = |a: f64| TerrainSection { amplitude_m: a, size_m: 60.0, wavelength_m: 15.0, flat_radius_m: 5.0, ..Default::default() };
+    let tan60 = 3.0f64.sqrt();
+    for (a, side) in [("10.666648164268156", -1.0f64), ("10.666648723199209", 1.0f64)] {
+        let gap = section(a.parse().unwrap()).build().max_slope() / tan60 - 1.0;
+        assert!(gap * side > 0.0 && gap.abs() < 1.0e-7, "amplitude {a}: the steepest slope is {gap:e} from tan 60");
+    }
+    let under = body("10.666648164268156");
+    let over = body("10.666648723199209");
+    assert!(written_world(&with_terrain(&under)).is_ok(), "{:?}", written_world(&with_terrain(&under)).err());
+    let found = problems(&with_terrain(&over));
+    assert!(
+        found.iter().any(|p| p.starts_with("terrain.amplitude_m: the steepest slope is 60.0 degrees, over the 60 degree limit")),
+        "{found:#?}"
+    );
+}

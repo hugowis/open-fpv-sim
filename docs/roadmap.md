@@ -54,8 +54,14 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
   recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
-  then). H.264 export needs an ffmpeg with libx264 and an AAC encoder on `PATH`. The audio leads the picture by the
-  goggles' latency (40 ms) and has no VTX buzzer (the sim has no buzzer model).
+  then). H.264 export needs an ffmpeg with libx264 and an AAC encoder on `PATH`, and an export still running when
+  the game quits is lost. The audio leads the picture by the goggles' latency (40 ms) and has no VTX buzzer (the sim
+  has no buzzer model).
+- Flight audio (#158, `docs/superpowers/specs/2026-10-31-flight-audio-design.md`), played live in the client:
+  airspeed is ground speed (the simulation has no wind yet), a hard landing and an object hit sound the same
+  (one thud), and the tone is the blade-pass fundamental plus 2x and 3x harmonics, which alias above about
+  7.35 kHz blade-pass. The samples are bit-identical on one platform only (`sin`/`exp`/`tanh` come from the
+  platform libm), so #159's DVR-audio goldens must not expect byte equality across OSes.
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports
@@ -68,10 +74,12 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   paced by the wall clock and flaked once), and promoting the macOS job into `publish.needs` after a record of clean
   `ci.yml` runs.
 - SITL runs natively on Windows, without WSL, from an MSYS2 build (`scripts/build-sitl-windows.sh`, #67,
-  `docs/research/sitl-native-windows.md`). It is experimental: no CI job builds it, the port needs a stub file for
-  hardware-only symbols (`--gc-sections` removes nothing on PE), the executable needs two Cygwin DLLs beside it, and it
-  has not been compared with the Linux SITL bit for bit. A DLL-free native Win32 (`ucrt64`) port is sized at several
-  days and not started.
+  `docs/research/sitl-native-windows.md`). It is experimental: the port needs a stub file for hardware-only symbols
+  (`--gc-sections` removes nothing on PE), the executable needs the two Cygwin runtime DLLs (`msys-2.0.dll`,
+  `msys-gcc_s-seh-1.dll`) beside it, and it has not been compared with the Linux SITL bit for bit. The `windows-sitl`
+  CI job builds it (MSYS2's msys environment, cached), live-tests the `.exe` from the runner's plain PowerShell, and
+  gates `publish` since 2026-10-31, after 13 consecutive green runs. A DLL-free native Win32 (`ucrt64`) port, which
+  this build is not, is sized at several days and not started (#105).
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
 - A session that ends while the quad is armed disarms Betaflight first (restoring the link, stepping until the motors
