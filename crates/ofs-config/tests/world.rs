@@ -750,7 +750,7 @@ fn a_seed_gives_one_grid_and_other_seeds_other_grids() {
 /// multiply-add: fix the generator, do not add a per-OS constant.
 #[test]
 fn the_default_grid_digest_is_pinned_on_every_os() {
-    assert_eq!(TerrainSection::default().build().digest(), 0xa382_160e_6e73_4cbd, "the default section's baked grid changed");
+    assert_eq!(TerrainSection::default().build().digest(), 0x9d1c_89d7_d6f5_fa1d, "the default section's baked grid changed");
 }
 
 #[test]

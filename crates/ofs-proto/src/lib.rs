@@ -1,4 +1,4 @@
-//! Protocol 15 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
+//! Protocol 16 messages and gRPC stubs, generated from `proto/ofs/v1/sim.proto`. The simulator server
 //! (`ofs-sim`) and every Rust client (`ofs-client`, the Godot extension) build against this one crate.
 // tonic's `Status` is the error type of every gRPC call (the generated traits fix it); boxing it would only move
 // the size elsewhere.
@@ -9,7 +9,10 @@ pub mod pb {
 }
 
 /// The protocol version this build speaks; the `Handshake` RPC compares it on both sides.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
+
+/// The largest reply a client accepts: tonic's 4 MiB default is smaller than a large `World.terrain` grid.
+pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// The unit vector (north, east, down) a heading and an elevation point along: how the server builds an antenna's
 /// aim and how clients draw it (`ReceiverAntenna.aim_az_deg` is added to the pilot's facing to give the heading).

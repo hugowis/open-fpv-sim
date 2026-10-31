@@ -82,3 +82,12 @@ fn the_digest_follows_the_exact_grid() {
     assert_ne!(a.digest(), c.digest());
     assert_eq!(a, b);
 }
+
+#[test]
+fn digest_changes_with_the_origin() {
+    let heights = vec![0.0, 1.0, 2.0, 3.0];
+    let at = |origin: [f64; 2]| Terrain::from_grid(origin, 1.0, 2, 2, heights.clone()).unwrap().digest();
+    assert_ne!(at([0.0, 0.0]), at([0.0, 1.0]));
+    assert_ne!(at([0.0, 0.0]), at([1.0, 0.0]));
+    assert_eq!(at([0.0, 1.0]), at([0.0, 1.0]));
+}

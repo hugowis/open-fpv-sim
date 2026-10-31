@@ -301,6 +301,21 @@ pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
                 .collect()
         },
         default_course: w.default_course() as u32,
+        // The same deterministic bake the vehicle samples.
+        terrain: w.terrain.as_ref().map(|section| {
+            let t = section.build();
+            let (nodes_n, nodes_e) = t.nodes();
+            let [origin_north_m, origin_east_m] = t.origin_ne();
+            pb::Terrain {
+                origin_north_m,
+                origin_east_m,
+                cell_m: t.cell_m(),
+                nodes_n: nodes_n as u32,
+                nodes_e: nodes_e as u32,
+                heights: t.heights().to_vec(),
+                digest: t.digest(),
+            }
+        }),
     }
 }
 

@@ -661,7 +661,7 @@ class Handset(_message.Message):
     def __init__(self, position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ...) -> None: ...
 
 class World(_message.Message):
-    __slots__ = ("name", "pilot_position_ned_m", "pilot_facing_deg", "antennas", "objects", "emitters", "handset", "gates", "courses", "default_course")
+    __slots__ = ("name", "pilot_position_ned_m", "pilot_facing_deg", "antennas", "objects", "emitters", "handset", "gates", "courses", "default_course", "terrain")
     NAME_FIELD_NUMBER: _ClassVar[int]
     PILOT_POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     PILOT_FACING_DEG_FIELD_NUMBER: _ClassVar[int]
@@ -672,6 +672,7 @@ class World(_message.Message):
     GATES_FIELD_NUMBER: _ClassVar[int]
     COURSES_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_COURSE_FIELD_NUMBER: _ClassVar[int]
+    TERRAIN_FIELD_NUMBER: _ClassVar[int]
     name: str
     pilot_position_ned_m: Vec3
     pilot_facing_deg: float
@@ -682,7 +683,26 @@ class World(_message.Message):
     gates: _containers.RepeatedCompositeFieldContainer[Gate]
     courses: _containers.RepeatedCompositeFieldContainer[Course]
     default_course: int
-    def __init__(self, name: _Optional[str] = ..., pilot_position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., pilot_facing_deg: _Optional[float] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ..., objects: _Optional[_Iterable[_Union[WorldObject, _Mapping]]] = ..., emitters: _Optional[_Iterable[_Union[Emitter, _Mapping]]] = ..., handset: _Optional[_Union[Handset, _Mapping]] = ..., gates: _Optional[_Iterable[_Union[Gate, _Mapping]]] = ..., courses: _Optional[_Iterable[_Union[Course, _Mapping]]] = ..., default_course: _Optional[int] = ...) -> None: ...
+    terrain: Terrain
+    def __init__(self, name: _Optional[str] = ..., pilot_position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., pilot_facing_deg: _Optional[float] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ..., objects: _Optional[_Iterable[_Union[WorldObject, _Mapping]]] = ..., emitters: _Optional[_Iterable[_Union[Emitter, _Mapping]]] = ..., handset: _Optional[_Union[Handset, _Mapping]] = ..., gates: _Optional[_Iterable[_Union[Gate, _Mapping]]] = ..., courses: _Optional[_Iterable[_Union[Course, _Mapping]]] = ..., default_course: _Optional[int] = ..., terrain: _Optional[_Union[Terrain, _Mapping]] = ...) -> None: ...
+
+class Terrain(_message.Message):
+    __slots__ = ("origin_north_m", "origin_east_m", "cell_m", "nodes_n", "nodes_e", "heights", "digest")
+    ORIGIN_NORTH_M_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_EAST_M_FIELD_NUMBER: _ClassVar[int]
+    CELL_M_FIELD_NUMBER: _ClassVar[int]
+    NODES_N_FIELD_NUMBER: _ClassVar[int]
+    NODES_E_FIELD_NUMBER: _ClassVar[int]
+    HEIGHTS_FIELD_NUMBER: _ClassVar[int]
+    DIGEST_FIELD_NUMBER: _ClassVar[int]
+    origin_north_m: float
+    origin_east_m: float
+    cell_m: float
+    nodes_n: int
+    nodes_e: int
+    heights: _containers.RepeatedScalarFieldContainer[float]
+    digest: int
+    def __init__(self, origin_north_m: _Optional[float] = ..., origin_east_m: _Optional[float] = ..., cell_m: _Optional[float] = ..., nodes_n: _Optional[int] = ..., nodes_e: _Optional[int] = ..., heights: _Optional[_Iterable[float]] = ..., digest: _Optional[int] = ...) -> None: ...
 
 class Course(_message.Message):
     __slots__ = ("name", "gates", "mode", "laps", "time_limit_s")
