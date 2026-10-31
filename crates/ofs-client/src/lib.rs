@@ -6,6 +6,7 @@
 //! them blocks.
 mod client;
 pub mod dvr;
+pub mod dvr_audio;
 pub mod dvr_export;
 pub mod error;
 pub mod fpv;
