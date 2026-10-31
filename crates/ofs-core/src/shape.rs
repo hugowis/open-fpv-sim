@@ -3,6 +3,8 @@
 //! (down is +z, the ground is the plane z = 0).
 use glam::DVec3;
 
+use crate::terrain::Terrain;
+
 /// A solid in the world, by its signed distance (negative inside).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape {
@@ -18,16 +20,23 @@ const ROOT_DEPTH_M: f64 = 1000.0;
 const ON_GROUND_M: f64 = 0.05;
 
 impl Shape {
-    /// The shape as an obstacle: one that stands on the ground continues below it, so a signal diffracts over its
-    /// top and around its sides, never underneath (its nearest face is never the bottom one).
+    /// The shape as an obstacle on the flat ground: `rooted_on(None)`.
     pub fn rooted(self) -> Shape {
+        self.rooted_on(None)
+    }
+
+    /// The shape as an obstacle: one that stands on the ground continues below it, so a signal diffracts over its
+    /// top and around its sides, never underneath (its nearest face is never the bottom one). The ground under the
+    /// footprint centre decides: the terrain's there, or the plane without one.
+    pub fn rooted_on(self, terrain: Option<&Terrain>) -> Shape {
+        let ground_d = |center: DVec3| terrain.map_or(0.0, |t| t.ground_d(center.x, center.y));
         match self {
-            Shape::Box { center, half } if center.z + half.z >= -ON_GROUND_M => {
+            Shape::Box { center, half } if center.z + half.z >= ground_d(center) - ON_GROUND_M => {
                 let top = center.z - half.z;
                 let half_z = (ROOT_DEPTH_M - top) * 0.5;
                 Shape::Box { center: DVec3::new(center.x, center.y, top + half_z), half: DVec3::new(half.x, half.y, half_z) }
             }
-            Shape::Cylinder { center, radius, half_height } if center.z + half_height >= -ON_GROUND_M => {
+            Shape::Cylinder { center, radius, half_height } if center.z + half_height >= ground_d(center) - ON_GROUND_M => {
                 let top = center.z - half_height;
                 let half_z = (ROOT_DEPTH_M - top) * 0.5;
                 Shape::Cylinder { center: DVec3::new(center.x, center.y, top + half_z), radius, half_height: half_z }
