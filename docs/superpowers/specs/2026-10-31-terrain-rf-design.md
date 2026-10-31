@@ -55,7 +55,7 @@ edge's loss (a crest near an end weighs more than a taller one in the middle).
 1. **Clip** the ray to the grid's footprint (slab test on north and east); outside the grid the ground is the plane,
    which is not an obstacle (as in a flat world). No overlap: 0 dB.
 2. **Clear-ray early out**: if the ray's lowest altitude over the clipped span exceeds the grid's highest point by
-   `0.78 sqrt(lambda L / 8)` (the clearance at which `v <= -0.78` for any `t`, i.e. `J = 0`), return 0 without
+   `0.78 sqrt(lambda max(L, 3) / 8)` (the clearance at which `v <= -0.78` for any `t`, i.e. `J = 0`; the `max(L, 3)` because `fresnel_v` clamps d1 and d2 to 1 m, which breaks the bound for shorter paths), return 0 without
    sampling. This needs `Terrain::max_height()` (new accessor, computed in `from_grid`, not in the digest).
 3. **Sample** `n = ceil(span / (cell_m / 2))` (clamped to 2..=2048) evenly spaced points of the clipped span, keep the
    best `v`.
