@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+// Simulator control, protocol version 15: protocol 14 plus named courses and race modes (World.courses,
+// RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
+// Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
 // clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
 // RACE_FINISHED, RACE_RESET, ResetRace).
 // Protocol 13 added the downlink-loss fault.
@@ -56,11 +58,14 @@ service Sim {
   rpc StartInputsRecording(Empty) returns (InputsRecordingStarted);
   // Finishes the running inputs recording's file.
   rpc StopInputsRecording(Empty) returns (InputsRecordingSummary);
-  // Starts a fresh race at the next tick (docs/race-timing.md); FAILED_PRECONDITION when the world has no gates.
-  rpc ResetRace(Empty) returns (Empty);
+  // Starts a fresh race at the next tick (docs/race-timing.md), on the named course (empty: the current one);
+  // FAILED_PRECONDITION when the world has no gates, INVALID_ARGUMENT for a course the world does not declare.
+  rpc ResetRace(ResetRaceRequest) returns (Empty);
 }
 
 message Empty {}
+
+message ResetRaceRequest { string course = 1; }
 
 message HandshakeRequest { uint32 protocol_version = 1; }
 message HandshakeReply {
@@ -255,7 +260,18 @@ message RaceState {
   double last_lap_s = 7;
   double best_lap_s = 8;
   bool finished = 9;          // the lap limit is reached: the clock has stopped, nothing counts until ResetRace
-  uint32 lap_limit = 10;      // the world's lap limit (0 = none)
+  uint32 lap_limit = 10;      // the course's lap limit (0 = none; always 0 in time attack)
+  string course = 11;         // the course being raced; empty for a world without [[courses]]
+  uint32 course_index = 12;   // its place in World.courses (0 for the implicit course)
+  RaceMode mode = 13;
+  double time_limit_s = 14;   // time attack: the clock (0 in a lap race)
+  double time_left_s = 15;    // time attack: the limit before the start, what is left while running, 0 once over
+}
+
+// How a race is won.
+enum RaceMode {
+  RACE_MODE_LAPS = 0;         // fly the laps (the lap limit, or forever)
+  RACE_MODE_TIME_ATTACK = 1;  // as many laps as fit before time_limit_s runs out
 }
 
 enum EventKind {
@@ -454,4 +470,16 @@ message World {
   repeated Emitter emitters = 6;
   Handset handset = 7;
   repeated Gate gates = 8;
+  // The courses [[courses]] declares, in file order; empty means one unnamed course of all the gates.
+  repeated Course courses = 9;
+  uint32 default_course = 10;  // the course a fresh session starts in (an index into courses)
+}
+
+// A named course: some of the world's gates, in order (the first is the start and finish).
+message Course {
+  string name = 1;
+  repeated string gates = 2;  // declared gate names
+  RaceMode mode = 3;
+  uint32 laps = 4;            // the lap limit that applies (0 = none)
+  double time_limit_s = 5;    // time attack only
 }

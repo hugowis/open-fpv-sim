@@ -26,7 +26,9 @@ again and says whether the failure came back (`docs/repro-bundle.md` in the repo
 
 A world with `[[gates]]` has a race: `sim.get_world().gates` lists them, `sim.run(...).race` is the lap clock
 (`present`, `running`, `next_gate`, `gate_count`, `laps`, `current_lap_s`, `last_lap_s`, `best_lap_s`) and the `gate_passed` and
-`lap_completed` events carry the splits and lap times (`docs/race-timing.md` in the repository).
+`lap_completed` events carry the splits and lap times (`docs/race-timing.md` in the repository). A world can name several
+courses (`sim.get_world().courses`, a race mode each: laps or `time_attack`); `race.course` names the one being raced and
+`sim.reset_race("Hunt")` switches to another.
 
 To fly a path from a script without Betaflight, load with `open_loop_fc=True, stabilize=True`: a minimal angle-mode
 stabilizer (a test stand-in, not Betaflight) so the sticks set the lean and the turn rate. `python/examples/circuit.py`

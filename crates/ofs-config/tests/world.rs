@@ -86,6 +86,9 @@ fn the_park_world_loads() {
     );
     assert!(w.gates.iter().all(|g| g.width_m == 2.4 && g.height_m == 2.2));
     assert_eq!(w.gates[2].roll_deg, 15.0, "the west gate leans with the turn");
+    let courses = w.resolved_courses();
+    assert_eq!(courses.iter().map(|c| (c.name.as_str(), c.mode, c.laps, c.time_limit_s)).collect::<Vec<_>>(), [("Diamond", world::RaceMode::Laps, Some(5), None), ("Hunt", world::RaceMode::TimeAttack, None, Some(60.0))]);
+    assert_eq!(w.default_course(), 0, "the default course is the whole loop, as before");
     let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(names.len(), 14, "gate frames (9), walls (2), pillars (2), hedge");
     let post = w.objects.iter().find(|o| o.name == "Gate0PostL").unwrap();
@@ -571,4 +574,108 @@ fn video_threshold_problems_are_reported_together() {
     for field in ["video.unstable_snr_db", "video.sparkle_snr_db", "video.color_fade_snr_db", "video.field_drop_p_max", "video.lost_after_fields"] {
         assert!(shown.contains(field), "{field} missing from:\n{shown}");
     }
+}
+
+/// The shipped world's three gates, plus two courses (`extra` is appended after them, so a `[race]` table in it works).
+fn with_courses(extra: &str) -> String {
+    world_text() + extra
+}
+
+const TWO_COURSES: &str = r#"
+[[courses]]
+name = "Line"
+gates = ["Gate0", "Gate1", "Gate2"]
+
+[[courses]]
+name = "Hunt"
+mode = "time_attack"
+time_limit_s = 45.0
+gates = ["Gate2", "Gate0"]
+"#;
+
+#[test]
+fn a_world_without_courses_has_one_implicit_course_of_all_its_gates() {
+    let w = world::load(Path::new(WORLD)).unwrap();
+    assert!(w.courses.is_empty());
+    let courses = w.resolved_courses();
+    assert_eq!(courses.len(), 1);
+    assert_eq!((courses[0].name.as_str(), courses[0].gates.clone(), courses[0].mode, courses[0].laps), ("", vec![0, 1, 2], world::RaceMode::Laps, None));
+    assert_eq!(w.default_course(), 0);
+    assert!(WorldConfig::open_field().resolved_courses().is_empty(), "no gates, no course");
+}
+
+#[test]
+fn courses_pick_and_order_the_declared_gates() {
+    let text = with_courses(&format!("{TWO_COURSES}\n[race]\nlaps = 3\ncourse = \"Hunt\"\n"));
+    let w = world::load(&write(tempfile::tempdir().unwrap().path(), &text)).unwrap();
+    let c = w.resolved_courses();
+    assert_eq!(c.len(), 2);
+    assert_eq!((c[0].name.as_str(), c[0].gates.clone(), c[0].mode, c[0].laps, c[0].time_limit_s), ("Line", vec![0, 1, 2], world::RaceMode::Laps, Some(3), None));
+    assert_eq!((c[1].name.as_str(), c[1].gates.clone(), c[1].mode, c[1].laps, c[1].time_limit_s), ("Hunt", vec![2, 0], world::RaceMode::TimeAttack, None, Some(45.0)));
+    assert_eq!(w.default_course(), 1, "[race] course picks the one a session starts in");
+    // A course's own laps beat the world's.
+    let own = with_courses(&TWO_COURSES.replace("name = \"Line\"", "name = \"Line\"\nlaps = 2")) + "\n[race]\nlaps = 3\n";
+    let w = world::load(&write(tempfile::tempdir().unwrap().path(), &own)).unwrap();
+    assert_eq!(w.resolved_courses()[0].laps, Some(2));
+    assert_eq!(w.default_course(), 0, "the first course is the default");
+}
+
+#[test]
+fn every_course_problem_is_reported_at_once() {
+    let text = with_courses(
+        r#"
+[[courses]]
+name = "Line"
+gates = []
+
+[[courses]]
+name = "Line"
+gates = ["Gate0", "Nope", "Gate0"]
+
+[[courses]]
+name = "Timed"
+mode = "time_attack"
+gates = ["Gate0"]
+
+[[courses]]
+name = "Laps"
+laps = 0
+gates = ["Gate0"]
+
+[[courses]]
+name = "Hunt2"
+mode = "time_attack"
+time_limit_s = 30.0
+laps = 2
+gates = ["Gate0"]
+
+[race]
+course = "Missing"
+"#,
+    );
+    let found = problems(&text);
+    for expected in [
+        "courses[0].gates: a course needs at least one gate",
+        "courses[1].name: \"Line\" is used twice",
+        "courses[1].gates[1]: no gate named \"Nope\"",
+        "courses[1].gates[2]: \"Gate0\" is already in this course",
+        "courses[2].time_limit_s: a time_attack course needs time_limit_s > 0",
+        "courses[3].laps: must be >= 1",
+        "courses[4].laps: a time_attack course ends on the clock, not on laps",
+        "race.course: no course named \"Missing\"",
+    ] {
+        assert!(found.iter().any(|p| p.starts_with(expected)), "{expected} missing from {found:#?}");
+    }
+    let lapped = with_courses("\n[[courses]]\nname = \"Laps\"\ntime_limit_s = 30.0\ngates = [\"Gate0\"]\n");
+    assert!(problems(&lapped).iter().any(|p| p.starts_with("courses[0].time_limit_s: only a time_attack course has")), "{:#?}", problems(&lapped));
+}
+
+#[test]
+fn courses_need_gates_and_a_course_pick_needs_courses() {
+    let bare = world_text();
+    let bare = bare[..bare.find("\n[[gates]]").unwrap()].to_string();
+    let found = problems(&format!("{bare}\n[[courses]]\nname = \"X\"\ngates = [\"A\"]\n"));
+    assert!(found.iter().any(|p| p.starts_with("courses: a course needs [[gates]]")), "{found:#?}");
+    let found = problems(&with_courses("\n[race]\ncourse = \"Line\"\n"));
+    assert!(found.iter().any(|p| p.starts_with("race.course: no course named")), "{found:#?}");
 }

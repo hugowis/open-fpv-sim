@@ -221,10 +221,52 @@ pub struct WorldGate {
     pub roll_deg: f64,
 }
 
+/// How a race is won.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RaceMode {
+    /// Fly the laps (the lap limit, or forever).
+    #[default]
+    Laps,
+    /// As many laps as fit before the time limit runs out.
+    TimeAttack,
+}
+
+impl RaceMode {
+    fn from_pb(m: i32) -> RaceMode {
+        if m == pb::RaceMode::TimeAttack as i32 { RaceMode::TimeAttack } else { RaceMode::Laps }
+    }
+
+    /// The name scripts and the Godot dictionary use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RaceMode::Laps => "laps",
+            RaceMode::TimeAttack => "time_attack",
+        }
+    }
+}
+
+/// A named course of the world: some of its gates (by name), in order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldCourse {
+    pub name: String,
+    pub gates: Vec<String>,
+    pub mode: RaceMode,
+    /// The lap limit that applies (0 = none).
+    pub laps: u32,
+    pub time_limit_s: f64,
+}
+
 /// The lap clock (all zero/false when the world has no gates).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RaceInfo {
     pub present: bool,
+    /// The course being raced: its name (empty for a world without courses) and its place in `World::courses`.
+    pub course: String,
+    pub course_index: u32,
+    pub mode: RaceMode,
+    /// Time attack: the clock, and what is left of it (the whole limit before the start, 0 once over).
+    pub time_limit_s: f64,
+    pub time_left_s: f64,
     pub running: bool,
     /// The world's lap limit is reached: the clock has stopped.
     pub finished: bool,
@@ -243,6 +285,11 @@ impl RaceInfo {
     fn from_pb(r: &pb::RaceState) -> RaceInfo {
         RaceInfo {
             present: r.present,
+            course: r.course.clone(),
+            course_index: r.course_index,
+            mode: RaceMode::from_pb(r.mode),
+            time_limit_s: r.time_limit_s,
+            time_left_s: r.time_left_s,
             running: r.running,
             finished: r.finished,
             next_gate: r.next_gate,
@@ -270,6 +317,9 @@ pub struct World {
     pub emitters: Vec<WorldEmitter>,
     /// The race course, in order (gate 0 is the start and finish).
     pub gates: Vec<WorldGate>,
+    /// The named courses over `gates`; empty means one course of all of them. The session starts on `default_course`.
+    pub courses: Vec<WorldCourse>,
+    pub default_course: u32,
 }
 
 fn ned(v: Option<pb::Vec3>) -> DVec3 {
@@ -340,6 +390,12 @@ impl World {
                     roll_deg: g.roll_deg,
                 })
                 .collect(),
+            courses: w
+                .courses
+                .into_iter()
+                .map(|c| WorldCourse { name: c.name, gates: c.gates, mode: RaceMode::from_pb(c.mode), laps: c.laps, time_limit_s: c.time_limit_s })
+                .collect(),
+            default_course: w.default_course,
         }
     }
 }
@@ -646,7 +702,7 @@ pub enum Update {
 }
 
 /// Requests to the supervisor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Pause,
     Resume,
@@ -656,8 +712,9 @@ pub enum Command {
     SetRadioLoss(bool),
     /// Starts (true) or stops (false) recording the sticks and link state to a replayable CSV the server names.
     SetInputsRecording(bool),
-    /// Starts a fresh race (no clock, no laps, gate 0 next); an error event when the world has no gates.
-    ResetRace,
+    /// Starts a fresh race (no clock, no laps, gate 0 next) on the named course (empty: the current one); an error
+    /// event when the world has no gates or no such course.
+    ResetRace(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

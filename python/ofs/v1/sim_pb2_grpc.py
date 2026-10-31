@@ -26,7 +26,9 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    """Simulator control, protocol version 15: protocol 14 plus named courses and race modes (World.courses,
+    RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
+    Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
     clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
     RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
@@ -157,13 +159,15 @@ class SimStub:
                 _registered_method=True)
         self.ResetRace = channel.unary_unary(
                 '/ofs.v1.Sim/ResetRace',
-                request_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+                request_serializer=ofs_dot_v1_dot_sim__pb2.ResetRaceRequest.SerializeToString,
                 response_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
                 _registered_method=True)
 
 
 class SimServicer:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    """Simulator control, protocol version 15: protocol 14 plus named courses and race modes (World.courses,
+    RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
+    Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
     clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
     RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
@@ -329,7 +333,8 @@ class SimServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ResetRace(self, request, context):
-        """Starts a fresh race at the next tick (docs/race-timing.md); FAILED_PRECONDITION when the world has no gates.
+        """Starts a fresh race at the next tick (docs/race-timing.md), on the named course (empty: the current one);
+        FAILED_PRECONDITION when the world has no gates, INVALID_ARGUMENT for a course the world does not declare.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -450,7 +455,7 @@ def add_SimServicer_to_server(servicer, server):
             ),
             'ResetRace': grpc.unary_unary_rpc_method_handler(
                     servicer.ResetRace,
-                    request_deserializer=ofs_dot_v1_dot_sim__pb2.Empty.FromString,
+                    request_deserializer=ofs_dot_v1_dot_sim__pb2.ResetRaceRequest.FromString,
                     response_serializer=ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
             ),
     }
@@ -462,7 +467,9 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 14: protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
+    """Simulator control, protocol version 15: protocol 14 plus named courses and race modes (World.courses,
+    RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
+    Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
     clipped passes (Gate.pitch_deg/roll_deg, GATE_HIT), and the lap limit and race reset (RaceState.finished/lap_limit,
     RACE_FINISHED, RACE_RESET, ResetRace).
     Protocol 13 added the downlink-loss fault.
@@ -1084,7 +1091,7 @@ class Sim:
             request,
             target,
             '/ofs.v1.Sim/ResetRace',
-            ofs_dot_v1_dot_sim__pb2.Empty.SerializeToString,
+            ofs_dot_v1_dot_sim__pb2.ResetRaceRequest.SerializeToString,
             ofs_dot_v1_dot_sim__pb2.Empty.FromString,
             options,
             channel_credentials,

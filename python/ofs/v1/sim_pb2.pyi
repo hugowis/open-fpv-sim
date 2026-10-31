@@ -26,6 +26,11 @@ class VideoSync(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     VIDEO_SYNC_UNSTABLE: _ClassVar[VideoSync]
     VIDEO_SYNC_LOST: _ClassVar[VideoSync]
 
+class RaceMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RACE_MODE_LAPS: _ClassVar[RaceMode]
+    RACE_MODE_TIME_ATTACK: _ClassVar[RaceMode]
+
 class EventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     EVENT_KIND_UNSPECIFIED: _ClassVar[EventKind]
@@ -65,6 +70,8 @@ VIDEO_SYNC_UNSPECIFIED: VideoSync
 VIDEO_SYNC_LOCKED: VideoSync
 VIDEO_SYNC_UNSTABLE: VideoSync
 VIDEO_SYNC_LOST: VideoSync
+RACE_MODE_LAPS: RaceMode
+RACE_MODE_TIME_ATTACK: RaceMode
 EVENT_KIND_UNSPECIFIED: EventKind
 EVENT_KIND_OVERRUN: EventKind
 EVENT_KIND_FIRMWARE_RESTARTED: EventKind
@@ -96,6 +103,12 @@ EVENT_KIND_RACE_RESET: EventKind
 class Empty(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class ResetRaceRequest(_message.Message):
+    __slots__ = ("course",)
+    COURSE_FIELD_NUMBER: _ClassVar[int]
+    course: str
+    def __init__(self, course: _Optional[str] = ...) -> None: ...
 
 class HandshakeRequest(_message.Message):
     __slots__ = ("protocol_version",)
@@ -376,7 +389,7 @@ class State(_message.Message):
     def __init__(self, time_s: _Optional[float] = ..., position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., velocity_ned_mps: _Optional[_Union[Vec3, _Mapping]] = ..., attitude: _Optional[_Union[Quat, _Mapping]] = ..., rate_frd_radps: _Optional[_Union[Vec3, _Mapping]] = ..., battery_voltage_v: _Optional[float] = ..., battery_current_a: _Optional[float] = ..., motor_rpm: _Optional[_Iterable[float]] = ..., motor_cmd: _Optional[_Iterable[float]] = ..., radio: _Optional[_Union[RadioLink, _Mapping]] = ..., running: _Optional[bool] = ..., overruns: _Optional[int] = ..., fc_restarts: _Optional[int] = ..., vtx: _Optional[_Union[Vtx, _Mapping]] = ..., serial_dropped_bytes: _Optional[int] = ..., video: _Optional[_Union[VideoLink, _Mapping]] = ..., collision_speed_mps: _Optional[float] = ..., fc_telemetry: _Optional[_Union[FcTelemetry, _Mapping]] = ..., battery_cell_voltages: _Optional[_Iterable[float]] = ..., race: _Optional[_Union[RaceState, _Mapping]] = ...) -> None: ...
 
 class RaceState(_message.Message):
-    __slots__ = ("present", "running", "next_gate", "gate_count", "laps", "current_lap_s", "last_lap_s", "best_lap_s", "finished", "lap_limit")
+    __slots__ = ("present", "running", "next_gate", "gate_count", "laps", "current_lap_s", "last_lap_s", "best_lap_s", "finished", "lap_limit", "course", "course_index", "mode", "time_limit_s", "time_left_s")
     PRESENT_FIELD_NUMBER: _ClassVar[int]
     RUNNING_FIELD_NUMBER: _ClassVar[int]
     NEXT_GATE_FIELD_NUMBER: _ClassVar[int]
@@ -387,6 +400,11 @@ class RaceState(_message.Message):
     BEST_LAP_S_FIELD_NUMBER: _ClassVar[int]
     FINISHED_FIELD_NUMBER: _ClassVar[int]
     LAP_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    COURSE_FIELD_NUMBER: _ClassVar[int]
+    COURSE_INDEX_FIELD_NUMBER: _ClassVar[int]
+    MODE_FIELD_NUMBER: _ClassVar[int]
+    TIME_LIMIT_S_FIELD_NUMBER: _ClassVar[int]
+    TIME_LEFT_S_FIELD_NUMBER: _ClassVar[int]
     present: bool
     running: bool
     next_gate: int
@@ -397,7 +415,12 @@ class RaceState(_message.Message):
     best_lap_s: float
     finished: bool
     lap_limit: int
-    def __init__(self, present: _Optional[bool] = ..., running: _Optional[bool] = ..., next_gate: _Optional[int] = ..., gate_count: _Optional[int] = ..., laps: _Optional[int] = ..., current_lap_s: _Optional[float] = ..., last_lap_s: _Optional[float] = ..., best_lap_s: _Optional[float] = ..., finished: _Optional[bool] = ..., lap_limit: _Optional[int] = ...) -> None: ...
+    course: str
+    course_index: int
+    mode: RaceMode
+    time_limit_s: float
+    time_left_s: float
+    def __init__(self, present: _Optional[bool] = ..., running: _Optional[bool] = ..., next_gate: _Optional[int] = ..., gate_count: _Optional[int] = ..., laps: _Optional[int] = ..., current_lap_s: _Optional[float] = ..., last_lap_s: _Optional[float] = ..., best_lap_s: _Optional[float] = ..., finished: _Optional[bool] = ..., lap_limit: _Optional[int] = ..., course: _Optional[str] = ..., course_index: _Optional[int] = ..., mode: _Optional[_Union[RaceMode, str]] = ..., time_limit_s: _Optional[float] = ..., time_left_s: _Optional[float] = ...) -> None: ...
 
 class Event(_message.Message):
     __slots__ = ("time_s", "kind", "message")
@@ -638,7 +661,7 @@ class Handset(_message.Message):
     def __init__(self, position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ...) -> None: ...
 
 class World(_message.Message):
-    __slots__ = ("name", "pilot_position_ned_m", "pilot_facing_deg", "antennas", "objects", "emitters", "handset", "gates")
+    __slots__ = ("name", "pilot_position_ned_m", "pilot_facing_deg", "antennas", "objects", "emitters", "handset", "gates", "courses", "default_course")
     NAME_FIELD_NUMBER: _ClassVar[int]
     PILOT_POSITION_NED_M_FIELD_NUMBER: _ClassVar[int]
     PILOT_FACING_DEG_FIELD_NUMBER: _ClassVar[int]
@@ -647,6 +670,8 @@ class World(_message.Message):
     EMITTERS_FIELD_NUMBER: _ClassVar[int]
     HANDSET_FIELD_NUMBER: _ClassVar[int]
     GATES_FIELD_NUMBER: _ClassVar[int]
+    COURSES_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_COURSE_FIELD_NUMBER: _ClassVar[int]
     name: str
     pilot_position_ned_m: Vec3
     pilot_facing_deg: float
@@ -655,4 +680,20 @@ class World(_message.Message):
     emitters: _containers.RepeatedCompositeFieldContainer[Emitter]
     handset: Handset
     gates: _containers.RepeatedCompositeFieldContainer[Gate]
-    def __init__(self, name: _Optional[str] = ..., pilot_position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., pilot_facing_deg: _Optional[float] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ..., objects: _Optional[_Iterable[_Union[WorldObject, _Mapping]]] = ..., emitters: _Optional[_Iterable[_Union[Emitter, _Mapping]]] = ..., handset: _Optional[_Union[Handset, _Mapping]] = ..., gates: _Optional[_Iterable[_Union[Gate, _Mapping]]] = ...) -> None: ...
+    courses: _containers.RepeatedCompositeFieldContainer[Course]
+    default_course: int
+    def __init__(self, name: _Optional[str] = ..., pilot_position_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., pilot_facing_deg: _Optional[float] = ..., antennas: _Optional[_Iterable[_Union[ReceiverAntenna, _Mapping]]] = ..., objects: _Optional[_Iterable[_Union[WorldObject, _Mapping]]] = ..., emitters: _Optional[_Iterable[_Union[Emitter, _Mapping]]] = ..., handset: _Optional[_Union[Handset, _Mapping]] = ..., gates: _Optional[_Iterable[_Union[Gate, _Mapping]]] = ..., courses: _Optional[_Iterable[_Union[Course, _Mapping]]] = ..., default_course: _Optional[int] = ...) -> None: ...
+
+class Course(_message.Message):
+    __slots__ = ("name", "gates", "mode", "laps", "time_limit_s")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    GATES_FIELD_NUMBER: _ClassVar[int]
+    MODE_FIELD_NUMBER: _ClassVar[int]
+    LAPS_FIELD_NUMBER: _ClassVar[int]
+    TIME_LIMIT_S_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    gates: _containers.RepeatedScalarFieldContainer[str]
+    mode: RaceMode
+    laps: int
+    time_limit_s: float
+    def __init__(self, name: _Optional[str] = ..., gates: _Optional[_Iterable[str]] = ..., mode: _Optional[_Union[RaceMode, str]] = ..., laps: _Optional[int] = ..., time_limit_s: _Optional[float] = ...) -> None: ...

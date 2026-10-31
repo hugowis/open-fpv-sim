@@ -120,6 +120,25 @@ func test_the_lap_line_shows_the_race() -> void:
 	hud.queue_free()
 
 
+func test_the_lap_line_names_the_course_and_a_time_attack_counts_down() -> void:
+	var hud := await _hud()
+	var named := _telemetry({"race_present": true, "race_running": true, "race_course": "Diamond", "race_next_gate": 2, "race_laps": 1, "race_lap_limit": 5,
+		"race_lap_s": 5.0, "race_last_lap_s": 31.2, "race_best_lap_s": 29.9})
+	hud.update_view(_view({"telemetry": named}))
+	eq(hud.race_text(), "DIAMOND   LAP 2/5   NEXT 2   0:05.0   LAST 31.2   BEST 29.9", "the course leads the lap line")
+	var waiting := _telemetry({"race_present": true, "race_running": false, "race_course": "Hunt", "race_mode": "time_attack", "race_time_limit_s": 60.0})
+	hud.update_view(_view({"telemetry": waiting}))
+	eq(hud.race_text(), "HUNT   RACE  fly through the start gate   (60 s)", "a time attack says how long it runs")
+	var hunting := _telemetry({"race_present": true, "race_running": true, "race_course": "Hunt", "race_mode": "time_attack", "race_time_limit_s": 60.0,
+		"race_time_left_s": 41.24, "race_next_gate": 0, "race_laps": 2, "race_lap_s": 12.3, "race_last_lap_s": 29.9, "race_best_lap_s": 29.1})
+	hud.update_view(_view({"telemetry": hunting}))
+	eq(hud.race_text(), "HUNT   LEFT 0:41.2   LAP 3   NEXT START   0:12.3   LAST 29.9   BEST 29.1", "the clock counts down, laps count up")
+	var over := _telemetry({"race_present": true, "race_finished": true, "race_course": "Hunt", "race_mode": "time_attack", "race_laps": 4, "race_best_lap_s": 29.1})
+	hud.update_view(_view({"telemetry": over}))
+	eq(hud.race_text(), "HUNT   TIME UP   4 LAPS   BEST 29.1   (N: new race)", "the end of a time attack")
+	hud.queue_free()
+
+
 func test_a_fatal_message_stays() -> void:
 	var hud := await _hud()
 	hud.show_fatal("The OfsClient extension is not loaded.")

@@ -1,5 +1,5 @@
 use glam::DVec3;
-use ofs_client::{ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
+use ofs_client::{ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, RaceMode, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -207,15 +207,48 @@ fn a_gate_is_converted_to_godots_frame() {
 }
 
 #[test]
+fn the_worlds_courses_reach_the_client() {
+    let w = World::from_pb(pb::World {
+        courses: vec![
+            pb::Course { name: "Line".into(), gates: vec!["A".into(), "B".into()], mode: pb::RaceMode::Laps as i32, laps: 3, time_limit_s: 0.0 },
+            pb::Course { name: "Hunt".into(), gates: vec!["B".into()], mode: pb::RaceMode::TimeAttack as i32, laps: 0, time_limit_s: 45.0 },
+        ],
+        default_course: 1,
+        ..Default::default()
+    });
+    assert_eq!(w.default_course, 1);
+    assert_eq!((w.courses[0].name.as_str(), w.courses[0].gates.clone(), w.courses[0].mode, w.courses[0].laps), ("Line", vec!["A".to_string(), "B".to_string()], RaceMode::Laps, 3));
+    assert_eq!((w.courses[1].mode, w.courses[1].time_limit_s), (RaceMode::TimeAttack, 45.0));
+    assert!(World::from_pb(pb::World::default()).courses.is_empty());
+}
+
+#[test]
 fn the_race_state_reaches_the_telemetry() {
     let state = pb::State {
-        race: Some(pb::RaceState { present: true, running: true, next_gate: 2, gate_count: 3, laps: 1, current_lap_s: 4.5, last_lap_s: 31.2, best_lap_s: 30.0, finished: true, lap_limit: 3 }),
+        race: Some(pb::RaceState {
+            present: true,
+            running: true,
+            next_gate: 2,
+            gate_count: 3,
+            laps: 1,
+            current_lap_s: 4.5,
+            last_lap_s: 31.2,
+            best_lap_s: 30.0,
+            finished: true,
+            lap_limit: 3,
+            course: "Hunt".into(),
+            course_index: 1,
+            mode: pb::RaceMode::TimeAttack as i32,
+            time_limit_s: 60.0,
+            time_left_s: 12.5,
+        }),
         ..Default::default()
     };
     let r = Telemetry::from_pb(&state).race;
     assert_eq!((r.present, r.running, r.next_gate, r.gate_count, r.laps), (true, true, 2, 3, 1));
     assert_eq!((r.current_lap_s, r.last_lap_s, r.best_lap_s), (4.5, 31.2, 30.0));
     assert_eq!((r.finished, r.lap_limit), (true, 3));
+    assert_eq!((r.course.as_str(), r.course_index, r.mode, r.time_limit_s, r.time_left_s), ("Hunt", 1, RaceMode::TimeAttack, 60.0, 12.5));
     assert!(!Telemetry::from_pb(&pb::State::default()).race.present, "a state without a race: none");
 }
 

@@ -9,7 +9,7 @@ static func roots(settings: Dictionary, kind: String) -> Array:
 	return [AppSettings.repo_root().path_join(kind), String(settings["data_dir"]).path_join(kind)]
 
 
-## The `*.toml` files directly in `dirs` as {path, label, gates}, sorted by label. A file reached through two
+## The `*.toml` files directly in `dirs` as {path, label, gates, courses}, sorted by label. A file reached through two
 ## directories is listed once; a directory that does not exist holds nothing.
 static func list(dirs: Array) -> Array:
 	var seen := {}
@@ -44,19 +44,25 @@ static func index_of(items: Array, path: String) -> int:
 	return 0
 
 
-## One file: its top-level `name = "..."` (else the file name) and how many `[[gates]]` it declares.
+## One file: its top-level `name = "..."` (else the file name), how many `[[gates]]` it declares and the names of its
+## `[[courses]]` in file order.
 static func entry(path: String) -> Dictionary:
 	var label := path.get_file().get_basename()
 	var gates := 0
-	var top_level := true
+	var courses := []
+	var table := ""
 	for line in FileAccess.get_file_as_string(path).split("\n"):
 		var t := line.strip_edges()
 		if t.begins_with("["):
-			top_level = false
+			table = t
 			if t == "[[gates]]":
 				gates += 1
-		elif top_level and t.begins_with("name") and t.contains("="):
+		elif t.begins_with("name") and t.contains("=") and (table == "" or table == "[[courses]]"):
 			var value := t.split("=", true, 1)
 			if value[0].strip_edges() == "name":
-				label = value[1].strip_edges().trim_prefix("\"").get_slice("\"", 0)
-	return {"path": path, "label": label, "gates": gates}
+				var named: String = value[1].strip_edges().trim_prefix("\"").get_slice("\"", 0)
+				if table == "":
+					label = named
+				else:
+					courses.append(named)
+	return {"path": path, "label": label, "gates": gates, "courses": courses}
