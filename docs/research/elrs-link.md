@@ -52,6 +52,29 @@ Notes:
   `-20 log10|cos Δ|`, capped at 20 dB — at 5.8 GHz the same flight keeps a circular link. A crossed linear pair
   (a quad antenna along the path, or a horizontal handset dipole under a level quad) takes the full 20 dB.
 
+## Terrain
+
+In a world with `[terrain]` the ground is the heightfield of the physics (`ofs_core::terrain::Terrain`, the same `Arc`),
+and the link takes one more diffraction loss, `terrain_loss_db` in `crates/ofs-rf/src/propagation.rs` (the video link
+shares it). For a point of the ray `t` of the way from the handset to the quad, `v(t)` is the Fresnel parameter of the
+ray's height over the ground there (`fresnel_v(h, d1, d2, λ)`, negative when the ray is clear). The path's one
+knife edge is where `v` is largest: `v` is sampled twice per cell along the part of the path over the grid and the
+best sample refined by a golden-section search (the terrain is not convex, so unlike the objects it needs the samples).
+The loss is `J(v)` of ITU-R P.526, capped at 60 dB (**estimated**: a ridge diffracts, but a quad that far behind
+one is out of reach anyway). A ray higher than the highest ground by the clear-path margin
+(`0.78 * sqrt(λ * max(L, 3 m) / 8)` for a path of length L) returns 0 without sampling.
+
+At 2440 MHz (λ = 12.3 cm) an 8 m ridge 20 m from both ends gives `v = 10.2` and **33.0 dB**; at 100 m from both ends,
+`v = 4.57` and 26.0 dB (at 5.8 GHz: 36.8 and 29.8 dB). Whole chain, `worlds/hills.toml`, the quad hovering 1.5 m over
+the ground (`crates/ofs-sim/tests/terrain_link.rs`): 110 m out in clear view the RSSI is -59.9 dBm and LQ 100; 167 m
+out behind a hill it is **-78.1 dBm**, LQ 99 (the same spot without the relief: -58.5 dBm). The link stays up because
+-78 dBm is still 27 dB over the 500 Hz sensitivity: a hill takes the margin first and the link after.
+
+Limits: the ground bounce still reflects off the plane d = 0, not off the terrain; only one edge counts (a second ridge
+behind the first adds nothing); a quad on the ground gets its ground-grazing loss from the terrain under it (the ray
+starts at the ground); objects with `rf_loss_db` add their own loss to the terrain's; outside the grid the ground is
+the plane d = 0 and costs nothing.
+
 ## The receiver
 
 | Constant | Value | Provenance |

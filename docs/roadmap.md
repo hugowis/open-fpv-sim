@@ -138,7 +138,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Plugin loading for radio models from outside the tree.
 
 ### Modelling
-- Terrain: the physics ground is a heightfield (#153); the radio and video line of sight over it (#154) and the Godot mesh (#155) remain. Rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
+- Terrain: the physics ground is a heightfield (#153); the radio and video line of sight over it (#154) is done, the Godot mesh (#155) remains. Rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
 - DShot extended telemetry and MSP over CRSF.
 - Feed Betaflight SITL a measured magnetometer (#31 added the model and left the firmware on its fixed virtual compass): a reserved block in the state datagram like eRPM's, and a SITL patch for `virtualMagSet`, so noise, hard iron and the world's declination reach heading hold and GPS rescue. A datasheet magnetometer part and a `fault.mag.*` interference seam.
@@ -172,7 +172,7 @@ These explain behaviour that would otherwise look like a bug.
 
 - **The VTX transmits in open loop**: a powered VTX transmits whether or not a flight controller talks to it.
 - **Obstruction is found by a golden-section search** on the shape's signed distance, so a thin post on a long path
-  is not stepped over; objects standing on the ground are rooted below it.
+  is not stepped over; objects standing on the ground are rooted below it (on the terrain's surface in a world with `[terrain]`). The terrain has its own sampled search because its clearance is not convex along a ray.
 - **Emitters may be 5300–6000 MHz** (Lowband is one of the VTX's own bands).
 - **The sync-loss test is at 4 km and 25 mW**: at 2 km the shipped diversity goggles sit at the edge.
 - **Prop spheres are 2.0 cm**, not 1.5: the larger radius keeps a 12 cm post from passing between them.

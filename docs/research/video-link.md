@@ -44,6 +44,18 @@ Notes:
   two rays are nearly equal and cancel into deep fades when flying low. This is why FPV uses circular antennas.
 - **Fading.** A hovering quad sees a steady signal (no movement, no change); fast flight flickers.
 
+## Terrain
+
+With a `[terrain]` section the path also takes the heightfield's knife-edge loss, from the same `Terrain` grid the physics
+samples and with the same code as the ELRS link (see "Terrain" in `docs/research/elrs-link.md` for the maths: the Fresnel
+parameter `v` maximised along the ray, `J(v)` capped at 60 dB, the clearance early-out). It applies to the wanted
+signal and to the interference paths alike, and it adds to the objects' losses. At 5800 MHz (λ = 5.17 cm) an 8 m ridge
+20 m from both ends gives `v = 15.7` and **36.8 dB**; at 100 m from both ends, `v = 7.04` and 29.8 dB. Whole chain on
+`worlds/hills.toml`, the quad hovering 1.5 m over the ground at the default power: 110 m out in clear view the SNR is
+14.8 dB; 167 m out behind a hill it is **-3.1 dB** (picture lost; the same spot without the relief: 18.0 dB).
+The limits are the ELRS link's: the ground bounce stays on the plane d = 0, one edge only, and until #155 the Godot
+client draws a flat ground, so the picture can be lost behind a hill it does not show.
+
 ## Interference
 
 Each emitter of the world file goes through the same propagation (without fading), then the receiver's
