@@ -2,6 +2,13 @@
 # precise flying (epic #136, issue #131). Gate2 is rolled 15 degrees so its opening leans with the turn; a rolled
 # frame cannot be drawn with axis-aligned boxes, so Gate2 has no posts and bar.
 #
+# The ground is gently rolling (issue #155): flat within 8 m of home, so the quad starts on level ground and the pilot
+# stands on it, then easing into low swells of about a metre, under 10 degrees on the course. The simulator's physics
+# sees them and the Godot client draws the same mesh. The course stands on that ground: each gate hangs 1.1 m over it
+# (Gate2, rolled, 1.5 m; Gate0 keeps its flat-ground height, because the loader holds an opening above d = 0). Posts,
+# walls, pillars and the hedge are buried 0.2 m under the lowest ground below them, with their tops where they were
+# designed: the gate frame 2.2 m, walls 3 m, pillars 4 m and the hedge 0.8 m over the local ground.
+#
 # Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
 # All values are estimates.
 schema_version = 1
@@ -27,21 +34,21 @@ polarization = "rhcp"
 name = "workshop-quad"
 freq_mhz = 5806.0
 power_mw = 25.0
-position_ned_m = [18.0, -16.0, -1.0]
+position_ned_m = [18.0, -16.0, -0.699]
 
 # Gate0 is the start and finish, flown east: its posts separate north-south along x.
 [[objects]]
 name = "Gate0PostL"
 shape = "box"
-center_ned_m = [10.75, 0.0, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [10.75, 0.0, -0.994]
+size_m = [0.1, 0.1, 2.412]
 color = [0.9, 0.3, 0.2]
 
 [[objects]]
 name = "Gate0PostR"
 shape = "box"
-center_ned_m = [13.25, 0.0, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [13.25, 0.0, -0.987]
+size_m = [0.1, 0.1, 2.426]
 color = [0.9, 0.3, 0.2]
 
 [[objects]]
@@ -55,21 +62,21 @@ color = [0.9, 0.3, 0.2]
 [[objects]]
 name = "Gate1PostL"
 shape = "box"
-center_ned_m = [20.0, 7.75, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [20.0, 7.75, -1.061]
+size_m = [0.1, 0.1, 2.414]
 color = [0.9, 0.45, 0.15]
 
 [[objects]]
 name = "Gate1PostR"
 shape = "box"
-center_ned_m = [20.0, 10.25, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [20.0, 10.25, -1.073]
+size_m = [0.1, 0.1, 2.39]
 color = [0.9, 0.45, 0.15]
 
 [[objects]]
 name = "Gate1Bar"
 shape = "box"
-center_ned_m = [20.0, 9.0, -2.25]
+center_ned_m = [20.0, 9.0, -2.318]
 size_m = [0.1, 2.6, 0.1]
 color = [0.9, 0.45, 0.15]
 
@@ -77,41 +84,41 @@ color = [0.9, 0.45, 0.15]
 [[objects]]
 name = "EastWall"
 shape = "box"
-center_ned_m = [20.0, 13.5, -1.5]
-size_m = [10.0, 0.3, 3.0]
+center_ned_m = [20.0, 13.5, -1.422]
+size_m = [10.0, 0.3, 3.381]
 color = [0.75, 0.72, 0.65]
 rf_loss_db = 12.0
 
 [[objects]]
 name = "SouthWall"
 shape = "box"
-center_ned_m = [8.0, 0.0, -1.5]
-size_m = [0.3, 7.0, 3.0]
+center_ned_m = [8.0, 0.0, -1.399]
+size_m = [0.3, 7.0, 3.202]
 color = [0.75, 0.72, 0.65]
 rf_loss_db = 12.0
 
 [[objects]]
 name = "PillarA"
 shape = "cylinder"
-center_ned_m = [16.0, 4.5, -2.0]
+center_ned_m = [16.0, 4.5, -1.871]
 radius_m = 0.3
-height_m = 4.0
+height_m = 4.201
 color = [0.8, 0.35, 0.25]
 
 [[objects]]
 name = "PillarB"
 shape = "cylinder"
-center_ned_m = [24.0, -4.5, -2.0]
+center_ned_m = [24.0, -4.5, -2.027]
 radius_m = 0.3
-height_m = 4.0
+height_m = 4.209
 color = [0.8, 0.35, 0.25]
 
 # A low hedge across the middle of the loop: hop it on the Gate0-Gate2 cut.
 [[objects]]
 name = "Hedge"
 shape = "box"
-center_ned_m = [20.0, 0.0, -0.4]
-size_m = [6.0, 0.8, 0.8]
+center_ned_m = [20.0, 0.0, -0.303]
+size_m = [6.0, 0.8, 1.042]
 color = [0.25, 0.5, 0.2]
 rf_loss_db = 6.0
 
@@ -119,21 +126,21 @@ rf_loss_db = 6.0
 [[objects]]
 name = "Gate3PostL"
 shape = "box"
-center_ned_m = [20.0, -10.25, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [20.0, -10.25, -1.009]
+size_m = [0.1, 0.1, 2.433]
 color = [0.2, 0.6, 0.9]
 
 [[objects]]
 name = "Gate3PostR"
 shape = "box"
-center_ned_m = [20.0, -7.75, -1.1]
-size_m = [0.1, 0.1, 2.2]
+center_ned_m = [20.0, -7.75, -1.032]
+size_m = [0.1, 0.1, 2.387]
 color = [0.2, 0.6, 0.9]
 
 [[objects]]
 name = "Gate3Bar"
 shape = "box"
-center_ned_m = [20.0, -9.0, -2.25]
+center_ned_m = [20.0, -9.0, -2.275]
 size_m = [0.1, 2.6, 0.1]
 color = [0.2, 0.6, 0.9]
 
@@ -147,14 +154,14 @@ height_m = 2.2
 
 [[gates]]
 name = "Gate1"
-center_ned_m = [20.0, 9.0, -1.1]
+center_ned_m = [20.0, 9.0, -1.168]
 heading_deg = 0.0
 width_m = 2.4
 height_m = 2.2
 
 [[gates]]
 name = "Gate2"
-center_ned_m = [28.0, 0.0, -1.5]
+center_ned_m = [28.0, 0.0, -1.781]
 heading_deg = 270.0
 roll_deg = 15.0
 width_m = 2.4
@@ -162,10 +169,19 @@ height_m = 2.2
 
 [[gates]]
 name = "Gate3"
-center_ned_m = [20.0, -9.0, -1.1]
+center_ned_m = [20.0, -9.0, -1.125]
 heading_deg = 180.0
 width_m = 2.4
 height_m = 2.2
+
+# Low swells around a flat start: no gate sits in a pit (Gate2, the far end of the loop, rides the highest ground).
+[terrain]
+seed = 153
+size_m = 160.0
+cell_m = 1.0
+amplitude_m = 3.5
+wavelength_m = 45.0
+flat_radius_m = 8.0
 
 [race]
 laps = 5

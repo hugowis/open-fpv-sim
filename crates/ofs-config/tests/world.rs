@@ -79,9 +79,9 @@ fn the_park_world_loads() {
         gates,
         [
             ("Gate0", [12.0, 0.0, -1.1], 90.0),
-            ("Gate1", [20.0, 9.0, -1.1], 0.0),
-            ("Gate2", [28.0, 0.0, -1.5], 270.0),
-            ("Gate3", [20.0, -9.0, -1.1], 180.0),
+            ("Gate1", [20.0, 9.0, -1.168], 0.0),
+            ("Gate2", [28.0, 0.0, -1.781], 270.0),
+            ("Gate3", [20.0, -9.0, -1.125], 180.0),
         ]
     );
     assert!(w.gates.iter().all(|g| g.width_m == 2.4 && g.height_m == 2.2));
@@ -92,7 +92,7 @@ fn the_park_world_loads() {
     let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(names.len(), 14, "gate frames (9), walls (2), pillars (2), hedge");
     let post = w.objects.iter().find(|o| o.name == "Gate0PostL").unwrap();
-    assert_eq!(post.center_ned_m, [10.75, 0.0, -1.1], "Gate0 flies east: its posts separate along x");
+    assert_eq!(&post.center_ned_m[..2], &[10.75, 0.0], "Gate0 flies east: its posts separate along x");
     let hedge = w.objects.iter().find(|o| o.name == "Hedge").unwrap();
     assert_eq!((hedge.shape, hedge.rf_loss_db), (Shape::Box, 6.0));
     assert_eq!(w.emitters.len(), 1);
@@ -828,4 +828,80 @@ polarization = \"linear\"
 fn a_pilot_above_the_hills_is_fine() {
     let text = with_terrain(HILL).replacen("position_ned_m = [-3.0, 2.0, -1.7]", "position_ned_m = [60.0, 40.0, -30.0]", 1);
     assert!(written_world(&text).is_ok(), "{:?}", written_world(&text).err());
+}
+
+/// The lowest and highest ground height (up) under a footprint: a 9 x 9 sample of its rectangle, or of the circle.
+fn ground_under(t: &ofs_core::terrain::Terrain, o: &world::ObjectSection) -> (f64, f64) {
+    let (half_n, half_e) = match o.shape {
+        Shape::Box => (o.size_m.unwrap()[0] / 2.0, o.size_m.unwrap()[1] / 2.0),
+        Shape::Cylinder => (o.radius_m.unwrap(), o.radius_m.unwrap()),
+    };
+    let heights: Vec<f64> = (0..81)
+        .map(|k| (half_n * (k / 9) as f64 / 4.0 - half_n, half_e * (k % 9) as f64 / 4.0 - half_e))
+        .filter(|&(n, e)| o.shape == Shape::Box || n * n + e * e <= half_n * half_n * 1.0001)
+        .map(|(n, e)| t.height_up(o.center_ned_m[0] + n, o.center_ned_m[1] + e))
+        .collect();
+    (heights.iter().copied().fold(f64::INFINITY, f64::min), heights.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+/// The park's course was designed on flat ground; with relief it stands on the ground. Gates hang 0.9 to 1.6 m above
+/// the ground at their centre, every object is buried slightly (never floating) and keeps its design height above
+/// the ground around it, and nothing is steeper than a gentle hill.
+#[test]
+fn the_park_course_stands_on_its_relief() {
+    let w = world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/park.toml"))).unwrap();
+    let t = w.terrain.expect("the park has relief").build();
+    assert!(t.max_slope() < 30f64.to_radians().tan(), "max slope tan = {}", t.max_slope());
+    assert_eq!(t.height_up(0.0, 0.0), 0.0, "home is on the flat pad");
+    let handset = w.handset.position(&w.pilot);
+    for (what, at) in [("pilot", w.pilot.position_ned_m), ("handset", handset)] {
+        assert!(-at[2] > t.height_up(at[0], at[1]), "{what} is above the ground");
+    }
+
+    for g in &w.gates {
+        let ground = t.height_up(g.center_ned_m[0], g.center_ned_m[1]);
+        let above = -g.center_ned_m[2] - ground;
+        assert!((0.9..=1.6).contains(&above), "{} centre is {above} m above the ground", g.name);
+        // The opening's lowest point: half the height and half the width, rolled.
+        let (sr, cr) = g.roll_deg.to_radians().sin_cos();
+        let drop = g.height_m / 2.0 * cr + g.width_m / 2.0 * sr.abs();
+        let (_, across, _) = g.axes();
+        let lowest_ground = (0..9)
+            .map(|k| {
+                let s = g.width_m * (k as f64 / 8.0 - 0.5);
+                t.height_up(g.center_ned_m[0] + across[0] * s, g.center_ned_m[1] + across[1] * s)
+            })
+            .fold(f64::INFINITY, f64::min);
+        let opening_bottom = -g.center_ned_m[2] - drop;
+        assert!(opening_bottom >= lowest_ground, "{}: the opening's lowest point {opening_bottom} is below the ground {lowest_ground}", g.name);
+        // Gate frame: the bar crowns the opening and the posts stand on the ground.
+        if let Some(bar) = w.objects.iter().find(|o| o.name == format!("{}Bar", g.name)) {
+            assert!((-bar.center_ned_m[2] - (-g.center_ned_m[2] + 1.15)).abs() < 1e-9, "{} bar is 1.15 m over the centre", g.name);
+        }
+    }
+
+    // The heights the objects were designed with on flat ground: how far each top stands above the ground around it.
+    let design = |name: &str| match name {
+        n if n.ends_with("Wall") => 3.0,
+        n if n.starts_with("Pillar") => 4.0,
+        "Hedge" => 0.8,
+        n if n.contains("Post") => 2.2,
+        n => panic!("{n}: no design height"),
+    };
+    for o in w.objects.iter().filter(|o| !o.name.ends_with("Bar")) {
+        let (lowest, highest) = ground_under(&t, o);
+        let h = match o.shape {
+            Shape::Box => o.size_m.unwrap()[2],
+            Shape::Cylinder => o.height_m.unwrap(),
+        };
+        let (base, top) = (-o.center_ned_m[2] - h / 2.0, -o.center_ned_m[2] + h / 2.0);
+        assert!(base <= lowest, "{}: base {base} floats above the ground {lowest}", o.name);
+        assert!(base >= lowest - 0.6, "{}: base {base} is buried too deep under {lowest}", o.name);
+        assert!(top >= highest + design(&o.name) - 0.35, "{}: top {top} is less than {} over the highest ground {highest}", o.name, design(&o.name));
+    }
+
+    for e in &w.emitters {
+        let above = -e.position_ned_m[2] - t.height_up(e.position_ned_m[0], e.position_ned_m[1]);
+        assert!((0.5..=2.0).contains(&above), "{} is {above} m above the ground", e.name);
+    }
 }

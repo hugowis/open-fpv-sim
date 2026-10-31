@@ -1,7 +1,8 @@
 extends SceneTree
 ## End to end: the terrain mesh world.gd draws is the surface the simulator samples. A real ofs-sim (open loop) loads
 ## worlds/hills.toml; the mesh is read back from the built Terrain node and compared with OfsClient.terrain_height
-## (the sim's own Terrain::height_up) at hundreds of points. Then worlds/park.toml: its gates must stand above the ground.
+## (the sim's own Terrain::height_up) at hundreds of points. Then worlds/park.toml: it has relief, its gates stand above the
+## ground and the quad rests on its flat start pad.
 ## Needs the extension and the server built (target/debug), or OFS_SIM_BIN set.
 ##   godot --headless --path godot -s res://tests/e2e_terrain.gd
 
@@ -180,16 +181,22 @@ func _run() -> void:
 	drawn.queue_free()
 	await _stop(app)
 
-	# Park: every gate hangs above its ground. Task 5 gives the park a terrain; until then the ground is the plane 0.
+	# Park: it has relief, every gate hangs above its ground and the quad sits on the flat pad at home.
 	app = await _start("park.toml")
 	client = app.client
 	field = client.get_world()
-	print("  note park %s" % ("has a terrain" if field.has("terrain") else "has no terrain yet: only the flat-ground checks apply"))
+	_check(field.has("terrain"), "the park world carries a terrain")
 	_check(field.get("gates", []).size() > 0, "the park has gates")
 	for g in field.get("gates", []):
 		var c: Vector3 = g["center"]
 		var above: float = c.y - client.terrain_height(c.x, c.z)
 		_check(above >= 0.5 and above <= 2.5, "gate %s stands %.2f m above the ground" % [g["name"], above])
+	# No throttle: after two simulated seconds the quad still rests on the pad (NED z within 0.2 m of 0, so drawn y too).
+	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.0, "aux": [-1.0, -1.0, -1.0, -1.0], "status": ""}
+	var settled: bool = await _wait_for(func(): return app.client.get_telemetry().get("time_s", 0.0) >= 2.0, 20.0)
+	_check(settled, "two simulated seconds pass: %.2f s" % app.client.get_telemetry().get("time_s", -1.0))
+	var rest: float = app.drone.position.y
+	_check(absf(rest) < 0.2 and absf(float(app.client.get_telemetry()["altitude_m"])) < 0.2, "the quad rests on the ground at the start: y = %.3f, altitude %.3f m" % [rest, app.client.get_telemetry()["altitude_m"]])
 	await _stop(app)
 	_finish()
 
