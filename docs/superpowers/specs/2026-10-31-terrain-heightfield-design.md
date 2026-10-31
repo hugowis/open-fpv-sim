@@ -161,6 +161,32 @@ digest are untouched. The signal doubles as a seam for the audio and the damage 
 - Performance: the shipped quads, 10 s of hover and bounce-around at 8 kHz in release, hilly against flat, recorded in
   `docs/research/collision.md` (an `#[ignore]` timing test, not a CI gate: wall-clock gates flake).
 
+## What the pins protect, and what a macOS difference cannot break
+
+Two kinds of digest check, with different reach:
+
+- **The flat-world pin** (`ofs-sim/tests/flat_world_pin.rs`, constants recorded on `main` before this change): proves a
+  world without `[terrain]` is bit-identical to before. It compares a whole-vehicle bus digest, which includes the
+  motor, battery and propeller maths, and those call libm (`exp`, `sin`, `powf`...), whose last bits differ between
+  Windows, Linux and macOS (the radio goldens already keep one digest file per OS for the same reason). So the
+  constant is per OS: Windows and Linux/WSL have theirs, recorded on `main`; macOS has none, and the test is compiled
+  out there. The claim it carries is "this change moved no bit on the platforms where it is pinned"; the change has no
+  platform-specific code, so it holds on macOS too, unpinned.
+- **The terrain grid pin** (`ofs-config/tests/world.rs`, the digest of the default section's baked grid): runs on every
+  OS, macOS included, with one constant, because the generator uses only IEEE-754 basic operations and `sqrt`
+  (correctly rounded everywhere), integer hashing and no fused multiply-add.
+
+A macOS difference cannot break the lockstep digest or "a seeded flight over hills replays exactly": the lockstep
+digest is compared between two runs on the same machine (a journal replay, `ofs-sim --replay`, the determinism tests
+that run a flight twice and compare), never against a constant from another OS, and the terrain adds no libm call, so
+it cannot make two same-platform runs differ. The test that proves the replay (`seeded_flight_over_hills_replays_exactly`)
+compares run against run and carries no per-OS constant, so it runs on macOS too. Cross-platform byte-identity of
+whole flights was never a property of this simulator and this change does not claim it; only the terrain grid itself
+is cross-platform byte-identical.
+
+The macOS CI job (`cargo test --workspace`, currently advisory) stays green by construction: the pin test is compiled
+out there, the grid pin is platform-independent, and no new test compares a libm-dependent value with a constant.
+
 ## Docs and bookkeeping
 
 `CHANGELOG.md` entry; `docs/dev-setup.md` world-file section (`[terrain]`, and that "nothing collides" line is stale);
