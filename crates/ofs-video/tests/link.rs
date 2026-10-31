@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use glam::{DQuat, DVec3};
 use ofs_core::{names, Bus, Model, Scheduler, StepCtx};
 use ofs_video::link::*;
 use ofs_core::shape::Shape;
-use ofs_rf::propagation::{fspl_db, power_sum_dbm, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_core::terrain::Terrain;
+use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -21,6 +24,7 @@ fn open_field() -> LinkWorld {
         diversity: true,
         obstacles: Vec::new(),
         emitters: Vec::new(),
+        terrain: None,
     }
 }
 
@@ -204,6 +208,61 @@ fn a_building_between_the_quad_and_the_pilot_costs_its_loss() {
     close(at(&open, 0.0).gain_db - at(&params, 0.0).gain_db, 25.0, 1e-6, "behind it");
     close(at(&params, 0.0).obstruction_db, 25.0, 1e-9, "reported as obstruction");
     close(at(&open, 40.0).gain_db - at(&params, 40.0).gain_db, 0.0, 1e-9, "beside it");
+}
+
+/// A 41 x 41 terrain, constant along east, with a tent-shaped ridge (10 rows a side) whose crest is `crest_m` high
+/// along north row 20; with 10 m cells the crest sits at north 100 m, mid-way between the goggles and a point 200 m out.
+fn ridge(crest_m: f32, cell_m: f64) -> Arc<Terrain> {
+    let height = |row: usize| (crest_m * (1.0 - row.abs_diff(20) as f32 / 10.0)).max(0.0);
+    let heights = (0..41 * 41).map(|k| height(k / 41)).collect();
+    Arc::new(Terrain::from_grid([-10.0 * cell_m, -20.0 * cell_m], cell_m, 41, 41, heights).unwrap())
+}
+
+fn over_the_ridge(terrain: Option<Arc<Terrain>>) -> LinkWorld {
+    LinkWorld { terrain, ..open_field() }
+}
+
+#[test]
+fn a_ridge_between_the_quad_and_the_goggles_lowers_the_snr() {
+    let terrain = ridge(10.0, 10.0);
+    let (open, hidden) = (bare(open_field()), bare(over_the_ridge(Some(terrain.clone()))));
+    let quad = DVec3::new(200.0, 0.0, -1.7);
+    let (a, b) = (vtx_paths(&open, quad, DQuat::IDENTITY, 5800.0)[0], vtx_paths(&hidden, quad, DQuat::IDENTITY, 5800.0)[0]);
+    let expected = terrain_loss_db(&terrain, quad, open.world.pilot_position, wavelength_m(5800.0));
+    assert!(expected > 20.0, "the 10 m crest is a deep knife edge over a 2 m path: {expected}");
+    close(a.gain_db - b.gain_db, expected, 1e-9, "the ridge's knife-edge loss");
+    close(b.obstruction_db, expected, 1e-9, "reported as obstruction");
+    close(snr_at(&open, 25.0, 200.0) - snr_at(&hidden, 25.0, 200.0), expected, 1e-9, "and in the SNR");
+    let published = |params: LinkParams| {
+        let mut rig = Rig::new(params, 1);
+        rig.set_pose(quad);
+        rig.field();
+        rig.get(names::VIDEO_SNR)
+    };
+    assert!(published(hidden) < published(open) - 20.0, "the published SNR drops with it");
+}
+
+#[test]
+fn a_ridge_between_an_emitter_and_the_goggles_lowers_the_interference() {
+    let mut world = emitter_world(0.0);
+    world.emitters[0].position = DVec3::new(200.0, 0.0, -2.0);
+    let terrain = ridge(10.0, 10.0);
+    let hidden = LinkWorld { terrain: Some(terrain.clone()), ..world.clone() };
+    let expected = terrain_loss_db(&terrain, world.emitters[0].position, world.pilot_position, wavelength_m(5800.0));
+    assert!(expected > 20.0, "{expected}");
+    close(interference_dbm(&world, 5800.0, false)[0] - interference_dbm(&hidden, 5800.0, false)[0], expected, 1e-3, "the ridge hides the emitter (the -150 dBm floor adds a hair)");
+}
+
+#[test]
+fn a_clear_path_over_the_ridge_is_unchanged() {
+    // 60 m up the ray clears the 10 m crest by 20 m, far beyond its first Fresnel zone.
+    let (open, ridged) = (bare(open_field()), bare(over_the_ridge(Some(ridge(10.0, 10.0)))));
+    let quad = DVec3::new(200.0, 0.0, -60.0);
+    assert_eq!(vtx_paths(&open, quad, DQuat::IDENTITY, 5800.0), vtx_paths(&ridged, quad, DQuat::IDENTITY, 5800.0));
+    let mut world = emitter_world(0.0);
+    world.emitters[0].position = DVec3::new(200.0, 0.0, -60.0);
+    let ridged_world = LinkWorld { terrain: Some(ridge(10.0, 10.0)), ..world.clone() };
+    assert_eq!(interference_dbm(&world, 5800.0, false), interference_dbm(&ridged_world, 5800.0, false));
 }
 
 struct Rig {

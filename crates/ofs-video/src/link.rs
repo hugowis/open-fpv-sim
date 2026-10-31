@@ -4,8 +4,11 @@
 //!
 //! Every threshold below is an estimate for a typical analog 5.8 GHz receiver; docs/research/video-link.md lists
 //! them with their provenance.
+use std::sync::Arc;
+
 use glam::{DQuat, DVec3};
 use ofs_core::rng::model_rng;
+use ofs_core::terrain::Terrain;
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
 use ofs_rf::propagation::{
@@ -233,6 +236,9 @@ pub struct LinkWorld {
     pub diversity: bool,
     pub obstacles: Vec<Obstacle>,
     pub emitters: Vec<Emitter>,
+    /// The ground that can hide the quad or an emitter from the goggles: the physics' own grid, shared: never a
+    /// copy of the heights.
+    pub terrain: Option<Arc<Terrain>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -254,7 +260,7 @@ pub fn vtx_paths(params: &LinkParams, quad_pos: DVec3, att: DQuat, freq_mhz: f64
     let tx = Endpoint { position: quad_pos, antenna: Antenna { axis: (att * params.vtx_antenna.axis).normalize(), ..params.vtx_antenna } };
     let shadow = body_shadow_db(att, quad_pos, params.world.pilot_position);
     // Every goggle antenna is at the pilot: one obstruction for all of them.
-    let obstruction = obstruction_db(&params.world.obstacles, quad_pos, params.world.pilot_position, freq_mhz);
+    let obstruction = obstruction_db(&params.world.obstacles, params.world.terrain.as_deref(), quad_pos, params.world.pilot_position, freq_mhz);
     params
         .world
         .antennas
@@ -269,8 +275,11 @@ pub fn vtx_paths(params: &LinkParams, quad_pos: DVec3, att: DQuat, freq_mhz: f64
 
 /// Interference at each receiver antenna for a receiver tuned to `freq_mhz`, in dBm.
 pub fn interference_dbm(world: &LinkWorld, freq_mhz: f64, ground_bounce: bool) -> Vec<f64> {
-    let obstructions: Vec<f64> =
-        world.emitters.iter().map(|e| obstruction_db(&world.obstacles, e.position, world.pilot_position, e.freq_mhz)).collect();
+    let obstructions: Vec<f64> = world
+        .emitters
+        .iter()
+        .map(|e| obstruction_db(&world.obstacles, world.terrain.as_deref(), e.position, world.pilot_position, e.freq_mhz))
+        .collect();
     world
         .antennas
         .iter()
