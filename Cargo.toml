@@ -45,3 +45,4 @@ ofs-proto = { path = "crates/ofs-proto" }
 ofs-client = { path = "crates/ofs-client" }
 ofs-log = { path = "crates/ofs-log" }
 ofs-sim = { path = "crates/ofs-sim" }
+ofs-audio = { path = "crates/ofs-audio" }
