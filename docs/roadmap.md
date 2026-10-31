@@ -146,7 +146,7 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Plugin loading for radio models from outside the tree.
 
 ### Modelling
-- Terrain: the physics ground is a heightfield (#153); the radio and video line of sight over it (#154) is done, the Godot mesh (#155) remains. Rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
+- Terrain: the physics ground is a heightfield (#153); the radio and video line of sight over it (#154) and the Godot mesh (#155) are done. Rotated boxes; a frequency-dependent `rf_loss_db`; collisions between objects; crash damage.
 - ExpressLRS dynamic power and frequency hopping; 2.4 GHz interference.
 - DShot extended telemetry and MSP over CRSF.
 - Feed Betaflight SITL a measured magnetometer (#31 added the model and left the firmware on its fixed virtual compass): a reserved block in the state datagram like eRPM's, and a SITL patch for `virtualMagSet`, so noise, hard iron and the world's declination reach heading hold and GPS rescue. A datasheet magnetometer part and a `fault.mag.*` interference seam.

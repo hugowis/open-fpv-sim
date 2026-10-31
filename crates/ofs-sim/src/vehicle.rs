@@ -499,9 +499,8 @@ pub struct Vehicle {
     osd: Option<OsdHandle>,
     fc_telemetry: FcTelemetryHandle,
     world: WorldConfig,
-    /// The grid the physics and both links share, for the test that they do.
-    #[cfg(test)]
-    terrain: Option<Arc<Terrain>>,
+    /// The terrain baked once at build, shared with the rigid body; `GetWorld` sends this grid instead of baking again.
+    terrain: Option<std::sync::Arc<ofs_core::terrain::Terrain>>,
     /// The quad file's radio antenna names, by index (the state's `active_antenna`).
     radio_antenna_names: Vec<String>,
     /// The video link's runtime-emitter handle, written by set_fault's VtxInterference arm.
@@ -987,6 +986,7 @@ pub fn build_seeded(
         },
         terrain: terrain.clone(),
     };
+    let terrain = airframe.terrain.clone();
     let initial = BodyState {
         pos_ned_m: v3(cfg.initial.position_ned_m),
         vel_ned_mps: DVec3::ZERO,
@@ -1161,7 +1161,6 @@ pub fn build_seeded(
         osd,
         fc_telemetry,
         world: opts.world.clone(),
-        #[cfg(test)]
         terrain,
         radio_antenna_names,
         vtx_interference,
@@ -1694,6 +1693,11 @@ impl Vehicle {
     /// The world the vehicle flies in (the open field when the session named none).
     pub fn world(&self) -> &WorldConfig {
         &self.world
+    }
+
+    /// The terrain the vehicle was built with (`None` for a world without `[terrain]`).
+    pub fn terrain(&self) -> Option<&std::sync::Arc<ofs_core::terrain::Terrain>> {
+        self.terrain.as_ref()
     }
 
     pub fn state(&self) -> VehicleState {

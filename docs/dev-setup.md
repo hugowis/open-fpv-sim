@@ -39,10 +39,11 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
     cargo build -p ofs-sim -p ofs-godot
 
 - **Install Godot:** download the official release zip (`Godot_v4.7.2-stable_win64.exe.zip`; Linux: `Godot_v4.7.2-stable_linux.x86_64.zip`) from the 4.7.2-stable release page and check it against that release's `SHA512-SUMS.txt`. For headless runs on Windows use the console binary from the same zip (`Godot_v4.7.2-stable_win64_console.exe`): the standard exe is a GUI program that detaches from the terminal, so its output is lost.
-- **Tests:** `bash scripts/run-godot-tests.sh [unit|e2e|all]` runs the unit suites and the end-to-end tests. It downloads Godot 4.7.2 itself (SHA-512 checked, into `build/godot-dl/`, override with `OFS_GODOT_DL`) unless `GODOT_BIN` points at any 4.7 binary, and it always builds the server and extension first (a no-op when up to date). The Betaflight e2e runs only when `OFS_SITL_LAUNCH` is set.
+- **Tests:** `bash scripts/run-godot-tests.sh [unit|open-loop|errors|terrain|betaflight|e2e|all]` runs the unit suites and the end-to-end tests (the `terrain` suite among them). It downloads Godot 4.7.2 itself (SHA-512 checked, into `build/godot-dl/`, override with `OFS_GODOT_DL`) unless `GODOT_BIN` points at any 4.7 binary, and it always builds the server and extension first (a no-op when up to date). The Betaflight e2e runs only when `OFS_SITL_LAUNCH` is set.
 - **Direct commands** (what the script wraps; both e2e scripts fly a real ofs-sim):
   - `godot --headless --path godot -s res://tests/run_tests.gd` — the unit suites;
   - `godot --headless --path godot -s res://tests/e2e_open_loop.gd` — open-loop e2e (no firmware);
+  - `godot --headless --path godot -s res://tests/e2e_terrain.gd` — the `terrain` suite: the mesh the client draws against the sim's `terrain_height` over `worlds/hills.toml`;
   - `OFS_SITL_LAUNCH=<cmd> godot --headless --path godot -s res://tests/e2e_betaflight.gd` — e2e with real Betaflight (armed through CRSF, climbs, reload re-arms).
 - **`timeout -k`:** a test script with a parse error exits 1, but a script that raises a runtime error never exits — the engine just keeps running. The runner therefore wraps every Godot call in `timeout -k` and treats a kill (rc 124) as a failure.
 - **`CARGO_TARGET_DIR`:** the Godot editor and `godot --path godot` load the extension from `target/debug` (the `debug` entries of `godot/ofs.gdextension`); the `release` entries (`target/release`) only apply to an exported release build of the game, which this repository does not make yet. So run `cargo build -p ofs-godot` without `--release` and keep `CARGO_TARGET_DIR` at its default while running Godot — a scratch target dir (as the WSL firewall workaround below uses for Rust tests) leaves the client without its extension.
@@ -54,7 +55,7 @@ The game client lives in `godot/`; README.md describes what it is, its keys and 
   3. Fly, then cut the radio (K, or switch the transmitter off): the HUD reports the link lost and Betaflight fails safe within a few seconds. R reloads the quad.
   4. Configurator: connect to the address the HUD shows (`tcp://127.0.0.1:5761` on an otherwise idle machine — it is the slot's, +10 per simulator, see the ports table), change a value and Save (the Configuration tab's Save and Reboot reboots Betaflight; the HUD counts the restarts).
 - **Flight audio:** headless Godot has no audio device (the dummy driver still takes frames), so the Godot tests cover the pump and the `audio` setting, and the Rust tests (`cargo test -p ofs-audio`) cover the sound itself. Check it by ear on a machine with speakers: the motor pitch follows the throttle, the wind noise rises with speed, a crash makes a thud, and turning **Sound** off in Settings silences it (and the choice persists in `user://ofs_client.cfg`).
-- **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views, the OSD, the three looks of the analog video link (`video_grain.png`, `video_unstable.png`, `video_lost.png`), and the help and controls screens (`start_fpv.png`, `start_chase.png`, `osd_fpv.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`, `menu.png`, `settings.png`); review them by eye. Without `--out=` they go to the project's user data dir.
+- **Visual check:** `godot --path godot -s res://tests/shots.gd -- --out=<dir>` opens a window briefly and saves screenshots of the start and a short hop in FPV and chase views, the OSD, the three looks of the analog video link (`video_grain.png`, `video_unstable.png`, `video_lost.png`), and the help and controls screens (`start_fpv.png`, `start_chase.png`, `osd_fpv.png`, `hop_fpv.png`, `hop_chase.png`, `help.png`, `controls.png`, `menu.png`, `settings.png`, `terrain.png`, a hilly world seen from above); review them by eye. Without `--out=` they go to the project's user data dir. For terrain, a human looks at what the tests cannot judge: the relief reads as ground in `terrain.png`, gates stand on it, the quad lands on the ground it sees (fly `worlds/hills.toml` and `worlds/park.toml`), and the frame rate holds with the large mesh (hills is 361k vertices) in FPV and in the DVR view.
 
 ## Controller setup (#127)
 
@@ -121,9 +122,11 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   neighbouring channels. The shipped world has one, on R2, next to the quad's default R1.
 - `[terrain]` — an opt-in height grid for the ground: `seed`, `size_m` (the square of relief, centred on home, flat beyond
   it), `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`, `persistence` and `flat_radius_m` (exactly flat, d = 0,
-  around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface; the Godot
-  client draws a flat ground until #155; the radio and video link are obstructed by the relief (#154), and objects with `rf_loss_db` stand on it. `worlds/hills.toml` is
-  the example; the steepest slope may not pass 60 degrees.
+  around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface and the
+  Godot client draws the same grid (it comes in the `GetWorld` reply, `World.terrain`, protocol 16; the client checks its
+  digest and builds the mesh itself); the radio and video link are obstructed by the relief (#154), and objects with
+  `rf_loss_db` stand on it. `worlds/hills.toml` is the big example (12 m hills); `worlds/park.toml` has gentle swells of
+  about a metre with its course placed on the ground. The steepest slope may not pass 60 degrees.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
 power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from
@@ -262,7 +265,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 15**. The fault catalog arrived in protocol 8, and its wire shapes live in
+The client and server speak **protocol 16**. The fault catalog arrived in protocol 8, and its wire shapes live in
 the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
 (`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
 `docs/research/faults.md` —
@@ -270,7 +273,7 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 15**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 16**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
@@ -278,7 +281,9 @@ protocol 13), the loaded parts' provenance (`LoadReply.parts`, protocol 14; Pyth
 passes (`Gate.pitch_deg`/`roll_deg`, `EVENT_KIND_GATE_HIT`, protocol 14), and the lap limit and race reset
 (`RaceState.finished`/`lap_limit`, `EVENT_KIND_RACE_FINISHED`/`RACE_RESET`, `ResetRace`, protocol 14), and named
 courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`course_index`/`mode`/`time_limit_s`/
-`time_left_s`, `ResetRace` taking a `ResetRaceRequest{course}`, protocol 15; Python `sim.reset_race(course)`).
+`time_left_s`, `ResetRace` taking a `ResetRaceRequest{course}`, protocol 15; Python `sim.reset_race(course)`), and the
+baked terrain grid (`World.terrain`: origin, cell size, node counts, heights and the digest, protocol 16). With a grid a
+reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

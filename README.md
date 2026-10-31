@@ -92,7 +92,7 @@ and Betaflight flying through the simulated ExpressLRS/CRSF link into real firmw
 Configurator port all behave as in the Python session. Betaflight's own OSD is drawn in the FPV view, the VTX is
 controlled by Betaflight over SmartAudio and shown in the HUD, and the battery reaches Betaflight so its OSD shows
 real voltage and warnings. The world is a data file the simulator loads — `worlds/flat.toml` (launch pad, gates,
-buildings, the pilot's spot and a parked quad's VTX), `worlds/park.toml` (a tight walled proximity loop) and
+buildings, the pilot's spot and a parked quad's VTX), `worlds/park.toml` (a tight walled proximity loop on gentle swells) and
 `worlds/meadow.toml` (a big fast circuit) — and its analog video link degrades the picture and the OSD together,
 like real goggles. A USB radio in joystick mode, a gamepad or the keyboard
 flies it; the F2 screen (or **Controls** in the main menu) sets the bindings and persists them to `user://controls.json`.

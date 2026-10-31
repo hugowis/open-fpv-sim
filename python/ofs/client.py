@@ -23,7 +23,9 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 15
+PROTOCOL_VERSION = 16
+# A terrain world's grid is a big get_world reply; gRPC's default receive limit is 4 MiB (ofs_proto::MAX_RESPONSE_BYTES).
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 UNLOAD_TIMEOUT_S = 5.0
 
 _MODES = {"lockstep": pb.MODE_LOCKSTEP, "realtime": pb.MODE_REALTIME}
@@ -418,7 +420,7 @@ class Sim:
         self.configurator_address = ""
         self.parts: list[Part] = []
         self._process = process
-        self._channel = grpc.insecure_channel(address)
+        self._channel = grpc.insecure_channel(address, options=[("grpc.max_receive_message_length", _MAX_RESPONSE_BYTES)])
         self._stub = pbg.SimStub(self._channel)
         self._watch = None
         self._events = collections.deque(maxlen=10_000)

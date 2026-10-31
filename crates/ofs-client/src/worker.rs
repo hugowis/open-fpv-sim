@@ -118,7 +118,8 @@ async fn connect_once(addr: &str, timeout: Duration) -> Result<SimClient<Channel
         .connect_timeout(timeout)
         .tcp_nodelay(true);
     let channel = endpoint.connect().await.map_err(|e| unavailable(&e))?;
-    let mut client = SimClient::new(channel);
+    // The largest terrain grid is over 4 MiB, tonic's default decoding limit.
+    let mut client = SimClient::new(channel).max_decoding_message_size(ofs_proto::MAX_RESPONSE_BYTES);
     let hello = client.handshake(pb::HandshakeRequest { protocol_version: PROTOCOL_VERSION });
     let reply = match tokio::time::timeout(timeout, hello).await {
         Err(_) => return Err(unavailable(&"the handshake timed out")),
@@ -285,7 +286,10 @@ async fn fly(client: &mut SimClient<Channel>, shared: &Arc<Shared>, settings: &S
         Err(status) => return Fly::Failed(status_error(status)),
     };
     match client.get_world(pb::Empty {}).await {
-        Ok(world) => shared.store_world(Some(World::from_pb(world.into_inner()))),
+        Ok(world) => match World::from_pb(world.into_inner()) {
+            Ok(world) => shared.store_world(Some(world)),
+            Err(message) => return Fly::Failed(ClientError::new(ErrorKind::Protocol, message)),
+        },
         Err(status) => return Fly::Failed(status_error(status)),
     }
     let _ = shared.updates.send(Update::Session { quad_name: reply.quad_name, configurator_address: reply.configurator_address });

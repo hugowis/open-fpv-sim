@@ -1,8 +1,10 @@
 //! Plain data the client exchanges with its users: sticks in, telemetry/events/phases out.
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use glam::DVec3;
+use ofs_core::terrain::Terrain;
 use ofs_proto::pb;
 
 use crate::error::{ClientError, ErrorKind};
@@ -204,6 +206,8 @@ pub struct WorldEmitter {
     pub position: DVec3,
     pub freq_mhz: f64,
     pub power_mw: f64,
+    /// The terrain's height (Godot's y) under it; 0 without a terrain.
+    pub ground_y: f64,
 }
 
 /// A gate's opening, with its centre in Godot's frame. `heading_deg` is the direction of travel through it, as in the
@@ -320,6 +324,8 @@ pub struct World {
     /// The named courses over `gates`; empty means one course of all of them. The session starts on `default_course`.
     pub courses: Vec<WorldCourse>,
     pub default_course: u32,
+    /// The ground grid, rebuilt and checked against the server's digest; shared, as it can be a million nodes.
+    pub terrain: Option<Arc<Terrain>>,
 }
 
 fn ned(v: Option<pb::Vec3>) -> DVec3 {
@@ -333,9 +339,10 @@ fn aim_ned(heading_deg: f64, elevation_deg: f64) -> DVec3 {
 }
 
 impl World {
-    pub fn from_pb(w: pb::World) -> World {
+    pub fn from_pb(w: pb::World) -> Result<World, String> {
         let facing = w.pilot_facing_deg;
-        World {
+        let terrain = w.terrain.map(terrain_from_pb).transpose()?.map(Arc::new);
+        Ok(World {
             name: w.name,
             pilot_position: vec_to_godot(ned(w.pilot_position_ned_m)),
             pilot_facing_deg: facing,
@@ -375,7 +382,11 @@ impl World {
             emitters: w
                 .emitters
                 .into_iter()
-                .map(|e| WorldEmitter { name: e.name, position: vec_to_godot(ned(e.position_ned_m)), freq_mhz: e.freq_mhz, power_mw: e.power_mw })
+                .map(|e| {
+                    let p = ned(e.position_ned_m);
+                    let ground_y = terrain.as_ref().map_or(0.0, |t| t.height_up(p.x, p.y));
+                    WorldEmitter { name: e.name, position: vec_to_godot(p), freq_mhz: e.freq_mhz, power_mw: e.power_mw, ground_y }
+                })
                 .collect(),
             gates: w
                 .gates
@@ -396,8 +407,19 @@ impl World {
                 .map(|c| WorldCourse { name: c.name, gates: c.gates, mode: RaceMode::from_pb(c.mode), laps: c.laps, time_limit_s: c.time_limit_s })
                 .collect(),
             default_course: w.default_course,
-        }
+            terrain,
+        })
     }
+}
+
+/// Rebuilds the grid and refuses it unless it is the server's, bit for bit.
+fn terrain_from_pb(t: pb::Terrain) -> Result<Terrain, String> {
+    let grid = Terrain::from_grid([t.origin_north_m, t.origin_east_m], t.cell_m, t.nodes_n as usize, t.nodes_e as usize, t.heights)
+        .map_err(|e| format!("the world's terrain is not a valid grid: {e}"))?;
+    if grid.digest() != t.digest {
+        return Err(format!("the terrain grid does not match the server's digest (got {:016x}, the server sent {:016x})", grid.digest(), t.digest));
+    }
+    Ok(grid)
 }
 
 /// Betaflight's OSD as a character grid. `cells` are row-major, each `char | font_page << 8 | blink << 10`.

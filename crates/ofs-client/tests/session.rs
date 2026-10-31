@@ -210,3 +210,21 @@ fn a_missing_world_file_fails_with_a_config_error() {
     assert!(detail.contains("no/such/world.toml"), "{detail}");
     assert!(probe.client.world().is_none());
 }
+
+#[test]
+fn a_client_loads_the_largest_terrain() {
+    let server = TestServer::start();
+    let world = std::env::temp_dir().join(format!("ofs-client-largest-terrain-{}.toml", std::process::id()));
+    std::fs::write(
+        &world,
+        "schema_version = 1\nname = \"Big\"\n[pilot]\nposition_ned_m = [-3.0, 2.0, -1.7]\nfacing_deg = 0.0\n[receiver]\nnoise_floor_dbm = -93.0\n\
+         [[receiver.antennas]]\nname = \"omni\"\nkind = \"omni\"\ngain_dbi = 2.0\npolarization = \"rhcp\"\n\
+         [terrain]\nsize_m = 256.0\ncell_m = 0.25\nwavelength_m = 64.0\n",
+    )
+    .unwrap();
+    let mut probe = Probe::start(Settings { world_path: world.to_string_lossy().into(), ..server.settings() });
+    probe.wait_phase(Phase::Flying, LONG);
+    let _ = std::fs::remove_file(&world);
+    let terrain = probe.client.world().expect("the world is there once flying").terrain.expect("a terrain");
+    assert_eq!(terrain.nodes(), (1025, 1025), "over 4 MiB of heights came through the decoding limit");
+}

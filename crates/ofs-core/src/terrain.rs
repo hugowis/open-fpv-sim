@@ -111,12 +111,14 @@ impl Terrain {
         self.max_height
     }
 
-    /// FNV-1a of the exact grid: its size, cell size and every height's bits.
+    /// FNV-1a of the exact grid: its size, cell size, origin and every height's bits.
     pub fn digest(&self) -> u64 {
         let mut h = Fnv1a::new();
         h.write(&(self.nodes_n as u64).to_le_bytes());
         h.write(&(self.nodes_e as u64).to_le_bytes());
         h.write(&self.cell_m.to_bits().to_le_bytes());
+        h.write(&self.origin_ne[0].to_bits().to_le_bytes());
+        h.write(&self.origin_ne[1].to_bits().to_le_bytes());
         for v in &self.heights {
             h.write(&v.to_bits().to_le_bytes());
         }

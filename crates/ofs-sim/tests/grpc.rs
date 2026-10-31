@@ -835,3 +835,55 @@ fn copy_library(dir: &std::path::Path) {
         std::fs::copy(root.join(&f), to).unwrap();
     }
 }
+
+/// A client that takes the grid a big terrain world carries (past tonic's 4 MiB default).
+async fn start_big_reply() -> SimClient<Channel> {
+    start_with_service().await.0.max_decoding_message_size(ofs_proto::MAX_RESPONSE_BYTES)
+}
+
+#[tokio::test]
+async fn get_world_carries_the_terrain_of_a_terrain_world() {
+    let mut c = start_big_reply().await;
+    c.load(LoadRequest { world_path: "hills".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    let t = c.get_world(Empty {}).await.unwrap().into_inner().terrain.expect("hills has a terrain");
+    assert_eq!(t.heights.len(), (t.nodes_n * t.nodes_e) as usize);
+    let rebuilt = ofs_core::terrain::Terrain::from_grid(
+        [t.origin_north_m, t.origin_east_m],
+        t.cell_m,
+        t.nodes_n as usize,
+        t.nodes_e as usize,
+        t.heights.clone(),
+    )
+    .unwrap();
+    assert_eq!(rebuilt.digest(), t.digest, "the message digest is the digest of the grid it carries");
+    c.load(LoadRequest { world_path: "flat".into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    assert!(c.get_world(Empty {}).await.unwrap().into_inner().terrain.is_none(), "a world without [terrain] has none");
+}
+
+#[tokio::test]
+async fn get_world_carries_a_grid_over_four_mebibytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let world = dir.path().join("big.toml");
+    std::fs::write(&world, "schema_version = 1
+name = \"Big\"
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+facing_deg = 0.0
+[receiver]
+noise_floor_dbm = -93.0
+[[receiver.antennas]]
+name = \"omni\"
+kind = \"omni\"
+gain_dbi = 2.0
+polarization = \"rhcp\"
+[terrain]
+size_m = 256.0
+cell_m = 0.25
+wavelength_m = 64.0
+").unwrap();
+    let mut c = start_big_reply().await;
+    c.load(LoadRequest { world_path: world.to_string_lossy().into(), ..open_loop(Mode::Lockstep) }).await.unwrap();
+    let t = c.get_world(Empty {}).await.unwrap().into_inner().terrain.expect("a terrain");
+    assert_eq!(t.heights.len(), 1025 * 1025);
+    assert!(t.heights.len() * 4 > 4 * 1024 * 1024, "the grid alone is past tonic's default limit");
+}
