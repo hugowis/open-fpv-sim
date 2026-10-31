@@ -54,7 +54,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
   recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
-  then). H.264 export needs an ffmpeg with libx264 on `PATH`. No audio.
+  then). H.264 export needs an ffmpeg with libx264 on `PATH`, and an export still running when the game quits is
+  lost. No audio.
 
 ### Flight controller and SITL (`docs/research/sitl-interface.md`)
 - Several SITLs per machine run side by side, one simulator process each, in slots of ten ports

@@ -5,6 +5,13 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### DVR export: a failed retry and a panicking export (#137)
+#### Fixed
+- **A failed MP4 export clears its partial file so a retry works, and a panicking export reports instead of going
+  silent**: the half-written `<stem>.mp4` a failing ffmpeg left behind no longer makes every retry die on
+  "already exists" (the file is removed only when the failed run itself wrote it; the never-overwrite rule stands),
+  and a panic in the export thread reaches `dvr_export_poll()` as an error instead of hanging the client's UI state.
+
 ### A heightfield ground for the physics (#153, part 1 of 3 of #27)
 #### Added
 - **`[terrain]` in the world file**, opt-in: `seed`, `size_m`, `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`,
