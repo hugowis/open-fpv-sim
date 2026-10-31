@@ -84,8 +84,9 @@ after the event, and the replay feeds records in the order they were logged. One
   Samples are `round(clamp(x, -1, 1) * 32767)` as `i16`.
 - `dvr.rs`: `DvrWriter::write_frame` returns whether the frame was accepted (it was dropped when the writer queue is
   full); existing callers ignore it.
-- `client.rs`: each feed's recording pairs its `DvrWriter` with an `AudioLog`. `dvr_start` creates the sidecar first, then
-  the AVI (and removes the sidecar if the AVI cannot be created, so a refused start leaves nothing); `dvr_write_frame` appends the `F`
+- `client.rs`: each feed's recording pairs its `DvrWriter` with an `AudioLog`. `dvr_start` creates the AVI (which refuses an
+  existing file, as today), then the sidecar (and removes the AVI if the sidecar cannot be created, so a refused start
+  leaves nothing); `dvr_write_frame` appends the `F`
   record when the writer accepted the frame; `poll` appends `C` for each collision event to every recording feed;
   `dvr_stop` finishes the log.
 - `dvr_export.rs`: `export_mp4` looks for `<stem>.audio` beside the AVI. If it exists, the replay is written to a
@@ -96,7 +97,7 @@ after the event, and the replay feeds records in the order they were logged. One
 
 **`ofs-godot`**, **Godot**: no new API. `dvr.gd` keeps calling `dvr_write_frame`; the audio rides on that call in
 Rust. `_free_stem` is unchanged (the `.audio` file shares the AVI's stem, and a stem is free only if the AVI is, as
-today; a leftover `.audio` without its AVI makes the start fail, see "Rulings", 8). **`ofs-audio`** is not changed.
+today). **`ofs-audio`** is not changed.
 
 ## Rulings (my calls, open to change)
 
@@ -118,8 +119,9 @@ today; a leftover `.audio` without its AVI makes the start fail, see "Rulings", 
 7. **Format:** AAC-LC 128 kb/s mono at 44.1 kHz in the MP4. Mono is the microphone; players put it on both speakers.
    The PCM goes through a temp file (an hour of flight is about 320 MB briefly, a five minute flight 26 MB), not a
    pipe: it keeps `-nostdin` and a plain `output()`.
-8. **Never overwrite:** a leftover `<name>.audio` with no AVI is not a free name for a new recording; `dvr_start`
-   fails with "already exists", as for the AVI. The sidecar is never modified after the recording stops.
+8. **The AVI's name decides:** the sidecar is created (truncating) only after its AVI was newly created, so a leftover
+   `<name>.audio` whose AVI was deleted never blocks a start (the Godot tests reuse fixed names). `_free_stem` and the
+   never-overwrite rule for the AVI are unchanged. The sidecar is never modified after the recording stops.
 9. **Determinism scope:** the PCM is a pure function of the sidecar bytes on one platform. Sin/exp/tanh come from
    the platform libm, so PCM is not byte-identical across operating systems, and the AAC bytes also depend on the
    ffmpeg build; tests compare PCM from the same machine and never carry golden audio files. The AAC track of two
