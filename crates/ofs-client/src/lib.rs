@@ -14,9 +14,12 @@ pub mod frames;
 pub mod interp;
 pub mod launch;
 pub mod model;
+pub mod terrain_mesh;
 mod worker;
 
 pub use client::Client;
 pub use error::{ClientError, ErrorKind};
 pub use interp::Pose;
 pub use model::*;
+pub use ofs_core::terrain::Terrain;
+pub use terrain_mesh::{terrain_mesh, TerrainMesh};

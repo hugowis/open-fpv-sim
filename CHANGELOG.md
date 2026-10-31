@@ -32,13 +32,39 @@ repository). The format follows Keep a Changelog.
   newest telemetry when a frame is written. It ignores the live "Sound" setting (muting the speakers does not silence the
   recording). There is no VTX buzzer: the sim has no buzzer or beeper model, so the track is the flight sound only. The
   temporary PCM file is about 26 MB for a five-minute flight (about 320 MB for an hour).
-- Server, protocol (still 15) and lockstep digest are unchanged.
+- Server, protocol and lockstep digest are unchanged by this change.
 - Tests: the log round trip is exact; replaying one `.audio` file twice gives identical PCM; the PCM length is 882 samples
   per frame; a truncated last line is tolerated and a bad line is an error; the export arguments carry the audio inputs
   only when asked. With the WSL ffmpeg, by hand (not in CI): an exported MP4 has an AAC stream of the video's length, and
   two exports of one recording give the same audio md5 (same machine and ffmpeg build).
 - Not checked: nobody has listened to an exported clip (headless, no audio device). Play an MP4 in VLC: the sound should
   match the picture.
+
+### Terrain in the Godot world (#155, part 3 of 3 of #27)
+#### Added
+- **The Godot client draws the terrain the physics samples.** Protocol 16 carries the baked grid in `World.terrain`
+  (origin, cell size, node counts, heights, digest); the client rebuilds its digest, and a grid that does not match fails
+  the load with a protocol error; a verified grid is turned into the mesh by the client (`ofs_client::terrain_mesh`:
+  vertices, normals, indices, cells split along the same diagonal as the physics) and `world.gd` draws it with a flat ring out to the horizon and hides the
+  flat ground plane. Emitter posts stand on the ground under them (`ground_y`).
+- **`OfsClient.get_world()["terrain"]`** (origin, cell size, node counts, vertices, normals, indices, digest) and
+  **`OfsClient.terrain_height(x, z)`**, the physics' height at a Godot position, the reference the drawn mesh is
+  compared to.
+- **A `terrain` Godot e2e suite** (`scripts/run-godot-tests.sh terrain`): the drawn mesh equals the sim's height at the
+  nodes and between them, over `worlds/hills.toml`. `shots.gd` also saves `terrain.png`.
+- **The park has relief**: `worlds/park.toml` gets a `[terrain]` (seed 153, 3.5 m amplitude, 45 m wavelength, 160 m
+  square, flat disc around home): gentle swells of about a metre on the course. The course is placed on the ground
+  (gates hang about 1.1 m over it, Gate2, rolled, 1.5 m; the walls, posts, pillars and hedge are buried 0.2 m under the lowest ground below them).
+- **Python**: the stubs are regenerated and the channel accepts messages of up to 16 MiB. The `World` dataclass does not
+  carry the grid yet; the message does.
+
+#### Changed
+- **Protocol 16**: `World.terrain` (`message Terrain`). Messages may now be larger than gRPC's 4 MiB default (a fine
+  grid can pass it), so `ofs_proto::MAX_RESPONSE_BYTES` is 16 MiB, set on the Rust client and the Python client.
+- **`Terrain::digest` hashes the grid's origin too**, so two grids with the same heights at different places differ. The
+  default section's pinned grid digest moved from `0xa382_160e_6e73_4cbd` to `0x9d1c_89d7_d6f5_fa1d`; a world without
+  `[terrain]` and its bus digest are unchanged.
+- The radio and the video link follow the terrain too (#154).
 
 ### Terrain in the radio and video line of sight (#154, part 2 of 3 of #27)
 #### Added
@@ -108,8 +134,8 @@ repository). The format follows Keep a Changelog.
   digest. No protocol change.
 - **Cost**: sampling roughly doubles the (tiny) physics cost, about +4 ms of wall time per simulated second on a
   hilly world (release, 8 kHz), still far above real time; the numbers are in `docs/research/collision.md`.
-- **Not yet**: until #155 the Godot client draws a flat ground in a world with `[terrain]`, so the picture and the
-  physics disagree there; the radio and the video link ignore the terrain until #154 (done, see above).
+- **Not yet** (at the time): until #155 the Godot client draws a flat ground in a world with `[terrain]`, so the
+  picture and the physics disagree there; the radio and the video link ignored the terrain until #154 (done, see above).
 ### Procedural flight audio (#158)
 #### Added
 - **The sim has sound.** The Godot client plays the quad's microphone: a tone per motor from its eRPM (the blade-pass

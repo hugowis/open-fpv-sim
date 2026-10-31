@@ -204,10 +204,10 @@ about 130 times real time against about 260 flat, and the budget is real time at
 done: skip the lookup for a sphere above the grid's highest node. It is a timing test, not a CI gate, because
 wall-clock gates flake.
 
-**Not yet.** The Godot client draws a flat ground in a world with `[terrain]` until #155, so the picture
-and the physics disagree there. The radio and video line of sight follow the terrain since #154 (see "Terrain" in
-`docs/research/elrs-link.md`), so a hill does block a link the client does not show. There is no protocol change: the
-client does not receive the grid yet.
+**Done in three parts.** The radio and video line of sight follow the terrain since #154 (see "Terrain" in
+`docs/research/elrs-link.md`), and since #155 (protocol 16) the Godot client receives the grid (`World.terrain`) and
+draws the same mesh the physics samples, so the picture is the physics' surface and a hill that blocks a link is one the
+pilot sees.
 
 ## Events
 

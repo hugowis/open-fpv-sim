@@ -1,5 +1,5 @@
 use glam::DVec3;
-use ofs_client::{ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, RaceMode, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
+use ofs_client::{Terrain, ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, RaceMode, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -193,7 +193,8 @@ fn the_world_converts_to_godots_frame() {
         }],
         emitters: vec![pb::Emitter { name: "parked-quad".into(), position_ned_m: v(30.0, -60.0, -1.0), freq_mhz: 5695.0, power_mw: 25.0 }],
         ..Default::default()
-    });
+    })
+    .unwrap();
     assert_eq!(w.pilot_position, DVec3::new(2.0, 1.7, 3.0), "east, up, south");
     let b = &w.objects[0];
     assert_eq!(b.center, DVec3::new(-45.0, 7.0, -110.0), "where world.gd drew building A");
@@ -203,7 +204,7 @@ fn the_world_converts_to_godots_frame() {
     let up = 10f64.to_radians();
     assert!((w.antennas[1].aim - DVec3::new(0.0, up.sin(), -up.cos())).length() < 1e-12, "the patch looks north (-Z), 10 degrees up");
     assert_eq!(w.emitters[0].position, DVec3::new(-60.0, 1.0, -30.0));
-    let east = World::from_pb(pb::World { pilot_facing_deg: 90.0, antennas: vec![pb::ReceiverAntenna { aim_el_deg: 0.0, ..Default::default() }], ..Default::default() });
+    let east = World::from_pb(pb::World { pilot_facing_deg: 90.0, antennas: vec![pb::ReceiverAntenna { aim_el_deg: 0.0, ..Default::default() }], ..Default::default() }).unwrap();
     assert!((east.antennas[0].aim - DVec3::X).length() < 1e-12, "facing east, aimed ahead: +X");
 }
 
@@ -221,13 +222,14 @@ fn a_gate_is_converted_to_godots_frame() {
     let w = World::from_pb(pb::World {
         gates: vec![pb::Gate { name: "Gate0".into(), center_ned_m: v(30.0, 0.0, -1.22), heading_deg: 90.0, width_m: 3.08, height_m: 2.44, pitch_deg: 10.0, roll_deg: -20.0 }],
         ..Default::default()
-    });
+    })
+    .unwrap();
     let g = &w.gates[0];
     assert_eq!(g.name, "Gate0");
     assert_eq!(g.center, DVec3::new(0.0, 1.22, -30.0), "east, up, south");
     assert_eq!((g.heading_deg, g.width_m, g.height_m), (90.0, 3.08, 2.44));
     assert_eq!((g.pitch_deg, g.roll_deg), (10.0, -20.0));
-    assert!(World::from_pb(pb::World::default()).gates.is_empty());
+    assert!(World::from_pb(pb::World::default()).unwrap().gates.is_empty());
 }
 
 #[test]
@@ -239,11 +241,12 @@ fn the_worlds_courses_reach_the_client() {
         ],
         default_course: 1,
         ..Default::default()
-    });
+    })
+    .unwrap();
     assert_eq!(w.default_course, 1);
     assert_eq!((w.courses[0].name.as_str(), w.courses[0].gates.clone(), w.courses[0].mode, w.courses[0].laps), ("Line", vec!["A".to_string(), "B".to_string()], RaceMode::Laps, 3));
     assert_eq!((w.courses[1].mode, w.courses[1].time_limit_s), (RaceMode::TimeAttack, 45.0));
-    assert!(World::from_pb(pb::World::default()).courses.is_empty());
+    assert!(World::from_pb(pb::World::default()).unwrap().courses.is_empty());
 }
 
 #[test]
@@ -288,4 +291,78 @@ fn the_race_event_kinds_have_names() {
     assert_eq!((e.kind, e.kind.as_str()), (EventKind::RaceFinished, "race_finished"));
     let e = Event::from_pb(pb::Event { time_s: 6.0, kind: pb::EventKind::RaceReset as i32, message: "race reset".into() });
     assert_eq!((e.kind, e.kind.as_str()), (EventKind::RaceReset, "race_reset"));
+}
+
+fn sloped() -> Terrain {
+    // Height rises 0.5 m per cell to the north and 0.25 m per cell to the east, 2 m cells, 4 x 5 nodes from (-2, 3).
+    let heights = (0..4).flat_map(|i| (0..5).map(move |j| 0.5 * i as f32 + 0.25 * j as f32)).collect();
+    Terrain::from_grid([-2.0, 3.0], 2.0, 4, 5, heights).unwrap()
+}
+
+fn terrain_pb(t: &Terrain) -> pb::Terrain {
+    let (nodes_n, nodes_e) = t.nodes();
+    pb::Terrain {
+        origin_north_m: t.origin_ne()[0],
+        origin_east_m: t.origin_ne()[1],
+        cell_m: t.cell_m(),
+        nodes_n: nodes_n as u32,
+        nodes_e: nodes_e as u32,
+        heights: t.heights().to_vec(),
+        digest: t.digest(),
+    }
+}
+
+#[test]
+fn a_world_with_a_terrain_keeps_it() {
+    let t = sloped();
+    let w = World::from_pb(pb::World { terrain: Some(terrain_pb(&t)), ..Default::default() }).unwrap();
+    let kept = w.terrain.unwrap();
+    assert_eq!(kept.digest(), t.digest());
+    assert_eq!(*kept, t);
+}
+
+#[test]
+fn a_corrupt_terrain_is_an_error() {
+    let t = sloped();
+    let err = |f: fn(&mut pb::Terrain)| {
+        let mut p = terrain_pb(&t);
+        f(&mut p);
+        World::from_pb(pb::World { terrain: Some(p), ..Default::default() }).unwrap_err()
+    };
+    let e = err(|p| p.digest ^= 1);
+    assert!(e.contains("digest"), "{e}");
+    let e = err(|p| {
+        p.heights.pop();
+    });
+    assert!(e.contains("heights"), "{e}");
+    let e = err(|p| p.cell_m = 0.0);
+    assert!(e.contains("cell size"), "{e}");
+}
+
+#[test]
+fn no_terrain_is_none_and_ground_y_zero() {
+    let v = |x, y, z| Some(pb::Vec3 { x, y, z });
+    let w = World::from_pb(pb::World {
+        emitters: vec![pb::Emitter { name: "e".into(), position_ned_m: v(1.0, 4.0, -1.0), freq_mhz: 5695.0, power_mw: 25.0 }],
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(w.terrain.is_none());
+    assert_eq!(w.emitters[0].ground_y, 0.0);
+}
+
+#[test]
+fn an_emitter_stands_on_the_relief() {
+    let t = sloped();
+    let v = |x, y, z| Some(pb::Vec3 { x, y, z });
+    let w = World::from_pb(pb::World {
+        terrain: Some(terrain_pb(&t)),
+        emitters: vec![pb::Emitter { name: "e".into(), position_ned_m: v(0.7, 5.1, -1.0), freq_mhz: 5695.0, power_mw: 25.0 }],
+        ..Default::default()
+    })
+    .unwrap();
+    let want = t.height_up(0.7, 5.1);
+    assert!(want > 0.5, "the emitter is on a slope: {want}");
+    assert_eq!(w.emitters[0].ground_y, want);
+    assert_eq!(w.emitters[0].position.y, 1.0, "the position stays where the file put it");
 }

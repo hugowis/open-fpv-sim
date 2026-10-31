@@ -233,8 +233,9 @@ fn antenna_msg(a: &world_cfg::AntennaSection) -> pb::ReceiverAntenna {
     }
 }
 
-/// The world as the protocol carries it. Emitters given by band and channel carry their frequency.
-pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
+/// The world as the protocol carries it. Emitters given by band and channel carry their frequency. `terrain` is the
+/// grid the vehicle already baked: building it again here would stall the session lock for the whole bake.
+pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Terrain>) -> pb::World {
     pb::World {
         name: w.name.clone(),
         pilot_position_ned_m: vec3_of(w.pilot.position_ned_m),
@@ -301,6 +302,19 @@ pub(crate) fn world_msg(w: &WorldConfig) -> pb::World {
                 .collect()
         },
         default_course: w.default_course() as u32,
+        terrain: terrain.map(|t| {
+            let (nodes_n, nodes_e) = t.nodes();
+            let [origin_north_m, origin_east_m] = t.origin_ne();
+            pb::Terrain {
+                origin_north_m,
+                origin_east_m,
+                cell_m: t.cell_m(),
+                nodes_n: nodes_n as u32,
+                nodes_e: nodes_e as u32,
+                heights: t.heights().to_vec(),
+                digest: t.digest(),
+            }
+        }),
     }
 }
 
@@ -777,7 +791,7 @@ mod tests {
     #[test]
     fn world_msg_carries_the_gates_and_state_msg_the_race() {
         let session = flat_session();
-        let world = world_msg(session.vehicle.world());
+        let world = world_msg(session.vehicle.world(), None);
         assert_eq!(world.gates.len(), 3);
         let g = &world.gates[0];
         assert_eq!((g.name.as_str(), g.heading_deg, g.width_m, g.height_m), ("Gate0", 0.0, 3.08, 2.44));
@@ -789,6 +803,26 @@ mod tests {
         assert_eq!((race.course_index, race.mode, race.time_limit_s), (0, pb::RaceMode::Laps as i32, 0.0));
         let bare = testing::open_loop_session(RunMode::Lockstep);
         assert!(!bare.state_msg().race.unwrap().present);
+    }
+
+    /// The message carries the grid the vehicle samples, not a second bake (issue #155: a bake under the session lock
+    /// stalls the real-time loop).
+    #[test]
+    fn world_msg_carries_the_terrain_the_vehicle_samples() {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hills.toml"))).unwrap();
+        let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+        let opts = crate::vehicle::BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-session-terrain-test"),
+            fc_override: Some(ofs_config::FcKind::OpenLoop),
+            world,
+        };
+        let vehicle = crate::vehicle::build(&cfg, &opts, None).unwrap();
+        let terrain = vehicle.terrain().expect("hills has a terrain");
+        let msg = world_msg(vehicle.world(), Some(&**terrain)).terrain.expect("the message carries the terrain");
+        assert_eq!(msg.digest, terrain.digest());
+        assert_eq!(msg.heights, terrain.heights());
+        assert!(world_msg(vehicle.world(), None).terrain.is_none());
     }
 
     #[test]
@@ -896,7 +930,7 @@ mod tests {
     #[test]
     fn the_world_message_carries_the_world_file() {
         let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"));
-        let msg = world_msg(&ofs_config::world::load(path).unwrap());
+        let msg = world_msg(&ofs_config::world::load(path).unwrap(), None);
         assert_eq!(msg.name, "Flat field");
         assert_eq!(msg.pilot_position_ned_m, Some(pb::Vec3 { x: -3.0, y: 2.0, z: -1.7 }));
         let patch = &msg.antennas[1];
