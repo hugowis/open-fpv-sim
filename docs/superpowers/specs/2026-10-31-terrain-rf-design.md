@@ -85,8 +85,12 @@ the old code path's expected value; the radio goldens and `ofs-sim` radio golden
 ### Behaviour worth knowing (rulings)
 
 - A quad lying on the ground has its antenna within centimetres of the ground, and the ground-grazing path now takes a
-  knife-edge loss from the terrain it sits on (about 4 dB at 3 cm clearance, 0 from 12 cm up at 5.8 GHz). Flat worlds do not
-  have this term (the two-ray bounce alone models the plane). It is physical and tiny; it is not subtracted.
+  knife-edge loss from the terrain it sits on. Measured with `terrain_loss_db` on an all-zero grid, the quad at its
+  clearance and the handset 1.2 m up, at 5.8 GHz: 4.4 dB at 3 cm, 2.3 dB at 12 cm, 1.9 dB at 15 cm, 0.5 dB at 30 cm and
+  nothing from 50 cm up over 110 m (3.0, 2.6 and 1.4 dB at 12, 15 and 30 cm over 167 m); the ray rises from the quad, so
+  the loss falls off slowly with the clearance, and the 1 m in the geometry is only the `MIN_DISTANCE_M` clamp on d1.
+  Flat worlds do not have this term (the two-ray bounce alone models the plane). It is physical and a few dB at most;
+  it is not removed to make a resting quad match a flat world.
 - The ground bounce still reflects off d = 0. Over hills that ray is approximate; documented.
 - Objects and terrain losses add (as objects already add). A building on a hill adds its own loss to the hill's.
 
@@ -139,9 +143,9 @@ its own sampled search); `docs/dev-setup.md` if it mentions the RF obstacles.
 The whole-flow check (`crates/ofs-sim/tests/terrain_link.rs`, `worlds/hills.toml`, the quad hovering 1.5 m over the
 ground) measured, against the same spot in a world without `[terrain]`: RSSI -58.5 dBm without the relief, -78.1 dBm
 behind a hill (about 20 dB down), video SNR 18.0 dB against -3.1 dB (about 21 dB down). LQ stays at 99 there: 167 m out
-the link still has 27 dB of margin over the 500 Hz sensitivity, so the picture is lost first. "Lose the uplink" holds
-farther out or with a weaker margin. The early-out margin uses `max(L, 3)` as amended above; the ground-grazing figure
-is about 4.4 dB at 3 cm clearance and nothing from about 15 cm up at 5.8 GHz (the nearest ground edge 1 m away).
+the link still has 27 dB of margin over the 500 Hz sensitivity, so the picture is lost first. "Lose the uplink" is
+an expectation, not measured here: it should hold farther out or with a weaker margin. The early-out margin uses
+`max(L, 3)` as amended above; the ground-grazing figures are those of "Behaviour worth knowing" above.
 
 ## Calls made without the user (rulings)
 

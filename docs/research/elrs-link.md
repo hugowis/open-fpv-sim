@@ -71,8 +71,7 @@ out behind a hill it is **-78.1 dBm**, LQ 99 (the same spot without the relief: 
 -78 dBm is still 27 dB over the 500 Hz sensitivity: a hill takes the margin first and the link after.
 
 Limits: the ground bounce still reflects off the plane d = 0, not off the terrain; only one edge counts (a second ridge
-behind the first adds nothing); a quad on the ground gets a ground-grazing loss from the terrain under it (at 5.8 GHz, with the nearest ground edge
-1 m away: about 4.4 dB at 3 cm clearance, 0.2 dB at 12 cm, nothing from about 15 cm up; small, and not subtracted); objects with `rf_loss_db` add their own loss to the terrain's; outside the grid the ground is
+behind the first adds nothing); a quad near the ground gets a ground-grazing loss from the terrain under it, a few dB at most (over flat ground with the handset 1.2 m up, a quad at its clearance above it takes (5.8 GHz) about 4.4 dB at 3 cm, 2.3 dB at 12 cm, 1.9 dB at 15 cm, 0.5 dB at 30 cm and nothing from 50 cm up over 110 m (3.0, 2.6 and 1.4 dB at 12, 15 and 30 cm over 167 m); the ray rises from the quad, so the loss falls off slowly with the clearance; flat worlds have no such term, and it is not removed to make a resting quad match one); objects with `rf_loss_db` add their own loss to the terrain's; outside the grid the ground is
 the plane d = 0 and costs nothing; sampling is capped at 2048 points, so a span over 1024 cells is sampled coarser than half a cell.
 
 ## The receiver

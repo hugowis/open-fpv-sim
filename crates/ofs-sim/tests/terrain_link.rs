@@ -70,7 +70,7 @@ fn a_hill_between_the_handset_and_the_quad_lowers_both_links_and_a_flat_world_do
     assert!(snr_clear - snr_behind > 15.0, "video SNR {snr_clear} in view, {snr_behind} behind the hill");
     assert!(lq_behind <= lq_clear);
 
-    // The same two placements without the relief: the ground bounce is off d = 0 in both worlds, so what the
+    // The same two placements without the relief: the ground bounce is on the plane d = 0 in both worlds, so what the
     // clear one hears is unchanged, and the hill is the whole of the other's drop.
     let (flat_clear, flat_behind) = (signals(flat(), clear), signals(flat(), behind));
     assert_eq!((rssi_clear, snr_clear), (flat_clear.0, flat_clear.2), "in clear view the hills world sounds like the flat one");
