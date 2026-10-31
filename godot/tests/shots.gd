@@ -2,7 +2,7 @@ extends SceneTree
 ## Renders the game to PNG files with a real renderer (a window opens briefly), to check the visuals by eye:
 ##   godot --path godot -s res://tests/shots.gd -- --out=C:/some/dir
 ## Flies the open-loop drone forward for a moment, then saves start_fpv.png, start_chase.png, osd_fpv.png, clean_fpv.png, hop_fpv.png,
-## hop_chase.png, video_grain.png, video_unstable.png, video_lost.png, help.png and controls.png.
+## hop_chase.png, video_grain.png, video_unstable.png, video_lost.png, help.png, controls.png and terrain.png (the hills world seen from above its flat disc).
 
 func _initialize() -> void:
 	_run()
@@ -115,6 +115,22 @@ func _run() -> void:
 	app.settings_screen.open()
 	await _frames(3)
 	await _save("settings")
+	# The hills world (#155): the terrain mesh seen from above the flat disc around the pad, looking north.
+	app.settings_screen.close()
+	app.settings["world_path"] = ProjectSettings.globalize_path("res://").path_join("..").simplify_path().path_join("worlds").path_join("hills.toml")
+	app._on_menu_start()
+	var terrain_deadline := Time.get_ticks_msec() + 30000
+	while not app.client.get_world().has("terrain") and Time.get_ticks_msec() < terrain_deadline:
+		await process_frame
+	var overview := Camera3D.new()
+	overview.far = 4000.0
+	app.fpv_viewport.add_child(overview)
+	overview.position = Vector3(0.0, 35.0, 40.0)
+	overview.look_at(Vector3(0.0, 5.0, -150.0))
+	app.set_chase_view(true)
+	overview.make_current()
+	await _frames(5)
+	await _save("terrain")
 	app.queue_free()
 	await _frames(2)
 	quit(0)
