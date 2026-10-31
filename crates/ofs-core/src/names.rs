@@ -13,6 +13,8 @@ pub const BODY_COLLISION_SPEED: &str = "body.collision_speed";
 pub const BODY_COLLISION_OBJECT: &str = "body.collision_object";
 /// Collision events raised so far; the server detects the event's edge on this counter.
 pub const BODY_COLLISION_COUNT: &str = "body.collision_count";
+/// Depth (NED d) of the ground under the body's centre; registered only in worlds with a `[terrain]`.
+pub const BODY_TERRAIN_D: &str = "body.terrain_d_m";
 
 /// The race (only in worlds with gates): 1 once gate 0 has started the clock.
 pub const RACE_RUNNING: &str = "race.running";

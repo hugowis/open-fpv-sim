@@ -7,6 +7,7 @@ pub mod names;
 pub mod rng;
 pub mod scheduler;
 pub mod shape;
+pub mod terrain;
 pub mod wire;
 
 pub use bus::{Bus, BusValue, Signal, SignalKind};
