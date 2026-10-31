@@ -145,6 +145,18 @@ fn a_truncated_tail_is_tolerated_and_a_bad_line_is_an_error() {
     std::fs::write(&cut, &text[..(tail + text.len()) / 2]).unwrap();
     assert_eq!(pcm(&cut).1, 4);
 
+    // A cut that still parses (inside the last number, or a shortened time) is a crash artefact too.
+    let whole = text[..tail].to_string();
+    std::fs::write(dir.join("whole.audio"), &whole).unwrap();
+    let want = pcm(&dir.join("whole.audio"));
+    assert_eq!(want.1, 4);
+    let parsable = dir.join("parsable.audio");
+    std::fs::write(&parsable, &text[..text.len() - 3]).unwrap();
+    assert_eq!(pcm(&parsable), want);
+    let c_cut = dir.join("c_cut.audio");
+    std::fs::write(&c_cut, format!("{whole}C 1.5")).unwrap();
+    assert_eq!(pcm(&c_cut), want);
+
     let mut lines: Vec<&str> = text.lines().collect();
     lines[2] = "F 1 2";
     let bad = dir.join("bad.audio");
@@ -175,4 +187,20 @@ fn a_collision_waits_for_its_state() {
     let (out, _) = pcm(&path);
     assert_eq!(energy(&out[..CHUNK_BYTES]), 0);
     assert!(energy(&out[CHUNK_BYTES..]) > 0);
+}
+
+#[test]
+fn corrupt_numbers_are_an_error_or_harmless_never_a_panic() {
+    let dir = fresh_dir("corrupt");
+    for n in ["9223372036854775807", "18446744073709551615", "4611686018427387904"] {
+        let path = dir.join("huge.audio");
+        std::fs::write(&path, format!("ofs-dvr-audio 1\nF 0 0 0 0 {n} 1 2\n")).unwrap();
+        let err = write_pcm(&path, &mut Vec::new()).unwrap_err();
+        assert!(err.contains("line 2"), "{err}");
+    }
+    let path = dir.join("odd.audio");
+    std::fs::write(&path, "ofs-dvr-audio 1\nF 0 inf inf -inf 1 NaN 0.5\nF inf 1e308 1e308 1e308 2 inf 1e308 NaN 2\n").unwrap();
+    let (out, frames) = pcm(&path);
+    assert_eq!(frames, 2);
+    assert_eq!(out.len(), 2 * CHUNK_BYTES);
 }

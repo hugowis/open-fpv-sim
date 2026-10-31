@@ -89,7 +89,7 @@ fn parse_line(line: &str) -> Result<Record, String> {
         Some("F") => {
             let rest: Vec<&str> = parts.collect();
             let n: usize = rest.get(4).ok_or("F is too short")?.parse().map_err(|_| "bad motor count")?;
-            if rest.len() != 5 + n.checked_mul(2).ok_or("bad motor count")? {
+            if rest.len() != n.checked_mul(2).and_then(|m| m.checked_add(5)).ok_or("bad motor count")? {
                 return Err(format!("F says {n} motors but has {} numbers after the count", rest.len() - 5));
             }
             let nums = rest.iter().enumerate().filter(|&(i, _)| i != 4).map(|(_, s)| num(s)).collect::<Result<Vec<_>, _>>()?;
@@ -126,12 +126,11 @@ pub fn write_pcm(sidecar: &Path, out: &mut dyn Write) -> Result<u64, String> {
             return Ok(frames);
         }
         lineno += 1;
-        let record = match parse_line(&line) {
-            Ok(r) => r,
-            // A crash mid-write leaves a last line without its LF.
-            Err(_) if !line.ends_with('\n') => return Ok(frames),
-            Err(e) => return Err(format!("{name}: line {lineno}: {e}")),
-        };
+        // The writer ends every line with LF, so a last line without one is a crash artefact, even if it parses.
+        if !line.ends_with('\n') {
+            return Ok(frames);
+        }
+        let record = parse_line(&line).map_err(|e| format!("{name}: line {lineno}: {e}"))?;
         match record {
             Record::Collision(t) => audio.collision_event(t),
             Record::Frame(input, time_s, speed_mps) => {
