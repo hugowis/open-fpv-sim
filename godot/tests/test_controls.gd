@@ -10,6 +10,14 @@ class FakeInput:
 	var axes: Dictionary = {}  # "device/axis" -> value
 	var buttons: Dictionary = {}  # "device/button" -> bool
 	var keys: Dictionary = {}  # keycode -> bool
+	var guids: Dictionary = {}  # device -> guid
+	var names: Dictionary = {}  # device -> name
+
+	func get_joy_guid(device: int) -> String:
+		return guids.get(device, "")
+
+	func get_joy_name(device: int) -> String:
+		return names.get(device, "")
 
 	func get_connected_joypads() -> Array:
 		return pads
@@ -191,3 +199,124 @@ func test_describe_names_each_kind_of_binding() -> void:
 	c.apply_preset("keyboard")
 	eq(c.describe("aux1"), "key Space (toggle)", "toggle key")
 	eq(c.describe("aux3"), "not bound", "unbound")
+
+
+func _cal(low: float, centre: float, high: float) -> Dictionary:
+	return {"name": "Test radio", "axes": {"0": {"min": low, "center": centre, "max": high}}}
+
+
+func test_a_calibrated_axis_reaches_full_deflection_at_its_end_points() -> void:
+	var c := Controls.new("radio")
+	c.deadzone = 0.0
+	c.calibration = {"guid-a": _cal(-0.8, 0.1, 0.9)}
+	var input := FakeInput.new()
+	input.guids = {0: "guid-a"}
+	input.axes = {"0/0": 0.1}
+	near(c.read(input)["roll"], 0.0, "the calibrated centre is zero")
+	input.axes = {"0/0": 0.9}
+	near(c.read(input)["roll"], 1.0, "top end point")
+	input.axes = {"0/0": -0.8}
+	near(c.read(input)["roll"], -1.0, "bottom end point")
+	input.guids = {0: "guid-b"}
+	input.axes = {"0/0": 0.9}
+	near(c.read(input)["roll"], 0.9, "another controller is read raw")
+
+
+func test_calibration_is_per_axis_and_the_throttle_uses_the_whole_range() -> void:
+	var c := Controls.new("radio")
+	c.calibration = {"g": {"name": "r", "axes": {"2": {"min": -0.5, "center": 0.0, "max": 0.5}}}}
+	var input := FakeInput.new()
+	input.guids = {0: "g"}
+	input.axes = {"0/2": 0.5}
+	near(c.read(input)["throttle"], 1.0, "throttle top")
+	input.axes = {"0/2": -0.5}
+	near(c.read(input)["throttle"], 0.0, "throttle bottom")
+	input.axes = {"0/0": 0.5}
+	near(c.read(input)["roll"], (0.5 - 0.02) / 0.98, "roll (axis 0) has no calibration")
+
+
+func test_invert_comes_after_calibration() -> void:
+	var c := Controls.new("radio")
+	c.deadzone = 0.0
+	c.calibration = {"g": _cal(-0.5, 0.0, 1.0)}
+	c.set_binding("roll", {"kind": "axis", "device": -1, "index": 0, "invert": true})
+	var input := FakeInput.new()
+	input.guids = {0: "g"}
+	input.axes = {"0/0": -0.5}
+	near(c.read(input)["roll"], 1.0, "the bottom end point, inverted")
+
+
+func test_per_channel_deadband_and_travel() -> void:
+	var c := Controls.new("radio")
+	c.shaping = {"roll": {"deadband": 0.2, "travel": 0.5}, "pitch": {"travel": 0.5}}
+	var input := FakeInput.new()
+	input.axes = {"0/0": 0.1, "0/1": 0.1, "0/3": 0.1}
+	var s := c.read(input)
+	near(s["roll"], 0.0, "inside roll's own deadband")
+	near(s["pitch"], (0.1 - 0.02) / 0.98 / 0.5, "pitch keeps the global deadzone, with travel")
+	near(s["yaw"], (0.1 - 0.02) / 0.98, "yaw is untouched")
+	input.axes = {"0/0": 0.5, "0/1": 0.6}
+	near(c.read(input)["roll"], 0.75, "(0.5 - 0.2) / 0.8 / 0.5")
+	near(c.read(input)["pitch"], 1.0, "pitch reaches full early")
+
+
+func test_presets_reset_the_shaping_but_not_the_calibration() -> void:
+	var c := Controls.new("radio")
+	c.shaping = {"roll": {"travel": 0.5}}
+	c.calibration = {"g": _cal(-1, 0, 1)}
+	c.apply_preset("gamepad")
+	eq(c.shaping, {}, "shaping cleared")
+	eq(c.calibration.size(), 1, "calibration kept")
+
+
+func test_shaping_survives_a_json_round_trip_and_is_cleaned_on_load() -> void:
+	var a := Controls.new("radio")
+	a.shaping = {"roll": {"deadband": 0.1, "travel": 0.8}}
+	var b := Controls.new("keyboard")
+	ok(b.from_json(a.to_json()), "loads")
+	eq(b.shaping, a.shaping, "shaping")
+	var dirty := Controls.new("radio").to_profile()
+	dirty["shaping"] = {"roll": {"deadband": 9.0, "travel": 0.0}, "aux1": {"travel": 0.5}, "pitch": 5, "yaw": {"travel": "x"}}
+	ok(b.from_profile(dirty), "a dirty shaping section still loads")
+	eq(b.shaping, {"roll": {"deadband": 0.5, "travel": 0.3}, "yaw": {}}, "clamped; aux and non-dictionaries dropped; junk values dropped")
+
+
+func test_an_old_file_without_shaping_loads_with_none() -> void:
+	var c := Controls.new("radio")
+	c.shaping = {"roll": {"travel": 0.5}}
+	var old := {"version": 1, "preset": "gamepad", "deadzone": 0.07, "bindings": Controls.preset("gamepad")["bindings"]}
+	ok(c.from_json(JSON.stringify(old)), "a version 1 file loads")
+	eq(c.shaping, {}, "no shaping")
+	near(c.deadzone, 0.07, "deadzone as saved")
+
+
+func test_the_device_name_picks_a_preset() -> void:
+	eq(Controls.preset_for_device("Xbox Wireless Controller"), "gamepad", "xbox")
+	eq(Controls.preset_for_device("PS5 Controller"), "gamepad", "playstation")
+	eq(Controls.preset_for_device("RadioMaster Pocket Joystick"), "radio", "radiomaster")
+	eq(Controls.preset_for_device("FrSky Taranis X9D"), "radio", "taranis")
+	eq(Controls.preset_for_device("Logitech Extreme 3D"), "", "unknown")
+	eq(Controls.preset_for_device(""), "", "empty")
+
+
+func test_the_device_key_is_the_guid_else_the_name() -> void:
+	var input := FakeInput.new()
+	input.guids = {0: "abc"}
+	input.names = {0: "Pad", 1: "Other"}
+	eq(Controls.device_key(input, 0), "abc", "guid")
+	eq(Controls.device_key(input, 1), "Other", "name when there is no guid")
+	eq(Controls.device_key(input, 2), "", "nothing")
+
+
+func test_calibration_tables_are_cleaned() -> void:
+	var clean := Controls.clean_calibration({
+		"g": {"name": "Pad", "axes": {"0": {"min": -1, "center": 0, "max": 1}, "1": {"min": 1, "center": 0, "max": 1}, "x": {}, "2": 3}},
+		"bad": 5, "worse": {"axes": 3},
+	})
+	eq(clean.keys(), ["g"], "only the usable controller")
+	eq(clean["g"]["name"], "Pad", "name")
+	eq(clean["g"]["axes"].keys(), ["0"], "only the well-formed axis (min <= centre <= max)")
+
+
+func test_the_real_input_singleton_has_the_device_methods_the_key_uses() -> void:
+	ok(Input.has_method("get_joy_guid") and Input.has_method("get_joy_name"), "Input exposes them")

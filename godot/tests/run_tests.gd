@@ -3,6 +3,9 @@ extends SceneTree
 ## Exit code 0 when every check passed. (Run `godot --headless --path godot --import` once first.)
 
 const SUITES := [
+	"res://tests/test_axis_shaping.gd",
+	"res://tests/test_calibration.gd",
+	"res://tests/test_control_profiles.gd",
 	"res://tests/test_controls.gd",
 	"res://tests/test_settings.gd",
 	"res://tests/test_catalog.gd",
@@ -10,6 +13,7 @@ const SUITES := [
 	"res://tests/test_settings_screen.gd",
 	"res://tests/test_main_menu.gd",
 	"res://tests/test_hud.gd",
+	"res://tests/test_calibration_wizard.gd",
 	"res://tests/test_controls_menu.gd",
 	"res://tests/test_extension.gd",
 	"res://tests/test_scene.gd",

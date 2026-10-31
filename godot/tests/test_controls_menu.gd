@@ -1,6 +1,7 @@
 extends "res://tests/testing.gd"
 
 const Controls = preload("res://scripts/controls.gd")
+const ControlProfiles = preload("res://scripts/control_profiles.gd")
 const Menu = preload("res://ui/controls_menu.gd")
 const App = preload("res://scripts/app.gd")
 
@@ -12,9 +13,16 @@ func _menu(preset := "radio") -> Array:
 	var menu := Menu.new()
 	await add_to_tree(menu)
 	DirAccess.remove_absolute(SAVE_PATH)
-	menu.setup(controls, SAVE_PATH)
+	menu.setup(ControlProfiles.new(controls), SAVE_PATH)
 	menu.toggle()
 	return [menu, controls]
+
+
+## What the file on disk holds, loaded back through a fresh store.
+func _saved():
+	var store := ControlProfiles.new(Controls.new("keyboard"))
+	ok(store.from_json(FileAccess.get_file_as_string(SAVE_PATH)), "the saved file loads")
+	return store
 
 
 func _axis_event(device: int, axis: int, value: float) -> InputEventJoypadMotion:
@@ -46,9 +54,7 @@ func test_moving_a_stick_binds_the_channel_and_saves() -> void:
 	eq(controls.bindings["roll"]["index"], 5, "axis 5")
 	eq(controls.bindings["roll"]["device"], -1, "any controller when at most one is connected")
 	eq(controls.preset_name, "custom", "no longer a preset")
-	var saved := Controls.new("keyboard")
-	ok(saved.from_json(FileAccess.get_file_as_string(SAVE_PATH)), "the saved file loads")
-	eq(saved.bindings["roll"], controls.bindings["roll"], "and holds the new binding")
+	eq(_saved().controls.bindings["roll"], controls.bindings["roll"], "and holds the new binding")
 	menu.queue_free()
 
 
@@ -89,8 +95,7 @@ func test_invert_preset_and_deadzone_change_the_controls_and_save() -> void:
 	eq(controls.bindings["throttle"]["invert"], true, "gamepad throttle is inverted by the preset")
 	menu._on_deadzone_changed(0.12)
 	near(controls.deadzone, 0.12, "deadzone")
-	var saved := Controls.new("radio")
-	ok(saved.from_json(FileAccess.get_file_as_string(SAVE_PATH)), "saved")
+	var saved = _saved().controls
 	near(saved.deadzone, 0.12, "the saved deadzone")
 	eq(saved.preset_name, "gamepad", "the saved preset")
 	menu.queue_free()
@@ -222,3 +227,96 @@ func test_the_fpv_box_fits_the_aspect_and_centers() -> void:
 	eq(window_mode["internal"], Vector2i(1600, 800), "at the window's own resolution")
 	var chase := App.fpv_box_for(Vector2(1600, 800), "4:3", true)
 	eq(chase["box"], Rect2(0, 0, 1600, 800), "the chase view always fills the window")
+
+
+func test_a_shaping_slider_sets_the_channel_and_saves() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	var controls = m[1]
+	near(menu._rows["roll"]["deadband"].value, 0.02, "starts at the default deadzone")
+	near(menu._rows["roll"]["travel"].value, 1.0, "and full travel")
+	menu._rows["roll"]["travel"].value = 0.8
+	menu._rows["pitch"]["deadband"].value = 0.1
+	eq(controls.shaping, {"roll": {"travel": 0.8}, "pitch": {"deadband": 0.1}}, "stored per channel")
+	var saved = _saved().controls
+	eq(saved.shaping, controls.shaping, "and saved")
+	menu._on_deadzone_changed(0.05)
+	near(menu._rows["roll"]["deadband"].value, 0.05, "a channel without its own deadband follows the default")
+	near(menu._rows["pitch"]["deadband"].value, 0.1, "one with its own keeps it")
+	ok(not menu._rows.has("throttle") or not menu._rows["throttle"].has("travel"), "throttle has no shaping sliders")
+	menu.queue_free()
+
+
+func test_profiles_are_created_switched_and_deleted_from_the_screen() -> void:
+	var m := await _menu("radio")
+	var menu = m[0]
+	var controls = m[1]
+	ok(menu._delete.disabled, "the only profile cannot be deleted")
+	menu._profile_name.text = "Pad"
+	menu._new.pressed.emit()
+	eq(menu.store.active, "Pad", "the new profile is active")
+	eq(menu._profile_name.text, "", "the name field is cleared")
+	eq(menu._profile.item_count, 2, "listed")
+	eq(menu._profile.get_item_text(menu._profile.selected), "Pad", "and selected")
+	menu._on_invert_toggled(true, "pitch")
+	menu._on_profile_selected(0)
+	eq(menu.store.active, "Default", "back to the first")
+	ok(not controls.bindings["pitch"].get("invert", false), "its own pitch")
+	var saved = _saved()
+	eq(saved.names(), ["Default", "Pad"], "both are saved")
+	eq(saved.profiles["Pad"]["bindings"]["pitch"]["invert"], true, "with the other's edit")
+	menu._on_profile_selected(1)
+	menu._delete.pressed.emit()
+	eq(menu.store.names(), ["Default"], "deleted")
+	eq(menu._profile.item_count, 1, "and gone from the list")
+	menu.queue_free()
+
+
+func test_a_calibration_result_is_merged_and_saved() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	var controls = m[1]
+	menu._on_calibrated("guid-x", "Radio X", {"0": {"min": -0.8, "center": 0.0, "max": 0.9}})
+	near(controls.calibration["guid-x"]["axes"]["0"]["max"], 0.9, "merged into the mapper")
+	near(_saved().controls.calibration["guid-x"]["axes"]["0"]["min"], -0.8, "and saved")
+	ok(menu._hint.text.contains("Calibrated 1 axes"), "the hint says so")
+	menu.queue_free()
+
+
+func test_the_stick_view_follows_the_live_sticks() -> void:
+	var menu = (await _menu())[0]
+	var sticks := {"roll": 0.5, "pitch": -0.5, "yaw": 0.0, "throttle": 1.0, "aux": [1.0, -1.0, -1.0, -1.0]}
+	menu.update_live(sticks)
+	eq(menu._sticks_view.sticks, sticks, "the same sticks the bars show")
+	menu.queue_free()
+
+
+func test_opened_from_the_menu_it_closes_on_cancel_and_reports_it() -> void:
+	var menu = (await _menu())[0]
+	menu.toggle()  # _menu() leaves it open; start from closed
+	var seen := []
+	menu.closed.connect(func(from_menu: bool) -> void: seen.append(from_menu))
+	menu.open_from_menu()
+	ok(menu.is_open() and menu.is_menu_mode(), "open in menu mode")
+	var esc := InputEventKey.new()
+	esc.keycode = KEY_ESCAPE
+	esc.physical_keycode = KEY_ESCAPE
+	esc.pressed = true
+	menu._start_listening("roll")
+	menu._input(esc)
+	ok(menu.is_open() and menu.listening_for() == "", "escape first cancels a binding")
+	menu._input(esc)
+	ok(not menu.is_open() and not menu.is_menu_mode(), "then closes")
+	eq(seen, [true], "and tells the game it came from the menu")
+	menu.toggle()
+	menu.toggle()
+	eq(seen, [true, false], "a flight's F2 screen reports false")
+	menu.queue_free()
+
+
+func test_calibrate_is_disabled_without_a_controller() -> void:
+	var menu = (await _menu())[0]
+	if Input.get_connected_joypads().is_empty():
+		ok(menu._calibrate.disabled, "nothing to calibrate")
+		ok(menu._pads.text.contains("none connected"), "the controller line says so")
+	menu.queue_free()

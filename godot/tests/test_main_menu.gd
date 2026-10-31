@@ -43,6 +43,7 @@ func _menu(overrides := {}, locks := {}) -> Array:
 		settings[key] = value)  # as the game does
 	menu.start_requested.connect(func(): events.append(["start"]))
 	menu.settings_requested.connect(func(): events.append(["settings"]))
+	menu.controls_requested.connect(func(): events.append(["controls"]))
 	menu.quit_requested.connect(func(): events.append(["quit"]))
 	menu.open()
 	return [menu, settings, events]
@@ -112,9 +113,10 @@ name = \"Hunt\"
 func test_the_buttons_emit() -> void:
 	var m := await _menu()
 	m[0].row("start").pressed.emit()
+	m[0].row("controls").pressed.emit()
 	m[0].row("settings").pressed.emit()
 	m[0].row("quit").pressed.emit()
-	eq(m[2], [["start"], ["settings"], ["quit"]], "start, settings, quit")
+	eq(m[2], [["start"], ["controls"], ["settings"], ["quit"]], "start, controls, settings, quit")
 	m[0].free()
 
 

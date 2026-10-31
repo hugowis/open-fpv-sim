@@ -95,7 +95,11 @@ real voltage and warnings. The world is a data file the simulator loads — `wor
 buildings, the pilot's spot and a parked quad's VTX), `worlds/park.toml` (a tight walled proximity loop) and
 `worlds/meadow.toml` (a big fast circuit) — and its analog video link degrades the picture and the OSD together,
 like real goggles. A USB radio in joystick mode, a gamepad or the keyboard
-flies it; the F2 screen sets the bindings, and they persist to `user://controls.json` (Godot's per-user data dir,
+flies it; the F2 screen (or **Controls** in the main menu) sets the bindings and persists them to `user://controls.json`.
+It also holds **named profiles** (a gamepad and a radio each keep their setup; a new profile starts from the preset the
+controller's name suggests), a **calibration wizard** (centres and end points per axis, once per controller) and per-axis
+**deadband and travel** on roll, pitch and yaw. Rates and expo stay Betaflight's; see "Controller setup" in
+docs/dev-setup.md. The file lives in Godot's per-user data dir,
 `%APPDATA%\Godot\app_userdata\Open FPV Sim\` on Windows, `~/.local/share/godot/app_userdata/Open FPV Sim/` on Linux).
 
     cargo build -p ofs-sim -p ofs-godot

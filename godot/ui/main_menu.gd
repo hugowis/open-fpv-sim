@@ -15,6 +15,7 @@ signal choice_changed(key: String, value)
 signal start_requested
 
 signal settings_requested
+signal controls_requested
 signal quit_requested
 
 var settings := {}  # the game's live settings
@@ -24,6 +25,7 @@ var _worlds: Array = []
 var _quads: Array = []
 var _start := Button.new()
 var _settings_button := Button.new()
+var _controls_button := Button.new()
 var _quit := Button.new()
 var _world := CycleButton.new()
 var _quad := CycleButton.new()
@@ -53,8 +55,10 @@ func _ready() -> void:
 	box.add_child(title)
 	_start.text = "Start flying"
 	_start.pressed.connect(func() -> void: start_requested.emit())
-	for node in [_start, _world, _quad, _mode, _course, _controller, _settings_button, _quit]:
+	for node in [_start, _world, _quad, _mode, _course, _controller, _controls_button, _settings_button, _quit]:
 		box.add_child(node)
+	_controls_button.text = "Controls"
+	_controls_button.pressed.connect(func() -> void: controls_requested.emit())
 	_settings_button.text = "Settings"
 	_settings_button.pressed.connect(func() -> void: settings_requested.emit())
 	_quit.text = "Quit"
@@ -102,10 +106,10 @@ static func effective_open_loop(s: Dictionary) -> bool:
 	return s["open_loop"] or s["sitl_launch"] == ""
 
 
-## The row for `name` ("world", "quad", "mode", "course", "controller", "start", "settings", "quit"), for tests.
+## The row for `name` ("world", "quad", "mode", "course", "controller", "start", "controls", "settings", "quit"), for tests.
 func row(name: String) -> Control:
 	return {"world": _world, "quad": _quad, "mode": _mode, "course": _course, "controller": _controller, "start": _start,
-		"settings": _settings_button, "quit": _quit}[name]
+		"controls": _controls_button, "settings": _settings_button, "quit": _quit}[name]
 
 
 func hint() -> String:
