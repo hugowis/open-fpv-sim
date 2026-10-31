@@ -53,7 +53,7 @@ signal and to the interference paths alike, and it adds to the objects' losses. 
 20 m from both ends gives `v = 15.7` and **36.8 dB**; at 100 m from both ends, `v = 7.04` and 29.8 dB. Whole chain on
 `worlds/hills.toml`, the quad hovering 1.5 m over the ground at the default power: 110 m out in clear view the SNR is
 14.8 dB; 167 m out behind a hill it is **-3.1 dB** (picture lost; the same spot without the relief: 18.0 dB).
-The limits are the ELRS link's: the ground bounce stays on the plane d = 0, one edge only, and until #155 the Godot
+The limits are the ELRS link's: the ground bounce stays on the plane d = 0, one edge only, sampling is capped at 2048 points, so a span over 1024 cells is sampled coarser than half a cell, and until #155 the Godot
 client draws a flat ground, so the picture can be lost behind a hill it does not show.
 
 ## Interference

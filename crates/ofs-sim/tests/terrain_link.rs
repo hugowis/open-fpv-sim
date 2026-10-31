@@ -11,8 +11,6 @@ use ofs_rf::propagation::{terrain_loss_db, wavelength_m};
 use ofs_sim::vehicle::{build, BuildOptions};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-/// The handset's position in `worlds/hills.toml` (0.5 m under the pilot's goggles).
-const HANDSET: DVec3 = DVec3::new(-3.0, 2.0, -1.2);
 const ELRS_MHZ: f64 = 2440.0;
 const VIDEO_MHZ: f64 = 5800.0;
 
@@ -38,16 +36,16 @@ fn signals(world: WorldConfig, at: DVec3) -> (f64, f64, f64) {
 
 /// The first hovering spot (1.5 m over the ground, 100 to 280 m from the handset) whose terrain loss at both
 /// frequencies satisfies `want`, searched on a ring grid of bearings and ranges.
-fn find(terrain: &Terrain, want: impl Fn(f64, f64) -> bool) -> DVec3 {
+fn find(terrain: &Terrain, handset: DVec3, want: impl Fn(f64, f64) -> bool) -> DVec3 {
     for range in (100..=280).step_by(10) {
         for bearing in (0..360).step_by(10) {
             let (b, r) = (f64::from(bearing).to_radians(), f64::from(range));
-            let (n, e) = (HANDSET.x + r * b.cos(), HANDSET.y + r * b.sin());
+            let (n, e) = (handset.x + r * b.cos(), handset.y + r * b.sin());
             let at = DVec3::new(n, e, terrain.ground_d(n, e) - 1.5);
             if at.z > -1.5 {
                 continue; // keep it above the plane d = 0 too, for the flat world
             }
-            let loss = |mhz| terrain_loss_db(terrain, HANDSET, at, wavelength_m(mhz));
+            let loss = |mhz| terrain_loss_db(terrain, handset, at, wavelength_m(mhz));
             if want(loss(ELRS_MHZ), loss(VIDEO_MHZ)) {
                 return at;
             }
@@ -58,9 +56,11 @@ fn find(terrain: &Terrain, want: impl Fn(f64, f64) -> bool) -> DVec3 {
 
 #[test]
 fn a_hill_between_the_handset_and_the_quad_lowers_both_links_and_a_flat_world_does_not() {
-    let terrain = hills().terrain.unwrap().build();
-    let clear = find(&terrain, |a, b| a == 0.0 && b == 0.0);
-    let behind = find(&terrain, |a, b| a > 20.0 && b > 20.0);
+    let world = hills();
+    let handset = DVec3::from(world.handset.position(&world.pilot));
+    let terrain = world.terrain.unwrap().build();
+    let clear = find(&terrain, handset, |a, b| a == 0.0 && b == 0.0);
+    let behind = find(&terrain, handset, |a, b| a > 20.0 && b > 20.0);
 
     let (rssi_clear, lq_clear, snr_clear) = signals(hills(), clear);
     let (rssi_behind, lq_behind, snr_behind) = signals(hills(), behind);

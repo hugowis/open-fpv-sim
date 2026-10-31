@@ -134,6 +134,15 @@ declared (not rooted), as today.
 edge, the cap, the limits); `docs/roadmap.md` (the terrain line and the golden-section ruling note that the terrain has
 its own sampled search); `docs/dev-setup.md` if it mentions the RF obstacles.
 
+## As built
+
+The whole-flow check (`crates/ofs-sim/tests/terrain_link.rs`, `worlds/hills.toml`, the quad hovering 1.5 m over the
+ground) measured, against the same spot in a world without `[terrain]`: RSSI -58.5 dBm without the relief, -78.1 dBm
+behind a hill (about 20 dB down), video SNR 18.0 dB against -3.1 dB (about 21 dB down). LQ stays at 99 there: 167 m out
+the link still has 27 dB of margin over the 500 Hz sensitivity, so the picture is lost first. "Lose the uplink" holds
+farther out or with a weaker margin. The early-out margin uses `max(L, 3)` as amended above; the ground-grazing figure
+is about 4.4 dB at 3 cm clearance and nothing from about 15 cm up at 5.8 GHz (the nearest ground edge 1 m away).
+
 ## Calls made without the user (rulings)
 
 1. Terrain is its own sampled-and-refined dominant-edge search, not forced into the convex-shape golden search.

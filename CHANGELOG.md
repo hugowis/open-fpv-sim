@@ -25,8 +25,8 @@ repository). The format follows Keep a Changelog.
   still pass. No protocol change.
 - **Not yet**: until #155 the Godot client still draws a flat ground in a world with `[terrain]`, so you can lose the
   picture behind a hill the picture does not show. Limits: the ground bounce is still the plane d = 0 (not the
-  terrain), only the single dominant edge counts (no Deygout or Epstein-Peterson sum over several ridges), and the
-  terrain's loss adds to the objects'.
+  terrain), only the single dominant edge counts (no Deygout or Epstein-Peterson sum over several ridges), the terrain's
+  loss adds to the objects', and sampling is capped at 2048 points, so a span over 1024 cells is sampled coarser than half a cell.
 
 ### A heightfield ground for the physics (#153, part 1 of 3 of #27)
 #### Added
