@@ -409,6 +409,8 @@ pub enum ReceiverKind {
     /// CRSF on a flight-controller UART.
     #[default]
     Crsf,
+    /// FlySky iBUS on a flight-controller UART.
+    Ibus,
 }
 
 /// The ExpressLRS band (`kind = "elrs"`); absent means 2.4 GHz.
@@ -459,7 +461,7 @@ pub struct RadioSection {
     /// The handset part; the only one today is `"joystick"`.
     #[serde(default)]
     pub handset: HandsetKind,
-    /// The receiver part; the only one today is `"crsf"`.
+    /// The receiver part: `"crsf"` (default) or `"ibus"`.
     #[serde(default)]
     pub receiver: ReceiverKind,
     /// The ExpressLRS LoRa modes of the band: 2.4 GHz 50, 150, 250 or 500; 900 MHz 25, 50, 100, 200 or 250 packets per second

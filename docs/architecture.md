@@ -17,7 +17,7 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-electrical` | Battery, ESC and brushless motor. | core |
 | `ofs-sensors` | IMU, barometer and magnetometer (with the tilt-compensated heading). | core |
 | `ofs-rf` | Shared RF: propagation, Rician fading, receiver diversity, body shadow. | core |
-| `ofs-radio` | CRSF framing and the radio as three swappable parts (`Handset`, `Link`, `Receiver`) stepped by `RadioChain`: the `joystick` handset, the `elrs` (2.4 GHz and 900 MHz) and `fixed` links, the `crsf` receiver. | core, rf |
+| `ofs-radio` | CRSF and iBUS framing and the radio as three swappable parts (`Handset`, `Link`, `Receiver`) stepped by `RadioChain`: the `joystick` handset, the `elrs` (2.4 GHz and 900 MHz) and `fixed` links, the `crsf` and `ibus` receivers. | core, rf |
 | `ofs-fc` | The Betaflight SITL bridge (process, UDP exchange, UART taps), MSP, and an open-loop stand-in. | core |
 | `ofs-video` | The SmartAudio and Tramp VTX, Betaflight's OSD over MSP DisplayPort, the 5.8 GHz analog link. | core, config, fc, rf |
 | `ofs-log` | Recording the bus to MCAP (a model appended last that only reads), and the rolling in-memory tail every session keeps for its repro bundle. | core |
@@ -40,7 +40,7 @@ pacer runs the same scheduler against the wall clock. Randomness comes from name
 The radio is one model, `RadioChain` (`crates/ofs-radio/src/chain.rs`), that steps three parts in order every packet
 slot (`parts.rs`): a **`Handset`** (stick and switch signals to a `TxFrame` of 16 CRSF ticks), a **`Link`** (the air:
 the RF budget, loss, latency, link quality and the downlink telemetry slots, returned as a `Delivery`) and a
-**`Receiver`** (what arrived, as CRSF bytes on the flight controller's UART, and the FC's telemetry back). Only a link
+**`Receiver`** (what arrived, as CRSF or iBUS bytes on the flight controller's UART, and the FC's CRSF telemetry back). Only a link
 draws random numbers, so a seeded run does not depend on the parts around it. The quad file's `[radio]` section picks
 them: `kind` names the link — `elrs` (`crates/ofs-radio/src/elrs.rs`, with a `band` of 2.4 GHz or 900 MHz) or `fixed`
 (`fixed.rs`, no geometry, the worked example) — and `handset` and `receiver` name the other two. The vehicle's

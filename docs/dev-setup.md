@@ -281,7 +281,7 @@ courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`
 
 The radio is three parts (a handset, a link, a receiver) behind `RadioChain`; the quad file's `[radio]` section picks
 them (`kind = "elrs"` or `"fixed"`, `handset`, `receiver`, and `band = "2g4"` or `"900"` for ELRS). The shipped
-examples are `quads/opendrone-5f-900mhz.toml` and `quads/opendrone-5f-fixed-link.toml`; `docs/writing-a-radio-model.md`
+examples are `quads/opendrone-5f-900mhz.toml`, `quads/opendrone-5f-fixed-link.toml` and `quads/opendrone-5f-ibus.toml` (a FlySky iBUS receiver, `receiver = "ibus"`, which needs a SITL built from the current patch); `docs/writing-a-radio-model.md`
 shows how to write a part, and `docs/research/serial-radio.md` records why M5 has no real serial radio. Quad files
 written before M5 load unchanged and fly byte-identically: the goldens (`crates/ofs-radio/tests/golden.rs`,
 `crates/ofs-sim/tests/radio_golden.rs`) pin the ELRS link's bytes, one digest file per OS

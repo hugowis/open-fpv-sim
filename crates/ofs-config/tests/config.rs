@@ -1109,3 +1109,13 @@ fn the_mag_values_are_checked_against_the_base_rate() {
         assert!(err.contains(field), "{to}: {err}");
     }
 }
+
+#[test]
+fn the_ibus_receiver_can_be_named_and_the_shipped_ibus_quad_loads() {
+    let named = shipped_with(|t| *t = t.replace("kind = \"elrs\"", "kind = \"elrs\"\nreceiver = \"ibus\"")).unwrap();
+    assert_eq!(named.radio.receiver, ofs_config::ReceiverKind::Ibus);
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-ibus.toml");
+    let cfg = load(Path::new(path)).unwrap();
+    assert_eq!((cfg.radio.receiver, cfg.radio.kind, cfg.radio.packet_rate_hz, cfg.radio.uart), (ofs_config::ReceiverKind::Ibus, RadioKind::Fixed, 250, 2));
+    assert!(fs::read_to_string(cfg.resolve(&cfg.fc.betaflight_diff)).unwrap().contains("serialrx_provider = IBUS"));
+}

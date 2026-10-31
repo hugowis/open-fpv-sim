@@ -356,3 +356,45 @@ fn a_held_tcp_port_does_not_stop_sitl_on_macos() {
         started.err().map(|e| e.to_string())
     );
 }
+
+/// Writes one iBUS RC frame every 7 ms (56 base steps at 8 kHz), like a FlySky receiver.
+struct IbusSource {
+    uart: Wire,
+    channels: [u16; crsf::CHANNEL_COUNT],
+}
+
+impl Model for IbusSource {
+    fn name(&self) -> &str {
+        "test.ibus_source"
+    }
+
+    fn rate_divisor(&self) -> u32 {
+        56
+    }
+
+    fn step(&mut self, _ctx: &StepCtx, _bus: &mut Bus) -> Result<(), SimError> {
+        self.uart.write(&ofs_radio::ibus::rc_frame(&self.channels));
+        Ok(())
+    }
+}
+
+/// Needs a SITL built from a patch that defines `USE_SERIALRX_IBUS` (the default `ofs-sitl.patch` since #8).
+#[test]
+#[ignore]
+fn ibus_bytes_in_the_state_datagram_reach_betaflight() {
+    let dir = tempfile::tempdir().unwrap();
+    let uart = Wire::new(4096);
+    let mut channels = [crsf::stick_ticks(0.0); crsf::CHANNEL_COUNT];
+    channels[0] = crsf::stick_ticks(0.2); // roll -> 1600 us
+    channels[1] = crsf::stick_ticks(-0.2); // pitch -> 1400 us
+    channels[2] = crsf::throttle_ticks(0.0); // throttle -> 1000 us
+    channels[3] = crsf::stick_ticks(0.0); // yaw -> 1500 us
+    let link = SerialLink { uart_index: 1, rx: uart.clone() }; // UART2
+    let ibus_diff = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/ibus.betaflight.diff");
+    let mut s = still_quad(dir.path(), ibus_diff, vec![link], vec![], |_| Some(Box::new(IbusSource { uart, channels })));
+    s.run_for(2.0).unwrap();
+    let mut msp = MspClient::connect(SocketAddr::from(([127, 0, 0, 1], MSP_TCP_PORT)), Duration::from_secs(5)).unwrap();
+    let reply = msp.request(MSP_RC, &[], 500, || s.run_for(0.01)).unwrap();
+    println!("MSP_RC over iBUS: {:?}", &rc_channels_us(&reply).unwrap()[..8]);
+    assert_eq!(&rc_channels_us(&reply).unwrap()[..4], &[1600, 1400, 1500, 1000]);
+}
