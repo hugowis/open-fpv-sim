@@ -229,11 +229,25 @@ falls back to the default:
   each file is exported as the setting asks; an abnormal stop and a start that failed export nothing. `frames` copies the AVI's JPEG frames unchanged to
   `<name>_frames/frame_000001.jpg`, `frame_000002.jpg`, ... (the directory must not already exist; it also works on
   an AVI that was never finalised by a crash). `mp4` runs `ffmpeg` from `PATH`; the ffmpeg must be built with
-  libx264. The encode is `ffmpeg -nostdin -n -loglevel error -i <name>.avi -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v
-  libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart <name>.mp4`: H.264 with an even size, quality 18, and the
-  index at the front for streaming. If ffmpeg is missing, a warning toast says so and the AVI is kept. An export
-  never overwrites a file or directory; it runs on a worker thread and toasts when it is done. The AVI is always
-  kept.
+  libx264 and an AAC encoder (its native `aac`). With the recording's audio (below) the encode is `ffmpeg -nostdin -n
+  -loglevel error -i <name>.avi -f s16le -ar 44100 -ac 1 -i <pcm> -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v libx264
+  -pix_fmt yuv420p -crf 18 -movflags +faststart -c:a aac -b:a 128k -shortest <name>.mp4`: H.264 with an even size,
+  quality 18, the index at the front for streaming, and AAC at 128 kb/s, mono. Without it the audio input and
+  options are left out and the MP4 is silent. If ffmpeg is missing, a warning toast says so and the AVI is kept. An
+  export never overwrites a file or directory; it runs on a worker thread and toasts when it is done. The AVI is
+  always kept.
+- **Audio.** While a feed records, the client writes `<name>.audio` beside the AVI (`REC_<ts>.audio`,
+  `REC_<ts>_clean.audio`): the header `ofs-dvr-audio 1`, then an `F` line per frame the writer accepted (the newest
+  telemetry: state time, collision speed, airspeed, descent, motor count, rpm and command of each motor) and a `C`
+  line per collision event. Text, LF, shortest round-trip numbers; a crash leaves at worst a truncated last line,
+  which is ignored. The `mp4` export replays it through `ofs_audio::Audio` (the flight sound of the game, 882 samples
+  per frame) into a temporary raw PCM file next to the output, `.<name>.pcm-<pid>.tmp`, which is always removed (about
+  26 MB for a five-minute flight). A recording without a `.audio` file, or with no frames in it, exports a silent
+  MP4; a malformed one fails the export and keeps the AVI and the `.audio` file. The `frames` export is silent.
+  The PCM is the same for the same file on one machine, not byte-identical across operating systems, and the AAC
+  bytes depend on the ffmpeg build. The sound is the quad's microphone sampled when a frame is written, so it leads the
+  picture by the goggles' latency (40 ms by default); it ignores the "Sound" setting and has no VTX buzzer (the sim has no
+  buzzer model).
 
 The **Tramp quad** `quads/opendrone-5f-tramp.toml` is the shipped freestyle quad with a Tramp VTX instead of
 the SmartAudio one: `[vtx] kind = "tramp"` on UART6 (Betaflight serial 5, function mask 8192 = `VTX_TRAMP`).

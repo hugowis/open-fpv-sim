@@ -24,7 +24,7 @@ extension. Betaflight runs as SITL, a separate process the server launches and s
 | `ofs-proto` | The gRPC messages and stubs, generated from `proto/ofs/v1/sim.proto`. | — |
 | `ofs-sim` | The server: vehicle assembly (`vehicle.rs`), sessions, real-time pacing, the gRPC service, scripted inputs and the inputs recorder (`inputs.rs`, `inputs_recorder.rs`), the steering journal and the repro bundle (`journal.rs`, `repro.rs`). | all of the above |
 | `ofs-validate` | The validation harness: the submission format, its checker and the thrust-stand comparator (`docs/validation.md`). A command-line tool; nothing depends on it. | core, config, electrical, physics, sim |
-| `ofs-client` | The Rust client: a worker thread, the FPV composite, the DVR muxer. | core, proto |
+| `ofs-client` | The Rust client: a worker thread, the FPV composite, the DVR muxer and its audio sidecar. | core, proto, audio |
 | `ofs-audio` | The flight sound: the pure parameter map (`params`, `thud_gain`) and the deterministic `Synth`, no Godot and no I/O. | — |
 | `ofs-godot` | The Godot extension (`OfsClient`), a thin layer over `ofs-client`, and the host of the flight sound. | client, audio |
 
@@ -69,9 +69,11 @@ silence without telemetry) and a loading phase resets it. In Godot, `godot/drone
 Master (the quad's microphone) and each frame pushes the samples an `AudioStreamGenerator` has room for; the `audio`
 setting mutes that bus.
 
-The constants (`AudioConfig`) are estimates. The DVR track (#159) will not tap the live bus, which carries the audio
-device's timing and is silent in headless runs: it will render the same `Synth` offline from a recording at the DVR's
-field times, so the file's audio is as deterministic as its video.
+The constants (`AudioConfig`) are estimates. The DVR track (#159) does not tap the live bus, which carries the audio
+device's timing and is silent in headless runs: while a feed records, `ofs-client` logs the audio inputs beside the AVI
+(`<name>.audio`, built by `Telemetry::audio_input`), and the MP4 export replays them through the same `Audio` at the
+DVR's frame rate (882 samples a frame) into the AAC track, so the file's audio is a pure function of the recording
+(per platform: the libm again).
 
 ## When a session fails
 The `Vehicle` keeps a **journal** (`journal.rs`): every call that steers the run (sticks when they change, the
