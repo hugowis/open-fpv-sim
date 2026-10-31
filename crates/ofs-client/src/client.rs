@@ -1,5 +1,5 @@
 //! The client handle: a supervisor running on its own threads, polled without blocking from a game loop.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
 use crate::dvr::{self, DvrFeed, DvrSummary, DvrWriter};
+use crate::dvr_audio::AudioLog;
 use crate::error::{ClientError, ErrorKind};
 use crate::fpv::{self, FpvBuffer, FpvView};
 use crate::interp::{Pose, StateBuffer};
-use crate::model::{Command, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
+use crate::model::{Command, EventKind, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
 use crate::worker::{lock, run, Shared};
 
 /// How long `shutdown` waits for the supervisor (it unloads the session of a server it launched).
@@ -32,7 +33,7 @@ pub struct Client {
     finished: Mutex<std_mpsc::Receiver<()>>,
     runtime: Option<tokio::runtime::Runtime>,
     seen: Mutex<Seen>,
-    dvr: Mutex<[Option<DvrWriter>; 2]>, // indexed by DvrFeed
+    dvr: Mutex<[Option<(DvrWriter, AudioLog)>; 2]>, // indexed by DvrFeed
 }
 
 /// Upper bound of the stick rate: a mistyped setting must not make the worker spin or flood the server.
@@ -122,7 +123,23 @@ impl Client {
                 Update::Event(_) | Update::Error(_) => {}
             }
         }
+        drop(seen);
+        self.log_collisions(&updates);
         updates
+    }
+
+    /// Every collision goes to the audio log of each recording feed (the lock is taken after `seen` is released).
+    fn log_collisions(&self, updates: &[Update]) {
+        let mut dvr = lock(&self.dvr);
+        for update in updates {
+            if let Update::Event(e) = update {
+                if e.kind == EventKind::Collision {
+                    for (_, audio) in dvr.iter_mut().flatten() {
+                        audio.collision(e.time_s);
+                    }
+                }
+            }
+        }
     }
 
     /// The phase as of the last `poll`, with its detail and, for `Failed`, the error kind.
@@ -194,21 +211,41 @@ impl Client {
         if slot.is_some() {
             return Err("already recording".into());
         }
-        *slot = Some(DvrWriter::start(PathBuf::from(path), dvr::DVR_FPS, width, height)?);
+        let avi = PathBuf::from(path);
+        if avi.extension().is_some_and(|e| e.eq_ignore_ascii_case("audio")) {
+            return Err(format!("{}: the .audio extension is reserved for the audio sidecar", avi.display()));
+        }
+        let writer = DvrWriter::start(avi.clone(), dvr::DVR_FPS, width, height)?; // refuses an existing AVI
+        match AudioLog::create(&Path::new(&avi).with_extension("audio")) {
+            Ok(audio) => *slot = Some((writer, audio)),
+            Err(e) => {
+                let _ = writer.stop();
+                let _ = std::fs::remove_file(&avi);
+                return Err(e);
+            }
+        }
         Ok(())
     }
 
+    /// Hands one frame to the writer; a frame it accepts gets its audio record from the newest telemetry.
     pub fn dvr_write_frame(&self, feed: DvrFeed, jpeg: Vec<u8>) {
-        let dvr = lock(&self.dvr);
-        if let Some(w) = dvr[feed as usize].as_ref() {
-            w.write_frame(jpeg);
+        // The telemetry is read before the dvr lock is taken: the two are never held together.
+        let input = lock(&self.shared.telemetry).as_ref().map(|(t, _)| (t.audio_input(true), t.time_s, t.collision_speed_mps));
+        if let Some((writer, audio)) = lock(&self.dvr)[feed as usize].as_mut() {
+            if writer.write_frame(jpeg) {
+                audio.frame(input.as_ref().map(|(i, t, v)| (i, *t, *v)));
+            }
         }
     }
 
     /// Stops the `feed` recording; the summary reports frames, drops and bytes.
     pub fn dvr_stop(&self, feed: DvrFeed) -> Result<DvrSummary, String> {
-        let writer = lock(&self.dvr)[feed as usize].take().ok_or_else(|| "not recording".to_string())?;
-        writer.stop()
+        let (writer, audio) = lock(&self.dvr)[feed as usize].take().ok_or_else(|| "not recording".to_string())?;
+        let summary = writer.stop();
+        let audio = audio.finish();
+        let summary = summary?;
+        audio?;
+        Ok(summary)
     }
 
     /// Ends the session (unloading it first when this client launched the server) and stops the supervisor.
@@ -251,5 +288,44 @@ mod tests {
         let mut defaults = Settings::new("quad.toml");
         clamp_rates(&mut defaults);
         assert_eq!((defaults.state_rate_hz, defaults.stick_rate_hz), (Settings::new("quad.toml").state_rate_hz, 250));
+    }
+
+    #[test]
+    fn an_avi_path_with_the_audio_extension_is_refused_and_creates_nothing() {
+        let dir = std::env::temp_dir().join(format!("ofs-client-reserved-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let client = Client::start(Settings { server_addr: "127.0.0.1:1".into(), ..Settings::new("quad.toml") }).unwrap();
+        for name in ["rec.audio", "rec.AUDIO"] {
+            let err = client.dvr_start(DvrFeed::Goggles, dir.join(name).display().to_string(), 4, 2).unwrap_err();
+            assert!(err.contains("reserved for the audio sidecar"), "{err}");
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert!(client.dvr_stop(DvrFeed::Goggles).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_collision_goes_to_every_recording_feed_and_other_events_to_none() {
+        let dir = std::env::temp_dir().join(format!("ofs-client-collisions-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let client = Client::start(Settings { server_addr: "127.0.0.1:1".into(), ..Settings::new("quad.toml") }).unwrap();
+        let (a, b) = (dir.join("a.avi"), dir.join("b.avi"));
+        client.dvr_start(DvrFeed::Goggles, a.display().to_string(), 4, 2).unwrap();
+        client.dvr_start(DvrFeed::Clean, b.display().to_string(), 4, 2).unwrap();
+        let event = |time_s, kind| Update::Event(crate::model::Event { time_s, kind, message: String::new() });
+        client.log_collisions(&[event(1.5, crate::model::EventKind::Collision), event(2.0, crate::model::EventKind::LinkDown)]);
+        client.dvr_write_frame(DvrFeed::Goggles, vec![0xFF; 8]);
+        client.dvr_write_frame(DvrFeed::Clean, vec![0xFF; 8]);
+        client.dvr_stop(DvrFeed::Goggles).unwrap();
+        client.dvr_stop(DvrFeed::Clean).unwrap();
+        for avi in [a, b] {
+            let log = std::fs::read_to_string(avi.with_extension("audio")).unwrap();
+            assert_eq!(log, "ofs-dvr-audio 1
+C 1.5
+F NaN 0 0 0 0
+");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

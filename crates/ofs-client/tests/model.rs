@@ -86,6 +86,24 @@ fn telemetry_carries_the_motor_rpm() {
 }
 
 #[test]
+fn telemetry_builds_the_audio_input() {
+    let state = pb::State {
+        motor_rpm: vec![1000.0, 2000.0],
+        motor_cmd: vec![0.25, 0.5],
+        velocity_ned_mps: Some(pb::Vec3 { x: 3.0, y: 4.0, z: 2.0 }),
+        ..Default::default()
+    };
+    let t = Telemetry::from_pb(&state);
+    let a = t.audio_input(true);
+    assert_eq!(a.motor_rpm, vec![1000.0, 2000.0]);
+    assert_eq!(a.motor_cmd, vec![0.25, 0.5]);
+    assert_eq!(a.airspeed_mps, t.speed_mps);
+    assert_eq!(a.descent_mps, 2.0);
+    assert!(a.active);
+    assert!(!t.audio_input(false).active);
+}
+
+#[test]
 fn default_telemetry_age_is_infinity() {
     // No frame yet: the age must be INFINITY (the doc comment's contract), not 0.0 ("just arrived").
     assert_eq!(FcTelemetry::default().telemetry_age_s, f64::INFINITY);

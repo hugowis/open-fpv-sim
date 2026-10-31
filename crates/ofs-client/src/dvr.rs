@@ -231,12 +231,14 @@ impl DvrWriter {
     }
 
     /// Hands one frame to the writer. JPEG bytes of the declared size. When the writer thread is saturated the
-    /// frame is dropped and counted.
-    pub fn write_frame(&self, jpeg: Vec<u8>) {
-        let Some(tx) = &self.tx else { return };
-        if tx.try_send(jpeg).is_err() {
+    /// frame is dropped and counted. Returns whether the frame was accepted (the audio log follows the video).
+    pub fn write_frame(&self, jpeg: Vec<u8>) -> bool {
+        let Some(tx) = &self.tx else { return false };
+        let accepted = tx.try_send(jpeg).is_ok();
+        if !accepted {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+        accepted
     }
 
     /// Stops: drops the sender (the worker drains the queue and patches the headers) and joins. A summary means

@@ -3,7 +3,7 @@
 //! file or a directory.
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -182,28 +182,63 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
 }
 
 /// The conversion: `-n` keeps the never-overwrite rule and the pad keeps odd window sizes legal for yuv420p.
-pub fn ffmpeg_args(avi: &Path, mp4: &Path) -> Vec<OsString> {
-    let mut args: Vec<OsString> = ["-nostdin", "-n", "-loglevel", "error", "-i"].iter().map(OsString::from).collect();
+/// With a raw PCM file (mono s16le, 44.1 kHz) as `pcm` it becomes a second input encoded to AAC, and `-shortest`
+/// ends the file with the shorter stream.
+pub fn ffmpeg_args(avi: &Path, pcm: Option<&Path>, mp4: &Path) -> Vec<OsString> {
+    let strs = |a: &[&str]| a.iter().map(OsString::from).collect::<Vec<_>>();
+    let mut args = strs(&["-nostdin", "-n", "-loglevel", "error", "-i"]);
     args.push(avi.into());
-    args.extend(
-        ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart"]
-            .iter()
-            .map(OsString::from),
-    );
+    if let Some(pcm) = pcm {
+        args.extend(strs(&["-f", "s16le", "-ar", "44100", "-ac", "1", "-i"]));
+        args.push(pcm.into());
+    }
+    args.extend(strs(&["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart"]));
+    if pcm.is_some() {
+        args.extend(strs(&["-c:a", "aac", "-b:a", "128k", "-shortest"]));
+    }
     args.push(mp4.into());
     args
 }
 
-/// Converts the AVI to `<stem>.mp4` next to it with the given ffmpeg. An existing mp4 is an error before
-/// anything is spawned; a failing ffmpeg is an error carrying the last line it wrote to stderr, and a failing
-/// run removes the partial it wrote, so the name is free for a retry.
+/// A temp file that is removed when it goes out of scope, whatever the outcome.
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
+}
+
+/// Replays `<stem>.audio` beside the AVI into a temp PCM file. `Ok(None)`: no sidecar, or one without frames
+/// (a silent export); a bad sidecar is an error.
+fn replay_audio(avi: &Path) -> Result<Option<TempFile>, String> {
+    let sidecar = avi.with_extension("audio");
+    if !sidecar.exists() {
+        return Ok(None);
+    }
+    let stem = avi.file_stem().unwrap_or(OsStr::new("recording")).to_string_lossy();
+    let path = avi.with_file_name(format!(".{stem}.pcm-{}.tmp", std::process::id()));
+    let name = |e: std::io::Error| format!("{}: {e}", path.display());
+    let file = File::create_new(&path).map_err(name)?;
+    let temp = TempFile(path.clone());
+    let mut out = BufWriter::new(file);
+    let frames = crate::dvr_audio::write_pcm(&sidecar, &mut out)?;
+    out.flush().map_err(name)?;
+    Ok((frames > 0).then_some(temp))
+}
+
+/// Converts the AVI to `<stem>.mp4` next to it with the given ffmpeg, with the audio replayed from `<stem>.audio`
+/// when that exists. An existing mp4 is an error before anything else happens, and a bad sidecar one before
+/// ffmpeg is spawned; a failing ffmpeg is an error carrying the last line it wrote to stderr, and a failing run
+/// removes the partial it wrote, so the name is free for a retry. No temp file stays.
 pub fn export_mp4(ffmpeg: &Path, avi: &Path) -> Result<PathBuf, String> {
     let mp4 = avi.with_extension("mp4");
     if mp4.exists() {
         return Err(format!("{} already exists: an export never overwrites another", mp4.display()));
     }
+    let pcm = replay_audio(avi)?;
     let mut command = Command::new(ffmpeg);
-    command.args(ffmpeg_args(avi, &mp4)).stdin(Stdio::null()).stdout(Stdio::null());
+    command.args(ffmpeg_args(avi, pcm.as_ref().map(|t| t.0.as_path()), &mp4)).stdin(Stdio::null()).stdout(Stdio::null());
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW: no console flash from a GUI parent
     let output = command.output().map_err(|e| format!("{}: {e}", ffmpeg.display()))?;

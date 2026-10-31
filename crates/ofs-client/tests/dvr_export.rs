@@ -1,5 +1,7 @@
 //! The DVR export: an image sequence copied out of the AVI, and the ffmpeg argument list. No test needs ffmpeg.
+use ofs_audio::AudioInput;
 use ofs_client::dvr::DvrWriter;
+use ofs_client::dvr_audio::AudioLog;
 use ofs_client::dvr_export::{export_frames, export_mp4, ffmpeg_args, find_ffmpeg_in, Exporter};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -127,9 +129,11 @@ fn a_file_that_is_not_an_avi_is_an_error() {
 
 #[test]
 fn ffmpeg_args_are_the_documented_list() {
-    let args = ffmpeg_args(Path::new("in.avi"), Path::new("out.mp4"));
+    let args = ffmpeg_args(Path::new("in.avi"), None, Path::new("out.mp4"));
     let s: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
     assert_eq!(s[0], "-nostdin");
+    assert!(!s.contains(&"-c:a".to_string()) && !s.contains(&"-shortest".to_string()), "no audio arguments without a pcm");
+    assert_eq!(s.iter().filter(|a| *a == "-i").count(), 1);
     assert!(s.contains(&"-n".to_string()));
     assert_eq!(s[s.iter().position(|a| a == "-i").unwrap() + 1], "in.avi");
     assert_eq!(s[s.iter().position(|a| a == "-vf").unwrap() + 1], "pad=ceil(iw/2)*2:ceil(ih/2)*2");
@@ -138,6 +142,110 @@ fn ffmpeg_args_are_the_documented_list() {
     assert_eq!(s[s.iter().position(|a| a == "-crf").unwrap() + 1], "18");
     assert_eq!(s[s.iter().position(|a| a == "-movflags").unwrap() + 1], "+faststart");
     assert_eq!(s.last().unwrap(), "out.mp4");
+}
+
+#[test]
+fn ffmpeg_args_with_audio_adds_the_pcm_input_and_aac() {
+    let args = ffmpeg_args(Path::new("in.avi"), Some(Path::new("a.pcm")), Path::new("out.mp4"));
+    let s: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let silent: Vec<String> = ffmpeg_args(Path::new("in.avi"), None, Path::new("out.mp4"))
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = |name: &str| s.iter().position(|a| a == name).unwrap();
+    let inputs: Vec<usize> = s.iter().enumerate().filter(|(_, a)| *a == "-i").map(|(i, _)| i).collect();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(s[inputs[0] + 1], "in.avi");
+    assert_eq!(s[inputs[1] + 1], "a.pcm");
+    assert_eq!(&s[inputs[1] - 6..inputs[1]], ["-f", "s16le", "-ar", "44100", "-ac", "1"]);
+    assert!(inputs[0] < inputs[1] - 6, "the pcm input follows the AVI input");
+    assert_eq!(s[at("-c:a") + 1], "aac");
+    assert_eq!(s[at("-b:a") + 1], "128k");
+    for video in ["-vf", "-c:v", "-pix_fmt", "-crf", "-movflags"] {
+        assert_eq!(s[at(video) + 1], silent[silent.iter().position(|a| a == video).unwrap() + 1], "{video}");
+    }
+    assert!(at("-shortest") > at("-c:a") && at("-shortest") < s.len() - 1);
+    assert_eq!(s.last().unwrap(), "out.mp4");
+}
+
+fn write_sidecar(path: &Path, frames: usize) {
+    let mut log = AudioLog::create(path).unwrap();
+    let input = AudioInput { motor_rpm: vec![9000.0; 4], motor_cmd: vec![0.5; 4], active: true, ..AudioInput::default() };
+    for i in 0..frames {
+        log.frame(Some((&input, i as f64 / 50.0, 3.0)));
+    }
+    log.finish().unwrap();
+}
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_bad_sidecar_fails_before_ffmpeg_and_leaves_no_temp_file() {
+    let dir = fresh_dir("badsidecar");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA"]);
+    std::fs::write(dir.join("rec.audio"), b"not-a-sidecar 9
+F 0 0 0 0 0
+").unwrap();
+    let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
+    assert!(err.contains("rec.audio") && !err.contains("no-such-ffmpeg"), "{err}");
+    assert_eq!(names(&dir), ["rec.audio", "rec.avi"]);
+    // An empty sidecar and a half-written header are bad headers like any other.
+    for bytes in [&b""[..], b"ofs-dvr-au"] {
+        std::fs::write(dir.join("rec.audio"), bytes).unwrap();
+        let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
+        assert!(err.contains("rec.audio"), "{err}");
+        assert_eq!(names(&dir), ["rec.audio", "rec.avi"]);
+    }
+}
+
+#[test]
+fn a_missing_ffmpeg_with_a_good_sidecar_leaves_no_temp_file() {
+    let dir = fresh_dir("goodsidecar");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA"]);
+    write_sidecar(&dir.join("rec.audio"), 3);
+    let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
+    assert!(err.contains("no-such-ffmpeg"), "{err}");
+    assert_eq!(names(&dir), ["rec.audio", "rec.avi"]);
+}
+
+#[test]
+fn a_sidecar_without_frames_is_a_silent_export_not_an_error_about_audio() {
+    let dir = fresh_dir("noaudioframes");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA"]);
+    write_sidecar(&dir.join("rec.audio"), 0);
+    let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
+    assert!(err.contains("no-such-ffmpeg"), "{err}");
+    assert_eq!(names(&dir), ["rec.audio", "rec.avi"]);
+}
+
+#[test]
+fn an_existing_mp4_is_refused_before_the_sidecar_is_read() {
+    let dir = fresh_dir("mp4firstaudio");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA"]);
+    std::fs::write(dir.join("rec.audio"), b"garbage").unwrap();
+    std::fs::write(dir.join("rec.mp4"), b"mine").unwrap();
+    let err = export_mp4(Path::new("no-such-ffmpeg"), &avi).unwrap_err();
+    assert!(err.contains("rec.mp4") && err.contains("already exists"), "{err}");
+}
+
+#[test]
+fn export_frames_ignores_the_sidecar() {
+    let dir = fresh_dir("framesaudio");
+    let avi = dir.join("rec.avi");
+    write_avi(&avi, &[b"AAA", b"BBBBB"]);
+    write_sidecar(&dir.join("rec.audio"), 2);
+    let (out, count) = export_frames(&avi).unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(std::fs::read(out.join("frame_000002.jpg")).unwrap(), b"BBBBB");
+    assert_eq!(names(&dir), ["rec.audio", "rec.avi", "rec_frames"]);
 }
 
 #[test]

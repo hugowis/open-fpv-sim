@@ -54,8 +54,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
   recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
-  then). H.264 export needs an ffmpeg with libx264 on `PATH`, and an export still running when the game quits is
-  lost. No audio.
+  then). H.264 export needs an ffmpeg with libx264 and an AAC encoder on `PATH`, and an export still running when
+  the game quits is lost. The audio leads the picture by the goggles' latency (40 ms) and has no VTX buzzer (the sim
+  has no buzzer model).
 - Flight audio (#158, `docs/superpowers/specs/2026-10-31-flight-audio-design.md`), played live in the client:
   airspeed is ground speed (the simulation has no wind yet), a hard landing and an object hit sound the same
   (one thud), and the tone is the blade-pass fundamental plus 2x and 3x harmonics, which alias above about
@@ -156,7 +157,6 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
   when built with `USE_OSD_HD`, which needs an HD SITL build, a decoder for the system-element sub-command and an HD font
   with a verified licence. Warnings and criticals (font pages 2–3) are drawn as the bold glyphs in amber and red.
 - Digital video systems (parent spec §2).
-- DVR audio (#36).
 
 ### Sandbox and component library
 - (C) plugin models (parent spec §1.5) and a stable plugin API.

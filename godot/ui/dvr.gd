@@ -58,6 +58,7 @@ func start(client: Object, viewport: SubViewport, feed := "goggles", clean_viewp
 				client.dvr_stop(done["feed"])
 			for done_path in started_paths:
 				DirAccess.remove_absolute(done_path)
+				DirAccess.remove_absolute(done_path.get_basename() + ".audio")
 			return error
 		started_feeds.append({"feed": which, "viewport": source_viewport, "size": source_viewport.size, "jpeg": PackedByteArray()})
 		started_paths.append(absolute)

@@ -227,14 +227,7 @@ impl OfsClient {
             Some(t) => {
                 // Inactive keeps the motors (zero gain), so their tones fade instead of being cut; and no state
                 // time, so a paused session releases no thud.
-                let input = AudioInput {
-                    motor_rpm: t.motor_rpm.clone(),
-                    motor_cmd: t.motor_cmd.clone(),
-                    // Ground speed: the simulator has no wind model yet, so it is also the airspeed.
-                    airspeed_mps: t.speed_mps,
-                    descent_mps: -t.climb_mps,
-                    active,
-                };
+                let input = t.audio_input(active);
                 let time_s = if active { t.time_s } else { f64::NAN };
                 self.audio.frame(&input, time_s, t.collision_speed_mps, frames)
             }

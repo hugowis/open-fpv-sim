@@ -561,6 +561,18 @@ impl Telemetry {
             age_s: 0.0,
         }
     }
+
+    /// What the flight sound needs from this telemetry; the live audio and the DVR export share this one map.
+    pub fn audio_input(&self, active: bool) -> ofs_audio::AudioInput {
+        ofs_audio::AudioInput {
+            motor_rpm: self.motor_rpm.clone(),
+            motor_cmd: self.motor_cmd.clone(),
+            // Ground speed: the simulator has no wind model yet, so it is also the airspeed.
+            airspeed_mps: self.speed_mps,
+            descent_mps: -self.climb_mps,
+            active,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

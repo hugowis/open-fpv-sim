@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Rust client for the ofs-sim server: session supervisor, pilot link and state interpolation (used by the Godot extension)"
 
 [dependencies]
+ofs-audio.workspace = true
 ofs-core.workspace = true
 ofs-proto.workspace = true
 glam.workspace = true

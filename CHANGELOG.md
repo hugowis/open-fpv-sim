@@ -5,6 +5,41 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Audio in the DVR (#159, part 2 of 2 of #36)
+#### Added
+- **The MP4 export has sound.** The flight sound of #158 is synthesised offline from what the recording saw and muxed as
+  an AAC track (128 kb/s, mono, 44.1 kHz). The audio is as long as the recorded frames (to one AAC frame).
+- **A `<name>.audio` file beside each AVI** (`REC_<ts>.audio`, `REC_<ts>_clean.audio`): while a feed records, the client
+  logs the audio inputs, one `F` line per frame the writer accepted and one `C <event_time_s>` line per collision event. Text, LF,
+  `ofs-dvr-audio 1` header; an `F` line is `F <state_time_s> <collision_speed_mps> <airspeed_mps> <descent_mps> <n>
+  <rpm_1..rpm_n> <cmd_1..cmd_n>` (the n rpms, then the n commands); the file is never modified after the recording
+  stops. A crash costs at worst the last second or so of audio (the log is buffered), ending in a truncated line that is
+  ignored, and the clip ends at the shorter of audio and video.
+- **The export** replays that file through `ofs_audio::Audio` into a temporary raw PCM file next to the output
+  (`.<name>.pcm-<pid>.tmp`, removed after the export) and ffmpeg muxes it with `-f s16le -ar 44100 -ac 1 -i <pcm>`, `-c:a aac
+  -b:a 128k` and `-shortest`.
+- `Telemetry::audio_input` is the one place the telemetry becomes an audio input; the live sound and the DVR both use it.
+
+#### Notes
+- **Silent cases**: a recording with no `.audio` file (made before this change, or a hand-made AVI) or with no frames in
+  it exports a silent MP4, as before. A malformed `.audio` file fails the export (no MP4; the AVI and the `.audio` file
+  are kept; delete the `.audio` file for a silent MP4). The image-sequence export is unchanged and silent.
+- **Needs** an ffmpeg with an AAC encoder (its native `aac`) besides libx264, on `PATH`.
+- **Determinism**: the PCM is a pure function of the `.audio` file on one platform, not byte-identical across operating
+  systems (`sin`, `exp` and `tanh` come from the platform's libm); the AAC bytes also depend on the ffmpeg build. No golden
+  audio is stored.
+- **Known limits**: the sound leads the picture by the goggles' latency (40 ms by default), because it is sampled from the
+  newest telemetry when a frame is written. It ignores the live "Sound" setting (muting the speakers does not silence the
+  recording). There is no VTX buzzer: the sim has no buzzer or beeper model, so the track is the flight sound only. The
+  temporary PCM file is about 26 MB for a five-minute flight (about 320 MB for an hour).
+- Server, protocol and lockstep digest are unchanged by this change.
+- Tests: the log round trip is exact; replaying one `.audio` file twice gives identical PCM; the PCM length is 882 samples
+  per frame; a truncated last line is tolerated and a bad line is an error; the export arguments carry the audio inputs
+  only when asked. With the WSL ffmpeg, by hand (not in CI): an exported MP4 has an AAC stream of the video's length, and
+  two exports of one recording give the same audio md5 (same machine and ffmpeg build).
+- Not checked: nobody has listened to an exported clip (headless, no audio device). Play an MP4 in VLC: the sound should
+  match the picture.
+
 ### Terrain in the Godot world (#155, part 3 of 3 of #27)
 #### Added
 - **The Godot client draws the terrain the physics samples.** Protocol 16 carries the baked grid in `World.terrain`
@@ -110,7 +145,7 @@ repository). The format follows Keep a Changelog.
 - **A "Sound" entry in Settings** (setting `audio`, `OFS_AUDIO`, `--audio`; on by default). It mutes the `Flight` audio bus
   and persists in `[client]` of `user://ofs_client.cfg` like the other settings.
 - **The `ofs-audio` crate**: the pure sound-parameter functions (`params`, `thud_gain`) and a deterministic `Synth`, with no
-  Godot and no I/O. Part 2 (#159, the DVR audio track) will render the same synth offline from a recording.
+  Godot and no I/O. Part 2 (#159, the DVR audio track) renders the same synth offline from a recording.
 - `OfsClient.get_telemetry()` carries `motor_rpm`; `OfsClient.audio_render(frames, active)` and `audio_sample_rate()` feed
   the generator.
 
