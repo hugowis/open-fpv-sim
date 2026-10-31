@@ -1,4 +1,4 @@
-//! Impulse contact of the collision spheres against the world's objects and the ground plane, applied after
+//! Impulse contact of the collision spheres against the world's objects and the ground, applied after
 //! integration: the body is moved out of every penetrating contact, then normal and friction impulses are
 //! resolved one contact at a time, deepest first, in a fixed order, so the result is deterministic. At 8 kHz the
 //! quad moves a few millimetres per step at racing speed, so no sphere passes through a 12 cm post between steps.
@@ -20,7 +20,7 @@ const CORRECTION_PASSES: usize = 4;
 /// A contact with less penetration than this left is resolved (and a lone contact is moved exactly once, so a
 /// single penetration is corrected bit-identically to a single sweep).
 const CORRECTION_EPS_M: f64 = 1.0e-9;
-/// The ground plane's index in a collision event (objects count from 0).
+/// The ground's index in a collision event (objects count from 0).
 pub const GROUND_OBJECT_INDEX: i32 = -1;
 
 /// The collision spheres of `[collision]`, in the body frame.

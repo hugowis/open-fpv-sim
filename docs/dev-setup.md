@@ -115,9 +115,14 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   polarization, aim relative to the pilot's facing);
 - `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal).
   The game draws them from the world the server loaded (`GetWorld`), so what you see is what the video link sees.
-  Nothing collides with the drone (the simulator's ground is the plane d = 0);
+  The quad collides with them (`docs/research/collision.md`);
 - `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
   neighbouring channels. The shipped world has one, on R2, next to the quad's default R1.
+- `[terrain]` � an opt-in height grid for the ground: `seed`, `size_m` (the square of relief, centred on home, flat beyond
+  it), `cell_m`, `amplitude_m`, `wavelength_m`, `octaves`, `persistence` and `flat_radius_m` (exactly flat, d = 0,
+  around home), every key optional. Without it the ground is the plane d = 0. The physics follows the surface; the Godot
+  client draws a flat ground and the radio and video link ignore the relief until #155 and #154. `worlds/hills.toml` is
+  the example; the steepest slope may not pass 60 degrees.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
 power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from

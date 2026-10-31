@@ -164,7 +164,7 @@ fn landing_points_hold_inside_the_friction_angle() {
 }
 
 #[test]
-fn crest_bounce_leaves_along_the_normal() {
+fn slope_bounce_leaves_along_the_normal() {
     // Dropped from 0.5 m onto the ramp with e = 0.5: the normal impulse reverses half the normal speed, so the
     // sphere leaves with a horizontal component downhill (south, -x), -(1 + e) v cos sin before friction, which
     // takes back at most its sliding share. On the flat plane it would bounce straight up.
