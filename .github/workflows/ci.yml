@@ -173,11 +173,10 @@ jobs:
       - run: bash scripts/run-godot-tests.sh e2e
 
   # The native Windows SITL (no WSL; docs/research/sitl-native-windows.md): built in MSYS2's msys environment, then the
-  # live tests run against the .exe from the runner's plain PowerShell (no MSYS2 on PATH). Not in `publish`'s needs, as
-  # the macOS job: promote it after about ten green runs.
+  # live tests run against the .exe from the runner's plain PowerShell (no MSYS2 on PATH). Gates `publish` (promoted
+  # 2026-10-31, after 13 consecutive green runs); the macOS job is the one still waiting on a clean record (#118).
   windows-sitl:
     runs-on: windows-latest
-    continue-on-error: true
     env:
       # Betaflight's make cannot build in a path with spaces; one fixed directory, in both path flavours.
       BF_DIR: C:/ofs/betaflight
@@ -235,7 +234,7 @@ jobs:
   # maintainer's call.
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [core, windows, sitl]
+    needs: [core, windows, sitl, windows-sitl]
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:

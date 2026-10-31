@@ -17,7 +17,7 @@ use crate::error::{ClientError, ErrorKind};
 use crate::frames::{quat_to_godot, vec_to_godot};
 use crate::fpv::{FieldUniforms, FpvBuffer};
 use crate::interp::{Sample, StateBuffer};
-use crate::launch::ServerProcess;
+use crate::launch::{exited_during_startup, wants_auto_port, ServerProcess};
 use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update, World};
 
 /// The server frees a disconnected pilot's slot asynchronously, so a pilot that reconnects at once (a reload) can
@@ -152,17 +152,18 @@ async fn connect_or_launch(
     shared.phase(Phase::Connecting, format!("starting {}", spec.program.display()));
     *server = None; // a server of ours that died: stop its leftovers before starting the next one
     let mut process = ServerProcess::spawn(spec, &settings.server_addr)?;
+    // Port 0 asked the OS for the port, so the setting is a placeholder: connect to what the server bound.
+    let addr = if wants_auto_port(&settings.server_addr) {
+        process.resolved_addr(settings.launch_timeout)?
+    } else {
+        settings.server_addr.clone()
+    };
     let deadline = Instant::now() + settings.launch_timeout;
     loop {
         if let Some(status) = process.try_wait() {
-            let tail = process.log_tail();
-            let log = if tail.is_empty() { String::new() } else { format!("\n{tail}") };
-            return Err(ClientError::new(
-                ErrorKind::Launch,
-                format!("{} exited during startup ({status}). Is the port in {} already taken?{log}", spec.program.display(), settings.server_addr),
-            ));
+            return Err(exited_during_startup(&spec.program, &settings.server_addr, status, &process.log_tail()));
         }
-        match connect_once(&settings.server_addr, PROBE_TIMEOUT).await {
+        match connect_once(&addr, PROBE_TIMEOUT).await {
             Ok(client) => {
                 *server = Some(process);
                 return Ok(client);
