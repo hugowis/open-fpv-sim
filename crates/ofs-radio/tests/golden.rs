@@ -221,6 +221,7 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64, [f64; 3])> {
         let shape = Shape::Box {
             center: DVec3::new(50.0, 0.0, -10.0),
             half: DVec3::new(10.0, 10.0, 10.0),
+            yaw_rad: 0.0,
         };
         p.obstacles = vec![Obstacle {
             shape: shape.rooted(),

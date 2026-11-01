@@ -16,7 +16,7 @@ fn post(north: f64, east: f64) -> Vec<WorldObject> {
 fn roof() -> Vec<WorldObject> {
     vec![WorldObject {
         name: "roof".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5), yaw_rad: 0.0 },
     }]
 }
 
@@ -249,7 +249,7 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let p = params(
         vec![WorldObject {
             name: "wall".into(),
-            shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -5.0), half: DVec3::new(1.0, 2.0, 5.0) },
+            shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -5.0), half: DVec3::new(1.0, 2.0, 5.0), yaw_rad: 0.0 },
         }],
         vec![(DVec3::new(0.1, 0.06, 0.03), 0.02)],
         0.3,
@@ -291,7 +291,7 @@ fn contacts_with_no_objects_leave_the_body_alone() {
     // A body far from any object behaves exactly as with an empty world.
     let far = vec![WorldObject {
         name: "far".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1000.0, 0.0, -5.0), half: DVec3::new(5.0, 5.0, 5.0) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1000.0, 0.0, -5.0), half: DVec3::new(5.0, 5.0, 5.0), yaw_rad: 0.0 },
     }];
     let mut with = sim(params(far, vec![(BODY_SPHERE, R)], 0.3), state(DVec3::new(0.0, 0.0, -1.0), DVec3::ZERO));
     let mut without = sim(params(vec![], vec![(BODY_SPHERE, R)], 0.3), state(DVec3::new(0.0, 0.0, -1.0), DVec3::ZERO));
@@ -326,7 +326,7 @@ fn a_corner_penetration_is_resolved_in_one_step() {
     // in the wall for the next step.
     let wall = vec![WorldObject {
         name: "wall".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5), yaw_rad: 0.0 },
     }];
     let p = params(wall, vec![(BODY_SPHERE, R)], 0.3);
     let pos = corrected(&p, DVec3::new(-R + 0.008, 0.0, -R + 0.01));
@@ -432,4 +432,32 @@ fn a_separating_point_carries_no_force_and_forgets_its_anchor() {
     let f = point_force(&g, DVec3::NEG_Z, 0.001, DVec3::new(0.5, 0.0, -1.0), &mut anchor, DT);
     assert_eq!(f, DVec3::ZERO);
     assert_eq!(anchor, DVec3::ZERO);
+}
+
+#[test]
+fn a_sphere_bouncing_off_a_yawed_wall_leaves_along_the_rotated_normal() {
+    // A wall thin along its own north axis, yawed 45 degrees, so its near face's outward normal is the
+    // -(north-east) diagonal. The body (one sphere at the centre, r = 0.04) starts touching that face and
+    // slides north into it at 2 m/s: the contact turns the velocity about the rotated normal — v - (1+e)(v.n)n
+    // with e = 0.5 gives (0.5, -1.5) before friction; assert the signs and the slowdown, not the exact bits.
+    // 2 m/s (not 1) so the inward speed 2*cos(45) = 1.4 m/s clears EVENT_MIN_SPEED_MPS and one event fires.
+    let p = params(
+        vec![WorldObject {
+            name: "wall".into(),
+            shape: ofs_core::shape::Shape::Box {
+                center: DVec3::new(0.2, 0.2, -5.0),
+                half: DVec3::new(0.25, 5.0, 5.0),
+                yaw_rad: std::f64::consts::FRAC_PI_4,
+            },
+        }],
+        vec![(DVec3::ZERO, 0.04)],
+        0.5,
+    );
+    let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect::<Vec<_>>();
+    let mut touch = TouchState::new(p.objects.len());
+    let mut s = state(DVec3::new(0.0, 0.0, -0.06), DVec3::new(2.0, 0.0, 0.0));
+    let events = ofs_physics::collision::resolve(&p, &bounds, 0.04, &mut s, &[], &mut touch, 0.0);
+    assert_eq!(events.len(), 1, "one hard touch");
+    assert!(s.vel_ned_mps.x < 1.0, "slowed along the approach: {:?}", s.vel_ned_mps);
+    assert!(s.vel_ned_mps.y < -0.5, "deflected west along the rotated face: {:?}", s.vel_ned_mps);
 }

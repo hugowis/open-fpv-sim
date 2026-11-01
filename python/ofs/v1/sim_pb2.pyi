@@ -603,7 +603,7 @@ class ReceiverAntenna(_message.Message):
     def __init__(self, name: _Optional[str] = ..., kind: _Optional[str] = ..., gain_dbi: _Optional[float] = ..., beamwidth_deg: _Optional[float] = ..., polarization: _Optional[str] = ..., aim_az_deg: _Optional[float] = ..., aim_el_deg: _Optional[float] = ...) -> None: ...
 
 class WorldObject(_message.Message):
-    __slots__ = ("name", "shape", "center_ned_m", "size_m", "radius_m", "height_m", "color", "rf_loss_db")
+    __slots__ = ("name", "shape", "center_ned_m", "size_m", "radius_m", "height_m", "color", "rf_loss_db", "yaw_deg")
     NAME_FIELD_NUMBER: _ClassVar[int]
     SHAPE_FIELD_NUMBER: _ClassVar[int]
     CENTER_NED_M_FIELD_NUMBER: _ClassVar[int]
@@ -612,6 +612,7 @@ class WorldObject(_message.Message):
     HEIGHT_M_FIELD_NUMBER: _ClassVar[int]
     COLOR_FIELD_NUMBER: _ClassVar[int]
     RF_LOSS_DB_FIELD_NUMBER: _ClassVar[int]
+    YAW_DEG_FIELD_NUMBER: _ClassVar[int]
     name: str
     shape: str
     center_ned_m: Vec3
@@ -620,7 +621,8 @@ class WorldObject(_message.Message):
     height_m: float
     color: Vec3
     rf_loss_db: float
-    def __init__(self, name: _Optional[str] = ..., shape: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., size_m: _Optional[_Union[Vec3, _Mapping]] = ..., radius_m: _Optional[float] = ..., height_m: _Optional[float] = ..., color: _Optional[_Union[Vec3, _Mapping]] = ..., rf_loss_db: _Optional[float] = ...) -> None: ...
+    yaw_deg: float
+    def __init__(self, name: _Optional[str] = ..., shape: _Optional[str] = ..., center_ned_m: _Optional[_Union[Vec3, _Mapping]] = ..., size_m: _Optional[_Union[Vec3, _Mapping]] = ..., radius_m: _Optional[float] = ..., height_m: _Optional[float] = ..., color: _Optional[_Union[Vec3, _Mapping]] = ..., rf_loss_db: _Optional[float] = ..., yaw_deg: _Optional[float] = ...) -> None: ...
 
 class Gate(_message.Message):
     __slots__ = ("name", "center_ned_m", "heading_deg", "width_m", "height_m", "pitch_deg", "roll_deg")

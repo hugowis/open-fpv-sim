@@ -172,6 +172,18 @@ fn video_messages_convert() {
 }
 
 #[test]
+fn a_yawed_box_reaches_the_client() {
+    let yawed = World::from_pb(pb::World {
+        objects: vec![pb::WorldObject { name: "Gate1Bar".into(), shape: "box".into(), yaw_deg: 135.0, ..Default::default() }],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(yawed.objects[0].yaw_deg, 135.0);
+    let plain = World::from_pb(pb::World { objects: vec![pb::WorldObject { name: "Pad".into(), shape: "box".into(), ..Default::default() }], ..Default::default() }).unwrap();
+    assert_eq!(plain.objects[0].yaw_deg, 0.0, "a proto3-absent yaw is axis-aligned");
+}
+
+#[test]
 fn the_world_converts_to_godots_frame() {
     let v = |x, y, z| Some(pb::Vec3 { x, y, z });
     let w = World::from_pb(pb::World {

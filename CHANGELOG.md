@@ -23,6 +23,23 @@ repository). The format follows Keep a Changelog.
 #### Changed
 - `drone.gd`'s `set_motors` takes motor speeds in RPM, not motor commands; the model-building code moved to the
   generator. No protocol, server or Rust change.
+### Rotated boxes in the world (#28)
+#### Added
+- **`yaw_deg` on a box in `[[objects]]`** (degrees clockwise from north, 0 = north, 90 = east; the heading of the
+  box's own north axis): the collision solver pushes along the rotated faces, the radio and video obstruction sees
+  the rotated solid, and the Godot client draws the rotated box — one geometry, `ofs_core::shape::Shape::Box {
+  center, half, yaw_rad }`. Absent = axis-aligned. `yaw_deg` on a cylinder is a validation problem.
+- **Protocol 18** (breaking): `WorldObject.yaw_deg` (field 9, `double`, box only; 0 = axis-aligned). The Godot bridge
+  exposes it as `get_world()["objects"][i]["yaw_deg"]`, the Python `WorldObject.yaw_deg` defaults to 0.0, and
+  `world.gd` turns the node by `PI - deg_to_rad(yaw)`.
+- **Meadow's Gate1 bar**: `worlds/meadow.toml` gets the bar its header said it was missing (`yaw_deg = 135.0`,
+  across the diagonal travel).
+
+#### Changed
+- Nothing for a world that writes no yaw: same shapes, same flights, same bus digest (pinned by
+  `crates/ofs-sim/tests/rotated_boxes.rs` beside the flat-world pin), radio goldens untouched. The identity fast
+  path (`yaw_rad == 0.0`) computes no trig, so it is bit-identical on every OS. A yawed box's signed distance does
+  (libm `sin`/`cos`), so only yawed worlds are machine-claimed.
 
 ### The stabilized start (#172)
 #### Fixed

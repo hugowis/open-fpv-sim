@@ -395,6 +395,9 @@ pub struct ObjectSection {
     pub radius_m: Option<f64>,
     #[serde(default)]
     pub height_m: Option<f64>,
+    /// Box only: the heading of the box's north axis (0 = north, 90 = east, clockwise). Absent = axis-aligned.
+    #[serde(default)]
+    pub yaw_deg: Option<f64>,
     /// `[r, g, b]`, each 0 to 1.
     pub color: [f64; 3],
     /// The loss when the object fully blocks the path; 0 (the default) lets the signal through.
@@ -596,11 +599,13 @@ impl WorldConfig {
                 Shape::Box => {
                     c.check(o.size_m.is_some_and(|s| s.iter().all(|v| v.is_finite() && *v > 0.0)), &field("size_m"), "a box needs size_m, every value > 0");
                     c.check(o.radius_m.is_none() && o.height_m.is_none(), &field("shape"), "radius_m and height_m are for a cylinder");
+                    c.check(o.yaw_deg.is_none_or(|y| y.is_finite()), &field("yaw_deg"), "must be finite");
                 }
                 Shape::Cylinder => {
-                    c.check(o.radius_m.is_some_and(|v| v.is_finite() && v > 0.0), &field("radius_m"), "a cylinder needs radius_m > 0");
-                    c.check(o.height_m.is_some_and(|v| v.is_finite() && v > 0.0), &field("height_m"), "a cylinder needs height_m > 0");
+                    c.check(o.radius_m.is_some_and(|r| r.is_finite() && r > 0.0), &field("radius_m"), "a cylinder needs radius_m > 0");
+                    c.check(o.height_m.is_some_and(|h| h.is_finite() && h > 0.0), &field("height_m"), "a cylinder needs height_m > 0");
                     c.check(o.size_m.is_none(), &field("shape"), "size_m is for a box");
+                    c.check(o.yaw_deg.is_none(), &field("yaw_deg"), "yaw_deg is for a box");
                 }
             }
         }

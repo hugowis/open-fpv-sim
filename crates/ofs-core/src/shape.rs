@@ -1,6 +1,7 @@
 //! Solids in the world, by their signed distance (negative inside): the video link's obstacles, the physics'
-//! collidable objects and the ELRS link's obstructions all use them. Positions and directions are NED metres
-//! (down is +z, the ground is the plane z = 0).
+//! collidable objects and the ELRS link's obstructions all use them. Boxes may be yawed about the vertical;
+//! `yaw_rad` 0 is the world's axes. Positions and directions are NED metres (down is +z, the ground is the
+//! plane z = 0).
 use glam::DVec3;
 
 use crate::terrain::Terrain;
@@ -8,10 +9,21 @@ use crate::terrain::Terrain;
 /// A solid in the world, by its signed distance (negative inside).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape {
-    /// Axis-aligned box: `half` is half the size along north, east and down.
-    Box { center: DVec3, half: DVec3 },
+    /// A box, axis-aligned at `yaw_rad` 0: `half` is half the size along the box's own north, east and down
+    /// axes, `yaw_rad` the heading of that north axis in radians clockwise from the world's north.
+    Box { center: DVec3, half: DVec3, yaw_rad: f64 },
     /// Vertical cylinder.
     Cylinder { center: DVec3, radius: f64, half_height: f64 },
+}
+
+/// The point in the box's local frame (the north/east pair rotated back by the yaw); identity yaw returns `d`.
+fn local(yaw_rad: f64, d: DVec3) -> DVec3 {
+    if yaw_rad == 0.0 { d } else { let (s, c) = yaw_rad.sin_cos(); DVec3::new(c * d.x + s * d.y, -s * d.x + c * d.y, d.z) }
+}
+
+/// A local direction back to the world frame; identity yaw returns `n`.
+fn world_dir(yaw_rad: f64, n: DVec3) -> DVec3 {
+    if yaw_rad == 0.0 { n } else { let (s, c) = yaw_rad.sin_cos(); DVec3::new(c * n.x - s * n.y, s * n.x + c * n.y, n.z) }
 }
 
 /// How far below the ground a rooted shape reaches (any depth works: nothing travels under the ground).
@@ -31,10 +43,10 @@ impl Shape {
     pub fn rooted_on(self, terrain: Option<&Terrain>) -> Shape {
         let ground_d = |center: DVec3| terrain.map_or(0.0, |t| t.ground_d(center.x, center.y));
         match self {
-            Shape::Box { center, half } if center.z + half.z >= ground_d(center) - ON_GROUND_M => {
+            Shape::Box { center, half, yaw_rad } if center.z + half.z >= ground_d(center) - ON_GROUND_M => {
                 let top = center.z - half.z;
                 let half_z = (ROOT_DEPTH_M - top) * 0.5;
-                Shape::Box { center: DVec3::new(center.x, center.y, top + half_z), half: DVec3::new(half.x, half.y, half_z) }
+                Shape::Box { center: DVec3::new(center.x, center.y, top + half_z), half: DVec3::new(half.x, half.y, half_z), yaw_rad }
             }
             Shape::Cylinder { center, radius, half_height } if center.z + half_height >= ground_d(center) - ON_GROUND_M => {
                 let top = center.z - half_height;
@@ -47,8 +59,9 @@ impl Shape {
 
     pub fn signed_distance(&self, p: DVec3) -> f64 {
         match *self {
-            Shape::Box { center, half } => {
-                let q = (p - center).abs() - half;
+            Shape::Box { center, half, yaw_rad } => {
+                let d = local(yaw_rad, p - center);
+                let q = d.abs() - half;
                 q.max(DVec3::ZERO).length() + q.max_element().min(0.0)
             }
             Shape::Cylinder { center, radius, half_height } => {
@@ -66,18 +79,18 @@ impl Shape {
     /// the lower axis wins, so the result is stable). Deep inside a degenerate point gives up.
     pub fn normal(&self, p: DVec3) -> DVec3 {
         match *self {
-            Shape::Box { center, half } => {
-                let d = p - center;
+            Shape::Box { center, half, yaw_rad } => {
+                let d = local(yaw_rad, p - center);
                 let q = d.abs() - half;
                 let outside = q.max(DVec3::ZERO);
                 if outside != DVec3::ZERO {
-                    return (d.signum() * outside).normalize();
+                    return world_dir(yaw_rad, (d.signum() * outside).normalize());
                 }
                 let axis = if q.x >= q.y && q.x >= q.z { 0 } else if q.y >= q.z { 1 } else { 2 };
                 let mut n = DVec3::ZERO;
                 n[axis] = if d[axis] >= 0.0 { 1.0 } else { -1.0 };
                 // Unreachable defensive fallback: the chosen axis always gets +-1 (glam's signum maps 0.0 to 1.0).
-                n.try_normalize().unwrap_or(DVec3::NEG_Z)
+                world_dir(yaw_rad, n.try_normalize().unwrap_or(DVec3::NEG_Z))
             }
             Shape::Cylinder { center, radius, half_height } => {
                 let d = p - center;
@@ -108,7 +121,12 @@ impl Shape {
     /// The axis-aligned bounding box of the shape.
     pub fn bounds(&self) -> Aabb {
         match *self {
-            Shape::Box { center, half } => Aabb { min: center - half, max: center + half },
+            Shape::Box { center, half, yaw_rad: 0.0 } => Aabb { min: center - half, max: center + half },
+            Shape::Box { center, half, yaw_rad } => {
+                let (s, c) = yaw_rad.sin_cos();
+                let half_world = DVec3::new(c.abs() * half.x + s.abs() * half.y, s.abs() * half.x + c.abs() * half.y, half.z);
+                Aabb { min: center - half_world, max: center + half_world }
+            }
             Shape::Cylinder { center, radius, half_height } => Aabb {
                 min: DVec3::new(center.x - radius, center.y - radius, center.z - half_height),
                 max: DVec3::new(center.x + radius, center.y + radius, center.z + half_height),

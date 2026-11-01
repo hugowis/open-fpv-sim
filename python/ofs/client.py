@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 17
+PROTOCOL_VERSION = 18
 # A terrain world's grid is a big get_world reply; gRPC's default receive limit is 4 MiB (ofs_proto::MAX_RESPONSE_BYTES).
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 UNLOAD_TIMEOUT_S = 5.0
@@ -140,6 +140,7 @@ class WorldObject:
     height_m: float  # cylinder
     color: tuple  # (r, g, b) in 0..1
     rf_loss_db: float
+    yaw_deg: float = 0.0  # box only: heading of the box's north axis; 0 = axis-aligned
 
 
 @dataclass(frozen=True)
@@ -344,7 +345,7 @@ def _world(m) -> World:
         antennas=tuple(ReceiverAntenna(a.name, a.kind, a.gain_dbi, a.beamwidth_deg, a.polarization, a.aim_az_deg,
                                        a.aim_el_deg) for a in m.antennas),
         objects=tuple(WorldObject(o.name, o.shape, _v(o.center_ned_m), _v(o.size_m), o.radius_m, o.height_m, _v(o.color),
-                                  o.rf_loss_db) for o in m.objects),
+                                  o.rf_loss_db, o.yaw_deg) for o in m.objects),
         emitters=tuple(Emitter(e.name, _v(e.position_ned_m), e.freq_mhz, e.power_mw) for e in m.emitters),
         handset=Handset(
             position_ned_m=_v(m.handset.position_ned_m),

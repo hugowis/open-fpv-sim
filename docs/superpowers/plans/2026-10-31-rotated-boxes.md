@@ -1,6 +1,6 @@
 # Rotated boxes in the world Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A box in the world file can be yawed; the collision solver, the radio and video obstruction, and the Godot client all see the same rotated box; a world that writes no yaw is bit-for-bit today. Closes #28.
 
@@ -52,7 +52,7 @@
 - Consumes: `ofs_sim::vehicle::{build, BuildOptions, Sticks}`, `Vehicle::{run_for, digest, state}` (the pattern of `crates/ofs-sim/tests/flat_world_pin.rs`), `ofs_config::{FcKind, QuadConfig, WorldConfig}`, `ofs_config::world::{ObjectSection, Shape}`.
 - Produces: `object_world()` (a helper later tasks extend) and per-OS digest constants that Tasks 2-4 must keep passing unmodified.
 
-- [ ] **Step 1:** Write the test with placeholder constants:
+- [x] **Step 1:** Write the test with placeholder constants:
 
 ```rust
 //! Pins the bus digest of a world with a box in the flight path, recorded on `main` before the rotated-boxes work,
@@ -108,8 +108,8 @@ fn an_unrotated_object_world_is_pinned() {
 }
 ```
 
-- [ ] **Step 2:** Run `cargo test -p ofs-sim --test rotated_boxes` in WSL — FAIL showing the real digests in the `println!`. Fill the Linux constants; if you can also run natively on Windows, fill those too (else ledger it and keep the `cfg` gate). If the collision assertion fails (the quad misses the slab), widen `size_m` to `[20.0, 20.0, 40.0]` and re-record — the pin must exercise the box.
-- [ ] **Step 3:** Run again: PASS. Commit `test(sim): pin an object world's bus digest before the rotated boxes (#28)`.
+- [x] **Step 2:** Run `cargo test -p ofs-sim --test rotated_boxes` in WSL — FAIL showing the real digests in the `println!`. Fill the Linux constants; if you can also run natively on Windows, fill those too (else ledger it and keep the `cfg` gate). If the collision assertion fails (the quad misses the slab), widen `size_m` to `[20.0, 20.0, 40.0]` and re-record — the pin must exercise the box.
+- [x] **Step 3:** Run again: PASS. Commit `test(sim): pin an object world's bus digest before the rotated boxes (#28)`.
 
 ### Task 2: The yawed box in `Shape`
 
@@ -120,7 +120,7 @@ fn an_unrotated_object_world_is_pinned() {
 **Interfaces:**
 - Produces: `Shape::Box { center: DVec3, half: DVec3, yaw_rad: f64 }` (radians, clockwise from north; `0.0` = today's box exactly). No signature anywhere else changes: `signed_distance`, `normal`, `bounds`, `rooted_on` keep theirs and now honour the yaw.
 
-- [ ] **Step 1:** Write the failing tests in `crates/ofs-core/tests/shape.rs` (beside the existing `BOX` rig):
+- [x] **Step 1:** Write the failing tests in `crates/ofs-core/tests/shape.rs` (beside the existing `BOX` rig):
 
 ```rust
 fn yawed(yaw_rad: f64) -> Shape {
@@ -187,8 +187,8 @@ fn rooting_keeps_the_yaw() {
 }
 ```
 
-- [ ] **Step 2:** Run `cargo test -p ofs-core --test shape` — FAIL (no `yaw_rad` field).
-- [ ] **Step 3:** Implement in `crates/ofs-core/src/shape.rs`. Add the field to the variant (doc: radians, clockwise from north, `0` = the world's axes). Add one helper and branch on identity in each method:
+- [x] **Step 2:** Run `cargo test -p ofs-core --test shape` — FAIL (no `yaw_rad` field).
+- [x] **Step 3:** Implement in `crates/ofs-core/src/shape.rs`. Add the field to the variant (doc: radians, clockwise from north, `0` = the world's axes). Add one helper and branch on identity in each method:
 
 ```rust
 /// The point in the box's local frame (the north/east pair rotated back by the yaw); identity yaw returns `d`.
@@ -208,7 +208,7 @@ fn world_dir(yaw_rad: f64, n: DVec3) -> DVec3 {
   - Update the module doc (shape.rs:1-3) to say boxes may be yawed.
 
   Then fix the 22 construction sites across the workspace (`yaw_rad: 0.0`); the compiler lists them.
-- [ ] **Step 4:** `cargo test -p ofs-core -p ofs-physics -p ofs-rf -p ofs-radio -p ofs-video --locked` PASS (the existing suites are the unrotated regression); `cargo test -p ofs-sim --test rotated_boxes --test flat_world_pin` PASS. Clippy clean. Commit `feat(core): a yawed box in Shape, bit-identical unrotated (#28)`.
+- [x] **Step 4:** `cargo test -p ofs-core -p ofs-physics -p ofs-rf -p ofs-radio -p ofs-video --locked` PASS (the existing suites are the unrotated regression); `cargo test -p ofs-sim --test rotated_boxes --test flat_world_pin` PASS. Clippy clean. Commit `feat(core): a yawed box in Shape, bit-identical unrotated (#28)`.
 
 ### Task 3: `yaw_deg` in the world file
 
@@ -219,12 +219,12 @@ fn world_dir(yaw_rad: f64, n: DVec3) -> DVec3 {
 **Interfaces:**
 - Produces: `ObjectSection { ..., /// Box only: the heading of the box's north axis (0 = north, 90 = east, clockwise). Absent = axis-aligned. #[serde(default)] pub yaw_deg: Option<f64> }`. Everything that reads `WorldConfig` is unchanged (`Option` default `None`).
 
-- [ ] **Step 1:** Write the failing tests in `crates/ofs-config/tests/world.rs` (beside `the_shipped_world_loads`):
+- [x] **Step 1:** Write the failing tests in `crates/ofs-config/tests/world.rs` (beside `the_shipped_world_loads`):
   - `yaw_deg_parses_and_defaults`: a world text with a box carrying `yaw_deg = 135.0` loads with `objects[i].yaw_deg == Some(135.0)`; the same box without the key is `None`; `the_open_field_is_valid_and_bare` still holds (its `objects.is_empty()` assertion).
   - `every_yaw_problem_is_reported_at_once`: from the same text, `yaw_deg = nan` → `"objects[0].yaw_deg: must be finite"`; a cylinder with `yaw_deg = 10.0` → `"objects[1].yaw_deg: yaw_deg is for a box"`.
-- [ ] **Step 2:** Run `cargo test -p ofs-config --test world yaw` — FAIL (unknown field).
-- [ ] **Step 3:** Implement: the field on `ObjectSection` (world.rs:341-360), and in the objects loop of `validate` (world.rs:543-561) inside the existing `match o.shape`: the `Box` arm checks `c.check(o.yaw_deg.is_none_or(|y| y.is_finite()), &field("yaw_deg"), "must be finite")`; the `Cylinder` arm checks `c.check(o.yaw_deg.is_none(), &field("yaw_deg"), "yaw_deg is for a box")` — the placement of the existing cross rules (`world.rs:553`, `world.rs:558`). `WorldConfig::open_field()` needs nothing (no objects); the Task 1 test's `ObjectSection` literal gains `yaw_deg: None` (the compiler says so) — the pin test's assertions stay untouched.
-- [ ] **Step 4:** Tests PASS; whole `cargo test -p ofs-config --locked` green. Commit `feat(config): yaw_deg on a box in the world file (#28)`.
+- [x] **Step 2:** Run `cargo test -p ofs-config --test world yaw` — FAIL (unknown field).
+- [x] **Step 3:** Implement: the field on `ObjectSection` (world.rs:341-360), and in the objects loop of `validate` (world.rs:543-561) inside the existing `match o.shape`: the `Box` arm checks `c.check(o.yaw_deg.is_none_or(|y| y.is_finite()), &field("yaw_deg"), "must be finite")`; the `Cylinder` arm checks `c.check(o.yaw_deg.is_none(), &field("yaw_deg"), "yaw_deg is for a box")` — the placement of the existing cross rules (`world.rs:553`, `world.rs:558`). `WorldConfig::open_field()` needs nothing (no objects); the Task 1 test's `ObjectSection` literal gains `yaw_deg: None` (the compiler says so) — the pin test's assertions stay untouched.
+- [x] **Step 4:** Tests PASS; whole `cargo test -p ofs-config --locked` green. Commit `feat(config): yaw_deg on a box in the world file (#28)`.
 
 ### Task 4: The consumers — collisions, the link, replay
 
@@ -236,7 +236,7 @@ fn world_dir(yaw_rad: f64, n: DVec3) -> DVec3 {
 - Consumes: Task 2's `Shape::Box { .., yaw_rad }`, Task 3's `ObjectSection.yaw_deg`.
 - Produces: `object_shape` maps `o.yaw_deg.map_or(0.0, |y| y.rem_euclid(360.0).to_radians())` into `yaw_rad`. `world_objects` and `world_obstacles` (vehicle.rs:655, :744) keep their signatures and now carry the yaw through.
 
-- [ ] **Step 1: Physics.** In `crates/ofs-physics/tests/collision.rs` (the rig of `params`/`state`/`resolve` at :23-62, :242). This is the consumer's proof of Task 2's engine — it passes the moment it is written; if it does not, the bug is in `Shape`, not here:
+- [x] **Step 1: Physics.** In `crates/ofs-physics/tests/collision.rs` (the rig of `params`/`state`/`resolve` at :23-62, :242). This is the consumer's proof of Task 2's engine — it passes the moment it is written; if it does not, the bug is in `Shape`, not here:
 
 ```rust
 #[test]
@@ -269,7 +269,7 @@ fn a_sphere_bouncing_off_a_yawed_wall_leaves_along_the_rotated_normal() {
 ```
 
   Run `cargo test -p ofs-physics --test collision` — PASS (re-check the geometry comments, not the engine, if not).
-- [ ] **Step 2: RF.** In `crates/ofs-rf/tests/propagation.rs`:
+- [x] **Step 2: RF.** In `crates/ofs-rf/tests/propagation.rs`:
 
 ```rust
 #[test]
@@ -286,11 +286,11 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
 ```
 
   Run `cargo test -p ofs-rf --test propagation` — PASS (Task 2's engine already serves it); if not, the bug is in `Shape`, fix it there.
-- [ ] **Step 3: The sim consumes the field.** In `object_shape` (vehicle.rs:753): `let yaw = o.yaw_deg.map_or(0.0, |y| y.rem_euclid(360.0).to_radians());` and `Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5, yaw_rad: yaw }`. In the `#[cfg(test)]` module, beside `objects_on_hilly_ground_root_to_the_terrain` (:2300), add `objects_carry_the_yaw_and_360_is_identity`: `world_objects` of a box with `yaw_deg = 135.0` gives `Shape::Box { yaw_rad, .. }` with `yaw_rad == 135f64.to_radians()`; `yaw_deg = 360.0` and `0.0` both give exactly `0.0`; `world_obstacles`' rooted shape keeps the yaw (`let Shape::Box { yaw_rad, .. } = obstacles[0].shape`).
-- [ ] **Step 4: Sim tests** in `crates/ofs-sim/tests/rotated_boxes.rs`:
+- [x] **Step 3: The sim consumes the field.** In `object_shape` (vehicle.rs:753): `let yaw = o.yaw_deg.map_or(0.0, |y| y.rem_euclid(360.0).to_radians());` and `Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5, yaw_rad: yaw }`. In the `#[cfg(test)]` module, beside `objects_on_hilly_ground_root_to_the_terrain` (:2300), add `objects_carry_the_yaw_and_360_is_identity`: `world_objects` of a box with `yaw_deg = 135.0` gives `Shape::Box { yaw_rad, .. }` with `yaw_rad == 135f64.to_radians()`; `yaw_deg = 360.0` and `0.0` both give exactly `0.0`; `world_obstacles`' rooted shape keeps the yaw (`let Shape::Box { yaw_rad, .. } = obstacles[0].shape`).
+- [x] **Step 4: Sim tests** in `crates/ofs-sim/tests/rotated_boxes.rs`:
   - `a_yawed_object_world_replays_exactly_and_differs_from_the_unyawed`: `let mut w = object_world(); w.objects[0].yaw_deg = Some(45.0);` — two vehicles from it (same quad/seed/sticks as the pin flight) replay to equal digests after each phase, and the yawed flight's digest differs from the unyawed `object_world()`'s (a 45-degree slab meets the climber with a corner, not a face).
   - The pin test of Task 1 still passes unmodified, its `yaw_deg: None` literal aside (the bit-for-bit claim).
-- [ ] **Step 5:** `cargo test -p ofs-sim --test rotated_boxes --test flat_world_pin` and `cargo test --workspace --locked --no-fail-fast` PASS; clippy clean. Commit `feat(sim): collisions and the link see the rotated boxes (#28)`.
+- [x] **Step 5:** `cargo test -p ofs-sim --test rotated_boxes --test flat_world_pin` and `cargo test --workspace --locked --no-fail-fast` PASS; clippy clean. Commit `feat(sim): collisions and the link see the rotated boxes (#28)`.
 
 ### Task 5: Protocol 17 and the clients
 
@@ -301,11 +301,11 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
 **Interfaces:**
 - Produces: `WorldObject.yaw_deg` (field 9, `double`; 0 = axis-aligned) on the wire; `ofs_client::model::WorldObject.yaw_deg: f64`; Godot `get_world()["objects"][i]["yaw_deg"]`; Python `WorldObject.yaw_deg: float = 0.0`. Sibling coordination (the umbrella's rule): #156's `WorldObject.motion` also plans field 9 — whoever lands second takes the next free field, re-verified against the worktree's `sim.proto` at execution.
 
-- [ ] **Step 1: Failing tests.** messages.rs: `assert_eq!(PROTOCOL_VERSION, 17);`. session.rs unit test `the_world_message_carries_a_box_yaw`: a hand-built `WorldConfig` (the `building`-helper style, vehicle.rs:2278) with a yawed box → `world_msg(...).objects[0].yaw_deg == 135.0`; a box without `yaw_deg` → `0.0`. ofs-client `tests/model.rs`: `a_yawed_box_reaches_the_client` — a `pb::World` with one `WorldObject { yaw_deg: 135.0, .. }` parses to `yaw_deg == 135.0`, and a default `WorldObject` parses to `0.0`.
-- [ ] **Step 2:** Run them — FAIL.
-- [ ] **Step 3: Implement.** In `sim.proto` under `WorldObject` (after `rf_loss_db = 8;`): `double yaw_deg = 9;  // box only: heading of the box's north axis (0 = north, 90 = east, clockwise); 0 = axis-aligned`; update the header comment (:5) to "protocol version 17: protocol 16 plus a box's yaw (WorldObject.yaw_deg)". Bump `PROTOCOL_VERSION` and the crate doc (ofs-proto/src/lib.rs:1, :12) to 17; fix messages.rs's other expectations if it names 16 anywhere. `world_msg`: `yaw_deg: o.yaw_deg.unwrap_or(0.0),`. Client model: the field and `yaw_deg: o.yaw_deg,`; leave `size`'s Godot reordering (:369) alone — the yaw is frame-free. Bridge: `e.set("yaw_deg", o.yaw_deg);` and one doc word. Python: `PROTOCOL_VERSION = 17`, `yaw_deg: float = 0.0` at the end of the frozen dataclass (positional callers keep working), `_world` appends `o.yaw_deg`. Regenerate the stubs with the Global Constraints command; `test_proto_stubs.py` passes.
-- [ ] **Step 4:** `cargo test --workspace --locked --no-fail-fast`; `PYTHONPATH=python python -m pytest python/tests/test_client.py python/tests/test_proto_stubs.py -q`. Update live protocol references: `grep -rn "protocol 16" --include=*.md --include=*.py --include=*.gd . | grep -v superpowers/ | grep -v CHANGELOG` — update `docs/dev-setup.md:268` ("speak protocol 16") and the walk's last item (:284-285); leave historical attributions (Global Constraints).
-- [ ] **Step 5:** Commit `feat(proto)!: protocol 17 - a box's yaw in the World message (#28)`.
+- [x] **Step 1: Failing tests.** messages.rs: `assert_eq!(PROTOCOL_VERSION, 17);`. session.rs unit test `the_world_message_carries_a_box_yaw`: a hand-built `WorldConfig` (the `building`-helper style, vehicle.rs:2278) with a yawed box → `world_msg(...).objects[0].yaw_deg == 135.0`; a box without `yaw_deg` → `0.0`. ofs-client `tests/model.rs`: `a_yawed_box_reaches_the_client` — a `pb::World` with one `WorldObject { yaw_deg: 135.0, .. }` parses to `yaw_deg == 135.0`, and a default `WorldObject` parses to `0.0`.
+- [x] **Step 2:** Run them — FAIL.
+- [x] **Step 3: Implement.** In `sim.proto` under `WorldObject` (after `rf_loss_db = 8;`): `double yaw_deg = 9;  // box only: heading of the box's north axis (0 = north, 90 = east, clockwise); 0 = axis-aligned`; update the header comment (:5) to "protocol version 17: protocol 16 plus a box's yaw (WorldObject.yaw_deg)". Bump `PROTOCOL_VERSION` and the crate doc (ofs-proto/src/lib.rs:1, :12) to 17; fix messages.rs's other expectations if it names 16 anywhere. `world_msg`: `yaw_deg: o.yaw_deg.unwrap_or(0.0),`. Client model: the field and `yaw_deg: o.yaw_deg,`; leave `size`'s Godot reordering (:369) alone — the yaw is frame-free. Bridge: `e.set("yaw_deg", o.yaw_deg);` and one doc word. Python: `PROTOCOL_VERSION = 17`, `yaw_deg: float = 0.0` at the end of the frozen dataclass (positional callers keep working), `_world` appends `o.yaw_deg`. Regenerate the stubs with the Global Constraints command; `test_proto_stubs.py` passes.
+- [x] **Step 4:** `cargo test --workspace --locked --no-fail-fast`; `PYTHONPATH=python python -m pytest python/tests/test_client.py python/tests/test_proto_stubs.py -q`. Update live protocol references: `grep -rn "protocol 16" --include=*.md --include=*.py --include=*.gd . | grep -v superpowers/ | grep -v CHANGELOG` — update `docs/dev-setup.md:268` ("speak protocol 16") and the walk's last item (:284-285); leave historical attributions (Global Constraints).
+- [x] **Step 5:** Commit `feat(proto)!: protocol 17 - a box's yaw in the World message (#28)`.
 
 ### Task 6: Godot draws the yaw
 
@@ -317,7 +317,7 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
 - Consumes: Task 5's `"yaw_deg"` dict key.
 - Produces: box nodes turned by their yaw; a world dict without `"yaw_deg"` draws exactly today's nodes.
 
-- [ ] **Step 1:** Failing tests in `test_scene.gd` (beside the object-building tests at :38-68, in the file's own style — `var world := World.new()`, `await add_to_tree(world)`, the `ok`/`eq` helpers of `testing.gd`):
+- [x] **Step 1:** Failing tests in `test_scene.gd` (beside the object-building tests at :38-68, in the file's own style — `var world := World.new()`, `await add_to_tree(world)`, the `ok`/`eq` helpers of `testing.gd`):
 
 ```gdscript
 func test_a_yawed_box_is_drawn_rotated_and_no_yaw_is_today_node() -> void:
@@ -336,8 +336,8 @@ func test_a_yawed_box_is_drawn_rotated_and_no_yaw_is_today_node() -> void:
 	eq(plain.transform, Transform3D(), "no yaw_deg leaves the node exactly unrotated (center at the origin)")
 	world.queue_free()
 ```
-- [ ] **Step 2:** Run `bash scripts/run-godot-tests.sh unit` (WSL) — FAIL on the new assertions.
-- [ ] **Step 3:** Implement: `"box": _box(o["name"], o["center"], o["size"], o["color"], float(o.get("yaw_deg", 0.0)))` and:
+- [x] **Step 2:** Run `bash scripts/run-godot-tests.sh unit` (WSL) — FAIL on the new assertions.
+- [x] **Step 3:** Implement: `"box": _box(o["name"], o["center"], o["size"], o["color"], float(o.get("yaw_deg", 0.0)))` and:
 
 ```gdscript
 func _box(node_name: String, center: Vector3, size: Vector3, color: Color, yaw_deg := 0.0) -> void:
@@ -352,7 +352,7 @@ func _box(node_name: String, center: Vector3, size: Vector3, color: Color, yaw_d
 	_add_built(instance)
 ```
 
-- [ ] **Step 4:** `bash scripts/run-godot-tests.sh all` (the e2e half starts `ofs-sim`) — PASS. Commit `feat(godot): draw the rotated boxes (#28)`.
+- [x] **Step 4:** `bash scripts/run-godot-tests.sh all` (the e2e half starts `ofs-sim`) — PASS. Commit `feat(godot): draw the rotated boxes (#28)`.
 
 ### Task 7: Meadow's Gate1 bar and the docs
 
@@ -362,7 +362,7 @@ func _box(node_name: String, center: Vector3, size: Vector3, color: Color, yaw_d
 **Interfaces:**
 - Consumes: Tasks 3-6 (the field, the wire, the drawing).
 
-- [ ] **Step 1:** In `worlds/meadow.toml`, after the Gate1 posts (:65-77), add — Gate0's bar proportions (:57-63), across Gate1's travel (heading 45 + 90):
+- [x] **Step 1:** In `worlds/meadow.toml`, after the Gate1 posts (:65-77), add — Gate0's bar proportions (:57-63), across Gate1's travel (heading 45 + 90):
 
 ```toml
 # The bar Gate1 was missing: a box yawed across the diagonal travel (#28).
@@ -376,10 +376,10 @@ color = [0.2, 0.8, 0.35]
 ```
 
   Rewrite the header lines that say the diagonal gate gets posts only, and the `:64` comment; the Gate2 (pitched) note stays. In `world.rs` config tests, extend `the_meadow_world_loads`: the bar exists, is a box, `yaw_deg == Some(135.0)`. Run `cargo test -p ofs-config --locked` — PASS.
-- [ ] **Step 2:** Docs. CHANGELOG `## Unreleased` top section (the neighbours' style): `### Rotated boxes in the world (#28)` — Added: `yaw_deg` (box only), protocol 17 (`WorldObject.yaw_deg`, breaking), the Godot drawing, meadow's Gate1 bar; Changed: nothing for worlds that write no yaw (pin, goldens). `docs/dev-setup.md`: the `[[objects]]` line (:118) gains `yaw_deg`; the protocol walk (Task 5's edits) — re-check :268 reads 17. `docs/research/collision.md`: a "Rotated boxes" paragraph — the local-frame SDF and normal, the exact AABB, the identity fast path, `rem_euclid` canonicalization, the trig-in-the-SDF determinism note (identity path has none). `docs/roadmap.md:21`: strike "boxes are axis-aligned". `python/README.md`: protocol number if it names one.
-- [ ] **Step 3:** `grep -rn "axis-aligned" --include=*.md . | grep -v superpowers/ | grep -v CHANGELOG` — every live hit updated or confirmed historical. `tr -cd '\r' < <file> | wc -c` is 0 for every changed file (`git diff --name-only main | xargs -I{} bash -c 'tr -cd "\r" < {} | wc -c | grep -q "^0$" || echo {}'`).
-- [ ] **Step 4:** Full gates: `cargo test --workspace --locked --no-fail-fast`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo +1.85 check -p ofs-core -p ofs-config -p ofs-sim -p ofs-proto -p ofs-client` (`ofs-godot` pins `rust-version = "1.94"` and is skipped by the msrv job — an erratum fixed 2026-11-01, the original list named it), `PYTHONPATH=python python -m pytest python/tests -q`, WSL `bash scripts/run-godot-tests.sh all`. Expected: PASS.
-- [ ] **Step 5:** Commit `docs: the rotated boxes and meadow's yawed Gate1 bar (#28)`.
+- [x] **Step 2:** Docs. CHANGELOG `## Unreleased` top section (the neighbours' style): `### Rotated boxes in the world (#28)` — Added: `yaw_deg` (box only), protocol 17 (`WorldObject.yaw_deg`, breaking), the Godot drawing, meadow's Gate1 bar; Changed: nothing for worlds that write no yaw (pin, goldens). `docs/dev-setup.md`: the `[[objects]]` line (:118) gains `yaw_deg`; the protocol walk (Task 5's edits) — re-check :268 reads 17. `docs/research/collision.md`: a "Rotated boxes" paragraph — the local-frame SDF and normal, the exact AABB, the identity fast path, `rem_euclid` canonicalization, the trig-in-the-SDF determinism note (identity path has none). `docs/roadmap.md:21`: strike "boxes are axis-aligned". `python/README.md`: protocol number if it names one.
+- [x] **Step 3:** `grep -rn "axis-aligned" --include=*.md . | grep -v superpowers/ | grep -v CHANGELOG` — every live hit updated or confirmed historical. `tr -cd '\r' < <file> | wc -c` is 0 for every changed file (`git diff --name-only main | xargs -I{} bash -c 'tr -cd "\r" < {} | wc -c | grep -q "^0$" || echo {}'`).
+- [x] **Step 4:** Full gates: `cargo test --workspace --locked --no-fail-fast`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo +1.85 check -p ofs-core -p ofs-config -p ofs-sim -p ofs-proto -p ofs-client` (`ofs-godot` pins `rust-version = "1.94"` and is skipped by the msrv job — an erratum fixed 2026-11-01, the original list named it), `PYTHONPATH=python python -m pytest python/tests -q`, WSL `bash scripts/run-godot-tests.sh all`. Expected: PASS.
+- [x] **Step 5:** Commit `docs: the rotated boxes and meadow's yawed Gate1 bar (#28)`.
 
 ## Ledger
 
@@ -388,3 +388,12 @@ color = [0.2, 0.8, 0.35]
 - Re-verify at execution: the object-world pin constants (Task 1, they do not exist yet); the climb-into-slab script actually touches the box (Task 1 Step 2's assertion); the Godot `rotation.y = PI - deg_to_rad(yaw)` against the shipped gate formula (the m8a derivation, re-derived in the spec's "Godot" section); `test_scene.gd`'s node-reference helpers before writing Task 6's test.
 - The 22 `Shape::Box {` construction sites in 8 files (plus shape.rs's 5 match arms) were counted at planning time (Task 2 Files); the compiler re-lists them, so a drift after a merge is self-correcting.
 - MSRV 1.85: `rem_euclid` on `f64`, `is_none_or`, and `sin_cos` all predate it; `map_or` over `Option<f64>` is used as written.
+
+Execution ledger (2026-11-01, base `cf472df` — the plan's base `bd4cc20` had moved):
+
+- **Protocol 18, field 9.** #176 (triangle-mesh worlds) landed between planning and execution and took 17 (`World.meshes = 12`), so this branch took **18**; #176 left `WorldObject` fields 1–8 occupied and 9 free, so `yaw_deg = 9` stood. Sibling #156 takes the next free field (10) if it lands after this.
+- **Two normal-test points moved.** The plan's 45° point `(12, 20, -5)` sat outside the box past the local east face (|local_e| = 1.414 > 1) and would have asserted a south-east normal; moved 1.5 m along the box's own north axis, the expected north-east diagonal holds. The 90° point `(14, 20, -5)` passed through the local −y face by luck; `(10, 24, -5)` genuinely tests the +x face.
+- **The plan's RF test was impossible as written.** A path centered on the wall is yaw-invariant (the center's SDF is −min(half) at every yaw); the path was offset to y = 1.5 so the unrotated wall's 2 m east extent crosses it and the yawed wall's 0.5 m clears — the swapped-extents 1e-12 check survives.
+- **The replay-diff test redesigned on measured evidence.** The plan's slab sat on the climb column, whose vertical SDF is yaw-invariant — no digest difference was possible; the redesign places the slab 6 m east (axis-aligned misses, `count == 0` asserted; yawed-45's corner swings past the column, `count >= 1`), same-machine digest comparisons only (the spec's libm ruling).
+- **28 `Shape::Box {` lines, not 22** — #176 added sites; the compiler listed them as the plan promised. `TriMesh` is not a `Shape` variant (the mesh lives in its own module), so Task 2 applied as written; a yawed mesh is out of scope and unruled.
+- The scratch/progress record of the run lives at `.superpowers/sdd/2026-10-31-rotated-boxes/` (gitignored — local only, never in the PR).
