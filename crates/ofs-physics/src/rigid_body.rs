@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use glam::{DQuat, DVec3};
 use crate::collision::{self, CollisionParams, TouchState};
+use ofs_core::mesh::{MeshHit, TriMesh};
 use ofs_core::shape::{Aabb, Shape};
 use ofs_core::terrain::Terrain;
 use ofs_core::consts::{AIR_DENSITY_KGPM3, GRAVITY_MPS2};
@@ -21,6 +22,22 @@ pub struct MotorMount {
 pub struct WorldObject {
     pub name: String,
     pub shape: Shape,
+}
+
+/// A triangle mesh the body can touch, with its bounding box (the broad phase) computed once. Its collision
+/// object index is the number of world objects plus its place in `AirframeParams::meshes`.
+#[derive(Debug, Clone)]
+pub struct WorldMesh {
+    pub name: String,
+    pub mesh: Arc<TriMesh>,
+    pub bounds: Aabb,
+}
+
+impl WorldMesh {
+    pub fn new(name: String, mesh: Arc<TriMesh>) -> WorldMesh {
+        let bounds = mesh.bounds();
+        WorldMesh { name, mesh, bounds }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +66,8 @@ pub struct AirframeParams {
     pub collision: CollisionParams,
     /// The ground's height grid, or none for the flat plane d = 0.
     pub terrain: Option<Arc<Terrain>>,
+    /// The world's triangle meshes, all of them collidable.
+    pub meshes: Vec<WorldMesh>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +87,8 @@ pub struct RigidBody {
     /// `collision::resolve` each step.
     bounding_radius_m: f64,
     touch: TouchState,
+    /// Scratch for the landing points' mesh queries, reused so a step does not allocate.
+    hits: Vec<MeshHit>,
     /// The landing points' friction anchors (point index, object index, displacement) of the last step, in the
     /// order they were made: a point that stuck keeps its anchor into the next step.
     anchors: Vec<(usize, i32, DVec3)>,
@@ -96,7 +117,7 @@ impl RigidBody {
         let n = p.mounts.len();
         let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect();
         let bounding_radius_m = p.collision.spheres.iter().map(|(c, r)| c.length() + r).fold(0.0, f64::max);
-        let touch = TouchState::new(p.objects.len());
+        let touch = TouchState::new(p.objects.len() + p.meshes.len());
         let body = Self {
             thrust: (0..n).map(|i| bus.signal(&names::prop_thrust(i))).collect(),
             torque: (0..n).map(|i| bus.signal(&names::prop_torque(i))).collect(),
@@ -115,6 +136,7 @@ impl RigidBody {
             bounds,
             bounding_radius_m,
             touch,
+            hits: Vec::new(),
             anchors: Vec::new(),
             last_collision: None,
             collision_events: 0,
@@ -151,7 +173,8 @@ impl RigidBody {
     /// or a world object — for the collision events. The spring-damper and Coulomb friction of `[ground]`
     /// (`collision::point_force`) act on every landing contact point against the ground and against every
     /// world object; against an object the depth is minus the signed distance and the normal is the shape's
-    /// gradient there.
+    /// gradient there. Against a mesh the point is a sphere of `MESH_POINT_RADIUS_M`: one contact per triangle it
+    /// touches, the depth the radius minus the distance and the normal from the surface toward the point.
     fn contact(&mut self, s: &BodyState, dt: f64) -> (DVec3, DVec3, Vec<(i32, f64)>) {
         let g = &self.p.ground;
         let before = std::mem::take(&mut self.anchors);
@@ -193,6 +216,18 @@ impl RigidBody {
                 let n = object.shape.normal(point);
                 touches.push((i as i32, (-v.dot(n)).max(0.0)));
                 act(lever, k, i as i32, n, -sd, v);
+            }
+            for (j, wm) in self.p.meshes.iter().enumerate() {
+                if !wm.bounds.grown(collision::MESH_POINT_RADIUS_M).contains(point) {
+                    continue;
+                }
+                self.hits.clear();
+                wm.mesh.within(point, collision::MESH_POINT_RADIUS_M, &mut self.hits);
+                let object = (self.p.objects.len() + j) as i32;
+                for hit in &self.hits {
+                    touches.push((object, (-v.dot(hit.normal)).max(0.0)));
+                    act(lever, k, object, hit.normal, collision::MESH_POINT_RADIUS_M - hit.distance, v);
+                }
             }
         }
         self.anchors = after;

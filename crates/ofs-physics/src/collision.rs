@@ -3,6 +3,7 @@
 //! resolved one contact at a time, deepest first, in a fixed order, so the result is deterministic. At 8 kHz the
 //! quad moves a few millimetres per step at racing speed, so no sphere passes through a 12 cm post between steps.
 use glam::DVec3;
+use ofs_core::mesh::MeshHit;
 use ofs_core::shape::Aabb;
 use ofs_core::terrain::Terrain;
 
@@ -20,6 +21,8 @@ const CORRECTION_PASSES: usize = 4;
 /// A contact with less penetration than this left is resolved (and a lone contact is moved exactly once, so a
 /// single penetration is corrected bit-identically to a single sweep).
 const CORRECTION_EPS_M: f64 = 1.0e-9;
+/// A landing point touches a mesh within this radius of it (a 5 mm sphere), the depth its spring-damper sees.
+pub const MESH_POINT_RADIUS_M: f64 = 0.005;
 /// The ground's index in a collision event (objects count from 0).
 pub const GROUND_OBJECT_INDEX: i32 = -1;
 
@@ -44,12 +47,14 @@ impl Default for CollisionParams {
 pub struct TouchState {
     touching: Vec<bool>,
     free_since: Vec<f64>,
+    /// Scratch for the spheres' mesh queries, reused so a step does not allocate.
+    hits: Vec<MeshHit>,
 }
 
 impl TouchState {
-    /// One slot per world object, then the ground.
+    /// One slot per world object and mesh (objects first), then the ground.
     pub fn new(objects: usize) -> Self {
-        Self { touching: vec![false; objects + 1], free_since: vec![-2.0 * EVENT_REARM_S; objects + 1] }
+        Self { touching: vec![false; objects + 1], free_since: vec![-2.0 * EVENT_REARM_S; objects + 1], hits: Vec::new() }
     }
 }
 
@@ -107,7 +112,7 @@ pub fn resolve(
     touch: &mut TouchState,
     time_s: f64,
 ) -> Vec<(i32, f64)> {
-    let mut contacts = collect(p, bounds, bounding_radius_m, s);
+    let mut contacts = collect(p, bounds, bounding_radius_m, s, &mut touch.hits);
     if contacts.is_empty() && point_touches.is_empty() {
         release_everything(touch, time_s);
         return Vec::new();
@@ -190,8 +195,8 @@ pub fn ground_at(terrain: Option<&Terrain>, north: f64, east: f64) -> (f64, DVec
 }
 
 /// Every sphere's contacts with every near object and with the ground. `quad_radius` is the body's bounding
-/// radius, the broad phase's margin around the quad's centre.
-fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState) -> Vec<Contact> {
+/// radius, the broad phase's margin around the quad's centre. `hits` is the mesh queries' scratch.
+fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState, hits: &mut Vec<MeshHit>) -> Vec<Contact> {
     let mut contacts = Vec::new();
     let omega = s.att * s.rate_frd_radps;
     for (centre_frd, radius) in &p.collision.spheres {
@@ -219,6 +224,20 @@ fn collect(p: &AirframeParams, bounds: &[Aabb], quad_radius: f64, s: &BodyState)
             let point = centre - normal * *radius;
             let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
             contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration, object: i as i32, inward });
+        }
+        for (j, wm) in p.meshes.iter().enumerate() {
+            if !wm.bounds.grown(quad_radius).contains(s.pos_ned_m) {
+                continue;
+            }
+            hits.clear();
+            wm.mesh.within(centre, *radius, hits);
+            let object = (p.objects.len() + j) as i32;
+            for hit in hits.iter() {
+                let normal = hit.normal;
+                let point = centre - normal * *radius;
+                let inward = (-(s.vel_ned_mps + omega.cross(point - s.pos_ned_m)).dot(normal)).max(0.0);
+                contacts.push(Contact { normal, centre_frd: *centre_frd, radius: *radius, penetration: radius - hit.distance, object, inward });
+            }
         }
     }
     contacts

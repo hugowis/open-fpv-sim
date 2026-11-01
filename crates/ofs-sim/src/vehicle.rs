@@ -985,6 +985,7 @@ pub fn build_seeded(
             spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
         },
         terrain: terrain.clone(),
+        meshes: Vec::new(),
     };
     let terrain = airframe.terrain.clone();
     let initial = BodyState {
