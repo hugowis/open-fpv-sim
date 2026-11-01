@@ -766,7 +766,8 @@ fn object_shape(o: &world_cfg::ObjectSection) -> Shape {
     match o.shape {
         world_cfg::Shape::Box => {
             let s = o.size_m.unwrap_or_default();
-            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5, yaw_rad: 0.0 }
+            let yaw = o.yaw_deg.map_or(0.0, |y| y.rem_euclid(360.0).to_radians());
+            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5, yaw_rad: yaw }
         }
         world_cfg::Shape::Cylinder => {
             Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }
@@ -2333,6 +2334,27 @@ mod tests {
         let valley_d = terrain.ground_d(valley.0, valley.1);
         world.objects = vec![building(valley, valley_d)];
         assert!(rooted_under(&world, Some(&terrain), valley, valley_d));
+    }
+
+    #[test]
+    fn objects_carry_the_yaw_and_360_is_identity() {
+        // Canonicalization is at object_shape: the file's degrees map through rem_euclid(360).to_radians(),
+        // so a full turn (or an explicit zero) lands on exactly the identity yaw the fast path branches on.
+        let yawed = |deg: f64| {
+            let mut world = WorldConfig::open_field();
+            let mut o = building((0.0, 0.0), 0.0);
+            o.yaw_deg = Some(deg);
+            world.objects = vec![o];
+            world
+        };
+        let Shape::Box { yaw_rad, .. } = world_objects(&yawed(135.0))[0].shape else { panic!("a box") };
+        assert_eq!(yaw_rad, 135f64.to_radians());
+        for full_turn in [360.0, 0.0] {
+            let Shape::Box { yaw_rad, .. } = world_objects(&yawed(full_turn))[0].shape else { panic!("a box") };
+            assert_eq!(yaw_rad, 0.0, "{full_turn} degrees is exactly the identity yaw");
+        }
+        let Shape::Box { yaw_rad, .. } = world_obstacles(&yawed(135.0), None)[0].shape else { panic!("a box") };
+        assert_eq!(yaw_rad, 135f64.to_radians(), "the rooted obstacle keeps the yaw");
     }
 
     #[test]

@@ -433,3 +433,31 @@ fn a_separating_point_carries_no_force_and_forgets_its_anchor() {
     assert_eq!(f, DVec3::ZERO);
     assert_eq!(anchor, DVec3::ZERO);
 }
+
+#[test]
+fn a_sphere_bouncing_off_a_yawed_wall_leaves_along_the_rotated_normal() {
+    // A wall thin along its own north axis, yawed 45 degrees, so its near face's outward normal is the
+    // -(north-east) diagonal. The body (one sphere at the centre, r = 0.04) starts touching that face and
+    // slides north into it at 2 m/s: the contact turns the velocity about the rotated normal — v - (1+e)(v.n)n
+    // with e = 0.5 gives (0.5, -1.5) before friction; assert the signs and the slowdown, not the exact bits.
+    // 2 m/s (not 1) so the inward speed 2*cos(45) = 1.4 m/s clears EVENT_MIN_SPEED_MPS and one event fires.
+    let p = params(
+        vec![WorldObject {
+            name: "wall".into(),
+            shape: ofs_core::shape::Shape::Box {
+                center: DVec3::new(0.2, 0.2, -5.0),
+                half: DVec3::new(0.25, 5.0, 5.0),
+                yaw_rad: std::f64::consts::FRAC_PI_4,
+            },
+        }],
+        vec![(DVec3::ZERO, 0.04)],
+        0.5,
+    );
+    let bounds = p.objects.iter().map(|o| o.shape.bounds()).collect::<Vec<_>>();
+    let mut touch = TouchState::new(p.objects.len());
+    let mut s = state(DVec3::new(0.0, 0.0, -0.06), DVec3::new(2.0, 0.0, 0.0));
+    let events = ofs_physics::collision::resolve(&p, &bounds, 0.04, &mut s, &[], &mut touch, 0.0);
+    assert_eq!(events.len(), 1, "one hard touch");
+    assert!(s.vel_ned_mps.x < 1.0, "slowed along the approach: {:?}", s.vel_ned_mps);
+    assert!(s.vel_ned_mps.y < -0.5, "deflected west along the rotated face: {:?}", s.vel_ned_mps);
+}

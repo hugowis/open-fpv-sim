@@ -407,3 +407,19 @@ fn no_meshes_changes_nothing() {
     assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda));
     assert_eq!(obstruction_db(&[building], Some(&ridge), &[], a, b, 5800.0), objects + terrain_loss_db(&ridge, a, b, lambda));
 }
+
+#[test]
+fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
+    // The path runs 1.5 m east of the wall's centre: it crosses the unrotated wall (2 m of east extent)
+    // but passes outside the same wall yawed 90 degrees, whose bulk now lies along the path — a centred
+    // path would hit the box's centre, whose signed distance is -min(half) at every yaw, so it could not
+    // tell the two apart.
+    let a = DVec3::new(-20.0, 1.5, -5.0);
+    let b = DVec3::new(20.0, 1.5, -5.0);
+    let wall = |half: DVec3, yaw: f64| Obstacle { shape: Shape::Box { center: DVec3::new(0.0, 0.0, -5.0), half, yaw_rad: yaw }, rf_loss_db: 60.0 };
+    let unrotated = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), 0.0), a, b, 0.0517);
+    let yawed = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), std::f64::consts::FRAC_PI_2), a, b, 0.0517);
+    let swapped = obstruction_loss_db(&wall(DVec3::new(2.0, 0.5, 5.0), 0.0), a, b, 0.0517);
+    assert!((unrotated - yawed).abs() > 1.0, "the rotated wall's bulk lies along the path, out of it");
+    assert!((swapped - yawed).abs() < 1e-12, "yaw 90 degrees is the swapped-extents wall (convexity keeps the search exact)");
+}
