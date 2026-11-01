@@ -148,3 +148,15 @@ func test_a_world_outside_the_roots_is_kept() -> void:
 	m[0].free()
 	_remove("user://menu-test-elsewhere")
 	_remove(DIR)
+
+
+func test_the_menu_previews_the_selected_quad_and_the_choice_still_emits() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	await menu.get_tree().process_frame
+	ok(menu.preview() != null and menu.preview().model() != null, "a live preview beside the choices")
+	menu.row("quad").set_value(DIR + "/data/quads/zz-b.toml")
+	menu.row("quad").changed.emit(DIR + "/data/quads/zz-b.toml")
+	eq(m[2].count(["quad_path", DIR + "/data/quads/zz-b.toml"]), 1, "the quad choice still emits once")
+	ok(menu.preview().model() != null, "the preview survives a quad change")
+	menu.free()

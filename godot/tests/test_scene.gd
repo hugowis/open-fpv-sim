@@ -6,6 +6,7 @@ const Drone = preload("res://drone/drone.gd")
 const FpvCamera = preload("res://drone/fpv_camera.gd")
 const ChaseCamera = preload("res://drone/chase_camera.gd")
 const Lens = preload("res://ui/lens.gd")
+const AppSettings = preload("res://scripts/settings.gd")
 
 
 ## A world like the one `OfsClient.get_world()` returns (Godot's frame).
@@ -171,41 +172,104 @@ func test_the_world_is_only_scenery() -> void:
 	world.queue_free()
 
 
-func test_the_drone_has_four_propellers_that_follow_the_motor_commands() -> void:
+func test_the_propellers_follow_the_motor_speeds() -> void:
 	var drone := Drone.new()
 	await add_to_tree(drone)
 	eq(drone._props.size(), 4, "four propellers")
 	var before: Array = drone._props.map(func(p: Node3D) -> float: return p.rotation.y)
-	drone.set_motors(PackedFloat32Array([0.0, 0.5, 1.0, 0.5]), 0.01)
+	drone.set_motors(PackedFloat32Array([0.0, 6000.0, 12000.0, 6000.0]), 0.01)
 	var after: Array = drone._props.map(func(p: Node3D) -> float: return p.rotation.y)
-	near(after[0], before[0], "an idle motor does not turn its propeller")
-	ok(absf(after[2] - before[2]) > absf(after[1] - before[1]), "a harder commanded motor turns faster")
+	near(after[0], before[0], "a stopped motor does not turn its propeller")
+	ok(absf(after[2] - before[2]) > absf(after[1] - before[1]), "a faster motor turns its propeller faster")
 	# Betaflight's default directions: M1 and M4 clockwise (negative about +Y), M2 and M3 counter-clockwise.
 	ok(after[1] > before[1] and after[2] > before[2], "M2 and M3 turn counter-clockwise")
-	drone.set_motors(PackedFloat32Array([1.0, 0.0, 0.0, 1.0]), 0.01)
+	drone.set_motors(PackedFloat32Array([12000.0, 0.0, 0.0, 12000.0]), 0.01)
 	ok(drone._props[0].rotation.y < after[0] and drone._props[3].rotation.y < after[3], "M1 and M4 turn clockwise")
-	drone.set_motors(PackedFloat32Array([1.0]), 0.01)  # fewer commands than propellers: no error
+	drone.set_motors(PackedFloat32Array([1000.0]), 0.01)  # fewer speeds than propellers: no error
 	drone.queue_free()
 
 
-func test_the_drone_is_a_modelled_quad_the_fpv_camera_never_sees() -> void:
+func test_a_spinning_propeller_blurs_into_its_disc() -> void:
 	var drone := Drone.new()
 	await add_to_tree(drone)
+	var blades := drone._props.map(func(p: Node3D) -> Node3D: return p.find_children("Blade*", "", true, false)[0])
+	drone.set_motors(PackedFloat32Array([1000.0, 0.0, 30000.0, 0.0]), 0.01)
+	ok(blades[0].visible, "a slow propeller shows its blade")
+	ok(blades[1].visible, "a stopped motor's blade stays visible")
+	ok(not blades[2].visible, "a fast one hides it: the blur disc stands in")
+	drone.queue_free()
+
+
+func test_the_model_scales_with_the_quad_and_the_mount_stays_at_the_eye() -> void:
+	var drone := Drone.new()
+	var camera := FpvCamera.new()
+	camera.name = "FpvCamera"
+	drone.add_child(camera)
+	await add_to_tree(drone)
+	var root: String = AppSettings.repo_root()
+	# k < 1 first: it is the failing side. Scaling the drone node itself (the old code) dragged the child camera
+	# to k * EYE while the mount stayed pinned at EYE — 20 mm apart at the toothpick's k = 0.55, dead-center of
+	# the FPV view; the model is scaled instead, so the camera keeps its authored eye at every frame size.
+	drone.set_quad(root.path_join("quads/opendrone-3t-toothpick.toml"))
+	near(drone._model.scale.x, 0.044 / 0.08, "the toothpick scales the model down", 1e-4)
+	ok(camera.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-6, "the camera keeps its authored eye (the drone node is not scaled)")
+	var mount: Node3D = drone.find_children("CameraMount", "Node3D", true, false)[0]
+	ok(mount.global_position.distance_to(camera.global_position) < camera.near,
+		"the mount hides inside the camera's near clip at 0.55x (distance %f)" % mount.global_position.distance_to(camera.global_position))
+	var corner: float = ((mount as MeshInstance3D).mesh.get_aabb().size * mount.global_transform.basis.get_scale() * 0.5).length()
+	ok(corner < camera.near, "and so does the mount's corner (corner %f)" % corner)
+	drone.set_quad(root.path_join("quads/opendrone-7lr-longrange.toml"))
+	near(drone._model.scale.x, 0.113 / 0.08, "the 7\" frame scales the model up", 1e-4)
+	ok(camera.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-6, "the camera keeps its eye at 1.4x too")
+	ok(mount.global_position.distance_to(camera.global_position) < camera.near,
+		"the mount stays within the near clip at 1.4x (distance %f)" % mount.global_position.distance_to(camera.global_position))
+	# The plate's nose, camera-relative (the old procedural test's check): out of the FPV picture — behind the
+	# camera, inside the near clip, or outside the field of view.
+	var plate: MeshInstance3D = drone.find_children("Plate", "MeshInstance3D", true, false)[0]
+	var nose := Vector3(plate.global_position.x, plate.global_position.y,
+		plate.global_position.z - plate.global_transform.basis.z.length() * plate.mesh.get_aabb().size.z * 0.5)
+	var to_nose: Vector3 = nose - camera.global_position
+	var off_axis: float = rad_to_deg(to_nose.angle_to(-camera.global_transform.basis.z))
+	ok(to_nose.z >= 0.0 or to_nose.length() < camera.near or off_axis > camera.fov * 0.5,
+		"the plate's nose stays out of the FPV picture at 1.4x (off-axis %f°, %f m away)" % [off_axis, to_nose.length()])
+	drone.set_quad(root.path_join("quads/no-such-quad.toml"))
+	near(drone._model.scale.x, 1.0, "an unreadable quad keeps the authored size", 1e-6)
+	drone.queue_free()
+
+
+func test_the_drone_is_a_gltf_model_the_fpv_camera_never_sees() -> void:
+	var drone := Drone.new()
+	var camera := FpvCamera.new()
+	camera.name = "FpvCamera"
+	camera.uptilt_deg = 15.0
+	drone.add_child(camera)
+	await add_to_tree(drone)
+	for part_name in ["Frame", "Plate", "Arm1", "Battery", "BatteryStrap", "Antenna1", "Antenna2", "CameraMount", "Lens", "Blade"]:
+		ok(not drone.find_children(part_name, "", true, false).is_empty(), "the asset has a %s" % part_name)
 	for i in [1, 2, 3, 4]:
-		ok(drone.get_node_or_null("Motor%d" % i) != null, "motor bell %d" % i)
-		ok(drone.get_node_or_null("Prop%d" % i) != null, "prop %d" % i)
-	ok(drone.get_node_or_null("Antenna1") != null and drone.get_node_or_null("Antenna2") != null, "two VTX antennas")
-	var eye := Vector3(0.0, 0.02, -0.04)  # fpv_camera.gd's _ready position, near = 0.02
-	var housing: MeshInstance3D = drone.get_node("CameraHousing")
-	eq(housing.position, eye, "the camera housing sits at the FPV camera's eye point")
-	var corner: float = ((housing.mesh as BoxMesh).size * 0.5).length()
-	ok(corner < 0.02, "the housing hides inside the near clip (corner %f)" % corner)
-	var plate: MeshInstance3D = drone.get_node("Plate")
-	var plate_nose: float = plate.position.z - (plate.mesh as BoxMesh).size.z * 0.5
-	ok(plate_nose >= eye.z, "the plate's nose stays behind the FPV camera")
-	var battery_material: StandardMaterial3D = drone.get_node("Battery").material_override
-	ok(battery_material.albedo_color.is_equal_approx(Color(0.9, 0.55, 0.1)), "the battery stays orange")
-	ok((drone.get_node("Plate").material_override as StandardMaterial3D).albedo_color.r < 0.2, "the plate is carbon")
+		ok(not drone.find_children("Motor%d" % i, "", true, false).is_empty(), "motor bell %d" % i)
+	eq(drone._props.size(), 4, "four propeller pivots")
+	var pivot: Vector3 = drone._props[0].position
+	ok(absf(pivot.x - 0.08) < 1e-4 and absf(pivot.y - 0.028) < 1e-4 and absf(pivot.z - 0.08) < 1e-4,
+		"M1's pivot at the authored rear-right motor: %s" % str(pivot))
+	eq(drone.find_children("Disc", "MeshInstance3D", true, false).size(), 4, "a blur disc under every propeller")
+	var mounts := drone.find_children("CameraMount", "MeshInstance3D", true, false)
+	eq(mounts.size(), 1, "one camera mount")
+	eq(mounts[0].position, Vector3(0.0, 0.02, -0.04), "the mount sits at the FPV camera's eye point")
+	ok(mounts[0].scale.is_equal_approx(Drone.AUTHORED_MOUNT_SCALE), "the loaded mount's size matches drone.gd's constant (set_quad resets to it)")
+	var corner: float = ((mounts[0] as MeshInstance3D).mesh.get_aabb().size * mounts[0].scale * 0.5).length()
+	ok(corner < 0.02, "the mount hides inside the near clip (corner %f)" % corner)
+	near(mounts[0].rotation_degrees.x, 15.0, "the mount follows the camera's up-tilt, not the authored 30")
+	drone.queue_free()
+
+
+func test_a_model_that_does_not_load_leaves_a_flying_but_bare_drone() -> void:
+	var drone := Drone.new()
+	drone.model_path = "res://drone/there-is-no-such-model.gltf"
+	await add_to_tree(drone)
+	eq(drone._props.size(), 0, "no propeller pivots")
+	ok(drone.get_node_or_null("Model") != null, "the fallback node stands in")
+	drone.set_motors(PackedFloat32Array([0.0, 0.5, 1.0, 0.5]), 0.01)  # no crash
 	drone.queue_free()
 
 
