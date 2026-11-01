@@ -45,6 +45,7 @@ class Footprint:
     skip: bool
     height_m: float | None
     material: str | None
+    openings: tuple = ()  # (wall, offset_m, width_m, bottom_m, top_m); the wall indexes the normalised ring
 
 
 @dataclass(frozen=True)
@@ -155,16 +156,39 @@ def _site(c, d):
     return name, origin, extent, snap
 
 
+def _openings(c, f, p):
+    v = f.get("openings", [])
+    if not isinstance(v, list):
+        c.err(f"{p}.openings", "must be a list of [wall, offset_m, width_m, bottom_m, top_m]")
+        return ()
+    out = []
+    for k, o in enumerate(v):
+        q, before = f"{p}.openings[{k}]", len(c.errs)
+        if not (isinstance(o, list) and len(o) == 5):
+            c.err(q, "must be [wall, offset_m, width_m, bottom_m, top_m]")
+            continue
+        if isinstance(o[0], bool) or not isinstance(o[0], int) or o[0] < 0:
+            c.err(f"{q}[0]", "must be an integer >= 0")
+        for j in range(1, 5):
+            if not _num(o[j]):
+                c.err(f"{q}[{j}]", "must be a finite number")
+        if _num(o[2]) and not o[2] > 0:
+            c.err(f"{q}[2]", "must be > 0")
+        if len(c.errs) == before:
+            out.append((o[0], *map(float, o[1:])))
+    return tuple(out)
+
+
 def _footprints(c, d):
     out, seen = [], set()
     for _, p, f in c.items(d, "footprints"):
-        c.keys(f, p, {"id", "skip", "height_m", "material"})
+        c.keys(f, p, {"id", "skip", "height_m", "material", "openings"})
         fid = c.get(f, p, "id", int)
         if fid is not None and fid in seen:
             c.err(f"{p}.id", f"duplicate id {fid}")
         seen.add(fid)
         out.append(Footprint(fid, bool(c.get(f, p, "skip", bool, False)), c.positive(f, p, "height_m"),
-                             c.get(f, p, "material", str, False)))
+                             c.get(f, p, "material", str, False), _openings(c, f, p)))
     return tuple(out)
 
 

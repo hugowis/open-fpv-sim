@@ -15,6 +15,7 @@ Run from `tools/sitegen`, or from the repository root with `PYTHONPATH=tools/sit
     cd tools/sitegen
     python -m sitegen fetch path/to/recipe.toml    # download the snapshot the recipe names (network)
     python -m sitegen build path/to/recipe.toml    # recipe + snapshot -> .glb + world file
+    python -m sitegen walls path/to/recipe.toml -70500001    # the walls of one footprint, to write its openings
 
     PYTHONPATH=tools/sitegen python -m sitegen build path/to/recipe.toml    # from the repository root
 
@@ -28,6 +29,7 @@ no output-directory option (the tests pass `out_dir` to `build_site`, in Python)
 |---|---|---|
 | `fetch <recipe>` | Asks Overpass for every `way["building"]` and `relation["building"]` in the box `site.origin` plus or minus `site.half_extent_m`, keeps the closed ways and the closed outer rings of multipolygon relations, and writes the snapshot to `site.snapshot`. Prints the count and what it skipped. | 1 on a bad recipe, a failed request, an empty answer or a write error; the existing snapshot is untouched |
 | `build <recipe>` | Reads the recipe and the snapshot, builds the footprints and landmarks, writes the `.glb` and the world file, prints the report. | 1 on a bad recipe or a site that cannot be built; nothing is written |
+| `walls <recipe> <way id>` | Projects and cleans that footprint's outline exactly as `build` does and prints one line per wall: `index  start_north  start_east  length_m  outward_bearing_deg` (metres to 0.1, the bearing whole degrees clockwise from north, 0..359). These are the indices an `openings` entry uses. The id may be negative (a relation ring). | 1 on a bad recipe or snapshot, an id not in the snapshot, or an outline `build` would skip as `bad_ring` |
 
 Paths: the recipe argument is relative to where you run it. Inside the recipe, `site.snapshot` and `output.world` are
 relative to the recipe's directory, and `output.glb` is relative to the world file's directory (it becomes the world file's
@@ -63,12 +65,24 @@ An unknown key anywhere is an error, and a bad recipe reports every problem at o
 | | `skip` | no | `true` leaves the building out. |
 | | `height_m` | no | > 0. Overrides the height rules. |
 | | `material` | no | Default `building`. |
+| | `openings` | no | List of `[wall, offset_m, width_m, bottom_m, top_m]`, the same entry as a `walls` landmark's: a rectangular breach in wall `wall`, `offset_m` along it from that wall's start node. `wall` is an integer >= 0 and `width_m` > 0; the rest are finite numbers. A footprint with `openings` is built as walls plus a flat roof (see "Breaches" below). |
 | `[[landmarks]]` | `kind`, `name` | yes | `arch`, `stack` or `walls`; names are unique. The other keys are in the next table. |
 | `[world]` | anything | no | Copied into the world file as is (`[pilot]`, `[receiver]`, `[[objects]]`, `name`...). `meshes` and `materials` are refused: sitegen writes them. `schema_version` is 1 and `name` is the site name unless `[world]` sets them. |
 
 Heights of a footprint, in order: the recipe's `height_m`; the OSM `height` tag (a number, optionally ending in `m`, comma or
 dot decimal); `building:levels` times `level_height_m`; `building_height_m`. A tag that is not a number in (0, 1000] is
 ignored and the next rule applies (feet and other units fall through).
+
+### Breaches in a footprint
+
+`openings` makes a hole in a footprint's wall, for a collapse or a doorway the outline cannot show. The wall index is the
+wall of the **cleaned, counter-clockwise** outline, not of the OSM node order: wall `i` runs from node `i` to node `i + 1` of
+that ring, and the ring can differ from the OSM one (a clockwise way is reversed, so the start moves, and mid-edge nodes are
+dropped). Run `python -m sitegen walls <recipe> <way id>` to see the walls of a footprint (start point, length and the
+compass direction the wall faces), then write the entry. Whether an opening fits is checked at build time: a wall index out of
+range, an opening that leaves its wall or overlaps another, or a bottom/top outside `0..height` is a build error naming the
+footprint, `footprint <id>.openings[<k>]: ...` (an overlap names `openings` and the wall; the author wrote it, so it is never a skip). A footprint without `openings` is
+built exactly as before.
 
 ### Landmarks
 

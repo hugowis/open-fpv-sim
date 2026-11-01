@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 from . import osm
 from .geo import Projection
 from .glb import write_glb
-from .landmarks import build_landmark
+from .landmarks import build_landmark, walls
 from .mesh import MeshBuilder
 from .polygon import extrude, normalize_ring
 from .recipe import load_recipe
@@ -95,6 +96,15 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
         height = o.height_m if o and o.height_m is not None else osm.height_of(
             w.tags, recipe.defaults.building_height_m, recipe.defaults.level_height_m)
         part = MeshBuilder()  # extrude can fail after adding the walls
+        if o and o.openings:  # the author wrote the opening, so one that does not fit is an error, not a skip
+            try:
+                walls(part, ring, height, material, o.openings, roof=True)
+            except ValueError as e:
+                errors.append(f"footprint {w.id}.{e}")
+                continue
+            mb.extend(part)
+            rep.footprints_used += 1
+            continue
         try:
             extrude(part, ring, height, material)
         except ValueError:
@@ -144,6 +154,28 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
     _write_all([(glb_path, glb), (world_path, text.encode("utf-8"))])
     rep.world_path, rep.glb_path = world_path, glb_path
     return rep
+
+
+def describe_walls(recipe_path: Path, way_id: int) -> list[str]:
+    """One line per wall of the footprint's normalised ring, the indices a `openings` entry uses."""
+    recipe = load_recipe(Path(recipe_path))
+    try:
+        ways = osm.read_snapshot(recipe.site.snapshot_path)
+    except ValueError as e:
+        raise BuildError(str(e)) from None
+    way = next((w for w in sorted(ways, key=lambda w: w.id) if w.id == way_id), None)  # the first of a duplicated id, as build does
+    if way is None:
+        raise BuildError(f"way {way_id} is not in {recipe.site.snapshot}")
+    proj = Projection(*recipe.site.origin)
+    ring = normalize_ring([proj.to_ned(*p) for p in way.ring])
+    if ring is None:
+        raise BuildError(f"way {way_id}: not a usable footprint")
+    lines = []
+    for i, (p0, p1) in enumerate(zip(ring, ring[1:] + ring[:1])):
+        dn, de = p1[0] - p0[0], p1[1] - p0[1]
+        bearing = round(math.degrees(math.atan2(de, dn)) + 90) % 360  # counter-clockwise ring: outside is right of the edge
+        lines.append(f"{i:3d}  {p0[0]:9.1f}  {p0[1]:9.1f}  {math.hypot(dn, de):8.1f}  {bearing:3d}")
+    return lines
 
 
 def _write_all(files: list[tuple[Path, bytes]]) -> None:

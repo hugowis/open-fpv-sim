@@ -9,9 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from helpers import segment_hits
 from sitegen import __main__ as cli
 from sitegen import osm
-from sitegen.build import BuildError, build_site
+from sitegen.build import BuildError, build_site, describe_walls
+from sitegen.mesh import MeshBuilder
 from sitegen.recipe import RecipeError
 
 TESTS = Path(__file__).resolve().parent
@@ -286,3 +288,90 @@ def test_an_empty_path_is_a_recipe_error_naming_the_field(tmp_path, field, edit)
     r = demo(tmp_path, lambda t: t.replace(*edit))
     with pytest.raises(RecipeError, match=f"{field}: must not be empty"):
         build_site(r, tmp_path / "o")
+
+
+def glb_triangles(path):
+    """The triangles of a written .glb as a MeshBuilder in NED (Godot (x, y, z) is NED (-z, x, -y))."""
+    blob = path.read_bytes()
+    jl = struct.unpack_from("<I", blob, 12)[0]
+    doc, bin0 = json.loads(blob[20 : 20 + jl]), 20 + jl + 8
+    mb = MeshBuilder()
+    for mesh in doc["meshes"]:
+        for prim in mesh["primitives"]:
+            def chunk(acc, fmt):
+                a = doc["accessors"][acc]
+                off = bin0 + doc["bufferViews"][a["bufferView"]]["byteOffset"]
+                return struct.unpack_from(f"<{a['count'] * len(fmt)}{fmt[0]}", blob, off)
+
+            pos, idx = chunk(prim["attributes"]["POSITION"], "fff"), chunk(prim["indices"], "I")
+            pts = [(-pos[i + 2], pos[i], -pos[i + 1]) for i in range(0, len(pos), 3)]
+            for i in range(0, len(idx), 3):
+                mb.add_tri(pts[idx[i]], pts[idx[i + 1]], pts[idx[i + 2]], "m")
+    return mb
+
+
+FP = "[[footprints]]\nid = 1\nheight_m = 10.0\n"
+SQUARE = [(0.0, 0.0), (0.0, 20.0), (20.0, 20.0), (20.0, 0.0), (0.0, 0.0)]  # counter-clockwise, 20 m; wall 0 is the south one
+
+
+def ring_ll(pts):
+    return [(n / DEG, e / DEG) for n, e in pts]
+
+
+def test_a_footprint_breach_is_open_and_the_wall_beside_it_is_not(tmp_path):
+    rep = build_site(mini(tmp_path, FP + "openings = [[0, 5.0, 4.0, 0.0, 3.0]]\n"), tmp_path / "o")
+    mb = glb_triangles(rep.glb_path)
+    assert segment_hits(mb, (-1, 7, -1.5), (1, 7, -1.5)) == 0  # through the hole (east 5..9, up to 3 m)
+    assert segment_hits(mb, (-1, 4, -1.5), (1, 4, -1.5)) == 1  # 1 m beside it: the wall
+    assert segment_hits(mb, (-1, 7, -4), (1, 7, -4)) == 1  # above the hole: the lintel
+    assert segment_hits(mb, (10, 10, -20), (10, 10, 0)) == 1  # the roof is there
+
+
+@pytest.mark.parametrize("opening, text", [("4, 5.0, 4.0, 0.0, 3.0", "openings[0]"), ("0, 18.0, 4.0, 0.0, 3.0", "openings"),
+                                           ("0, 5.0, 4.0, 0.0, 11.0", "openings[0]")])
+def test_a_breach_that_does_not_fit_is_a_build_error_naming_the_footprint(tmp_path, capsys, opening, text):
+    r = mini(tmp_path, FP + f"openings = [[{opening}]]\n")
+    with pytest.raises(BuildError) as e:
+        build_site(r, tmp_path / "o")
+    assert e.value.args[0].startswith("footprint 1.") and text in e.value.args[0]
+    assert cli.main(["build", str(r)]) == 1 and "footprint 1." in capsys.readouterr().err
+    assert not (tmp_path / "mini" / "w.toml").exists()
+
+
+def test_breach_index_follows_the_normalised_counter_clockwise_ring(tmp_path):
+    south = {}
+    for name, pts in (("ccw", SQUARE), ("cw", SQUARE[::-1])):  # normalising the clockwise ring rotates it
+        r = mini(tmp_path / name, FP, ways=[ring_ll(pts)])
+        south[name] = next(int(ln.split()[0]) for ln in describe_walls(r, 1) if ln.split()[-1] == "180")
+        r.write_text(r.read_text(encoding="utf-8") + f"openings = [[{south[name]}, 5.0, 4.0, 0.0, 3.0]]\n", encoding="utf-8", newline="\n")
+        mb = glb_triangles(build_site(r, tmp_path / name / "o").glb_path)
+        assert segment_hits(mb, (-1, 7, -1.5), (1, 7, -1.5)) == 0, name
+        assert segment_hits(mb, (-1, 4, -1.5), (1, 4, -1.5)) == 1, name
+        assert segment_hits(mb, (10, 3, -1.5), (10, -3, -1.5)) == 1, name  # the west wall is whole
+    assert south["ccw"] != south["cw"]
+
+
+def test_walls_description_lists_every_wall(tmp_path):
+    ring = [(0.0, 0.0), (0.0, 30.0), (10.0, 30.0), (10.0, 15.0), (20.0, 15.0), (20.0, 0.0), (0.0, 0.0)]  # an L, counter-clockwise
+    sliver = [(0.0, 0.0), (0.0, 0.5), (0.5, 0.5), (0.0, 0.0)]
+    r = mini(tmp_path, ways=[ring_ll(ring), ring_ll(sliver)])
+    rows = [ln.split() for ln in describe_walls(r, 1)]
+    assert [int(x[0]) for x in rows] == list(range(6))
+    assert sum(float(x[3]) for x in rows) == pytest.approx(30 + 10 + 15 + 10 + 15 + 20, abs=0.5)
+    assert [(float(x[1]), float(x[2]), float(x[3]), int(x[4])) for x in rows[:3]] == [
+        (0.0, 0.0, 30.0, 180), (0.0, 30.0, 10.0, 90), (10.0, 30.0, 15.0, 0)]
+    with pytest.raises(BuildError, match="999"):
+        describe_walls(r, 999)
+    with pytest.raises(BuildError, match="not a usable footprint"):
+        describe_walls(r, 2)
+
+
+def test_walls_cli_accepts_a_negative_id(tmp_path):
+    r = mini(tmp_path)
+    osm.write_snapshot(r.parent / "s.json", [osm.Way(-70500001, {"building": "yes"}, ring_ll(SQUARE))], (-1, -1, 1, 1), "test")
+    cmd = [sys.executable, "-m", "sitegen", "walls", str(r)]
+    p = subprocess.run([*cmd, "-70500001"], cwd=TESTS.parent, capture_output=True, text=True, encoding="utf-8")
+    assert p.returncode == 0 and len(p.stdout.splitlines()) == 4, p.stderr
+    assert p.stdout.splitlines()[0].split() == ["0", "0.0", "0.0", "20.0", "180"]
+    p = subprocess.run([*cmd, "-5"], cwd=TESTS.parent, capture_output=True, text=True, encoding="utf-8")
+    assert p.returncode == 1 and "-5" in p.stderr and p.stdout == ""

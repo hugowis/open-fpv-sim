@@ -196,3 +196,32 @@ def test_huge_integer_rf_loss_is_an_error_not_a_crash(tmp_path):
 def test_huge_integer_colour_is_an_error_not_a_crash(tmp_path):
     lines = problems(tmp_path, MINIMAL.replace("[0.62, 0.60, 0.56]", f"[{HUGE}, 0, 0]"))
     assert "colors.building" in [ln.split(":")[0] for ln in lines]
+
+
+def test_footprint_openings_are_validated_with_field_paths(tmp_path):
+    lines = problems(tmp_path, MINIMAL + """
+[[footprints]]
+id = 1
+openings = [[0, 1.0, 2.0, 0.0]]
+[[footprints]]
+id = 2
+openings = [[0, 1.0, -2.0, 0.0, 3.0]]
+[[footprints]]
+id = 3
+openings = [[0, 1.0, 2.0, 0.0, nan]]
+[[footprints]]
+id = 4
+openings = "x"
+[[footprints]]
+id = 5
+openings = [[1.5, 1.0, 2.0, 0.0, 3.0], [-1, 1.0, 2.0, 0.0, 3.0], [0, "a", 2.0, 0.0, 3.0]]
+""")
+    got = sorted(ln.split(":")[0] for ln in lines)
+    assert got == sorted([
+        "footprints[0].openings[0]", "footprints[1].openings[0][2]", "footprints[2].openings[0][4]",
+        "footprints[3].openings", "footprints[4].openings[0][0]", "footprints[4].openings[1][0]",
+        "footprints[4].openings[2][1]",
+    ]), lines
+    r = load_recipe(write(tmp_path, MINIMAL + "[[footprints]]\nid = 1\nopenings = [[0, 1, 2.5, 0, 3], [1, 0.0, 1.0, 0.5, 2.0]]\n"))
+    assert r.footprints[0].openings == ((0, 1.0, 2.5, 0.0, 3.0), (1, 0.0, 1.0, 0.5, 2.0))
+    assert load_recipe(write(tmp_path, MINIMAL + "[[footprints]]\nid = 1\n")).footprints[0].openings == ()
