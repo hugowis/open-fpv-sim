@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+pub mod mesh;
 pub mod world;
 pub use world::{AntennaKind, Polarization, WorldConfig};
 
