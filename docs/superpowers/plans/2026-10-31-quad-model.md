@@ -869,3 +869,13 @@ git commit -m "docs: the quad model's changelog entries and README (#130)"
 
 - Planned 2026-10-31 against `main` at `87c5914` (worktree `docs/game-completion-plan`). PR #167 merged as `b37aae5` after that base; its `app.gd` hunk (a DVR toast string, ~line 385) does not overlap this plan's edits — re-verified by the executor at rebased execution, per Global Constraints.
 - Ruled in planning (spec, calls 2 and 5): the asset's geometry is PR #147's procedural model carried number-for-number — traceability over redesign; `SLOWDOWN = 50` keeps a full-speed 5" drawing at the old `DRAWN_SPIN = 60` rad/s.
+
+Execution ledger (2026-11-01, base `cf472df` — executed from this plan by a session, reviewed whole-branch before the PR):
+
+- **The plan's generator draft had two broken counts** (`len(positions)` where `len(positions) // 3` was meant, in the base index and the accessor counts) — Godot refuses the import without the fix; the committed generator is correct and the committed asset is its byte-exact output.
+- **Godot 4.7's glTF API is `append_from_file(path, state)` / `generate_scene(state)`** — the plan's longer signatures (with base-dir and flags) do not compile in 4.7; the same form `world.gd` uses for the mesh worlds (#176).
+- **`generate_scene` uniquifies node names scene-wide** (Blade, Blade2..4), so blade lookups use the `Blade*` prefix scoped inside each prop pivot — documented in QUAD_MODEL.md and drone.gd's header.
+- **`mount.scale = AUTHORED_MOUNT_SCALE / k`**, not the plan's `ONE / k` — the plan assumed the procedural 1 m-cube meshes; the asset's mount has its own authored size, now pinned to the constant by a test (`is_equal_approx`: the loaded scale is f32).
+- **The review's Critical, fixed before the PR**: the plan's `set_quad` scaled the Drone root, dragging a child `FpvCamera` to `k·EYE` while the mount stayed pinned at `EYE` — at the toothpick's k = 0.55 the mount sat 20 mm from the camera, past the near clip, dead-center of the FPV frame. The model node is scaled instead (`_model.scale`), the camera keeps its authored eye at every frame size, and the rewritten test is camera-relative with k < 1 as the failing side plus the resurrected plate-nose check.
+- The plan's glTF indices accessor overstated its `max` (`len(positions) - 1` = 71; the true max index is 23) — fixed and the asset regenerated; exactly that one value changed.
+- The run's scratch/progress record lives at `.superpowers/sdd/2026-10-31-quad-model/` (gitignored — local only).
