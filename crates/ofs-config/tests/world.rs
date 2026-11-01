@@ -1128,6 +1128,9 @@ fn chernobyl_loads_and_the_pilot_sees_the_nsc_door() {
     let mut m = Vec::new();
     nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(0.0, -81.0, -20.0), &mut m);
     assert!(m.is_empty(), "the door is open");
+    // A mesh that loaded empty would pass the line above: this one crosses the closed end wall beside the door.
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(25.0, -76.0, -10.0), &mut m);
+    assert!(!m.is_empty(), "the closed end wall beside the door is crossed");
 }
 
 /// The shipped hall copied to a temp dir with its relative layout; returns the world path and the `.glb` path.
@@ -1180,4 +1183,18 @@ fn a_cloned_world_shares_the_cache() {
     let c = w.clone();
     fs::remove_file(&glb).unwrap();
     assert!(std::sync::Arc::ptr_eq(&w.load_meshes().unwrap()[0].mesh, &c.load_meshes().unwrap()[0].mesh));
+}
+
+#[test]
+fn a_changed_material_loss_is_not_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = hall_copy(dir.path());
+    let mut w = world::load(&path).unwrap();
+    let before = w.load_meshes().unwrap()[0].loss_db.clone();
+    assert!(!before.is_empty());
+    w.materials[0].rf_loss_db += 7.0;
+    let after = w.load_meshes().unwrap()[0].loss_db.clone();
+    assert_ne!(after, before, "the loss of a material changed after load");
+    let named = &w.materials[0].name;
+    assert!(after.iter().zip(&before).any(|(a, b)| (a - b - 7.0).abs() < 1e-9), "{named}: {before:?} -> {after:?}");
 }
