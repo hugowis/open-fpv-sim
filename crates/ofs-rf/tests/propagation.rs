@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use glam::DVec3;
+use ofs_core::mesh::{TriMesh, Triangle};
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 use ofs_rf::propagation::*;
@@ -141,8 +144,8 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
             let d = 100.0 + f64::from(i) * 0.5;
             let tx = Endpoint { position: DVec3::new(d, 0.0, -10.0), antenna: omni(DVec3::NEG_Z, polarization) };
             let rx = Endpoint { position: DVec3::new(0.0, 0.0, -1.7), antenna: omni(DVec3::NEG_Z, polarization) };
-            let with = path_gain(&tx, &rx, freq, &[], None, true).gain_db;
-            let without = path_gain(&tx, &rx, freq, &[], None, false).gain_db;
+            let with = path_gain(&tx, &rx, freq, &[], None, &[], true).gain_db;
+            let without = path_gain(&tx, &rx, freq, &[], None, &[], false).gain_db;
             gains.push(with - without);
         }
         let max = gains.iter().cloned().fold(f64::MIN, f64::max);
@@ -159,7 +162,7 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
 fn the_direct_path_adds_gains_and_subtracts_the_path_loss() {
     let tx = Endpoint { position: DVec3::new(100.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
     let rx = Endpoint { position: DVec3::new(0.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
-    let p = path_gain(&tx, &rx, 5800.0, &[], None, false);
+    let p = path_gain(&tx, &rx, 5800.0, &[], None, &[], false);
     close(p.gain_db, 2.0 + 2.0 - fspl_db(100.0, 5800.0), 1e-9, "two broadside omnis");
     assert_eq!(p.obstruction_db, 0.0);
 }
@@ -264,7 +267,7 @@ fn a_flat_terrain_changes_nothing_for_a_raised_ray() {
     assert_eq!(terrain_loss_db(&flat, a, b, wavelength_m(5800.0)), 0.0);
     let antenna = omni(DVec3::NEG_Z, Polarization::Rhcp);
     let (tx, rx) = (Endpoint { position: b, antenna }, Endpoint { position: a, antenna });
-    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&flat), true), path_gain(&tx, &rx, 5800.0, &[], None, true));
+    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&flat), &[], true), path_gain(&tx, &rx, 5800.0, &[], None, &[], true));
 }
 
 #[test]
@@ -324,12 +327,12 @@ fn obstruction_db_adds_terrain_to_the_objects() {
     let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
     let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
     let (a, b) = along_north(-2.0);
-    let objects = obstruction_db(&[building], None, a, b, 5800.0);
+    let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);
     assert!(objects > 1.0, "the building is in the way: {objects}");
     let terrain = terrain_loss_db(&ridge, a, b, lambda);
     assert!(terrain > 1.0, "so is the ridge: {terrain}");
-    assert_eq!(obstruction_db(&[building], Some(&ridge), a, b, 5800.0), objects + terrain);
-    assert_eq!(obstruction_db(&[building], None, a, b, 5800.0), objects);
+    assert_eq!(obstruction_db(&[building], Some(&ridge), &[], a, b, 5800.0), objects + terrain);
+    assert_eq!(obstruction_db(&[building], None, &[], a, b, 5800.0), objects);
     assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda), "the objects alone are the one building's loss");
 }
 
@@ -366,4 +369,41 @@ fn the_terrain_loss_is_capped() {
     // An end 80 m underground: v is about 500, far over the cap's 225.
     let (a, b) = (DVec3::new(0.0, 0.0, 80.0), DVec3::new(40.0, 0.0, -2.0));
     assert_eq!(terrain_loss_db(&ridge(20, 10.0), a, b, wavelength_m(5800.0)), TERRAIN_RF_LOSS_DB);
+}
+
+/// A square wall of two triangles in the plane north = `north`, spanning east and down within +-`half`, of material `material`.
+fn wall(north: f64, half: f64, material: u32) -> Triangle {
+    let p = |e: f64, d: f64| DVec3::new(north, e, d);
+    Triangle { a: p(-half, -half), b: p(half, -half), c: p(0.0, half), material }
+}
+
+fn mesh_of(triangles: Vec<Triangle>, loss_db: Vec<f64>) -> MeshObstacle {
+    MeshObstacle { mesh: Arc::new(TriMesh::new(triangles).unwrap()), loss_db }
+}
+
+#[test]
+fn a_path_crossing_two_walls_loses_the_sum() {
+    let m = mesh_of(vec![wall(10.0, 5.0, 0), wall(20.0, 5.0, 1)], vec![18.0, 40.0]);
+    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0)), 58.0, 1e-12, "both walls");
+    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(15.0, 0.0, -1.0)), 18.0, 1e-12, "the first only");
+    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 50.0, -1.0), DVec3::new(30.0, 50.0, -1.0)), 0.0, "past the walls' edge");
+    let (a, b) = (DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0));
+    close(obstruction_db(&[], None, &[m.clone()], a, b, 2400.0), 58.0, 1e-12, "obstruction_db carries it");
+    close(obstruction_db(&[], None, &[m], a, b, 5800.0), 58.0, 1e-12, "at any frequency");
+}
+
+#[test]
+fn a_material_past_the_end_of_the_table_loses_nothing() {
+    let m = mesh_of(vec![wall(10.0, 5.0, 3)], vec![18.0]);
+    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0)), 0.0);
+}
+
+#[test]
+fn no_meshes_changes_nothing() {
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
+    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let (a, b) = along_north(-2.0);
+    let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);
+    assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda));
+    assert_eq!(obstruction_db(&[building], Some(&ridge), &[], a, b, 5800.0), objects + terrain_loss_db(&ridge, a, b, lambda));
 }

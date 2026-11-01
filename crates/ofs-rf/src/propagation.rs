@@ -1,7 +1,10 @@
 //! Radio propagation as pure functions: free-space path loss, antenna patterns, polarization, knife-edge
 //! diffraction around obstacles and the two-ray ground bounce. Positions and directions are NED metres (down is
 //! +z, the ground is the plane z = 0 or the terrain the caller passes).
+use std::sync::Arc;
+
 use glam::DVec3;
+use ofs_core::mesh::TriMesh;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 
@@ -190,6 +193,29 @@ pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m
     knife_edge_loss_db(v).min(obstacle.rf_loss_db)
 }
 
+/// A triangle mesh in the way of a radio path: every surface the path crosses costs `loss_db[material]`.
+#[derive(Debug, Clone)]
+pub struct MeshObstacle {
+    pub mesh: Arc<TriMesh>,
+    /// The loss of one crossing per material index; a material past the end costs nothing.
+    pub loss_db: Vec<f64>,
+}
+
+/// Two obstacles are equal when they share the same mesh (not a copy of it) and the same losses.
+impl PartialEq for MeshObstacle {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.mesh, &other.mesh) && self.loss_db == other.loss_db
+    }
+}
+
+/// The loss of the mesh on the path `a`..`b`: the sum of `loss_db[material]` over every surface the path crosses.
+/// Known limits: frequency-independent, no diffraction around the mesh's edges and no reflection off it.
+pub fn mesh_loss_db(m: &MeshObstacle, a: DVec3, b: DVec3) -> f64 {
+    let mut crossed = Vec::new();
+    m.mesh.crossings(a, b, &mut crossed);
+    crossed.iter().map(|&i| m.loss_db.get(i as usize).copied().unwrap_or(0.0)).sum()
+}
+
 /// The most the terrain takes off a path, in dB (a ridge in the way, like a solid wall).
 pub const TERRAIN_RF_LOSS_DB: f64 = 60.0;
 
@@ -269,20 +295,34 @@ fn ray_gain_db(tx: &Endpoint, tx_polarization: Polarization, rx: &Endpoint, out_
 
 /// The path from `tx` to `rx` at `freq_mhz`: the direct ray, plus (with `ground_bounce`) the ray reflected off the
 /// ground (coefficient -1, which reverses circular polarization), added with their phase difference; then the
-/// diffraction losses of the obstacles and the terrain on the direct ray.
-pub fn path_gain(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], terrain: Option<&Terrain>, ground_bounce: bool) -> PathGain {
-    let obstruction_db = obstruction_db(obstacles, terrain, tx.position, rx.position, freq_mhz);
+/// diffraction losses of the obstacles and the terrain, and the crossing losses of the meshes, on the direct ray.
+pub fn path_gain(
+    tx: &Endpoint,
+    rx: &Endpoint,
+    freq_mhz: f64,
+    obstacles: &[Obstacle],
+    terrain: Option<&Terrain>,
+    meshes: &[MeshObstacle],
+    ground_bounce: bool,
+) -> PathGain {
+    let obstruction_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
     PathGain { gain_db: unobstructed_gain_db(tx, rx, freq_mhz, ground_bounce) - obstruction_db, obstruction_db }
 }
 
-/// The diffraction losses of the obstacles and the terrain on the direct ray from `a` to `b`, in dB. It depends on
-/// the two positions only, so receivers that share a position (the goggles' antennas) share it.
-pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+/// The diffraction losses of the obstacles and the terrain, plus the crossing losses of the meshes, on the direct ray
+/// from `a` to `b`, in dB. It depends on the two positions only, so receivers that share a position (the goggles'
+/// antennas) share it.
+pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let lambda = wavelength_m(freq_mhz);
     let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum();
-    match terrain {
+    let ground = match terrain {
         Some(t) => objects + terrain_loss_db(t, a, b, lambda),
         None => objects,
+    };
+    if meshes.is_empty() {
+        ground
+    } else {
+        ground + meshes.iter().map(|m| mesh_loss_db(m, a, b)).sum::<f64>()
     }
 }
 

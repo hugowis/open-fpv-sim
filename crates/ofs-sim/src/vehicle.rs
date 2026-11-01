@@ -708,6 +708,7 @@ fn radio_chain(
             .collect(),
         obstacles: world_obstacles(&opts.world, terrain.as_deref()),
         terrain,
+        meshes: Vec::new(), // the world's meshes arrive with the vehicle wiring
         fading: true,
         ground_bounce: true,
     };
@@ -814,6 +815,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Te
             diversity: world.receiver.diversity,
             obstacles,
             terrain,
+            meshes: Vec::new(),
             emitters,
         },
         vtx_antenna: Antenna {

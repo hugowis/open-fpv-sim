@@ -5,7 +5,8 @@ use ofs_core::{names, Bus, Model, Scheduler, StepCtx};
 use ofs_video::link::*;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
-use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_core::mesh::{TriMesh, Triangle};
+use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, MeshObstacle, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -25,6 +26,7 @@ fn open_field() -> LinkWorld {
         obstacles: Vec::new(),
         emitters: Vec::new(),
         terrain: None,
+        meshes: Vec::new(),
     }
 }
 
@@ -518,4 +520,16 @@ fn the_injected_emitter_degrades_the_picture() {
         clean.0 - noisy.0,
         rise
     );
+}
+
+#[test]
+fn a_mesh_wall_lowers_the_snr_by_its_loss() {
+    let p = |e: f64, d: f64| DVec3::new(100.0, e, d);
+    let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
+    let meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    let (open, walled) = (bare(open_field()), bare(LinkWorld { meshes, ..open_field() }));
+    close(snr_at(&open, 25.0, 200.0) - snr_at(&walled, 25.0, 200.0), 18.0, 1e-9, "behind the wall");
+    let quad = DVec3::new(200.0, 0.0, -1.7);
+    close(vtx_paths(&walled, quad, DQuat::IDENTITY, 5800.0)[0].obstruction_db, 18.0, 1e-9, "reported as obstruction");
+    close(snr_at(&open, 25.0, 50.0) - snr_at(&walled, 25.0, 50.0), 0.0, 1e-9, "in front of it");
 }
