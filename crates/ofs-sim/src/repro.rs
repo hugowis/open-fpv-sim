@@ -51,6 +51,8 @@ pub struct BundleSource {
     pub quad_rel: String,
     /// The world's path inside the bundle, when the session had one.
     pub world_rel: Option<String>,
+    /// Each mesh file's path inside the bundle and the FNV-1a digest of its bytes, for `bundle.toml`.
+    pub mesh_digests: Vec<(String, u64)>,
 }
 
 /// Appends the bundle's `library/` snapshot: every relative path from the first root that has it, merged across
@@ -93,13 +95,14 @@ fn read_tree(root: &Path) -> std::io::Result<Vec<(PathBuf, Vec<u8>)>> {
 }
 
 impl BundleSource {
-    /// Reads the configuration files of a session that loaded `cfg` (and `world_path`, if it flew in a world) now.
+    /// Reads the configuration files of a session that loaded `cfg` (and `world`, loaded from its file, if it flew
+    /// in one) now. The mesh files are copied as bytes, not parsed again.
     /// A Betaflight diff given as an absolute path or with `..` is stored by its file name, and the bundled quad is
     /// rewritten to say so; the files are never copied by path, so nothing can land outside the bundle or onto itself.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: &ofs_config::QuadConfig,
-        world_path: Option<&Path>,
+        world: Option<&ofs_config::WorldConfig>,
         library_roots: &[PathBuf],
         seed: u64,
         open_loop_fc: bool,
@@ -127,15 +130,18 @@ impl BundleSource {
             files.push((Path::new("quads").join(&stored), read(&diff_path, "Betaflight diff")?));
         }
         files.push((Path::new("quads").join(&quad_name), quad_bytes));
-        let world_rel = match world_path {
-            Some(p) => {
+        let mut mesh_digests = Vec::new();
+        let world_rel = match world {
+            Some(w) => {
+                let p = &w.source_path;
                 let name = file_name(p)?;
                 files.push((Path::new("worlds").join(&name), read(p, "world")?));
                 // Mesh files sit beside the world file by the same relative path, so the replay finds them.
-                let world = ofs_config::world::load(p).map_err(|e| format!("loading the world {}: {e}", p.display()))?;
                 let mut seen = std::collections::BTreeSet::new();
-                for m in world.meshes.iter().filter(|m| seen.insert(m.file.as_str())) {
-                    files.push((Path::new("worlds").join(&m.file), read(&p.parent().unwrap_or(Path::new("")).join(&m.file), "mesh")?));
+                for m in w.meshes.iter().filter(|m| seen.insert(m.file.as_str())) {
+                    let bytes = read(&p.parent().unwrap_or(Path::new("")).join(&m.file), "mesh")?;
+                    mesh_digests.push((format!("worlds/{}", m.file), ofs_core::rng::fnv1a64(&bytes)));
+                    files.push((Path::new("worlds").join(&m.file), bytes));
                 }
                 Some(format!("worlds/{name}"))
             }
@@ -154,6 +160,7 @@ impl BundleSource {
             files,
             quad_rel: format!("quads/{quad_name}"),
             world_rel,
+            mesh_digests,
         })
     }
 }
@@ -290,6 +297,10 @@ pub fn write_bundle(src: &BundleSource, vehicle: &Vehicle, error: &SimError) -> 
     put("quad", Value::String(src.quad_rel.clone()));
     if let Some(w) = &src.world_rel {
         put("world", Value::String(w.clone()));
+    }
+    if !src.mesh_digests.is_empty() {
+        let digests = src.mesh_digests.iter().map(|(rel, d)| (rel.clone(), Value::String(format!("{d:016x}"))));
+        put("mesh_digests", Value::Table(digests.collect()));
     }
     put("window_s", Value::Float(DEFAULT_WINDOW_S));
     put("digest", Value::String(format!("{:016x}", vehicle.digest())));
@@ -445,7 +456,8 @@ pub(crate) fn test_source_for(logs_dir: &Path, quad: &Path, world: Option<&Path>
     let quad = std::path::absolute(quad).unwrap();
     let cfg = ofs_config::load_with_library_env(&quad, library_env).unwrap();
     let roots = ofs_config::library_roots(library_env, cfg.source_dir());
-    BundleSource::new(&cfg, world, &roots, 1, true, false, logs_dir.to_path_buf(), None).unwrap()
+    let world = world.map(|p| ofs_config::world::load(p).unwrap());
+    BundleSource::new(&cfg, world.as_ref(), &roots, 1, true, false, logs_dir.to_path_buf(), None).unwrap()
 }
 
 #[cfg(test)]
@@ -611,6 +623,48 @@ mod tests {
         let dir = write_bundle(&src, &v, &error).unwrap();
         assert!(dir.join("worlds/flat.toml").is_file());
         assert_eq!(bundle_toml(&dir)["world"].as_str(), Some("worlds/flat.toml"));
+        assert!(!bundle_toml(&dir).contains_key("mesh_digests"), "a world without meshes records none");
+    }
+
+    /// A source for the shipped quad in a world at `<dir>/w.toml` whose meshes name `files`. The world is built here,
+    /// not loaded, so the mesh files need not be `.glb`s: `BundleSource::new` copies them without reading them.
+    fn mesh_world_source(logs: &Path, dir: &Path, files: &[&str]) -> Result<BundleSource, String> {
+        std::fs::write(dir.join("w.toml"), "schema_version = 1
+").unwrap();
+        let meshes = files.iter().enumerate();
+        let world = WorldConfig {
+            source_path: dir.join("w.toml"),
+            meshes: meshes.map(|(i, f)| ofs_config::MeshSection { name: format!("m{i}"), file: f.to_string(), position_ned_m: [0.0; 3], heading_deg: 0.0 }).collect(),
+            ..WorldConfig::open_field()
+        };
+        let cfg = ofs_config::load(&std::path::absolute(repo("quads/opendrone-5f-freestyle.toml")).unwrap()).unwrap();
+        BundleSource::new(&cfg, Some(&world), &ofs_config::library_roots(None, cfg.source_dir()), 1, true, false, logs.to_path_buf(), None)
+    }
+
+    #[test]
+    fn mesh_files_are_copied_once_by_their_relative_path_with_their_digests() {
+        let (logs, world) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::create_dir_all(world.path().join("assets/sub")).unwrap();
+        std::fs::write(world.path().join("assets/sub/x.glb"), b"x bytes, not parsed").unwrap();
+        std::fs::write(world.path().join("y.glb"), b"y bytes").unwrap();
+        let src = mesh_world_source(logs.path(), world.path(), &["assets/sub/x.glb", "y.glb", "assets/sub/x.glb"]).unwrap();
+        let x = src.files.iter().filter(|(rel, _)| rel.ends_with("x.glb")).count();
+        assert_eq!(x, 1, "two entries naming one file copy it once");
+        let mut v = vehicle_from(&ofs_config::load(&src.quad_path).unwrap());
+        let error = fail(&mut v);
+        let dir = write_bundle(&src, &v, &error).unwrap();
+        assert_eq!(std::fs::read(dir.join("worlds/assets/sub/x.glb")).unwrap(), b"x bytes, not parsed");
+        let digests = bundle_toml(&dir)["mesh_digests"].as_table().unwrap().clone();
+        let hex = |b: &[u8]| toml::Value::String(format!("{:016x}", ofs_core::rng::fnv1a64(b)));
+        let expected: toml::Table = [("worlds/assets/sub/x.glb".to_string(), hex(b"x bytes, not parsed")), ("worlds/y.glb".to_string(), hex(b"y bytes"))].into_iter().collect();
+        assert_eq!(digests, expected);
+    }
+
+    #[test]
+    fn an_unreadable_mesh_file_is_an_error() {
+        let (logs, world) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = mesh_world_source(logs.path(), world.path(), &["gone.glb"]).unwrap_err();
+        assert!(e.contains("mesh") && e.contains("gone.glb"), "{e}");
     }
 
     /// A bundle of the shipped quad failing in `worlds/hall.toml` (which has a mesh).
@@ -633,8 +687,11 @@ mod tests {
     fn a_world_with_meshes_copies_them_into_the_bundle() {
         let logs = tempfile::tempdir().unwrap();
         let (dir, _) = hall_bundle(logs.path());
-        assert_eq!(std::fs::read(dir.join("worlds/assets/hall.glb")).unwrap(), std::fs::read(repo("worlds/assets/hall.glb")).unwrap());
+        let glb = std::fs::read(repo("worlds/assets/hall.glb")).unwrap();
+        assert_eq!(std::fs::read(dir.join("worlds/assets/hall.glb")).unwrap(), glb);
         assert!(dir.join("worlds/hall.toml").is_file());
+        let digest = format!("{:016x}", ofs_core::rng::fnv1a64(&glb));
+        assert_eq!(bundle_toml(&dir)["mesh_digests"]["worlds/assets/hall.glb"].as_str(), Some(digest.as_str()));
     }
 
     #[test]
