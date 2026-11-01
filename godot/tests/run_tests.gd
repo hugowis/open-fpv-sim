@@ -18,6 +18,7 @@ const SUITES := [
 	"res://tests/test_extension.gd",
 	"res://tests/test_scene.gd",
 	"res://tests/test_quad_spec.gd",
+	"res://tests/test_quad_preview.gd",
 	"res://tests/test_osd.gd",
 	"res://tests/test_video.gd",
 	"res://tests/test_dvr.gd",
