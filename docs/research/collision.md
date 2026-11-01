@@ -274,6 +274,12 @@ spends about 4 ms per simulated second (see "The ground", measured on another ma
 mesh. It is a timing test, not a CI gate, because wall-clock gates flake. The Godot rendering of meshes has been verified
 headless only, by the Godot test suites; nobody has looked at it by eye yet.
 
+The Chernobyl world (`chernobyl_timing_is_recorded` in `crates/ofs-sim/tests/chernobyl_world.rs`, run with
+`cargo test --release -p ofs-sim --test chernobyl_world --locked -- --ignored --nocapture`) on 2026-11-01, same machine
+(AMD Ryzen 9 9900X3D, rustc 1.99.0): 10 s of the whole vehicle (open-loop stabilised 7-inch quad flying in through the
+door) against a mesh of 288 triangles takes 0.127 s, against 0.053 s for the same flight in the open field, best of 3:
+about 7 ms more per simulated second.
+
 ## Events
 
 A sphere or a landing point that *starts* touching something (it was free the step before) with an inward speed
