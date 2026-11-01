@@ -1015,10 +1015,11 @@ fn every_mesh_and_material_rule_names_its_field() {
     let twice = "[[meshes]]\nname = \"x\"\nfile = \"a.glb\"\n[[meshes]]\nname = \"x\"\nfile = \"b.glb\"\n";
     assert_field(&mesh_problems(twice), "meshes[1].name");
     assert_field(&mesh_problems("[[meshes]]\nname = \"a b\"\nfile = \"a.glb\"\n"), "meshes[0].name");
-    for file in ["/etc/a.glb", "\\a.glb", "C:/a.glb", "../a.glb", "sub/../a.glb", "sub\\..\\a.glb", "a.gltf", "a"] {
+    for file in ["/etc/a.glb", "\\a.glb", "C:/a.glb", "../a.glb", "sub/../a.glb", "sub\\..\\a.glb", "sub\\a.glb", "a.gltf", "a"] {
         let p = mesh_problems(&format!("[[meshes]]\nname = \"x\"\nfile = {file:?}\n"));
         assert_field(&p, "meshes[0].file");
         assert_eq!(p.len(), 1, "{file}: {p:?}");
+        assert!(!file.contains('\\') || p[0].contains("backslash"), "{file}: {p:?}");
     }
     for (body, field) in [
         ("position_ned_m = [nan, 0.0, 0.0]", "meshes[0].position_ned_m"),

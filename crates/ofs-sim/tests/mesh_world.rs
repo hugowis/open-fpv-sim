@@ -18,22 +18,31 @@ fn quad() -> QuadConfig {
 }
 
 /// The quad starts on the ground 6 m south of the wall, off to the side of the doorway, and flies north into it.
-/// Returns the digest, the number of collisions and the number of meshes the vehicle holds.
-fn fly(world: WorldConfig) -> (u64, u64, usize) {
+/// Returns the digest, the number of collisions, the number of meshes the vehicle holds and the collision object
+/// index of the first hit.
+fn fly(world: WorldConfig) -> (u64, u64, usize, Option<i32>) {
     let mut cfg = quad();
     cfg.initial.position_ned_m = [24.0, 4.0, -0.03];
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoopStabilized), world };
     let mut v = build(&cfg, &opts, None).unwrap();
     v.set_sticks(&Sticks { throttle: 0.45, pitch: 1.0, ..Sticks::default() }).unwrap();
-    v.run_for(4.0).unwrap();
-    (v.digest(), v.state().collision_event_count, v.meshes().len())
+    let mut first = None;
+    for _ in 0..400 {
+        v.run_for(0.01).unwrap();
+        if first.is_none() && v.state().collision_event_count > 0 {
+            first = Some(v.state().collision_object);
+        }
+    }
+    (v.digest(), v.state().collision_event_count, v.meshes().len(), first)
 }
 
 #[test]
 fn a_flight_in_the_hall_world_replays_exactly() {
-    let (digest, hits, meshes) = fly(hall());
+    let (digest, hits, meshes, first) = fly(hall());
     assert_eq!(meshes, 1);
     assert!(hits > 0, "the quad must reach the wall for this test to exercise the mesh");
+    // Meshes follow the objects in the collision indices: the first hit is the hall, not a ground bounce.
+    assert_eq!(first, Some(hall().objects.len() as i32));
     assert_eq!(fly(hall()).0, digest, "the same seed replays the same flight");
     assert_ne!(fly(WorldConfig::open_field()).0, digest, "the wall changes the flight");
 }

@@ -129,15 +129,16 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   about a metre with its course placed on the ground. The steepest slope may not pass 60 degrees.
 - `[[meshes]]` and `[[materials]]` — triangle meshes from `.glb` files, solid to the quad and in the way of the radio.
   A mesh has a `name` (letters, digits, `_` and `-`, unique), a `file` (relative to the world file, ending `.glb`, no `..`,
-  no absolute path and no `:`), a `position_ned_m` and a `heading_deg` (clockwise from north; the file's origin goes to
-  the position). A material is the glTF material's name (any non-empty, unique string, matched exactly; an unnamed
-  one is called `default`) with an `rf_loss_db` (0 if it is not listed; a listed material that no mesh uses is an error).
+  no absolute path, no `:` and `/` between directories, never `\`), a `position_ned_m` and a `heading_deg` (clockwise
+  from north; the file's origin goes to the position). A material is the glTF material's name (any non-empty, unique
+  string, matched exactly; an unnamed one is called `default`) with an `rf_loss_db` (0 if it is not listed; a listed material that no mesh uses is an error).
   `worlds/hall.toml` flies a concrete hall with a doorway and a glass window (`worlds/assets/hall.glb`, made by
   `cargo run -p ofs-config --example make_hall`). Caps (estimates): 8 meshes, 400 000 triangles in all and 64 MiB per file.
   - **The file** is in Godot's frame (x east, y up, -z north), so NED = (-z, x, -y). Only triangle lists are read (other
     primitive modes are skipped); sparse accessors, external buffers and a node graph that is not a tree are refused, and
-    zero-area triangles are dropped. A node whose own name starts with `col_` is collision and radio only and Godot does not
-    draw it (children do not inherit the prefix); if the file has no `col_` node, the visible nodes are used for both.
+    zero-area triangles are dropped. A node whose own name starts with `col_` is collision and radio only, and Godot drops
+    its whole subtree, so its children are never drawn, even when they are not named `col_`. When any `col_` node has
+    triangles, only the `col_` nodes collide (not their children); otherwise every node collides.
   - **Physics**: a sphere is tested against the *surface*, two-sided, so a mesh need not be watertight; the landing points
     use only the nearest triangle, with a 5 mm skin. A hit is `HIT <mesh name>`. The maths and limits are in
     `docs/research/collision.md`.

@@ -685,8 +685,10 @@ impl WorldConfig {
         for (i, m) in self.meshes.iter().enumerate() {
             let field = |f: &str| format!("meshes[{i}].{f}");
             check_name(&mut c, &m.name, &field("name"), &mut names);
-            c.check(!m.file.starts_with(['/', '\\']) && !m.file.contains(':'), &field("file"), format!("must be a relative path (got {:?})", m.file));
-            c.check(!m.file.split(['/', '\\']).any(|s| s == ".."), &field("file"), format!("must not contain '..' (got {:?})", m.file));
+            // On Linux a backslash is part of a file name, so a world written on Windows would not travel.
+            c.check(!m.file.contains('\\'), &field("file"), format!("must separate directories with '/', not a backslash (got {:?})", m.file));
+            c.check(!m.file.starts_with('/') && !m.file.contains(':'), &field("file"), format!("must be a relative path (got {:?})", m.file));
+            c.check(!m.file.split('/').any(|s| s == ".."), &field("file"), format!("must not contain '..' (got {:?})", m.file));
             c.check(m.file.ends_with(".glb"), &field("file"), format!("must end in .glb (got {:?})", m.file));
             c.check(finite(&m.position_ned_m), &field("position_ned_m"), "values must be finite");
             c.check(m.heading_deg.is_finite(), &field("heading_deg"), "must be finite");
