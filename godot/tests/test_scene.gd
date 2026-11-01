@@ -341,3 +341,118 @@ func test_an_emitter_post_stands_on_the_ground_below_it() -> void:
 	eq(marker.position, Vector3(5.0, 1.5, -6.0), "the post starts on the ground")
 	eq(((marker.get_node("Post") as MeshInstance3D).mesh as CylinderMesh).height, 2.5, "and rises to the emitter")
 	world.queue_free()
+
+
+## Writes a GLB of flat nodes (each {name, tris: PackedVector3Array of 3 points per triangle}) and returns its absolute path.
+func _write_glb(file_name: String, nodes: Array) -> String:
+	var bin := PackedFloat32Array()
+	var views := []
+	var accessors := []
+	var meshes := []
+	var json_nodes := []
+	for n in nodes:
+		var tris: PackedVector3Array = n["tris"]
+		var offset := bin.size() * 4
+		for v in tris:
+			bin.append_array([v.x, v.y, v.z])
+		views.append({"buffer": 0, "byteOffset": offset, "byteLength": tris.size() * 12})
+		accessors.append({"bufferView": views.size() - 1, "componentType": 5126, "count": tris.size(), "type": "VEC3",
+			"min": [-100, -100, -100], "max": [100, 100, 100]})
+		meshes.append({"primitives": [{"attributes": {"POSITION": accessors.size() - 1}}]})
+		json_nodes.append({"name": n["name"], "mesh": meshes.size() - 1})
+	var ids := []
+	for i in nodes.size():
+		ids.append(i)
+	var json := JSON.stringify({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": ids}], "nodes": json_nodes,
+		"meshes": meshes, "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": bin.size() * 4}]}).to_utf8_buffer()
+	while json.size() % 4 != 0:
+		json.append(32)
+	var data := bin.to_byte_array()
+	var out := StreamPeerBuffer.new()
+	out.put_u32(0x46546C67)
+	out.put_u32(2)
+	out.put_u32(12 + 8 + json.size() + 8 + data.size())
+	out.put_u32(json.size())
+	out.put_u32(0x4E4F534A)
+	out.put_data(json)
+	out.put_u32(data.size())
+	out.put_u32(0x004E4942)
+	out.put_data(data)
+	var path := "user://%s" % file_name
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_buffer(out.data_array)
+	file.close()
+	return ProjectSettings.globalize_path(path)
+
+
+## A world with one mesh the way `get_world()` describes it: the digest check passed.
+func _mesh_world(path: String, heading_deg := 0.0, digest_ok := true) -> Dictionary:
+	return {"meshes": [{"name": "hall", "path": path, "position": Vector3(1.0, 2.0, 3.0), "heading_deg": heading_deg,
+		"digest_ok": digest_ok, "error": "" if digest_ok else "digest mismatch"}]}
+
+
+## The world-space position of the first vertex of the first mesh instance under `node`.
+func _first_vertex(node: Node) -> Vector3:
+	var instance: MeshInstance3D = node.find_children("*", "MeshInstance3D", true, false)[0]
+	return instance.global_transform * instance.mesh.get_faces()[0]
+
+
+func test_mesh_is_built_and_named() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var path := ProjectSettings.globalize_path("res://../worlds/assets/hall.glb")
+	ok(FileAccess.file_exists(path), "the demo hall resolves: %s" % path)
+	world.build(_mesh_world(path))
+	eq(world.built_names(), PackedStringArray(["hall"]), "one node named after the mesh")
+	var hall: Node3D = world.get_node("hall")
+	eq(hall.position, Vector3(1.0, 2.0, 3.0), "where the world puts it")
+	ok(hall.find_children("*", "MeshInstance3D", true, false).size() > 0, "with the file's meshes")
+	world.queue_free()
+
+
+func test_col_nodes_are_not_drawn() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var tri := PackedVector3Array([Vector3(0, 0, 0), Vector3(0, 1, 0), Vector3(1, 0, 0)])
+	var path := _write_glb("test_col.glb", [{"name": "wall", "tris": tri}, {"name": "col_wall", "tris": tri}])
+	world.build(_mesh_world(path))
+	var drawn := world.get_node("hall")
+	ok(drawn.find_child("wall", true, false) != null, "the visible node is drawn")
+	ok(drawn.find_child("col_*", true, false) == null, "the collision-only node is not")
+	world.queue_free()
+
+
+func test_heading_90_turns_the_mesh_to_face_east() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var tri := PackedVector3Array([Vector3(0, 0, -10), Vector3(0, 1, -10), Vector3(1, 0, -10)])
+	var path := _write_glb("test_heading.glb", [{"name": "wall", "tris": tri}])
+	var at := Vector3(1.0, 2.0, 3.0)
+	world.build(_mesh_world(path, 0.0))
+	ok((_first_vertex(world.get_node("hall")) - (at + Vector3(0, 0, -10))).length() < 1e-4, "heading 0: a vertex 10 m north stays north")
+	world.build(_mesh_world(path, 90.0))
+	ok((_first_vertex(world.get_node("hall")) - (at + Vector3(10, 0, 0))).length() < 1e-4, "heading 90: it lands 10 m east")
+	world.queue_free()
+
+
+func test_a_mesh_with_a_bad_digest_draws_nothing() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var path := ProjectSettings.globalize_path("res://../worlds/assets/hall.glb")
+	world.build(_mesh_world(path, 0.0, false))
+	eq(world.built_names(), PackedStringArray(), "a file that is not the one the sim collides with is not drawn")
+	world.build(_mesh_world("/no/such/file.glb"))
+	eq(world.built_names(), PackedStringArray(), "nor is one that fails to load")
+	world.queue_free()
+
+
+func test_a_world_without_meshes_builds_exactly_as_before() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	world.build(_world_dict())
+	var before := world.built_names()
+	var with_empty := _world_dict()
+	with_empty["meshes"] = []
+	world.build(with_empty)
+	eq(world.built_names(), before, "an empty meshes array changes nothing")
+	world.queue_free()

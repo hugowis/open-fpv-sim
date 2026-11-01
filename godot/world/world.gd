@@ -1,8 +1,9 @@
 extends Node3D
 ## The grey-box world. The sky, the sun and the ground (a flat plane with its metre grid, or the terrain mesh the
 ## simulator samples when the world has a `[terrain]`) are drawn here; the objects on the field (launch pad, pylons,
-## gates, buildings), the pilot's spot and other transmitters come from the world file the simulator loaded
-## (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the physics: the
+## gates, buildings), the world's triangle meshes (the .glb files the simulator collides with and blocks the radio
+## with, minus their `col_` nodes), the pilot's spot and other transmitters come from the world file the simulator
+## loaded (`OfsClient.get_world()`), so what you see is what the video link sees. Nothing here does the physics: the
 ## simulator collides the drone with these objects and its ground, and the video link's occlusion is the
 ## simulator's too — this node only draws.
 ##
@@ -64,6 +65,8 @@ func build(world: Dictionary) -> void:
 				_box(o["name"], o["center"], o["size"], o["color"])
 			"cylinder":
 				_cylinder(o["name"], o["center"], o["radius"], o["height"], o["color"])
+	for m in world.get("meshes", []):
+		_add_mesh(m)
 	if world.has("pilot_position"):
 		_add_pilot(world["pilot_position"], world.get("antennas", []))
 	if world.has("handset_position"):
@@ -248,6 +251,30 @@ func _cylinder(node_name: String, center: Vector3, radius: float, height: float,
 	mesh.bottom_radius = radius
 	mesh.height = height
 	_add_built(_mesh(node_name, mesh, color, center))
+
+
+## A mesh file of the world, loaded at run time (no editor import) with its materials as the file defines them. The
+## `col_` nodes are for collision and radio only. A mesh whose file is not the one the simulator checked (`digest_ok`),
+## or that fails to load, draws nothing.
+func _add_mesh(m: Dictionary) -> void:
+	if not m.get("digest_ok", false):
+		push_error("mesh '%s' not drawn: %s" % [m["name"], m.get("error", "")])
+		return
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	var err := document.append_from_file(m["path"], state)
+	var root: Node = null if err != OK else document.generate_scene(state)
+	if root == null:
+		push_error("mesh '%s' not drawn: cannot load %s (error %d)" % [m["name"], m["path"], err])
+		return
+	for n in root.find_children("col_*", "", true, false):
+		if is_instance_valid(n):
+			n.get_parent().remove_child(n)
+			n.free()
+	root.name = m["name"]
+	root.position = m["position"]
+	root.rotation.y = -deg_to_rad(float(m["heading_deg"]))
+	_add_built(root)
 
 
 ## A figure where the pilot stands (its head at the goggles), with a pointer along each patch antenna's aim.
