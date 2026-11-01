@@ -19,8 +19,8 @@ Run from `tools/sitegen`, or from the repository root with `PYTHONPATH=tools/sit
     PYTHONPATH=tools/sitegen python -m sitegen build path/to/recipe.toml    # from the repository root
 
 The demo, which needs no network: `python -m sitegen build tests/fixtures/demo/recipe.toml`. **Never `fetch` the demo.** Its
-snapshot is hand-made (its `source_note` says so) and the goldens are built from it; the demo's coordinates are real, so a
-fetch would replace it with real OpenStreetMap data, break the goldens and put ODbL data into the repository ahead of the
+snapshot is hand-made (its `source_note` says so) and the goldens are built from it; the demo's bounding box sits on real ground, so a
+`fetch` would return real OpenStreetMap data that replaces it, break the goldens and put ODbL data into the repository ahead of the
 licence decision. A build of the demo writes under `tests/fixtures/demo/out/`, which `.gitignore` excludes. The command line has
 no output-directory option (the tests pass `out_dir` to `build_site`, in Python); a recipe's `output.world` decides where files go.
 

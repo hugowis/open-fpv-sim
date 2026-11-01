@@ -405,7 +405,8 @@ snapshot once and you commit it; `build` turns recipe and snapshot into a `.glb`
     python -m sitegen build <recipe.toml>    # offline; prints footprints, landmarks, triangles and what it skipped
 
 `tools/sitegen/tests/fixtures/demo/` is a working example: `build` it, but never `fetch` it (its snapshot is hand-made and the
-goldens depend on it; `tools/sitegen/README.md` says why). The recipe schema, the determinism and `doubleSided` rules, the
+goldens depend on it, and its bounding box sits on real ground, so `fetch` would return real OpenStreetMap data;
+`tools/sitegen/README.md` says more). The recipe schema, the determinism and `doubleSided` rules, the
 frames and the limits (flat roofs, flat ground, no textures) are in `tools/sitegen/README.md`. **sitegen needs Python 3.11
 or newer** (it reads TOML with `tomllib`), although the rest of the repository still says 3.10; the output is read by the
 engine like any other mesh world (the "The world file" section above).
