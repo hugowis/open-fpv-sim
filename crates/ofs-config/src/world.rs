@@ -693,7 +693,10 @@ impl WorldConfig {
         }
         let mut names = HashSet::new();
         for (i, m) in self.materials.iter().enumerate() {
-            check_name(&mut c, &m.name, &format!("materials[{i}].name"), &mut names);
+            // glTF material names are free-form (`Material.001`, `Wall Concrete`): only non-empty and unique.
+            let field = format!("materials[{i}].name");
+            c.check(!m.name.is_empty(), &field, "must not be empty");
+            c.check(names.insert(m.name.clone()), &field, format!("{:?} is used twice", m.name));
             c.non_negative(m.rf_loss_db, &format!("materials[{i}].rf_loss_db"));
         }
         c.0

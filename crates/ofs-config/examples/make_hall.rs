@@ -23,7 +23,7 @@ fn main() {
     rect(&mut walls, south, [-6.0, -2.0], [0.0, UP]);
     rect(&mut walls, south, [2.0, 6.0], [0.0, UP]);
     rect(&mut walls, south, [-2.0, 2.0], [3.0, UP]);
-    // East wall (east = 6): u = north; the window is a hole, glazed below.
+    // East wall (east = 6): u = north; the window is a hole in the wall; a separate glass pane node fills it (below).
     let east = |u: f32, v| [6.0, v, -u];
     rect(&mut walls, east, [30.0, 50.0], [0.0, 3.0]);
     rect(&mut walls, east, [30.0, 50.0], [4.0, UP]);

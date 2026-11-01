@@ -995,6 +995,14 @@ fn meshes_and_materials_parse() {
 }
 
 #[test]
+fn a_material_name_may_be_free_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"c.glb\"\n[[materials]]\nname = \"Wall Concrete.001\"\nrf_loss_db = 17.5\n");
+    fs::write(dir.path().join("c.glb"), glb(&["Paint", "Wall Concrete.001"])).unwrap();
+    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, [0.0, 17.5]);
+}
+
+#[test]
 fn an_unlisted_material_loses_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"a.glb\"\n[[materials]]\nname = \"glass\"\nrf_loss_db = 2.0\n");
@@ -1023,7 +1031,7 @@ fn every_mesh_and_material_rule_names_its_field() {
     let many: String = (0..=ofs_config::mesh::MAX_MESHES).map(|i| format!("[[meshes]]\nname = \"m{i}\"\nfile = \"a.glb\"\n")).collect();
     assert_field(&mesh_problems(&many), "meshes");
     assert_field(&mesh_problems("[[materials]]\nname = \"x\"\n[[materials]]\nname = \"x\"\n"), "materials[1].name");
-    assert_field(&mesh_problems("[[materials]]\nname = \"x y\"\n"), "materials[0].name");
+    assert_field(&mesh_problems("[[materials]]\nname = \"\"\n"), "materials[0].name");
     for loss in ["-1.0", "nan", "inf"] {
         assert_field(&mesh_problems(&format!("[[materials]]\nname = \"x\"\nrf_loss_db = {loss}\n")), "materials[0].rf_loss_db");
     }
@@ -1091,7 +1099,7 @@ fn a_world_without_meshes_loads_exactly_as_before() {
 }
 
 #[test]
-fn the_hall_loads_with_its_doorway_and_window_open() {
+fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
     use glam::DVec3;
     let w = world::load(&shipped_world("hall")).unwrap();
     assert_eq!(w.pilot.position_ned_m, [5.0, 0.0, -1.7]);
