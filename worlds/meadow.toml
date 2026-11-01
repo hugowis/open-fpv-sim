@@ -1,7 +1,7 @@
 # An open meadow: a big, fast four-gate loop for the 5 inch and 7 inch quads (epic #136, issue #131). Trees, a
 # barn and hay bales give the video link something to block. Gate2 is pitched 20 degrees, leaning its opening up
-# on the west leg; a pitched frame cannot be drawn with axis-aligned boxes, so Gate2 has no posts and bar, and
-# the diagonal Gate1 gets posts only.
+# on the west leg; a pitched frame cannot be built from yawed boxes either, so Gate2 has no posts and bar, and
+# the diagonal Gate1's bar is yawed across the travel.
 #
 # Positions are NED metres from home (north, east, down: up is negative); sizes are [north, east, height].
 # All values are estimates.
@@ -61,7 +61,7 @@ center_ned_m = [30.0, 0.0, -5.075]
 size_m = [8.3, 0.15, 0.15]
 color = [0.2, 0.8, 0.35]
 
-# Gate1 is the diagonal (heading 45): posts across the travel, no bar (a bar would need a rotated box).
+# Gate1 is the diagonal (heading 45); its bar is yawed across the travel (heading + 90 = 135).
 [[objects]]
 name = "Gate1PostL"
 shape = "box"
@@ -74,6 +74,15 @@ name = "Gate1PostR"
 shape = "box"
 center_ned_m = [62.88, 42.12, -2.5]
 size_m = [0.15, 0.15, 5.0]
+color = [0.2, 0.8, 0.35]
+
+# The bar Gate1 was missing: a box yawed across the diagonal travel (#28).
+[[objects]]
+name = "Gate1Bar"
+shape = "box"
+center_ned_m = [60.0, 45.0, -5.075]
+size_m = [8.3, 0.15, 0.15]
+yaw_deg = 135.0
 color = [0.2, 0.8, 0.35]
 
 # Trees: trunks only at this distance, close enough to matter to the link and the prop spheres.

@@ -142,9 +142,11 @@ fn the_meadow_world_loads() {
     assert!(w.gates.iter().all(|g| g.width_m == 8.0 && g.height_m == 5.0));
     assert_eq!(w.gates[2].pitch_deg, 20.0, "the west gate leans up with the climb");
     let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(names.len(), 17, "gate frames (8), trees (6), barn, hay bales (2)");
+    assert_eq!(names.len(), 18, "gate frames (9: Gate1 has its bar), trees (6), barn, hay bales (2)");
     let post = w.objects.iter().find(|o| o.name == "Gate1PostL").unwrap();
     assert_eq!(post.center_ned_m, [57.12, 47.88, -2.5], "Gate1's posts sit across the 45-degree travel");
+    let bar = w.objects.iter().find(|o| o.name == "Gate1Bar").unwrap();
+    assert_eq!((bar.shape, bar.size_m, bar.yaw_deg), (Shape::Box, Some([8.3, 0.15, 0.15]), Some(135.0)), "the bar Gate1 was missing, yawed across the travel");
     let barn = w.objects.iter().find(|o| o.name == "Barn").unwrap();
     assert_eq!((barn.shape, barn.size_m, barn.rf_loss_db), (Shape::Box, Some([10.0, 6.0, 6.0]), 25.0));
     assert_eq!(w.emitters.len(), 1);

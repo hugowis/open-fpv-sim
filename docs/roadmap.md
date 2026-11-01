@@ -18,7 +18,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   touchdown both bounces and compresses the legs. The landing points hold on a slope by static friction (a
   millimetre of tangential sag, not a rigid hold) but the spheres' impulse friction creeps `g·sinθ·Δt` (0.4 mm/s on
   a 20° slope); the position correction translates the body out of every contact but never turns it.
-- The ground is the plane d = 0 unless the world has a `[terrain]` heightfield (#153); boxes are axis-aligned, and objects never collide with each other.
+- The ground is the plane d = 0 unless the world has a `[terrain]` heightfield (#153); boxes may be yawed (#28), and objects never collide with each other.
 - Triangle meshes (`[[meshes]]`, `.glb`): the quad's spheres and landing points collide with the surface (no inside, so a
   mesh need not be watertight); a foot's force on a mesh is capped at `k × 5 mm` by its skin, and a mesh collides with
   nothing but the quad. The Godot drawing of meshes was verified headless only. The caps (8 meshes, 400 000 triangles a

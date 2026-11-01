@@ -117,7 +117,8 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
 - `[pilot]` — where the goggles are and which way the pilot faces;
 - `[receiver]` — the noise floor, diversity, and the goggle antennas (`omni` or `patch` with a beamwidth; gain,
   polarization, aim relative to the pilot's facing);
-- `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal).
+- `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal);
+  a box may carry `yaw_deg` (the heading of its north axis, clockwise from north; absent = axis-aligned).
   The game draws them from the world the server loaded (`GetWorld`), so what you see is what the video link sees.
   The quad collides with them (`docs/research/collision.md`);
 - `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
