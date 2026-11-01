@@ -1117,3 +1117,55 @@ fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
     assert_eq!(materials_crossed([40.0, 0.0, -3.5], [40.0, 10.0, -3.5]), [1], "through the window: glass only");
     assert_eq!(materials_crossed([40.0, 0.0, -1.7], [40.0, 0.0, -9.0]), [0], "through the roof");
 }
+
+/// The shipped hall copied to a temp dir with its relative layout; returns the world path and the `.glb` path.
+fn hall_copy(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    fs::create_dir_all(dir.join("assets")).unwrap();
+    let glb = dir.join("assets/hall.glb");
+    fs::copy(shipped_world("hall").parent().unwrap().join("assets/hall.glb"), &glb).unwrap();
+    fs::copy(shipped_world("hall"), dir.join("hall.toml")).unwrap();
+    (dir.join("hall.toml"), glb)
+}
+
+#[test]
+fn load_meshes_after_load_reads_the_file_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    fs::remove_file(&glb).unwrap();
+    let (a, b) = (w.load_meshes().unwrap(), w.load_meshes().unwrap());
+    assert!(std::sync::Arc::ptr_eq(&a[0].mesh, &b[0].mesh));
+}
+
+#[test]
+fn a_changed_mesh_section_is_reloaded_not_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let mut w = world::load(&path).unwrap();
+    let before = w.load_meshes().unwrap()[0].mesh.bounds();
+    let bytes = fs::read(&glb).unwrap();
+    fs::remove_file(&glb).unwrap();
+    fs::write(&glb, bytes).unwrap();
+    w.meshes[0].position_ned_m[0] += 10.0;
+    let after = w.load_meshes().unwrap()[0].mesh.bounds();
+    assert!((after.min.x - before.min.x - 10.0).abs() < 1e-9 && (after.max.x - before.max.x - 10.0).abs() < 1e-9, "{before:?} -> {after:?}");
+}
+
+#[test]
+fn load_meshes_with_a_small_cap_still_refuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    let e = w.load_meshes_with(3).unwrap_err();
+    assert!(e.starts_with("meshes[0].file: "), "{e}");
+}
+
+#[test]
+fn a_cloned_world_shares_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    let c = w.clone();
+    fs::remove_file(&glb).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&w.load_meshes().unwrap()[0].mesh, &c.load_meshes().unwrap()[0].mesh));
+}

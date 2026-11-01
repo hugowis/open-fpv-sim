@@ -78,6 +78,31 @@ pub struct WorldConfig {
     pub materials: Vec<MaterialSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
+    /// What [`load`] read, so [`load_meshes`](Self::load_meshes) need not parse the files again.
+    /// Public only so `..WorldConfig { .. }` works outside this crate; leave it alone.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub mesh_cache: MeshCache,
+}
+
+/// The meshes `load` read, keyed by the fields they came from; a changed key makes the entry stale. Not part of a
+/// world's identity: it compares equal to any other.
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct MeshCache(Option<CachedMeshes>);
+
+type CachedMeshes = (Vec<MeshSection>, Vec<MaterialSection>, PathBuf, Arc<Vec<WorldMeshData>>);
+
+impl std::fmt::Debug for MeshCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "loaded" } else { "empty" })
+    }
+}
+
+impl PartialEq for MeshCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 /// A `.glb` placed in the world: its origin goes to `position_ned_m`, turned by `heading_deg` (clockwise from north).
@@ -467,6 +492,7 @@ impl WorldConfig {
             meshes: Vec::new(),
             materials: Vec::new(),
             source_path: PathBuf::new(),
+            mesh_cache: MeshCache::default(),
         }
     }
 
@@ -704,13 +730,17 @@ impl WorldConfig {
         c.0
     }
 
-    /// [`load_meshes_with`](Self::load_meshes_with) at the default triangle cap.
+    /// The meshes [`load`] already read (the files are read once, at `load`) while `meshes`, `materials` and
+    /// `source_path` are unchanged since; otherwise [`load_meshes_with`](Self::load_meshes_with) at the default cap.
     pub fn load_meshes(&self) -> Result<Vec<WorldMeshData>, String> {
-        self.load_meshes_with(MAX_MESH_TRIANGLES)
+        match &self.mesh_cache.0 {
+            Some((meshes, materials, source, data)) if *meshes == self.meshes && *materials == self.materials && *source == self.source_path => Ok(data.to_vec()),
+            _ => self.load_meshes_with(MAX_MESH_TRIANGLES),
+        }
     }
 
     /// Reads every `[[meshes]]` file (resolved against the world file's directory) into NED, at most
-    /// `max_total_triangles` in all. A world not loaded from disk has no meshes to load. Call it on a validated config.
+    /// `max_total_triangles` in all; always reads the files. A world not loaded from disk has no meshes to load. Call it on a validated config.
     pub fn load_meshes_with(&self, max_total_triangles: usize) -> Result<Vec<WorldMeshData>, String> {
         self.load_meshes_checked(max_total_triangles).map_err(|p| format!("{}: {}", p.field, p.message))
     }
@@ -838,7 +868,8 @@ pub fn load(path: &Path) -> Result<WorldConfig, ConfigError> {
     if !problems.is_empty() {
         return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
     }
-    world.load_meshes_checked(MAX_MESH_TRIANGLES).map_err(|p| ConfigError::Invalid { path: path.to_path_buf(), problems: vec![p] })?;
+    let data = world.load_meshes_checked(MAX_MESH_TRIANGLES).map_err(|p| ConfigError::Invalid { path: path.to_path_buf(), problems: vec![p] })?;
+    world.mesh_cache = MeshCache(Some((world.meshes.clone(), world.materials.clone(), world.source_path.clone(), Arc::new(data))));
     Ok(world)
 }
 

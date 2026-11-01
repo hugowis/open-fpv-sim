@@ -2362,8 +2362,9 @@ mod tests {
         let vehicle = open_loop(&shipped_quad(), hall_world());
         let data = &vehicle.meshes()[0];
         assert_eq!(data.name, "hall");
-        // The vehicle's own data, the body's airframe, the ELRS link's parameters and the video link's world: no copies.
-        assert_eq!(Arc::strong_count(&data.mesh), 4);
+        // The vehicle's own data, the body's airframe, the ELRS link's parameters, the video link's world and the
+        // world's load cache: no copies.
+        assert_eq!(Arc::strong_count(&data.mesh), 5);
     }
 
     #[test]
