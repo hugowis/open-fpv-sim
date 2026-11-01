@@ -1,3 +1,5 @@
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -175,3 +177,27 @@ def test_fetch_dispatches_to_osm(monkeypatch):
     seen = []
     monkeypatch.setattr(osm, "fetch_main", lambda p: seen.append(p) or 7)
     assert cli.main(["fetch", "r.toml"]) == 7 and seen == [Path("r.toml")]
+
+
+def test_an_unsorted_snapshot_with_a_duplicate_id_builds_the_same_bytes(tmp_path):
+    base = tmp_path / "base"
+    build_site(DEMO / "recipe.toml", base)
+    r = demo(tmp_path, lambda t: t)
+    snap = r.parent / "demo.osm.json"
+    doc = json.loads(snap.read_text(encoding="utf-8"))
+    doc["ways"] = doc["ways"][::-1] + [{**doc["ways"][0], "tags": {"building": "yes", "height": "99"}}]
+    snap.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    rep = build_site(r, tmp_path / "o")
+    assert rep.skipped == {"recipe_skip": 1, "duplicate_id": 1}
+    for f in (OUT_WORLD, OUT_GLB):
+        assert (tmp_path / "o" / f).read_bytes() == (base / f).read_bytes()
+
+
+def test_the_cli_prints_cyrillic_to_a_piped_stdout(tmp_path):
+    d = tmp_path / "тест"
+    shutil.copytree(DEMO, d)
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+    p = subprocess.run([sys.executable, "-m", "sitegen", "build", str(d / "recipe.toml")], cwd=TESTS.parent, env=env,
+                       capture_output=True)
+    assert p.returncode == 0, p.stderr.decode("utf-8", "replace")
+    assert "тест".encode() in p.stdout

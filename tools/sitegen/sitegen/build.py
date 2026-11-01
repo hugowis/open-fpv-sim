@@ -68,7 +68,12 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
     def skip(reason):
         rep.skipped[reason] = rep.skipped.get(reason, 0) + 1
 
-    for w in ways:  # the snapshot is sorted by id
+    seen = set()
+    for w in sorted(ways, key=lambda w: w.id):  # sorted stably: the first of a duplicated id wins
+        if w.id in seen:
+            skip("duplicate_id")
+            continue
+        seen.add(w.id)
         i, o = over.get(w.id, (None, None))
         if o and o.skip:
             skip("recipe_skip")

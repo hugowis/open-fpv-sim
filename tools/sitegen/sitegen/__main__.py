@@ -9,6 +9,9 @@ from .recipe import RecipeError
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # a piped Windows stream is cp1252 and cannot print Cyrillic
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(prog="sitegen")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("build", help="recipe + snapshot -> .glb + world file").add_argument("recipe")
