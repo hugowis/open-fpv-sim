@@ -87,6 +87,16 @@ def test_bad_rings_return_none():
         assert normalize_ring(ring) is None, name
 
 
+def test_minimum_area_is_half_a_square_metre():
+    def rect(n, e):
+        return [(0.0, 0.0), (0.0, e), (n, e), (n, 0.0)]
+
+    for n, e in ((0.7, 0.8), (0.9, 0.9), (1.1, 0.9), (0.6, 1.0)):  # 0.56, 0.81, 0.99, 0.6 m2
+        assert normalize_ring(rect(n, e)) is not None, (n, e)
+    for n, e in ((0.4, 1.0), (0.5, 0.9), (0.1, 1.0)):  # 0.4, 0.45, 0.1 m2
+        assert normalize_ring(rect(n, e)) is None, (n, e)
+
+
 def test_normalize_is_idempotent():
     for raw in (SQUARE, L_SHAPE, U_SHAPE):
         once = normalize_ring(raw)

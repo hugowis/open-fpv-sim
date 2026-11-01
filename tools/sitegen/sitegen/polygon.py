@@ -61,7 +61,7 @@ def normalize_ring(ring) -> Ring | None:
                 again = True
                 break
     n = len(out)
-    if n < 3 or abs(signed_area(out)) < 2 * MIN_AREA_M2:
+    if n < 3 or abs(signed_area(out)) < MIN_AREA_M2:
         return None
     if any(_side(out[i - 1], out[(i + 1) % n], out[i]) == 0 for i in range(n)):
         return None  # a remaining collinear triple is a spike
