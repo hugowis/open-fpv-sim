@@ -166,8 +166,7 @@ intended change, `python tests/make_golden.py` rewrites the goldens; review the 
 are kept: `building`, `height`, `building:levels`, `name`, `name:en`, `man_made`, `roof:shape` (only string values). `fetch`
 counts the elements it drops: `open_way`, `relation`, `no_geometry`, `malformed`.
 
-A hand-written snapshot works too (the demo's is one); give it `"format": 1` and a `"ways"` list. See the licence note for
-`build` always writes the OpenStreetMap credit into the world header, even for hand-made outlines (over-crediting is harmless).
+A hand-written snapshot works too (the demo's is one); give it `"format": 1` and a `"ways"` list. `build` always writes the OpenStreetMap credit into the world header, even for hand-made outlines (over-crediting is harmless).
 
 ## Overpass etiquette (what `fetch` does)
 
