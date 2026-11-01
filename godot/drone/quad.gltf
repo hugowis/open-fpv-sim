@@ -1,0 +1,697 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "tools/make_quad_model.py \u2014 open-fpv-sim, see godot/drone/QUAD_MODEL.md"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0,
+    5,
+    6,
+    7,
+    8,
+    10,
+    11,
+    13,
+    14,
+    16,
+    17,
+    19,
+    20,
+    21
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Frame",
+   "children": [
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "name": "Plate",
+   "mesh": 0,
+   "translation": [
+    0,
+    0,
+    0.015
+   ],
+   "scale": [
+    0.034,
+    0.005,
+    0.09
+   ],
+   "children": []
+  },
+  {
+   "name": "PlateTop",
+   "mesh": 0,
+   "translation": [
+    0,
+    0.028,
+    0.012
+   ],
+   "scale": [
+    0.034,
+    0.004,
+    0.085
+   ],
+   "children": []
+  },
+  {
+   "name": "Arm1",
+   "mesh": 1,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.24,
+    0.008,
+    0.014
+   ],
+   "rotation": [
+    0.0,
+    0.3826834323650898,
+    0.0,
+    0.9238795325112867
+   ],
+   "children": []
+  },
+  {
+   "name": "Arm2",
+   "mesh": 1,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.24,
+    0.008,
+    0.014
+   ],
+   "rotation": [
+    0.0,
+    -0.3826834323650898,
+    0.0,
+    0.9238795325112867
+   ],
+   "children": []
+  },
+  {
+   "name": "Battery",
+   "mesh": 2,
+   "translation": [
+    0,
+    0.0425,
+    0.01
+   ],
+   "scale": [
+    0.035,
+    0.025,
+    0.09
+   ],
+   "children": []
+  },
+  {
+   "name": "BatteryStrap",
+   "mesh": 3,
+   "translation": [
+    0,
+    0.0425,
+    0.01
+   ],
+   "scale": [
+    0.041,
+    0.028,
+    0.012
+   ],
+   "children": []
+  },
+  {
+   "name": "Motor1",
+   "mesh": 4,
+   "translation": [
+    0.08,
+    0.016,
+    0.08
+   ],
+   "scale": [
+    0.052,
+    0.024,
+    0.052
+   ],
+   "children": []
+  },
+  {
+   "name": "Prop1",
+   "translation": [
+    0.08,
+    0.028,
+    0.08
+   ],
+   "children": [
+    9
+   ]
+  },
+  {
+   "name": "Blade",
+   "mesh": 5,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.127,
+    0.002,
+    0.012
+   ],
+   "children": []
+  },
+  {
+   "name": "Motor2",
+   "mesh": 4,
+   "translation": [
+    0.08,
+    0.016,
+    -0.08
+   ],
+   "scale": [
+    0.052,
+    0.024,
+    0.052
+   ],
+   "children": []
+  },
+  {
+   "name": "Prop2",
+   "translation": [
+    0.08,
+    0.028,
+    -0.08
+   ],
+   "children": [
+    12
+   ]
+  },
+  {
+   "name": "Blade",
+   "mesh": 5,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.127,
+    0.002,
+    0.012
+   ],
+   "children": []
+  },
+  {
+   "name": "Motor3",
+   "mesh": 4,
+   "translation": [
+    -0.08,
+    0.016,
+    0.08
+   ],
+   "scale": [
+    0.052,
+    0.024,
+    0.052
+   ],
+   "children": []
+  },
+  {
+   "name": "Prop3",
+   "translation": [
+    -0.08,
+    0.028,
+    0.08
+   ],
+   "children": [
+    15
+   ]
+  },
+  {
+   "name": "Blade",
+   "mesh": 5,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.127,
+    0.002,
+    0.012
+   ],
+   "children": []
+  },
+  {
+   "name": "Motor4",
+   "mesh": 4,
+   "translation": [
+    -0.08,
+    0.016,
+    -0.08
+   ],
+   "scale": [
+    0.052,
+    0.024,
+    0.052
+   ],
+   "children": []
+  },
+  {
+   "name": "Prop4",
+   "translation": [
+    -0.08,
+    0.028,
+    -0.08
+   ],
+   "children": [
+    18
+   ]
+  },
+  {
+   "name": "Blade",
+   "mesh": 5,
+   "translation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    0.127,
+    0.002,
+    0.012
+   ],
+   "children": []
+  },
+  {
+   "name": "Antenna1",
+   "mesh": 6,
+   "translation": [
+    -0.014,
+    0.058,
+    0.05
+   ],
+   "scale": [
+    0.007,
+    0.075,
+    0.007
+   ],
+   "rotation": [
+    0.3420201433256687,
+    0.0,
+    0.0,
+    0.9396926207859084
+   ],
+   "children": []
+  },
+  {
+   "name": "Antenna2",
+   "mesh": 7,
+   "translation": [
+    0.014,
+    0.058,
+    0.05
+   ],
+   "scale": [
+    0.007,
+    0.075,
+    0.007
+   ],
+   "rotation": [
+    0.3420201433256687,
+    0.0,
+    0.0,
+    0.9396926207859084
+   ],
+   "children": []
+  },
+  {
+   "name": "CameraMount",
+   "mesh": 8,
+   "translation": [
+    0.0,
+    0.02,
+    -0.04
+   ],
+   "scale": [
+    0.02,
+    0.02,
+    0.026
+   ],
+   "rotation": [
+    0.25881904510252074,
+    0.0,
+    0.0,
+    0.9659258262890683
+   ],
+   "children": [
+    22
+   ]
+  },
+  {
+   "name": "Lens",
+   "mesh": 9,
+   "translation": [
+    0,
+    0,
+    -0.015
+   ],
+   "scale": [
+    0.014,
+    0.014,
+    0.004
+   ],
+   "children": []
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 1
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 2
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 3
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 4
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 5
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 6
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 7
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 8
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1
+     },
+     "indices": 2,
+     "material": 9
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "part0",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.1,
+     0.1,
+     0.11,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part1",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.2,
+     0.2,
+     0.22,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part2",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.9,
+     0.55,
+     0.1,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part3",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.15,
+     0.15,
+     0.16,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part4",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.16,
+     0.16,
+     0.18,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part5",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.08,
+     0.08,
+     0.08,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part6",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.85,
+     0.2,
+     0.2,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part7",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.2,
+     0.4,
+     0.9,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part8",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.08,
+     0.08,
+     0.09,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  },
+  {
+   "name": "part9",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.02,
+     0.02,
+     0.03,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.8
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "max": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "min": [
+    -0.5,
+    -0.5,
+    -0.5
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR",
+   "max": [
+    23
+   ],
+   "min": [
+    0
+   ]
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 288
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 288,
+   "byteLength": 288
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 576,
+   "byteLength": 72
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 648,
+   "uri": "data:application/octet-stream;base64,AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAL8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAD8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAA/AAAAPwAAAD8AAAA/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAA/AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAA/AAAAvwAAAL8AAAC/AAAAvwAAAL8AAAA/AAAAvwAAAD8AAAA/AAAAvwAAAD8AAAC/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcA"
+  }
+ ]
+}

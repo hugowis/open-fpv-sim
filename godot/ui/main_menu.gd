@@ -7,6 +7,7 @@ extends CanvasLayer
 const AppSettings = preload("res://scripts/settings.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const CycleButton = preload("res://ui/cycle_button.gd")
+const QuadPreview = preload("res://ui/quad_preview.gd")
 
 ## The pilot changed `key` (`world_path`, `quad_path`, `race_start`, `course` or `open_loop`) to `value`.
 signal choice_changed(key: String, value)
@@ -23,6 +24,7 @@ var locks := {}  # key -> "--flag" or "OFS_NAME"
 
 var _worlds: Array = []
 var _quads: Array = []
+var _preview := QuadPreview.new()
 var _start := Button.new()
 var _settings_button := Button.new()
 var _controls_button := Button.new()
@@ -41,13 +43,19 @@ func _ready() -> void:
 	back.color = Color(0.06, 0.07, 0.09)
 	back.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(back)
+	var columns := HBoxContainer.new()
+	columns.set_anchors_preset(Control.PRESET_CENTER)
+	columns.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	columns.grow_vertical = Control.GROW_DIRECTION_BOTH
+	columns.add_theme_constant_override("separation", 24)
+	add_child(columns)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	box.custom_minimum_size.x = 460
 	box.add_theme_constant_override("separation", 10)
-	add_child(box)
+	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	columns.add_child(box)
+	columns.add_child(_preview)
+	_preview.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var title := Label.new()
 	title.text = "Open FPV Sim"
 	title.add_theme_font_size_override("font_size", 40)
@@ -65,6 +73,7 @@ func _ready() -> void:
 	_quit.pressed.connect(func() -> void: quit_requested.emit())
 	_world.changed.connect(_on_world)
 	_quad.changed.connect(func(path) -> void: choice_changed.emit("quad_path", path))
+	_quad.changed.connect(func(path) -> void: _preview.set_quad(path))
 	_mode.changed.connect(func(race) -> void: choice_changed.emit("race_start", race))
 	_course.changed.connect(func(name) -> void: choice_changed.emit("course", name))
 	_controller.changed.connect(func(open_loop) -> void: choice_changed.emit("open_loop", open_loop))
@@ -116,6 +125,11 @@ func hint() -> String:
 	return _hint.text
 
 
+## The turning model of the selected quad, for tests (and the workbench, #128).
+func preview():
+	return _preview
+
+
 func _refresh() -> void:
 	if settings.is_empty() or not is_node_ready():
 		return
@@ -123,6 +137,7 @@ func _refresh() -> void:
 	_quads = Catalog.with_current(Catalog.list(Catalog.roots(settings, "quads")), settings["quad_path"])
 	_fill(_world, "World", "world_path", _worlds)
 	_fill(_quad, "Quad", "quad_path", _quads)
+	_preview.set_quad(settings["quad_path"])
 	var no_firmware: bool = settings["sitl_launch"] == ""
 	_controller.setup(_title("Flight controller", "open_loop"), [true] if no_firmware else [false, true],
 		["Open loop"] if no_firmware else ["Betaflight", "Open loop"])
