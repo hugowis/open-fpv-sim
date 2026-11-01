@@ -2,8 +2,9 @@
 //! NED = (-z, x, -y); the mesh is then turned by a heading (clockwise from north) and moved to a position, all in
 //! f64. Geometry only: no images are decoded, and a `.glb` that points at external buffers is refused.
 //!
-//! Collision follows the Godot side's convention: a node whose name starts with `col_` is collision-only, and if
-//! the file has any such node only those contribute; otherwise every node does.
+//! Collision follows the Godot side's convention: a node whose own name starts with `col_` is collision-only, and if
+//! any such node has triangles only those contribute (not their children, which Godot drops with them); otherwise
+//! every node does.
 use std::fs;
 use std::path::Path;
 
@@ -13,7 +14,8 @@ use ofs_core::rng::fnv1a64;
 
 /// At most this many `[[meshes]]` in one world.
 pub const MAX_MESHES: usize = 8;
-/// At most this many triangles in one file (counted as stored, before degenerate ones are dropped).
+/// At most this many triangles in one world, all its meshes together (counted as stored, before degenerate ones
+/// are dropped). A file may also read at most 3 x this many positions, counting a shared accessor once per node.
 pub const MAX_MESH_TRIANGLES: usize = 400_000;
 /// At most this many bytes in one file; the size is checked before the bytes are read.
 pub const MAX_MESH_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -59,7 +61,7 @@ fn load(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, max_triangles: 
     let scene = gltf.default_scene().or_else(|| gltf.scenes().next()).ok_or("the file has no scene")?;
 
     let mut prims = Vec::new();
-    let mut triangles = 0usize;
+    let (mut triangles, mut positions_read) = (0usize, 0usize);
     let mut stack: Vec<(gltf::Node, DMat4)> = scene.nodes().map(|n| (n, DMat4::IDENTITY)).collect();
     stack.reverse();
     // glTF nodes form a tree; gltf-json checks neither cycles nor shared children, so a revisit is an error.
@@ -84,6 +86,23 @@ fn load(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, max_triangles: 
                     }
                     if acc.count() == 0 || acc.count() > limit {
                         return Err(format!("an accessor of {} elements is empty or over the limit of {max_triangles} triangles", acc.count()));
+                    }
+                }
+                // gltf-json does not check these, and the reader panics on what it cannot take.
+                use gltf::accessor::{DataType as T, Dimensions as D};
+                if let Some(p) = prim.get(&gltf::Semantic::Positions) {
+                    if p.data_type() != T::F32 || p.dimensions() != D::Vec3 {
+                        return Err(format!("POSITION must be F32 VEC3, not {:?} {:?}", p.data_type(), p.dimensions()));
+                    }
+                    // Instancing re-reads a shared accessor per node, which the triangle count does not see.
+                    positions_read += p.count();
+                    if positions_read > limit {
+                        return Err(format!("the nodes read more than {limit} positions in all (3 x the {max_triangles}-triangle limit)"));
+                    }
+                }
+                if let Some(i) = prim.indices() {
+                    if !matches!(i.data_type(), T::U8 | T::U16 | T::U32) || i.dimensions() != D::Scalar {
+                        return Err(format!("indices must be unsigned SCALAR, not {:?} {:?}", i.data_type(), i.dimensions()));
                     }
                 }
                 let reader = prim.reader(|b| match b.source() {

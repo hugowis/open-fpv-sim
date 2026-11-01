@@ -208,6 +208,49 @@ fn bad_indices_are_errors() {
 }
 
 #[test]
+fn accessor_types_the_reader_cannot_take_are_errors_not_panics() {
+    let node = r#"{"name":"n","mesh":0}"#;
+    // FLOAT indices reach an `unreachable!` in the gltf reader.
+    let float_indices = format!("{POSITIONS},{{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"SCALAR\"}}");
+    refused(&glb_with(node, &float_indices, r#"{"attributes":{"POSITION":0},"indices":1}"#), "indices");
+    // u16 positions trip a debug assertion in the reader.
+    let u16_positions = r#"{"bufferView":0,"componentType":5123,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}"#;
+    refused(&glb_with(node, u16_positions, r#"{"attributes":{"POSITION":0}}"#), "POSITION");
+    let vec2_positions = POSITIONS.replace("VEC3", "VEC2").replace(",0]", "]");
+    refused(&glb_with(node, &vec2_positions, r#"{"attributes":{"POSITION":0}}"#), "POSITION");
+}
+
+#[test]
+fn instancing_one_big_primitive_is_bounded_by_the_positions_read() {
+    // 300 nodes share one primitive: 30 positions, 3 u16 indices. 300 triangles pass a 400-triangle cap, but the
+    // walk would read 9000 positions, over the 1200 (3 x cap) budget.
+    let mut bin = Vec::new();
+    for i in 0..30 * 3 {
+        let c = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].get(i).copied().unwrap_or(0.0);
+        bin.extend_from_slice(&c.to_le_bytes());
+    }
+    for i in [0u16, 1, 2] {
+        bin.extend_from_slice(&i.to_le_bytes());
+    }
+    let nodes: Vec<String> = (0..300).map(|i| format!(r#"{{"name":"n{i}","mesh":0}}"#)).collect();
+    let ids: Vec<String> = (0..300).map(|i| i.to_string()).collect();
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[{}]}}],"nodes":[{}],
+        "meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1}}]}}],
+        "accessors":[{{"bufferView":0,"componentType":5126,"count":30,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}},
+            {{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],
+        "bufferViews":[{{"buffer":0,"byteLength":360}},{{"buffer":0,"byteOffset":360,"byteLength":6}}],"buffers":[{{"byteLength":366}}]}}"#,
+        ids.join(","),
+        nodes.join(",")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(&dir, &pack_glb(&json, &bin));
+    assert_eq!(load_glb_with(&path, [0.0; 3], 0.0, 3000).unwrap().mesh.len(), 300);
+    let e = load_glb_with(&path, [0.0; 3], 0.0, 400).unwrap_err();
+    assert!(e.contains(&path.display().to_string()) && e.contains("positions"), "{e}");
+}
+
+#[test]
 fn node_cycles_and_fan_out_are_errors_not_hangs() {
     let prim = r#"{"attributes":{"POSITION":0}}"#;
     refused(&glb_with(r#"{"name":"a","children":[0]}"#, POSITIONS, prim), "not a tree");
