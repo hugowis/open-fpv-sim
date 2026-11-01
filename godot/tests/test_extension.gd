@@ -70,6 +70,15 @@ func test_invalid_settings_are_reported_as_text() -> void:
 	client.queue_free()
 
 
+func test_a_stabilized_start_is_valid_settings() -> void:
+	var client := await _client()
+	var error: String = client.start({"quad_path": QUAD, "server_addr": "127.0.0.1:1", "open_loop": true, "stabilize": true})
+	eq(error, "", "open_loop with stabilize parses (the wire proof is e2e_open_loop.gd's stabilized start)")
+	eq(client.start({"quad_path": QUAD}), "already started", "and it really started")
+	client.stop()
+	client.queue_free()
+
+
 func test_a_server_that_is_not_there_fails_with_a_signal_and_a_hint() -> void:
 	var client := await _client()
 	var seen := []
