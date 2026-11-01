@@ -69,7 +69,12 @@ class Recipe:
 
 
 def _num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:  # TOML ints are unbounded: float() overflows past ~1e308, which is not finite either
+        return math.isfinite(float(v))
+    except OverflowError:
+        return False
 
 
 class _Check:

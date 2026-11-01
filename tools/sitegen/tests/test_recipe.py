@@ -147,7 +147,6 @@ def test_relative_paths_resolve_against_the_recipe(tmp_path):
     assert isinstance(r.world_path, Path)
 
 
-
 @pytest.mark.parametrize("extra, want", [
     ("footprints = 3", "footprints: must be an array of tables"),
     ("landmarks = [1]", "landmarks[0]: must be a table"),
@@ -184,3 +183,16 @@ def test_non_finite_numbers_are_errors(tmp_path, text, field):
 def test_non_finite_extent_is_an_error(tmp_path):
     lines = problems(tmp_path, MINIMAL.replace("[300.0, 250.0]", "[inf, 1.0]"))
     assert "site.half_extent_m" in [ln.split(":")[0] for ln in lines]
+
+
+HUGE = "9" * 400
+
+
+def test_huge_integer_rf_loss_is_an_error_not_a_crash(tmp_path):
+    lines = problems(tmp_path, MINIMAL + f"[[materials]]\nname = 'a'\nrf_loss_db = {HUGE}\n")
+    assert "materials[0].rf_loss_db" in [ln.split(":")[0] for ln in lines]
+
+
+def test_huge_integer_colour_is_an_error_not_a_crash(tmp_path):
+    lines = problems(tmp_path, MINIMAL.replace("[0.62, 0.60, 0.56]", f"[{HUGE}, 0, 0]"))
+    assert "colors.building" in [ln.split(":")[0] for ln in lines]
