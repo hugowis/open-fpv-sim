@@ -48,15 +48,19 @@ The ventilation stack VP-2, 75.5 m tall on the roof of unit 4 with its top 150 m
 October and 25 November 2013 so that the NSC could be slid over reactor 4
 (<https://world-nuclear-news.org/Articles/Chernobyl-ventilation-stack-removed>). The arch and the stack never stood
 together. The map is the present-day site, so no chimney is built, and a test (`test_no_chimney_is_built`) caps the height at
-the arch's 108 m. OpenStreetMap still maps a 125 m chimney where VP-2 stood; that is stale and is not built either.
+the arch's 108 m. As of 2026-11-01 OpenStreetMap still maps a 125 m chimney where VP-2 stood (way 301362167); that is stale and is not built either.
 
 ## Flying it
 
-The game: set `world_path` in the settings to `worlds/chernobyl.toml`, or start it with `OFS_WORLD=worlds/chernobyl.toml`
-or `--world=worlds/chernobyl.toml` (`docs/dev-setup.md`, "The world file and the analog video link"). From Python:
+The game: set `world_path` in the settings to the file, or start it with `OFS_WORLD=worlds/chernobyl.toml` or
+`--world=worlds/chernobyl.toml` (`docs/dev-setup.md`, "The world file and the analog video link"). The client passes the
+string to the server unchanged and the server opens it as a path, so a relative path like this one works only when the
+server starts in the repository root (as `godot --path godot` is started in the README); from anywhere else use the
+absolute path. A bare name (`chernobyl`) is not documented for the game, only for Python. From Python:
 
 ```python
-sim.load("quads/opendrone-7lr-longrange.toml", world="worlds/chernobyl.toml")   # or world="chernobyl", by name
+sim.load("quads/opendrone-7lr-longrange.toml", world="chernobyl")   # a bare name: worlds/chernobyl.toml beside the quad's directory
+sim.load("quads/opendrone-7lr-longrange.toml", world="worlds/chernobyl.toml")   # a path: from the repository root, or absolute
 ```
 
 You start 150 m west of the door. Fly east and in: a 7-inch quad (about 0.4 m tip to tip) passes the 40 m door without
@@ -68,9 +72,11 @@ touching anything. Come in 30 m off the door's axis and you hit the end wall (`H
 
 A path loses 40 dB for every skin of the arch it crosses (an estimate; no diffraction, no reflection, no thickness:
 `docs/dev-setup.md`). The video link is therefore dead behind the arch and inside it, except where the line to the pilot
-passes through the door: near the door's axis the picture holds, off to the side the line crosses the end wall. The test
-`the_video_link_is_cut_by_the_arch_skin_and_not_through_the_door` shows 40 dB or more behind the end wall and none straight
-through the door.
+passes through the door: where it passes through the 40 x 40 m opening the picture holds; where it crosses the closed end
+wall the skin takes 40 dB. The tests check it at two points each: in Rust
+(`the_video_link_is_cut_by_the_arch_skin_and_not_through_the_door`) the quad at (0, -40) gets 0 dB and at (40, -40) 40 dB or
+more; in Python (`test_the_pilot_sees_the_door`) the line of sight from the pilot passes 10 m off the door's axis and is
+blocked 25 m off it.
 
 ## Regenerating it
 
@@ -90,7 +96,7 @@ The output is byte-identical to what is committed, and `tools/sitegen/tests/test
   collapse of 600 m2 of its roof and wall (<https://world-nuclear-news.org/articles/safety-work-planned-for-chernobyl-turbine-hall>).
 
 Stage B waits for the repository owner to confirm `docs/research/sitegen-licensing.md` (status: unconfirmed): whether an ODbL
-snapshot may live in this GPLv3 repository. Nothing from OpenStreetMap is committed until then.
+snapshot may live in this GPLv3 repository. Nothing from OpenStreetMap is committed until then: `test_the_snapshot_is_hand_made_and_empty` (`tools/sitegen/tests/test_chernobyl_site.py`) and `tools/sitegen/tests/test_licence_gate.py` guard it.
 
 ## Attribution
 
