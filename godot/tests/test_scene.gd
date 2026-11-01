@@ -456,3 +456,20 @@ func test_a_world_without_meshes_builds_exactly_as_before() -> void:
 	world.build(with_empty)
 	eq(world.built_names(), before, "an empty meshes array changes nothing")
 	world.queue_free()
+
+
+func test_a_yawed_box_is_drawn_rotated_and_no_yaw_is_today_node() -> void:
+	var world := World.new()
+	await add_to_tree(world)
+	var dict := {"objects": [
+		{"name": "Bar", "shape": "box", "center": Vector3.ZERO, "size": Vector3(1.0, 1.0, 8.0), "color": Color.WHITE, "yaw_deg": 90.0},
+		{"name": "Plain", "shape": "box", "center": Vector3.ZERO, "size": Vector3(1.0, 1.0, 8.0), "color": Color.WHITE},
+	]}
+	world.build(dict)
+	# The size's z (the box's north extent, 8 m) yawed 90 degrees lies along east.
+	var bar: MeshInstance3D = world.get_node("Bar")
+	var long_axis: Vector3 = bar.global_transform.basis * Vector3(0.0, 0.0, 1.0)
+	ok(long_axis.distance_to(Vector3(1.0, 0.0, 0.0)) < 1e-6, "yaw 90 turns the long (north) axis to east")
+	var plain: MeshInstance3D = world.get_node("Plain")
+	eq(plain.transform, Transform3D(), "no yaw_deg leaves the node exactly unrotated (center at the origin)")
+	world.queue_free()
