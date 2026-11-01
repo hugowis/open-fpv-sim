@@ -258,6 +258,7 @@ pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Ter
                 height_m: o.height_m.unwrap_or(0.0),
                 color: vec3_of(o.color),
                 rf_loss_db: o.rf_loss_db,
+                yaw_deg: o.yaw_deg.unwrap_or(0.0),
             })
             .collect(),
         emitters: w
@@ -800,6 +801,27 @@ mod tests {
             "the last lap also ends the race"
         );
         assert_eq!(race_events(&RaceEvent::LapCompleted { lap: 1, time_s: 9.0, lap_s: 9.0, best: true, finished: true }, &names)[1].message, "race finished: 1 lap");
+    }
+
+    #[test]
+    fn the_world_message_carries_a_box_yaw() {
+        // A hand-built world in the building-helper style: one box that yaws, one that does not.
+        let object = |yaw: Option<f64>| ofs_config::world::ObjectSection {
+            name: "Bar".into(),
+            shape: world_cfg::Shape::Box,
+            center_ned_m: [60.0, 45.0, -5.075],
+            size_m: Some([8.3, 0.15, 0.15]),
+            radius_m: None,
+            height_m: None,
+            yaw_deg: yaw,
+            color: [0.2, 0.8, 0.35],
+            rf_loss_db: 0.0,
+        };
+        let mut yawed = ofs_config::WorldConfig::open_field();
+        yawed.objects = vec![object(Some(135.0)), object(None)];
+        let msg = world_msg(&yawed, None, &[]);
+        assert_eq!(msg.objects[0].yaw_deg, 135.0, "the wire carries the yaw");
+        assert_eq!(msg.objects[1].yaw_deg, 0.0, "a box without one is axis-aligned");
     }
 
     #[test]
