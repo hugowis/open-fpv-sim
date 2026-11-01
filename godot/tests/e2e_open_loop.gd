@@ -79,11 +79,16 @@ func _avi_frames(path: String) -> Array:
 
 
 ## Copies a directory tree. The quad parts library resolves from `library/` beside the quads dir (#176), so a quad
-## written into the e2e data dir needs the library copied beside it, exactly like a self-contained install.
+## written into the e2e data dir needs the library copied beside it, exactly like a self-contained install. A failed
+## copy is said out loud here — otherwise it surfaces only as a misattributed load failure downstream.
 func _copy_tree(from: String, to: String) -> void:
-	DirAccess.make_dir_recursive_absolute(to)
+	var err := DirAccess.make_dir_recursive_absolute(to)
+	if err != OK:
+		push_error("e2e: could not create %s (error %d)" % [to, err])
 	for file in DirAccess.get_files_at(from):
-		DirAccess.copy_absolute(from.path_join(file), to.path_join(file))
+		err = DirAccess.copy_absolute(from.path_join(file), to.path_join(file))
+		if err != OK:
+			push_error("e2e: could not copy %s (error %d)" % [from.path_join(file), err])
 	for dir in DirAccess.get_directories_at(from):
 		_copy_tree(from.path_join(dir), to.path_join(dir))
 
