@@ -39,8 +39,36 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 - school: the progress numbers reading as teaching, the pylons against the circuit field, a demo flown end to
   end, a Betaflight arm on a real switch, the hover's difficulty (its plan's Task 10 and the spec's list).
 
+## The Consequence-completion plan set — before it merges
+
+- **Rule the specs' maintainer questions** (`docs/superpowers/specs/2026-10-31-{rotated-boxes,object-collisions,crash-damage}-design.md`):
+  - object-collisions — #29's "props with each other" is read as two aircraft's props, ruled out of part 1 (one
+    vehicle per session); the executing session posts this reading in #156 before starting and proceeds unless
+    corrected — say the word here first if you disagree.
+  - crash-damage — a dislodged battery sags one cell (the `WeakCell` seam holds one; pack-wide sag would be a
+    tenth fault variant), and a catastrophic impulse floors a motor at `scale = 0.2` rather than killing it (the
+    spec's two open questions).
+  - rotated-boxes — none (yaw-only declined full orientation with the `rooted_on` exactness reason).
+- **Read the dispositions.** The umbrella (`docs/superpowers/plans/2026-10-31-consequence-completion.md`)
+  propositions the wave and its deltas; the wire-number coordination rule (three pairs assume protocol 17, two
+  collide on `WorldObject` field 9, two on `State` field 21 — sequential landing, next free number) is the one to
+  keep in view.
+- **Rule the filed follow-ups:** #174 (the hover-determinism flake on windows-sitl — one strike, passes since)
+  and the minors' two rulings (the ESC rating stops clamping #164, with the golden regeneration it sanctions;
+  the mag block is SITL-side only #165).
+
+## At execution — the Consequence tasks' by-hand passes
+
+- rotated-boxes: the yawed gate bar in meadow read at a glance in both cameras; a yawed wall's crash feel
+  unchanged from an axis-aligned one of the same shape (its plan's docs task).
+- object-collisions: the park crate's throw crossing the diamond visibly; a crate strike's toast; the timing
+  row's numbers (its plan's Task 7).
+- crash-damage: a crashed quad flying audibly and visibly worse before repair and right after (Python `repair`),
+  the bent prop's shake audible in a recording, the resting-forever quad staying factory-new (its spec's
+  checked-by-eye list).
+- the minors: the 5F's full-throttle amperage against a bench expectation if one is ever available (#164's
+  number is model-derived); a mag quad's compass in the Betaflight Configurator following declination (#165).
+
 ## Standing
 
 - #163 stays open until both waves' checks are in; this file points, #163 keeps.
-- The Consequence wave's by-hand checks (terrain flight feel, damage by ear, DVR audio in VLC) join this file
-  when that wave's plans exist.
