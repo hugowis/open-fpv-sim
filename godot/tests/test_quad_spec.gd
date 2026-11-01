@@ -25,6 +25,16 @@ func test_an_unreadable_quad_falls_back_to_the_authored_5f() -> void:
 	DirAccess.remove_absolute(path)
 
 
+func test_a_zero_arm_frame_falls_back_instead_of_vanishing() -> void:
+	var dir := "user://quad-spec-zero"
+	DirAccess.make_dir_recursive_absolute(dir.path_join("quads"))
+	DirAccess.make_dir_recursive_absolute(dir.path_join("library/frames"))
+	FileAccess.open(dir.path_join("quads/z.toml"), FileAccess.WRITE).store_string("frame = \"zero\"\n")
+	FileAccess.open(dir.path_join("library/frames/zero.toml"), FileAccess.WRITE).store_string(
+		"[frame]\nmotor_positions_frd_m = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]\n")
+	near(QuadSpec.arm_m(dir.path_join("quads/z.toml")), 0.08, "a degenerate arm falls back, never a zero scale")
+
+
 func test_a_frame_part_beside_its_quads_is_found() -> void:
 	var dir := "user://quad-spec-lib"
 	DirAccess.make_dir_recursive_absolute(dir.path_join("quads"))

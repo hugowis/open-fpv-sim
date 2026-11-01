@@ -11,12 +11,14 @@ const DEFAULT_ARM_M := 0.08
 const DEFAULT_SPIN: Array = [1.0, -1.0, -1.0, 1.0]
 
 
-## The frame's motor arm in metres (the first motor position's larger sideways coordinate).
+## The frame's motor arm in metres (the first motor position's larger sideways coordinate). A degenerate row
+## (zeros) falls back with the unreadable ones: a zero arm would zero-scale the model away.
 static func arm_m(quad_path: String) -> float:
 	var row := _first_row(frame_part(quad_path), "motor_positions_frd_m")
 	if row.size() < 2:
 		return DEFAULT_ARM_M
-	return maxf(absf(row[0]), absf(row[1]))
+	var arm: float = maxf(absf(row[0]), absf(row[1]))
+	return arm if arm > 0.0 else DEFAULT_ARM_M
 
 
 ## The frame's propeller directions, +1 clockwise seen from above.
