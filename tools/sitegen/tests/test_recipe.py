@@ -145,3 +145,42 @@ def test_relative_paths_resolve_against_the_recipe(tmp_path):
     assert r.glb_rel == "assets/demo.glb"
     assert r.glb_path == r.world_path.parent / "assets/demo.glb"
     assert isinstance(r.world_path, Path)
+
+
+
+@pytest.mark.parametrize("extra, want", [
+    ("footprints = 3", "footprints: must be an array of tables"),
+    ("landmarks = [1]", "landmarks[0]: must be a table"),
+    ("footprints = {a = 1}", "footprints: must be an array of tables"),
+    ("materials = 'x'", "materials: must be an array of tables"),
+    ("landmarks = {kind = 'arch'}", "landmarks: must be an array of tables"),
+])
+def test_wrong_type_array_sections_are_errors(tmp_path, extra, want):
+    # top-level keys must precede the tables, hence the prepend
+    assert want in problems(tmp_path, extra + "\n" + MINIMAL)
+
+
+def test_non_utf8_recipe_is_a_recipe_error(tmp_path):
+    p = tmp_path / "bad.toml"
+    p.write_bytes(MINIMAL.encode() + b"# caf\xe9\n")
+    with pytest.raises(RecipeError, match="^toml: "):
+        load_recipe(p)
+
+
+def test_missing_file_is_a_file_error(tmp_path):
+    with pytest.raises(RecipeError, match="^file: "):
+        load_recipe(tmp_path / "nope.toml")
+
+
+@pytest.mark.parametrize("text, field", [
+    ("[[materials]]\nname = 'a'\nrf_loss_db = nan\n", "materials[0].rf_loss_db"),
+    ("[defaults]\nbuilding_height_m = inf\n", "defaults.building_height_m"),
+    ("[[footprints]]\nid = 1\nheight_m = inf\n", "footprints[0].height_m"),
+])
+def test_non_finite_numbers_are_errors(tmp_path, text, field):
+    assert field in [ln.split(":")[0] for ln in problems(tmp_path, MINIMAL + text)]
+
+
+def test_non_finite_extent_is_an_error(tmp_path):
+    lines = problems(tmp_path, MINIMAL.replace("[300.0, 250.0]", "[inf, 1.0]"))
+    assert "site.half_extent_m" in [ln.split(":")[0] for ln in lines]

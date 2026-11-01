@@ -1,3 +1,4 @@
+import math
 import re
 import tomllib
 from dataclasses import dataclass
@@ -68,7 +69,7 @@ class Recipe:
 
 
 def _num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 class _Check:
@@ -90,6 +91,18 @@ class _Check:
         if allowed is not None:
             self.keys(t, path, allowed)
         return t
+
+    def items(self, d, key):
+        """(index, path, table) for each entry of the array-of-tables d[key]; bad shapes are recorded."""
+        a = d.get(key, [])
+        if not isinstance(a, list):
+            self.err(key, "must be an array of tables")
+            return
+        for i, t in enumerate(a):
+            if isinstance(t, dict):
+                yield i, f"{key}[{i}]", t
+            else:
+                self.err(f"{key}[{i}]", "must be a table")
 
     def keys(self, t, path, allowed):
         for k in sorted(set(t) - set(allowed)):
@@ -139,8 +152,7 @@ def _site(c, d):
 
 def _footprints(c, d):
     out, seen = [], set()
-    for i, f in enumerate(d.get("footprints", [])):
-        p = f"footprints[{i}]"
+    for _, p, f in c.items(d, "footprints"):
         c.keys(f, p, {"id", "skip", "height_m", "material"})
         fid = c.get(f, p, "id", int)
         if fid is not None and fid in seen:
@@ -153,8 +165,7 @@ def _footprints(c, d):
 
 def _landmarks(c, d):
     out, seen = [], set()
-    for i, m in enumerate(d.get("landmarks", [])):
-        p = f"landmarks[{i}]"
+    for _, p, m in c.items(d, "landmarks"):
         kind, name = c.get(m, p, "kind", str), c.get(m, p, "name", str)
         if name is not None:
             if name in seen:
@@ -178,7 +189,9 @@ def load_recipe(path: Path) -> Recipe:
     try:
         with open(path, "rb") as f:
             d = tomllib.load(f)
-    except (tomllib.TOMLDecodeError, OSError) as e:
+    except OSError as e:
+        raise RecipeError(f"file: {e}") from None
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise RecipeError(f"toml: {e}") from None
     c = _Check()
     for k in sorted(set(d) - {"site", "output", "defaults", "colors", "materials", "footprints", "landmarks", "world"}):
@@ -202,8 +215,7 @@ def load_recipe(path: Path) -> Recipe:
         c.err("colors.building", "missing")
 
     mats, seen = [], set()
-    for i, m in enumerate(d.get("materials", [])):
-        p = f"materials[{i}]"
+    for _, p, m in c.items(d, "materials"):
         c.keys(m, p, {"name", "rf_loss_db"})
         n, loss = c.get(m, p, "name", str), c.get(m, p, "rf_loss_db", float)
         if n is not None and n in seen:
