@@ -22,7 +22,7 @@ fn far_post() -> Vec<WorldObject> {
     }]
 }
 
-/// A rectangle of two triangles through the corners `a`, `b`, `c` and `a + (c - b)`... given as four corners in order.
+/// Two triangles over four corners given in order.
 fn quad(c: [DVec3; 4]) -> [Triangle; 2] {
     [Triangle { a: c[0], b: c[1], c: c[2], material: 0 }, Triangle { a: c[0], b: c[2], c: c[3], material: 0 }]
 }
@@ -199,10 +199,50 @@ fn a_mesh_far_from_the_quad_costs_no_contact() {
     assert_eq!(s.vel_ned_mps, before.vel_ned_mps);
 
     // With the true box the same state is pushed out.
-    let mut near = world_mesh("wall", wall_rect(10.0, (-10.0, 10.0), (-10.0, 10.0)).to_vec());
-    near.bounds = near.mesh.bounds();
+    let near = world_mesh("wall", wall_rect(10.0, (-10.0, 10.0), (-10.0, 10.0)).to_vec());
     let p = params(vec![(DVec3::ZERO, R)], vec![near]);
     let mut s = before;
     resolve(&p, &mut s, &mut touch, 0.0);
     assert!(s.pos_ned_m.x < before.pos_ned_m.x);
+}
+
+/// The body's acceleration after one step with a single landing point at its centre, 0.5 mm above `mesh`.
+fn one_foot_accel(mesh: WorldMesh, north: f64, east: f64) -> DVec3 {
+    let mut p = params(vec![], vec![mesh]);
+    p.contact_points_frd_m = vec![DVec3::ZERO];
+    let mut s = sim(p, state(DVec3::new(north, east, AIR - 0.0005), DVec3::ZERO, DQuat::IDENTITY));
+    s.step().unwrap();
+    vec3(&s, names::BODY_ACCEL_NED)
+}
+
+#[test]
+fn a_landing_point_on_a_shared_vertex_feels_the_same_force_as_one_in_a_triangle() {
+    // A hexagonal fan of six coplanar triangles around (0, 0), 1 m out.
+    let rim = |k: usize| {
+        let a = k as f64 * std::f64::consts::FRAC_PI_3;
+        DVec3::new(a.cos(), a.sin(), AIR)
+    };
+    let fan = || {
+        let tris = (0..6).map(|k| Triangle { a: DVec3::new(0.0, 0.0, AIR), b: rim(k), c: rim((k + 1) % 6), material: 0 }).collect();
+        world_mesh("fan", tris)
+    };
+    let inside = (rim(0) + rim(1)) / 3.0;
+    let on_vertex = one_foot_accel(fan(), 0.0, 0.0);
+    let in_triangle = one_foot_accel(fan(), inside.x, inside.y);
+    assert!(on_vertex.z < GRAVITY_MPS2 - 1.0, "the foot pushes: {on_vertex}");
+    assert!((on_vertex - in_triangle).length() < 1e-9, "vertex {on_vertex}, interior {in_triangle}");
+}
+
+#[test]
+fn a_fast_sphere_never_tunnels_through_a_mesh_wall() {
+    // 30 m/s at a wall 5 m ahead: it would reach 11 m in 0.2 s.
+    let wall = world_mesh("wall", wall_rect(10.0, (-10.0, 10.0), (-10.0, 10.0)).to_vec());
+    let p = params(vec![(DVec3::ZERO, R)], vec![wall]);
+    let mut s = sim(p, state(DVec3::new(5.0, 0.0, AIR), DVec3::new(30.0, 0.0, 0.0), DQuat::IDENTITY));
+    for _ in 0..1600 {
+        s.step().unwrap();
+        let north = vec3(&s, names::BODY_POS_NED).x;
+        assert!(north <= 10.0 - R + 1e-9, "centre at {north}, through the wall");
+    }
+    assert!(vec3(&s, names::BODY_VEL_NED).x < 0.0, "it bounced back");
 }

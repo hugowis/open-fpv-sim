@@ -173,8 +173,9 @@ impl RigidBody {
     /// or a world object — for the collision events. The spring-damper and Coulomb friction of `[ground]`
     /// (`collision::point_force`) act on every landing contact point against the ground and against every
     /// world object; against an object the depth is minus the signed distance and the normal is the shape's
-    /// gradient there. Against a mesh the point is a sphere of `MESH_POINT_RADIUS_M`: one contact per triangle it
-    /// touches, the depth the radius minus the distance and the normal from the surface toward the point.
+    /// gradient there. Against a mesh the point is a sphere of `MESH_POINT_RADIUS_M`: one contact per mesh, with
+    /// its nearest triangle: the depth is the radius minus the distance and the normal runs from the surface toward
+    /// the point.
     fn contact(&mut self, s: &BodyState, dt: f64) -> (DVec3, DVec3, Vec<(i32, f64)>) {
         let g = &self.p.ground;
         let before = std::mem::take(&mut self.anchors);
@@ -224,7 +225,9 @@ impl RigidBody {
                 self.hits.clear();
                 wm.mesh.within(point, collision::MESH_POINT_RADIUS_M, &mut self.hits);
                 let object = (self.p.objects.len() + j) as i32;
-                for hit in &self.hits {
+                // Only the nearest triangle (the first in BVH order on a tie): one contact per mesh, as for a
+                // shape, so the force does not depend on how the surface is tessellated.
+                if let Some(hit) = self.hits.iter().min_by(|a, b| a.distance.total_cmp(&b.distance)) {
                     touches.push((object, (-v.dot(hit.normal)).max(0.0)));
                     act(lever, k, object, hit.normal, collision::MESH_POINT_RADIUS_M - hit.distance, v);
                 }
