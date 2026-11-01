@@ -1088,7 +1088,7 @@ fn a_world_without_meshes_loads_exactly_as_before() {
     let mut seen = 0;
     for entry in fs::read_dir(shipped_world("x").parent().unwrap()).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_none_or(|e| e != "toml") || path.file_stem().unwrap() == "hall" {
+        if path.extension().is_none_or(|e| e != "toml") || ["hall", "chernobyl"].contains(&path.file_stem().unwrap().to_str().unwrap()) {
             continue;
         }
         let w = world::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -1116,6 +1116,18 @@ fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
     assert_eq!(materials_crossed([45.0, 0.0, -1.7], [45.0, 10.0, -1.7]), [0], "through the east wall: concrete");
     assert_eq!(materials_crossed([40.0, 0.0, -3.5], [40.0, 10.0, -3.5]), [1], "through the window: glass only");
     assert_eq!(materials_crossed([40.0, 0.0, -1.7], [40.0, 0.0, -9.0]), [0], "through the roof");
+}
+
+#[test]
+fn chernobyl_loads_and_the_pilot_sees_the_nsc_door() {
+    use glam::DVec3;
+    let w = world::load(&shipped_world("chernobyl")).unwrap();
+    assert_eq!((w.name.as_str(), w.pilot.position_ned_m), ("Chernobyl", [0.0, -231.0, -1.7]));
+    let nsc = &w.load_meshes().unwrap()[0];
+    assert_eq!(nsc.loss_db, [40.0]);
+    let mut m = Vec::new();
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(0.0, -81.0, -20.0), &mut m);
+    assert!(m.is_empty(), "the door is open");
 }
 
 /// The shipped hall copied to a temp dir with its relative layout; returns the world path and the `.glb` path.

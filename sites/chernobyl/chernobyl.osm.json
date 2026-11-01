@@ -1,0 +1,13 @@
+{
+ "attribution": "© OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright",
+ "bbox": [
+  51.387022,
+  30.094846,
+  51.392418,
+  30.103494
+ ],
+ "format": 1,
+ "query": "[out:json][timeout:60]; (way[\"building\"](51.387022,30.094846,51.392418,30.103494); relation[\"building\"](51.387022,30.094846,51.392418,30.103494);); out tags geom;",
+ "source_note": "empty: no OpenStreetMap data yet",
+ "ways": []
+}
