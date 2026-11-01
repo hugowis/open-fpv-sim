@@ -130,10 +130,33 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
     if out_dir is not None:  # a world path that climbs out of the recipe's directory also climbs out of out_dir
         world_path = Path(out_dir) / os.path.relpath(world_path, recipe_path.parent)
         glb_path = world_path.parent / recipe.glb_rel
-    for p in (world_path, glb_path):
-        p.parent.mkdir(parents=True, exist_ok=True)
-    glb_path.write_bytes(glb)
-    with open(world_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(_header(recipe_path, recipe.world_path.parent) + dumps(world))
+    try:
+        text = _header(recipe_path, recipe.world_path.parent) + dumps(world)
+    except TypeError as e:  # e.g. a TOML date in [world]
+        raise BuildError(f"world: {e}") from None
+    # Everything is validated and rendered before the first byte is written.
+    claimed = {"the recipe": recipe_path, "the snapshot": site.snapshot_path, "output.world": world_path}
+    for name, p in (("output.world", world_path), ("output.glb", glb_path)):
+        for other, q in claimed.items():
+            if other != name and p.resolve() == q.resolve():
+                raise BuildError(f"{name} and {other} are the same file ({p}); refusing to overwrite it")
+    _write_all([(glb_path, glb), (world_path, text.encode("utf-8"))])
     rep.world_path, rep.glb_path = world_path, glb_path
     return rep
+
+
+def _write_all(files: list[tuple[Path, bytes]]) -> None:
+    """Temp files first, then renames, so a failed write leaves the old outputs alone."""
+    tmps = []
+    try:
+        for p, data in files:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmps.append(p.with_name(p.name + ".tmp"))
+            tmps[-1].write_bytes(data)
+        for (p, _), t in zip(files, tmps):
+            os.replace(t, p)
+    except OSError as e:
+        raise BuildError(f"cannot write {e.filename or files[0][0]}: {e.strerror or e}") from None
+    finally:
+        for t in tmps:
+            t.unlink(missing_ok=True)

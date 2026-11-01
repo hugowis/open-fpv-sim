@@ -33,7 +33,8 @@ fn the_demo_world_loads() {
     // The recipe's tallest thing is the footprint override at 20 m (the chimney is 15 m, the hangar 8 m).
     assert!((b.min.z + 20.0).abs() < 1e-3 && b.max.z.abs() < 1e-3, "{b:?}");
     // The frame, end to end: x is north, y is east. North spans the ruin's far wall (+45) to way 1004's south edge (-40)
-    // and is asymmetric, so a swapped or flipped axis fails; east spans way 1001 (-40) to way 1004's east edge (+40).
+    // and is asymmetric, so a swapped or flipped axis fails; east spans way 1001 (-40) to way 1004's east edge (+40)
+    // (the east sign is pinned by the fixture test above, max.y = 50).
     // The ways go through lat/lon at 7 decimals, so they are a centimetre or two off.
     let near = |got: f64, want: f64| (got - want).abs() < 0.05;
     assert!(near(b.max.x, 45.0) && near(b.min.x, -40.0), "{b:?}");

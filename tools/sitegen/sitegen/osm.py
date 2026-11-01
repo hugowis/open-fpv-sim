@@ -14,6 +14,7 @@ from .geo import EARTH_RADIUS_M
 from .recipe import RecipeError, load_recipe
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+FETCH_NOTE = f"Overpass API {OVERPASS_URL}"  # the source_note of a fetched snapshot; the licence-gate test keys off it
 USER_AGENT = "open-fpv-sim-sitegen/0.1 (+https://github.com/hugowis/open-fpv-sim)"
 ATTRIBUTION = "© OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright"
 FORMAT = 1
@@ -196,7 +197,7 @@ def fetch_main(recipe_path: Path, *, opener=urllib.request.urlopen, sleep=time.s
     if not ways:
         return fail(f"no buildings in the response; {site.snapshot_path} left untouched")
     try:
-        write_snapshot(site.snapshot_path, ways, bbox, f"Overpass API {OVERPASS_URL}")
+        write_snapshot(site.snapshot_path, ways, bbox, FETCH_NOTE)
     except OSError as e:
         return fail(f"cannot write {site.snapshot_path}: {e}")
     print(f"fetch: {len(ways)} buildings -> {site.snapshot_path} (skipped {skipped})")

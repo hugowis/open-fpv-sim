@@ -205,6 +205,9 @@ def load_recipe(path: Path) -> Recipe:
     name, origin, extent, snap = _site(c, d)
     o = c.table(d, "output", "output", {"world", "glb"})
     world, glb = c.get(o, "output", "world", str), c.get(o, "output", "glb", str)
+    for field, v in (("site.snapshot", snap), ("output.world", world), ("output.glb", glb)):
+        if v == "":
+            c.err(field, "must not be empty")
     df = c.table(d, "defaults", "defaults", {"building_height_m", "level_height_m"}, required=False)
     defaults = Defaults(c.positive(df, "defaults", "building_height_m") or 8.0,
                         c.positive(df, "defaults", "level_height_m") or 3.0)

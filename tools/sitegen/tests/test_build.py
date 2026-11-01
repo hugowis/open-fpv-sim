@@ -11,6 +11,7 @@ import pytest
 from sitegen import __main__ as cli
 from sitegen import osm
 from sitegen.build import BuildError, build_site
+from sitegen.recipe import RecipeError
 
 TESTS = Path(__file__).resolve().parent
 DEMO = TESTS / "fixtures" / "demo"
@@ -84,7 +85,7 @@ def test_report_counts(tmp_path):
 
 
 def test_footprint_outside_extent_is_dropped(tmp_path):
-    # centroids: 1001 east -30, 1003 east -20 (inside), 1004 east +30; the extent is east +-25
+    # mean of the nodes: 1001 east -30, 1003 east -20 (inside), 1004 east +30; the extent is east +-25
     r = demo(tmp_path, lambda t: t.replace("half_extent_m = [50.0, 50.0]", "half_extent_m = [50.0, 25.0]"))
     rep = build_site(r, tmp_path / "o")
     assert (rep.footprints_used, rep.skipped) == (1, {"recipe_skip": 1, "outside_extent": 2})
@@ -201,3 +202,54 @@ def test_the_cli_prints_cyrillic_to_a_piped_stdout(tmp_path):
                        capture_output=True)
     assert p.returncode == 0, p.stderr.decode("utf-8", "replace")
     assert "тест".encode() in p.stdout
+
+
+def tree(root):
+    return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_a_toml_date_in_world_fails_before_anything_is_written(tmp_path):
+    r = demo(tmp_path, lambda t: t + "\n[world.when]\nbuilt = 2026-11-01\n")
+    out = tmp_path / "o"
+    (out / "out").mkdir(parents=True)
+    good = out / OUT_WORLD
+    good.write_bytes(b"previous good world\n")
+    with pytest.raises(BuildError, match="^world:"):
+        build_site(r, out)
+    assert tree(out) == {good: b"previous good world\n"}
+
+
+@pytest.mark.parametrize("field, target", [("world", "demo.osm.json"), ("glb", "../recipe.toml"), ("glb", "../demo.osm.json")])
+def test_an_output_naming_an_input_is_refused_and_the_input_is_untouched(tmp_path, field, target):
+    old = {"world": 'world = "out/demo.toml"', "glb": 'glb = "assets/demo.glb"'}[field]
+    r = demo(tmp_path, lambda t: t.replace(old, f'{field} = "{target}"'))
+    before = tree(r.parent)
+    with pytest.raises(BuildError, match="same file"):
+        build_site(r)
+    assert tree(r.parent) == before
+
+
+def test_the_world_and_the_glb_may_not_be_one_file(tmp_path):
+    r = demo(tmp_path, lambda t: t.replace('glb = "assets/demo.glb"', 'glb = "demo.toml"'))
+    with pytest.raises(BuildError, match="same file"):
+        build_site(r, tmp_path / "o")
+    assert not (tmp_path / "o").exists()
+
+
+def test_a_write_failure_is_a_build_error(tmp_path):
+    out = tmp_path / "o"
+    (out / OUT_WORLD).mkdir(parents=True)  # a directory where the world file goes
+    with pytest.raises(BuildError, match="cannot write"):
+        build_site(DEMO / "recipe.toml", out)
+    assert not list(out.rglob("*.tmp"))
+
+
+@pytest.mark.parametrize("field, edit", [
+    ("site.snapshot", ('snapshot = "demo.osm.json"', 'snapshot = ""')),
+    ("output.world", ('world = "out/demo.toml"', 'world = ""')),
+    ("output.glb", ('glb = "assets/demo.glb"', 'glb = ""')),
+])
+def test_an_empty_path_is_a_recipe_error_naming_the_field(tmp_path, field, edit):
+    r = demo(tmp_path, lambda t: t.replace(*edit))
+    with pytest.raises(RecipeError, match=f"{field}: must not be empty"):
+        build_site(r, tmp_path / "o")
