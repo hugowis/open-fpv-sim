@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use glam::{DQuat, DVec3};
 use ofs_config::world::{self as world_cfg, WorldConfig};
+use ofs_config::WorldMeshData;
 use ofs_config::{BandKind, FcKind, FixedSection, HandsetKind, QuadConfig, RadioKind, ReceiverKind, VtxSection};
 use ofs_core::rng::fnv1a64;
 use ofs_core::{names, Bus, Model, Scheduler, Signal, SimError, Wire};
@@ -30,7 +31,7 @@ use ofs_fc::sitl::net;
 use ofs_fc::sitl::process::LaunchConfig;
 use ofs_physics::collision::CollisionParams;
 use ofs_physics::propeller::{PropParams, Propeller};
-use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldObject};
+use ofs_physics::rigid_body::{AirframeParams, BodyState, GroundParams, MotorMount, RigidBody, WorldMesh, WorldObject};
 use ofs_radio::band::Band;
 use ofs_radio::chain::RadioChain;
 use ofs_radio::elrs::{ElrsLink, LinkParams};
@@ -51,7 +52,7 @@ use ofs_video::link::{
 use ofs_video::osd::{OsdFrame, OsdHandle, OsdModel};
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
-use ofs_rf::propagation::{Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_rf::propagation::{Antenna, AntennaKind, MeshObstacle, Obstacle, Polarization};
 use ofs_video::vtx::{band_index, VtxModel, VtxParams, FREQUENCIES_MHZ};
 
 #[derive(Debug, Clone)]
@@ -501,6 +502,8 @@ pub struct Vehicle {
     world: WorldConfig,
     /// The terrain baked once at build, shared with the rigid body; `GetWorld` sends this grid instead of baking again.
     terrain: Option<std::sync::Arc<ofs_core::terrain::Terrain>>,
+    /// The world's meshes, parsed once at build and shared with the rigid body and both links.
+    meshes: Vec<WorldMeshData>,
     /// The quad file's radio antenna names, by index (the state's `active_antenna`).
     radio_antenna_names: Vec<String>,
     /// The video link's runtime-emitter handle, written by set_fault's VtxInterference arm.
@@ -663,6 +666,7 @@ fn radio_chain(
     cfg: &QuadConfig,
     opts: &BuildOptions,
     terrain: Option<Arc<Terrain>>,
+    meshes: &[WorldMeshData],
     base_hz: u32,
     uart: Wire,
     telemetry_in: Wire,
@@ -708,7 +712,7 @@ fn radio_chain(
             .collect(),
         obstacles: world_obstacles(&opts.world, terrain.as_deref()),
         terrain,
-        meshes: Vec::new(), // the world's meshes arrive with the vehicle wiring
+        meshes: mesh_obstacles(meshes),
         fading: true,
         ground_bounce: true,
     };
@@ -738,6 +742,11 @@ fn radio_chain(
         ReceiverKind::Ibus => Box::new(IbusReceiver::new(r.packet_rate_hz, uart, telemetry_in)),
     };
     RadioChain::new(handset, link, receiver, base_hz, bus)
+}
+
+/// The loaded meshes as RF obstacles, sharing the triangles.
+fn mesh_obstacles(meshes: &[WorldMeshData]) -> Vec<MeshObstacle> {
+    meshes.iter().map(|m| MeshObstacle { mesh: m.mesh.clone(), loss_db: m.loss_db.clone() }).collect()
 }
 
 /// The world's objects as RF obstacles: those that take signal, rooted on the ground (the terrain's, if any) so nothing
@@ -777,7 +786,7 @@ pub(crate) fn emitter_freq_mhz(e: &world_cfg::EmitterSection) -> Result<f64, Sim
 }
 
 /// The video link's view of the world file and the quad's VTX antenna.
-pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Terrain>>) -> Result<VideoLinkParams, SimError> {
+pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Terrain>>, meshes: &[WorldMeshData]) -> Result<VideoLinkParams, SimError> {
     let facing = world.pilot.facing_deg;
     let antennas = world
         .receiver
@@ -815,7 +824,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Te
             diversity: world.receiver.diversity,
             obstacles,
             terrain,
-            meshes: Vec::new(),
+            meshes: mesh_obstacles(meshes),
             emitters,
         },
         vtx_antenna: Antenna {
@@ -960,6 +969,7 @@ pub fn build_seeded(
 
     // One grid for the physics and both links: they must agree on where the ground is.
     let terrain = opts.world.terrain.as_ref().map(|t| Arc::new(t.build()));
+    let meshes = opts.world.load_meshes().map_err(SimError::InvalidArgument)?;
     let f = &cfg.frame;
     let (restitution, friction_coeff) = cfg.collision_contact();
     let airframe = AirframeParams {
@@ -987,7 +997,7 @@ pub fn build_seeded(
             spheres: cfg.collision_spheres().into_iter().map(|s| (DVec3::new(s[0], s[1], s[2]), s[3])).collect(),
         },
         terrain: terrain.clone(),
-        meshes: Vec::new(),
+        meshes: meshes.iter().map(|m| WorldMesh::new(m.name.clone(), m.mesh.clone())).collect(),
     };
     let terrain = airframe.terrain.clone();
     let initial = BodyState {
@@ -1032,7 +1042,7 @@ pub fn build_seeded(
     let receiver_uart = Wire::new(RECEIVER_UART_CAPACITY);
     let radio_tap = Wire::new(VIDEO_TAP_CAPACITY);
     // Before the FC: a frame received on a tick reaches Betaflight in that tick's exchange.
-    let chain = radio_chain(cfg, opts, terrain.clone(), base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
+    let chain = radio_chain(cfg, opts, terrain.clone(), &meshes, base_hz, receiver_uart.clone(), radio_tap.clone(), &mut bus);
     let fc_telemetry = chain.fc_telemetry_handle();
     models.push(Box::new(chain));
 
@@ -1126,7 +1136,7 @@ pub fn build_seeded(
     let vtx_interference = VtxInterferenceHandle::default();
     if let Some(x) = &cfg.vtx {
         // Last in the tick: it reads the pose the physics wrote and the channel the VTX published.
-        let params = link_params(x, &opts.world, terrain.clone())?;
+        let params = link_params(x, &opts.world, terrain.clone(), &meshes)?;
         models.push(Box::new(VideoLink::new(params, base_hz / FIELD_RATE_HZ, opts.seed, vtx_interference.clone(), &mut bus)));
     }
 
@@ -1165,6 +1175,7 @@ pub fn build_seeded(
         fc_telemetry,
         world: opts.world.clone(),
         terrain,
+        meshes,
         radio_antenna_names,
         vtx_interference,
         prop_imbalance_baseline: cfg.props.iter().map(|p| p.imbalance_kgm).collect(),
@@ -1701,6 +1712,11 @@ impl Vehicle {
     /// The terrain the vehicle was built with (`None` for a world without `[terrain]`).
     pub fn terrain(&self) -> Option<&std::sync::Arc<ofs_core::terrain::Terrain>> {
         self.terrain.as_ref()
+    }
+
+    /// The meshes the vehicle was built with (empty for a world without `[[meshes]]`).
+    pub fn meshes(&self) -> &[WorldMeshData] {
+        &self.meshes
     }
 
     pub fn state(&self) -> VehicleState {
@@ -2251,7 +2267,7 @@ mod tests {
     #[test]
     fn the_link_parameters_follow_the_world_file() {
         let world = flat_world();
-        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, None).unwrap();
+        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, None, &[]).unwrap();
         let w = &params.world;
         assert_eq!(w.pilot_position, DVec3::new(-3.0, 2.0, -1.7));
         assert_eq!(w.antennas.len(), 2);
@@ -2336,11 +2352,39 @@ mod tests {
         assert_eq!(Arc::strong_count(terrain), 4);
     }
 
+    fn hall_world() -> WorldConfig {
+        world_cfg::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hall.toml"))).unwrap()
+    }
+
+    #[test]
+    fn a_mesh_world_shares_one_mesh_with_physics_and_both_links() {
+        let vehicle = open_loop(&shipped_quad(), hall_world());
+        let data = &vehicle.meshes()[0];
+        assert_eq!(data.name, "hall");
+        // The vehicle's own data, the body's airframe, the ELRS link's parameters and the video link's world: no copies.
+        assert_eq!(Arc::strong_count(&data.mesh), 4);
+    }
+
+    #[test]
+    fn a_world_without_meshes_has_none_anywhere() {
+        let vehicle = open_loop(&shipped_quad(), flat_world());
+        assert!(vehicle.meshes().is_empty());
+        assert!(link_params(shipped_quad().vtx.as_ref().unwrap(), &flat_world(), None, &[]).unwrap().world.meshes.is_empty());
+    }
+
+    #[test]
+    fn a_world_whose_mesh_file_vanished_fails_to_build_instead_of_panicking() {
+        let mut world = hall_world();
+        world.source_path = std::env::temp_dir().join("ofs-no-such-dir").join("hall.toml");
+        let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-unit-test-data"), fc_override: Some(FcKind::OpenLoop), world };
+        assert!(matches!(build(&shipped_quad(), &opts, None), Err(SimError::InvalidArgument(_))));
+    }
+
     #[test]
     fn a_world_without_terrain_has_no_terrain_in_the_links() {
         let vehicle = open_loop(&shipped_quad(), flat_world());
         assert!(vehicle.terrain.is_none());
-        assert!(link_params(shipped_quad().vtx.as_ref().unwrap(), &flat_world(), None).unwrap().world.terrain.is_none());
+        assert!(link_params(shipped_quad().vtx.as_ref().unwrap(), &flat_world(), None, &[]).unwrap().world.terrain.is_none());
     }
 
     #[test]
@@ -2349,7 +2393,7 @@ mod tests {
         let heights = (0..41usize * 41).map(|k| (10.0f32 * (1.0 - (k / 41).abs_diff(20) as f32 / 10.0)).max(0.0)).collect();
         let ridge = Arc::new(Terrain::from_grid([-100.0, -200.0], 10.0, 41, 41, heights).unwrap());
         let world = world_cfg::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hills.toml"))).unwrap();
-        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, Some(ridge)).unwrap();
+        let params = link_params(shipped_quad().vtx.as_ref().unwrap(), &world, Some(ridge), &[]).unwrap();
         let obstruction = |north: f64, east: f64| {
             ofs_video::link::vtx_paths(&params, DVec3::new(north, east, -1.7), DQuat::IDENTITY, 5800.0)[0].obstruction_db
         };

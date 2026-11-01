@@ -458,12 +458,13 @@ impl Session {
             let message = if s.collision_object < 0 {
                 format!("HARD LANDING {:.1} m/s", s.collision_speed_mps)
             } else {
-                let name = self
-                    .vehicle
-                    .world()
-                    .objects
-                    .get(s.collision_object.max(0) as usize)
-                    .map_or("unknown", |o| o.name.as_str());
+                let (world, index) = (self.vehicle.world(), s.collision_object.max(0) as usize);
+                // Meshes follow the objects in the physics' collision indices.
+                let name = match index.checked_sub(world.objects.len()) {
+                    None => world.objects.get(index).map(|o| o.name.as_str()),
+                    Some(j) => self.vehicle.meshes().get(j).map(|m| m.name.as_str()),
+                }
+                .unwrap_or("unknown");
                 format!("HIT {name} {:.1} m/s", s.collision_speed_mps)
             };
             out.push(event(s.time_s, pb::EventKind::Collision, message));
@@ -891,6 +892,31 @@ mod tests {
         let events = session.events_for(&ground, session.vehicle.active_fault_names());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].message, "HARD LANDING 7.2 m/s");
+    }
+
+    #[test]
+    fn a_hit_on_a_mesh_names_it() {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hall.toml"))).unwrap();
+        let first_mesh = world.objects.len() as i32;
+        let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+        let opts = crate::vehicle::BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-session-collision-test"),
+            fc_override: Some(ofs_config::FcKind::OpenLoop),
+            world,
+        };
+        let mut session = Session::new(crate::vehicle::build(&cfg, &opts, None).unwrap(), RunMode::Lockstep, OverrunPolicy::Warn, true);
+        session.last_link_up = true;
+        let mut state = session.vehicle.state();
+        state.radio.link_up = true;
+        state.collision_speed_mps = 7.2;
+        for (object, count, expected) in [(first_mesh, 1, "HIT hall 7.2 m/s"), (first_mesh + 1, 2, "HIT unknown 7.2 m/s")] {
+            state.collision_object = object;
+            state.collision_event_count = count;
+            let events = session.events_for(&state, session.vehicle.active_fault_names());
+            assert_eq!(events.len(), 1, "{events:?}");
+            assert_eq!(events[0].message, expected);
+        }
     }
 
     #[test]
