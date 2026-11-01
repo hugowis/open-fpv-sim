@@ -27,6 +27,7 @@ pub fn object_world() -> WorldConfig {
         size_m: Some([10.0, 10.0, 40.0]),
         radius_m: None,
         height_m: None,
+        yaw_deg: None,
         color: [0.6, 0.6, 0.6],
         rf_loss_db: 25.0,
     });
