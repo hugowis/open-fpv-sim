@@ -32,6 +32,8 @@ proptest = "1"
 # (foxglove/mcap#1838). See docs/research/mcap-determinism.md; switch to the release once it ships.
 mcap = { git = "https://github.com/foxglove/mcap.git", rev = "00e47a1b", default-features = false, features = ["zstd"] }
 serde_json = "1"
+# Default features off: no image decoding (the world reader needs geometry only).
+gltf = { version = "1", default-features = false, features = ["utils", "names"] }
 ofs-core = { path = "crates/ofs-core" }
 ofs-physics = { path = "crates/ofs-physics" }
 ofs-electrical = { path = "crates/ofs-electrical" }

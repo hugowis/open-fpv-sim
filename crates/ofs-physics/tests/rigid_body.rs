@@ -36,6 +36,7 @@ fn params(mounts: Vec<MotorMount>, contacts: Vec<DVec3>) -> AirframeParams {
         objects: Vec::new(),
         collision: Default::default(),
         terrain: None,
+        meshes: Vec::new(),
     }
 }
 

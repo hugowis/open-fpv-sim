@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+pub mod mesh;
 pub mod world;
-pub use world::{AntennaKind, Polarization, WorldConfig};
+pub use world::{AntennaKind, MaterialSection, MeshSection, Polarization, WorldConfig, WorldMeshData};
 
 mod terrain;
 pub use terrain::{TerrainSection, MAX_TERRAIN_SLOPE_DEG};

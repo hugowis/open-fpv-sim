@@ -13,7 +13,8 @@ use ofs_radio::elrs::{
 use ofs_radio::parts::{Delivery, Link, LinkReport, TxFrame};
 use ofs_radio::receiver::ReceiverParams;
 use ofs_radio::telemetry::FcTelemetryHandle;
-use ofs_rf::propagation::{fspl_db, terrain_loss_db, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_core::mesh::{TriMesh, Triangle};
+use ofs_rf::propagation::{fspl_db, terrain_loss_db, wavelength_m, Antenna, AntennaKind, MeshObstacle, Obstacle, Polarization};
 
 const BASE_HZ: u32 = 8000;
 
@@ -604,4 +605,19 @@ fn the_models_own_stream_ignores_the_fault_fraction() {
     for fraction in [0.3, 0.9] {
         assert_eq!(downlink_lq(fraction, edge), clean, "fault fraction {fraction} moved the model's own draws");
     }
+}
+
+#[test]
+fn a_mesh_wall_lowers_the_uplink_rssi() {
+    let p = |e: f64, d: f64| DVec3::new(50.0, e, d);
+    let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
+    let mut walled_params = LinkParams::ideal(500);
+    walled_params.meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
+    let (mut walled, _, _telemetry_in, _fc) = rig(walled_params, 1);
+    set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));
+    set_pos(&mut walled, DVec3::new(100.0, 0.0, -1.7));
+    packets(&mut open, 2);
+    packets(&mut walled, 2);
+    close(get(&open, names::RADIO_RSSI) - get(&walled, names::RADIO_RSSI), 18.0, 1e-6, "the wall costs its loss");
 }

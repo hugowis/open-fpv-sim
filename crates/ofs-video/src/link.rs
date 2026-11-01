@@ -13,7 +13,7 @@ use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
 use ofs_rf::propagation::{
     adjacent_channel_rejection_db, mw_to_dbm, obstruction_db, power_sum_dbm, unobstructed_gain_db, wavelength_m, Antenna,
-    Endpoint, Obstacle, PathGain,
+    Endpoint, MeshObstacle, Obstacle, PathGain,
 };
 use rand_chacha::ChaCha8Rng;
 
@@ -239,6 +239,8 @@ pub struct LinkWorld {
     /// The ground that can hide the quad or an emitter from the goggles: the physics' own grid, shared: never a
     /// copy of the heights.
     pub terrain: Option<Arc<Terrain>>,
+    /// Triangle meshes that take signal by material, shared with the physics (Arcs, never copies).
+    pub meshes: Vec<MeshObstacle>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -260,7 +262,7 @@ pub fn vtx_paths(params: &LinkParams, quad_pos: DVec3, att: DQuat, freq_mhz: f64
     let tx = Endpoint { position: quad_pos, antenna: Antenna { axis: (att * params.vtx_antenna.axis).normalize(), ..params.vtx_antenna } };
     let shadow = body_shadow_db(att, quad_pos, params.world.pilot_position);
     // Every goggle antenna is at the pilot: one obstruction for all of them.
-    let obstruction = obstruction_db(&params.world.obstacles, params.world.terrain.as_deref(), quad_pos, params.world.pilot_position, freq_mhz);
+    let obstruction = obstruction_db(&params.world.obstacles, params.world.terrain.as_deref(), &params.world.meshes, quad_pos, params.world.pilot_position, freq_mhz);
     params
         .world
         .antennas
@@ -278,7 +280,7 @@ pub fn interference_dbm(world: &LinkWorld, freq_mhz: f64, ground_bounce: bool) -
     let obstructions: Vec<f64> = world
         .emitters
         .iter()
-        .map(|e| obstruction_db(&world.obstacles, world.terrain.as_deref(), e.position, world.pilot_position, e.freq_mhz))
+        .map(|e| obstruction_db(&world.obstacles, world.terrain.as_deref(), &world.meshes, e.position, world.pilot_position, e.freq_mhz))
         .collect();
     world
         .antennas

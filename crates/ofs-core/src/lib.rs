@@ -2,6 +2,7 @@
 pub mod bus;
 pub mod consts;
 pub mod interp;
+pub mod mesh;
 pub mod model;
 pub mod names;
 pub mod rng;

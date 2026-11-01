@@ -457,7 +457,9 @@ impl OfsClient {
     /// (absent on flat ground): {`origin_x`, `origin_z`: Godot position of grid node (0, 0), `cell_m`, `nodes_n`,
     /// `nodes_e`, `vertices` (PackedVector3Array, vertex `i * nodes_e + j` is node (i, j)), `normals`
     /// (PackedVector3Array), `indices` (PackedInt32Array, clockwise triangles, the sim's own diagonal) and `digest`
-    /// (String, 16 hex digits)}.
+    /// (String, 16 hex digits)}. `meshes` (Array, empty without `[[meshes]]`) lists the `.glb` files the client loads itself:
+    /// {`name`, `path` (String, absolute), `position`: Vector3 (the origin), `heading_deg` (clockwise from north),
+    /// `digest_ok` (the file hashes to the server's digest), `error` (String, empty when `digest_ok`)}.
     #[func]
     fn get_world(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -521,6 +523,19 @@ impl OfsClient {
         d.set("objects", &objects);
         d.set("emitters", &emitters);
         d.set("gates", &gates);
+        let mut meshes = VarArray::new();
+        for m in &world.meshes {
+            let verdict = m.verify();
+            let mut e = VarDictionary::new();
+            e.set("name", &GString::from(m.name.as_str()));
+            e.set("path", &GString::from(m.path.to_string_lossy().as_ref()));
+            e.set("position", vector3(m.position.x, m.position.y, m.position.z));
+            e.set("heading_deg", m.heading_deg);
+            e.set("digest_ok", verdict.is_ok());
+            e.set("error", &GString::from(verdict.err().unwrap_or_default().as_str()));
+            meshes.push(&e.to_variant());
+        }
+        d.set("meshes", &meshes);
         let mut courses = VarArray::new();
         for c in &world.courses {
             let mut e = VarDictionary::new();

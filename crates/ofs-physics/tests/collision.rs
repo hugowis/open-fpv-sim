@@ -33,6 +33,7 @@ fn params(objects: Vec<WorldObject>, spheres: Vec<(DVec3, f64)>, restitution: f6
         objects,
         collision: CollisionParams { restitution, friction_coeff: 0.5, spheres },
         terrain: None,
+        meshes: Vec::new(),
     }
 }
 

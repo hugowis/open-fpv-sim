@@ -1,5 +1,5 @@
 use glam::DVec3;
-use ofs_client::{Terrain, ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, RaceMode, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World};
+use ofs_client::{Terrain, ClientError, ErrorKind, Event, EventKind, FcTelemetry, OsdFrame, RaceMode, Sticks, Telemetry, VideoInfo, VideoSync, VtxInfo, World, WorldMesh};
 use ofs_proto::pb;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status};
@@ -365,4 +365,39 @@ fn an_emitter_stands_on_the_relief() {
     assert!(want > 0.5, "the emitter is on a slope: {want}");
     assert_eq!(w.emitters[0].ground_y, want);
     assert_eq!(w.emitters[0].position.y, 1.0, "the position stays where the file put it");
+}
+
+#[test]
+fn from_pb_puts_the_mesh_in_godots_frame() {
+    let mesh = pb::Mesh { name: "hall".into(), path: "/a/hall.glb".into(), position_ned_m: Some(pb::Vec3 { x: 30.0, y: -4.0, z: -1.5 }), heading_deg: 90.0, digest: 0xabcd };
+    let w = World::from_pb(pb::World { meshes: vec![mesh], ..Default::default() }).unwrap();
+    let m = &w.meshes[0];
+    assert_eq!((m.name.as_str(), m.heading_deg, m.digest), ("hall", 90.0, 0xabcd));
+    assert_eq!(m.path, std::path::PathBuf::from("/a/hall.glb"));
+    assert_eq!(m.position, DVec3::new(-4.0, 1.5, -30.0), "east, up, south");
+    assert!(World::from_pb(pb::World::default()).unwrap().meshes.is_empty());
+}
+
+#[test]
+fn verify_accepts_the_matching_file_and_names_the_mismatch() {
+    let dir = std::env::temp_dir().join(format!("ofs-client-mesh-verify-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("hall.glb");
+    let bytes = b"glTF pretend mesh bytes".to_vec();
+    std::fs::write(&path, &bytes).unwrap();
+    let mesh = |path: &std::path::Path, digest| WorldMesh { name: "hall".into(), path: path.to_path_buf(), position: DVec3::ZERO, heading_deg: 0.0, digest };
+    let digest = ofs_core::rng::fnv1a64(&bytes);
+    assert_eq!(mesh(&path, digest).verify(), Ok(()));
+
+    let mut edited = bytes.clone();
+    edited[3] ^= 1;
+    std::fs::write(&path, &edited).unwrap();
+    let e = mesh(&path, digest).verify().unwrap_err();
+    let got = ofs_core::rng::fnv1a64(&edited);
+    assert!(e.contains("hall.glb") && e.contains(&format!("{got:016x}")) && e.contains(&format!("{digest:016x}")), "{e}");
+
+    let gone = dir.join("gone.glb");
+    let e = mesh(&gone, digest).verify().unwrap_err();
+    assert!(e.contains("gone.glb") && e.contains("cannot read"), "{e}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -127,6 +127,30 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   digest and builds the mesh itself); the radio and video link are obstructed by the relief (#154), and objects with
   `rf_loss_db` stand on it. `worlds/hills.toml` is the big example (12 m hills); `worlds/park.toml` has gentle swells of
   about a metre with its course placed on the ground. The steepest slope may not pass 60 degrees.
+- `[[meshes]]` and `[[materials]]` — triangle meshes from `.glb` files, solid to the quad and in the way of the radio.
+  A mesh has a `name` (letters, digits, `_` and `-`, unique), a `file` (relative to the world file, ending `.glb`, no `..`,
+  no absolute path, no `:` and `/` between directories, never `\`), a `position_ned_m` and a `heading_deg` (clockwise
+  from north; the file's origin goes to the position). A material is the glTF material's name (any non-empty, unique
+  string, matched exactly; an unnamed one is called `default`) with an `rf_loss_db` (0 if it is not listed; a listed material that no mesh uses is an error).
+  `worlds/hall.toml` flies a concrete hall with a doorway and a glass window (`worlds/assets/hall.glb`, made by
+  `cargo run -p ofs-config --example make_hall`). Caps (estimates): 8 meshes, 400 000 triangles in all and 64 MiB per file.
+  - **The file** is in Godot's frame (x east, y up, -z north), so NED = (-z, x, -y). Only triangle lists are read (other
+    primitive modes are skipped); sparse accessors, external buffers and a node graph that is not a tree are refused, and
+    zero-area triangles are dropped. A node whose own name starts with `col_` is collision and radio only, and Godot drops
+    its whole subtree, so its children are never drawn, even when they are not named `col_`. When any `col_` node has
+    triangles, only the `col_` nodes collide (not their children); otherwise every node collides.
+  - **Physics**: a sphere is tested against the *surface*, two-sided, so a mesh need not be watertight; the landing points
+    use only the nearest triangle, with a 5 mm skin. A hit is `HIT <mesh name>`. The maths and limits are in
+    `docs/research/collision.md`.
+  - **Radio**: a path loses the `rf_loss_db` of every surface it crosses, summed, at any frequency. There is no diffraction
+    around a mesh's edges (the shadow is sharp), no reflection, and no thickness: a wall drawn as two skins costs two
+    losses, a wall that is one surface costs one, a window is a surface with a small loss and an opening passes the signal.
+  - **The client** loads the same `.glb` itself: the protocol carries only the absolute path and an FNV-1a 64 digest
+    (`World.meshes`, protocol 17), so the simulator and the Godot client must share a filesystem. A client whose file differs
+    draws nothing for that mesh and `OfsClient.get_world()["meshes"]` says why. A repro bundle carries the mesh files under
+    `worlds/`. A world without `[[meshes]]` is bit-identical to before; a mesh with a non-zero `heading_deg` is turned with
+    libm `sin` and `cos` at load, so only `heading_deg = 0` meshes are claimed bit-identical across operating systems. The
+    Godot drawing has been verified headless only.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
 power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from
@@ -279,7 +303,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 16**. The fault catalog arrived in protocol 8, and its wire shapes live in
+The client and server speak **protocol 17**. The fault catalog arrived in protocol 8, and its wire shapes live in
 the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
 (`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
 `docs/research/faults.md` —
@@ -287,7 +311,7 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 16**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 17**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
@@ -297,7 +321,9 @@ passes (`Gate.pitch_deg`/`roll_deg`, `EVENT_KIND_GATE_HIT`, protocol 14), and th
 courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`course_index`/`mode`/`time_limit_s`/
 `time_left_s`, `ResetRace` taking a `ResetRaceRequest{course}`, protocol 15; Python `sim.reset_race(course)`), and the
 baked terrain grid (`World.terrain`: origin, cell size, node counts, heights and the digest, protocol 16). With a grid a
-reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`).
+reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`), and the
+world's triangle meshes (`World.meshes`: name, absolute path, placement and the file's digest, never the bytes; the Godot
+client loads each `.glb` itself and `get_world()` reports whether it matches, protocol 17).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

@@ -44,6 +44,7 @@ fn sphere(terrain: Option<Arc<Terrain>>, restitution: f64) -> AirframeParams {
         objects: vec![],
         collision: CollisionParams { restitution, friction_coeff: 0.5, spheres: vec![(DVec3::ZERO, R)] },
         terrain,
+        meshes: Vec::new(),
     }
 }
 

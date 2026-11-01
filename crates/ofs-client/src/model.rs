@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use glam::DVec3;
+use ofs_core::rng::fnv1a64;
 use ofs_core::terrain::Terrain;
 use ofs_proto::pb;
 
@@ -326,6 +327,32 @@ pub struct World {
     pub default_course: u32,
     /// The ground grid, rebuilt and checked against the server's digest; shared, as it can be a million nodes.
     pub terrain: Option<Arc<Terrain>>,
+    /// The `.glb` meshes the client loads itself (the protocol carries no mesh bytes).
+    pub meshes: Vec<WorldMesh>,
+}
+
+/// A mesh placed in the world: the file at `path` (absolute, on the simulator's machine) must hash to `digest`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldMesh {
+    pub name: String,
+    pub path: PathBuf,
+    /// Where its origin goes, in Godot's frame.
+    pub position: DVec3,
+    /// Clockwise from north, as in the world file.
+    pub heading_deg: f64,
+    pub digest: u64,
+}
+
+impl WorldMesh {
+    /// Reads the file and checks it is the simulator's: the error names the path and what is wrong.
+    pub fn verify(&self) -> Result<(), String> {
+        let bytes = std::fs::read(&self.path).map_err(|e| format!("cannot read the mesh file {}: {e}", self.path.display()))?;
+        let got = fnv1a64(&bytes);
+        if got != self.digest {
+            return Err(format!("the mesh file {} differs from the server's (digest got {got:016x}, expected {:016x})", self.path.display(), self.digest));
+        }
+        Ok(())
+    }
 }
 
 fn ned(v: Option<pb::Vec3>) -> DVec3 {
@@ -408,6 +435,11 @@ impl World {
                 .collect(),
             default_course: w.default_course,
             terrain,
+            meshes: w
+                .meshes
+                .into_iter()
+                .map(|m| WorldMesh { name: m.name, path: PathBuf::from(m.path), position: vec_to_godot(ned(m.position_ned_m)), heading_deg: m.heading_deg, digest: m.digest })
+                .collect(),
         })
     }
 }

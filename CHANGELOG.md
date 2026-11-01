@@ -5,6 +5,37 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Triangle-mesh worlds (protocol 17)
+#### Added
+- **`[[meshes]]` and `[[materials]]` in the world file**: a `.glb` placed at `position_ned_m` and `heading_deg`, solid to
+  the quad and in the way of the radio. A material is the glTF material's name with an `rf_loss_db`. Caps (estimates): 8
+  meshes, 400 000 triangles per world, 64 MiB per file. `worlds/hall.toml` is the demo (a concrete hall with a doorway and
+  a glass window, `worlds/assets/hall.glb`); a node named `col_...` is collision and radio only and is not drawn.
+  Layout, units and limits: `docs/dev-setup.md`.
+- **`ofs_core::mesh::TriMesh`**: triangles with a deterministic BVH, a sphere query and a segment-crossing query.
+- **Collision with meshes**: the quad's spheres collide with the surface (two-sided, no inside, so a mesh need not be
+  watertight), the landing points with the nearest triangle only, through a 5 mm skin. Events read `HIT <mesh name>`. The
+  maths, the tunnelling bound (160 to 320 m/s at 8 kHz) and a timing record (100 352 triangles: 0.102 s against 0.011 s for
+  10 s of flight) are in `docs/research/collision.md`.
+- **The links lose the `rf_loss_db` of every surface they cross** (video and ExpressLRS): no diffraction around edges, no
+  reflection, no thickness.
+- **Repro bundles carry a world's mesh files** under `worlds/`.
+- **Protocol 17**: `World.meshes` (`message Mesh`: `name`, absolute `path` on the simulator's machine, `position_ned_m`,
+  `heading_deg`, and the `digest` of the `.glb`, its FNV-1a 64 hash). The protocol never carries mesh bytes: the Godot
+  client loads the file itself. A world without `[[meshes]]` sends none, and nothing else changes for it.
+- **`ofs_client::WorldMesh`** (`World.meshes`, the position in Godot's frame) and `WorldMesh::verify()`, which reads the
+  file and names the path and the two digests (or the read error) when it is not the server's.
+- **`OfsClient.get_world()["meshes"]`**: an Array of {`name`, `path`, `position`, `heading_deg`, `digest_ok`, `error`}
+  (empty without meshes).
+
+#### Notes
+- A world without `[[meshes]]` is bit-identical to before, and the protocol sends it no meshes.
+- The simulator and the Godot client must share a filesystem: the client loads the `.glb` itself and draws nothing for a
+  mesh whose file differs from the simulator's digest (`get_world()["meshes"]` says why).
+- A mesh with a non-zero `heading_deg` is turned with libm `sin` and `cos` at load, so only `heading_deg = 0` meshes are
+  claimed bit-identical across operating systems.
+- The Godot drawing of meshes was verified headless only.
+
 ### Audio in the DVR (#159, part 2 of 2 of #36)
 #### Added
 - **The MP4 export has sound.** The flight sound of #158 is synthesised offline from what the recording saw and muxed as
