@@ -1,0 +1,53 @@
+{
+ "version": 0.6,
+ "generator": "hand-written test fixture in the shape of an Overpass `relation[...]; out tags geom;` response",
+ "elements": [
+  {
+   "type": "relation",
+   "id": 8705336,
+   "tags": {"building": "industrial", "type": "multipolygon", "name": "Турбінний зал", "name:en": "Turbine hall", "addr:street": "ignored"},
+   "members": [
+    {"type": "way", "ref": 1001, "role": "outer", "geometry": [
+     {"lat": 51.3890, "lon": 30.0990},
+     {"lat": 51.3890, "lon": 30.1050},
+     {"lat": 51.3894, "lon": 30.1050},
+     {"lat": 51.3894, "lon": 30.0990},
+     {"lat": 51.3890, "lon": 30.0990}]},
+    {"type": "way", "ref": 1002, "role": "inner", "geometry": [
+     {"lat": 51.38915, "lon": 30.1000},
+     {"lat": 51.38915, "lon": 30.1010},
+     {"lat": 51.38925, "lon": 30.1010},
+     {"lat": 51.38925, "lon": 30.1000},
+     {"lat": 51.38915, "lon": 30.1000}]}
+   ]
+  },
+  {
+   "type": "relation",
+   "id": 500,
+   "tags": {"type": "multipolygon", "building": "yes"},
+   "members": [
+    {"type": "way", "ref": 2001, "role": "outer", "geometry": [
+     {"lat": 51.3880, "lon": 30.0970},
+     {"lat": 51.3880, "lon": 30.0974},
+     {"lat": 51.3883, "lon": 30.0974}]},
+    {"type": "way", "ref": 2002, "role": "outer", "geometry": [
+     {"lat": 51.3883, "lon": 30.0970},
+     {"lat": 51.3883, "lon": 30.0974}]},
+    {"type": "way", "ref": 2003, "role": "outer", "geometry": [
+     {"lat": 51.3883, "lon": 30.0970},
+     {"lat": 51.3880, "lon": 30.0970}]}
+   ]
+  },
+  {
+   "type": "relation",
+   "id": 600,
+   "tags": {"type": "multipolygon", "building": "yes"},
+   "members": [
+    {"type": "way", "ref": 3001, "role": "outer", "geometry": [
+     {"lat": 51.3870, "lon": 30.0970},
+     {"lat": 51.3870, "lon": 30.0974},
+     {"lat": 51.3873, "lon": 30.0974}]}
+   ]
+  }
+ ]
+}

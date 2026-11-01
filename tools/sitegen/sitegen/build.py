@@ -82,9 +82,10 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
         if ring is None:
             skip("bad_ring")
             continue
-        # Inside means the mean of the ring's nodes lies within the half extents, so a building straddling the edge stays whole.
-        n, e = sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring)
-        if abs(n) > site.half_extent_m[0] or abs(e) > site.half_extent_m[1]:
+        # Touching the extent is enough: a long building (a 600 m turbine hall) stays whole when only part of it is inside.
+        (n0, n1), (e0, e1) = ((min(v), max(v)) for v in zip(*ring))
+        hn, he = site.half_extent_m
+        if n0 > hn or n1 < -hn or e0 > he or e1 < -he:
             skip("outside_extent")
             continue
         material = o.material if o and o.material else "building"

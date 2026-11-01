@@ -26,7 +26,7 @@ no output-directory option (the tests pass `out_dir` to `build_site`, in Python)
 
 | Command | What it does | Exit |
 |---|---|---|
-| `fetch <recipe>` | Asks Overpass for every `way["building"]` in the box `site.origin` plus or minus `site.half_extent_m`, keeps the closed ways with geometry, and writes the snapshot to `site.snapshot`. Prints the count and what it skipped. | 1 on a bad recipe, a failed request, an empty answer or a write error; the existing snapshot is untouched |
+| `fetch <recipe>` | Asks Overpass for every `way["building"]` and `relation["building"]` in the box `site.origin` plus or minus `site.half_extent_m`, keeps the closed ways and the closed outer rings of multipolygon relations, and writes the snapshot to `site.snapshot`. Prints the count and what it skipped. | 1 on a bad recipe, a failed request, an empty answer or a write error; the existing snapshot is untouched |
 | `build <recipe>` | Reads the recipe and the snapshot, builds the footprints and landmarks, writes the `.glb` and the world file, prints the report. | 1 on a bad recipe or a site that cannot be built; nothing is written |
 
 Paths: the recipe argument is relative to where you run it. Inside the recipe, `site.snapshot` and `output.world` are
@@ -98,8 +98,9 @@ magnitude. Errors read `<landmark name>.<field>: <message>`.
 ## What a build does
 
 - Footprints come from the snapshot in id order. Each is cleaned (repeated and mid-edge nodes removed, made counter-clockwise),
-  checked for simplicity, extruded to its height with a flat roof and no floor, and kept when the **mean of its nodes** lies
-  inside the half extents. A building straddling the edge stays whole.
+  checked for simplicity, extruded to its height with a flat roof and no floor, and kept when the **bounding box of its outline
+  touches** the extent rectangle (`|north| <= half_north`, `|east| <= half_east`, edges included). A building straddling the
+  edge stays whole, even a 600 m hall with most of its length outside; one wholly outside is dropped.
 - Landmarks are added after the footprints, in the recipe's order.
 - One mesh node named after the site holds everything, one primitive per material. The world file gets `[[meshes]]` with
   that node's name and the `.glb` path, and a `[[materials]]` table (see below).
@@ -125,7 +126,7 @@ Footprints left out, by reason:
 | `recipe_skip` | The recipe's `skip = true`. |
 | `duplicate_id` | The snapshot lists the id twice; the first wins. |
 | `bad_ring` | The outline is not usable (fewer than 3 nodes, under 0.5 m2, self-touching, a spike). |
-| `outside_extent` | The mean of its nodes is outside the half extents. |
+| `outside_extent` | The bounding box of its outline does not touch the extent rectangle. |
 | `extrude_error` | The outline passed the checks but could not be triangulated. |
 
 Warnings (the build still succeeds): a recipe footprint id that is not in the snapshot; a material the mesh uses but
@@ -156,15 +157,21 @@ intended change, `python tests/make_golden.py` rewrites the goldens; review the 
 - **Always UTF-8.** Snapshots are written and read as UTF-8 with `ensure_ascii=False` (OSM names are Cyrillic here), and the
   world file is UTF-8 with LF; the command-line tool also forces UTF-8 on its output because a piped Windows stream is
   cp1252. Do not let an editor change the encoding or the line endings.
-- **A footprint is a closed OSM way.** Open ways are not buildings, and relations (multipolygons, buildings with courtyards)
-  are skipped by `fetch` and counted.
+- **A footprint is a closed OSM way or a closed outer ring of a multipolygon relation.** Open ways are not buildings. A
+  relation (`type=multipolygon` or a `building` tag) becomes one footprint per closed outer ring, with the relation's tags;
+  the ring is the `outer` members joined end to end (in member order, a member may be reversed, endpoints must match
+  exactly). Its id is `-(relation_id * 100 + k)`, `k` = 1, 2, ... in the order the rings close, at most 99 per relation.
+  Negative so it never collides with a way id; a `[[footprints]]` override takes it like any other id.
+  **Holes are filled**: `inner` members are ignored and counted as `relation_hole`. A relation with no closable outer
+  ring (a gap, a member the endpoint match cannot join, no geometry) is skipped and counted as `relation`.
 
 ## The snapshot
 
 `<site>.osm.json`, sorted by way id, stable bytes, with a header: `attribution`, `bbox`, the exact `query`, `source_note`,
 `format` (1), and `ways` (each `id`, `tags`, `ring` of `[lat, lon]`; a closed way repeats its first node). Only these tags
 are kept: `building`, `height`, `building:levels`, `name`, `name:en`, `man_made`, `roof:shape` (only string values). `fetch`
-counts the elements it drops: `open_way`, `relation`, `no_geometry`, `malformed`.
+counts the elements it drops: `open_way`, `relation`, `no_geometry`, `malformed`, and `relation_hole` (inner members
+seen); every key is always present. Relation ids are negative and the file is sorted by id, so they come first.
 
 A hand-written snapshot works too (the demo's is one); give it `"format": 1` and a `"ways"` list. `build` always writes the OpenStreetMap credit into the world header, even for hand-made outlines (over-crediting is harmless).
 
@@ -193,7 +200,7 @@ Deliberately not built (all of them are additions, not bugs):
 - Flat ground only (d = 0): no elevation data. The engine supports `[terrain]`, but sitegen writes none and does not
   place the mesh on it.
 - No textures, no vertex colours, one flat colour per material.
-- No relations or multipolygons, so courtyards and holes in a footprint are not represented.
+- Multipolygon holes (courtyards) are filled, and a ring that needs more than exact endpoint matching to close is skipped.
 - No `col_` collision proxies: every visible triangle collides, so a door or a breach is passable exactly where the mesh is
   open.
 - Units other than metres in a `height` tag are ignored.

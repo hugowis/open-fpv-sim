@@ -19,7 +19,8 @@ USER_AGENT = "open-fpv-sim-sitegen/0.1 (+https://github.com/hugowis/open-fpv-sim
 ATTRIBUTION = "© OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright"
 FORMAT = 1
 KEEP_TAGS = ("building", "height", "building:levels", "name", "name:en", "man_made", "roof:shape")
-SKIP_KEYS = ("open_way", "relation", "no_geometry", "malformed")
+SKIP_KEYS = ("open_way", "relation", "no_geometry", "malformed", "relation_hole")
+MAX_RINGS = 99  # per relation: way ids are -(relation * 100 + k)
 RETRY_CODES = (429, 502, 504)
 BACKOFF_S = 25
 MAX_HEIGHT_M = 1000.0  # a taller "height" tag is a typo; fall through to the next rule
@@ -53,14 +54,65 @@ def _ring(points):
     return ring
 
 
+def _stitch(pieces):
+    """Closed rings (first point repeated last) from open polylines joined end to end, greedy in order; a piece may be reversed."""
+    pieces, rings = [list(p) for p in pieces if len(p) > 1], []
+    while pieces:
+        cur = pieces.pop(0)
+        while cur[0] != cur[-1]:
+            for i, p in enumerate(pieces):
+                if p[0] == cur[-1]:
+                    cur += p[1:]
+                elif p[-1] == cur[-1]:
+                    cur += p[-2::-1]
+                else:
+                    continue
+                del pieces[i]
+                break
+            else:
+                break  # shortcut: only endpoint matches join, so a ring that needs a split or a snapped gap is skipped
+        if cur[0] == cur[-1] and len(cur) >= 4:
+            rings.append(cur)
+    return rings
+
+
+def _relation(e, skipped):
+    """One Way per closed outer ring of a multipolygon (building) relation; holes are only counted."""
+    rid, tags, members = e.get("id"), e.get("tags", {}), e.get("members")
+    if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0 or not isinstance(tags, dict):
+        skipped["malformed"] += 1
+        return []
+    if not (tags.get("type") == "multipolygon" or "building" in tags) or not isinstance(members, list):
+        skipped["relation"] += 1
+        return []
+    outers = []
+    for m in members:
+        geom = m.get("geometry") if isinstance(m, dict) else None
+        ref = m.get("ref") if isinstance(m, dict) else None
+        if not isinstance(ref, int) or isinstance(ref, bool) or (geom is not None and not isinstance(geom, list)):
+            skipped["malformed"] += 1
+            return []
+        if m.get("role") == "inner":
+            skipped["relation_hole"] += 1
+        elif m.get("role") == "outer" and geom:
+            if (pts := _ring((n.get("lat"), n.get("lon")) if isinstance(n, dict) else (None, None) for n in geom)) is None:
+                skipped["malformed"] += 1
+                return []
+            outers.append(pts)
+    rings = _stitch(outers)
+    kept = {k: v for k, v in tags.items() if k in KEEP_TAGS and isinstance(v, str)}
+    skipped["relation"] += max(len(rings) - MAX_RINGS, 0 if rings else 1)
+    return [Way(-(rid * 100 + k), kept, r) for k, r in enumerate(rings[:MAX_RINGS], 1)]
+
+
 def parse_overpass(data: dict) -> tuple[list[Way], dict[str, int]]:
-    """Closed ways with geometry, sorted by id, and a count per skip reason (every key always present)."""
+    """Closed ways and multipolygon relations' outer rings, sorted by id, and a count per skip reason (every key always present)."""
     skipped = dict.fromkeys(SKIP_KEYS, 0)
     ways = []
     for e in data.get("elements", []) if isinstance(data, dict) else []:
         kind = e.get("type") if isinstance(e, dict) else None
         if kind == "relation":
-            skipped["relation"] += 1
+            ways += _relation(e, skipped)
             continue
         wid, tags, geom = (e.get("id"), e.get("tags", {}), e.get("geometry")) if kind == "way" else (None, None, None)
         if not isinstance(wid, int) or isinstance(wid, bool) or not isinstance(tags, dict):
@@ -99,7 +151,8 @@ def height_of(tags, building_height_m, level_height_m) -> float:
 
 
 def _query(bbox):
-    return '[out:json][timeout:60];way["building"](%s);out tags geom;' % ",".join(str(v) for v in bbox)
+    b = ",".join(str(v) for v in bbox)
+    return '[out:json][timeout:60]; (way["building"](%s); relation["building"](%s);); out tags geom;' % (b, b)
 
 
 def write_snapshot(path, ways, bbox, source_note):

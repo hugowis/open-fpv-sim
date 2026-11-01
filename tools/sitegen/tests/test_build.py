@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tomllib
@@ -85,10 +86,42 @@ def test_report_counts(tmp_path):
 
 
 def test_footprint_outside_extent_is_dropped(tmp_path):
-    # mean of the nodes: 1001 east -30, 1003 east -20 (inside), 1004 east +30; the extent is east +-25
-    r = demo(tmp_path, lambda t: t.replace("half_extent_m = [50.0, 50.0]", "half_extent_m = [50.0, 25.0]"))
+    # east spans: 1001 -40..-20, 1003 -30..-10 (reaches in), 1004 20..40; the extent is east +-15
+    r = demo(tmp_path, lambda t: t.replace("half_extent_m = [50.0, 50.0]", "half_extent_m = [50.0, 15.0]"))
     rep = build_site(r, tmp_path / "o")
     assert (rep.footprints_used, rep.skipped) == (1, {"recipe_skip": 1, "outside_extent": 2})
+
+
+def wide(tmp_path, tail, ways):
+    """mini() with a 300 m half extent."""
+    r = mini(tmp_path, tail, ways)
+    r.write_text(r.read_text(encoding="utf-8").replace("[50.0, 50.0]", "[300.0, 300.0]"), encoding="utf-8", newline="\n")
+    return r
+
+
+def glb_max(path):
+    blob = path.read_bytes()
+    doc = json.loads(blob[20 : 20 + struct.unpack_from("<I", blob, 12)[0]])
+    return [max(a["max"][i] for a in doc["accessors"] if a["type"] == "VEC3") for i in range(3)]
+
+
+def test_a_footprint_crossing_the_extent_edge_is_kept_whole(tmp_path):
+    rep = build_site(wide(tmp_path, "", [(0, 0, 10), (0, 100, 400)]), tmp_path / "o")  # 400 m east-west from 100 m to 500 m
+    assert (rep.footprints_used, rep.skipped) == (2, {})
+    assert glb_max(rep.glb_path)[0] == pytest.approx(500, abs=0.5)  # Godot x is east
+
+
+def test_a_footprint_wholly_outside_is_dropped(tmp_path):
+    rep = build_site(wide(tmp_path, "", [(0, 0, 10), (0, 301, 10), (-400, 0, 50)]), tmp_path / "o")
+    assert (rep.footprints_used, rep.skipped) == (1, {"outside_extent": 2})
+
+
+def test_a_footprint_override_by_negative_id_applies(tmp_path):
+    r = mini(tmp_path, "[[footprints]]\nid = -50001\nheight_m = 20.0\n")
+    sq = osm.read_snapshot(tmp_path / "mini" / "s.json")[0].ring
+    osm.write_snapshot(tmp_path / "mini" / "s.json", [osm.Way(-50001, {"building": "yes"}, sq)], (-1, -1, 1, 1), "test")
+    rep = build_site(r, tmp_path / "o")
+    assert not any("snapshot" in w for w in rep.warnings) and glb_max(rep.glb_path)[1] == pytest.approx(20.0)  # Godot y is up
 
 
 def test_unlisted_material_warns_and_an_unused_listed_one_is_dropped(tmp_path):
