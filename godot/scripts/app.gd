@@ -76,6 +76,7 @@ func _ready() -> void:
 	controls_menu.dvr_toggled.connect(_set_dvr)
 	var overridden := AppSettings.overrides(AppSettings.read_env(), OS.get_cmdline_user_args())
 	main_menu.setup(settings, overridden)
+	drone.set_quad(settings["quad_path"])
 	main_menu.choice_changed.connect(_on_setting_changed)
 	main_menu.start_requested.connect(_on_menu_start)
 	main_menu.controls_requested.connect(func() -> void: main_menu.close(); controls_menu.open_from_menu())
@@ -120,6 +121,7 @@ func _start_session(choices := {}) -> void:
 	# stabilizer is refused by the server. Derived per start, never a setting (docs/scripted-flight.md).
 	if session["open_loop"] and Catalog.quad_is_stabilized(session["quad_path"]):
 		session["stabilize"] = true
+	drone.set_quad(session["quad_path"])
 	# A new session numbers its worlds from the start, and has no faults or recordings yet.
 	_world_version = -1
 	_world_courses = []

@@ -8,9 +8,16 @@ extends Node3D
 ## The model's node names are the contract: Frame (Plate, PlateTop, Arm1, Arm2), Battery, BatteryStrap,
 ## Motor1..4, Prop1..4 (each holding a Blade), Antenna1..2, CameraMount (holding a Lens). The glTF loader
 ## uniquifies same-named nodes scene-wide (Blade, Blade2..4), so blades are looked up by the Blade* prefix.
+const QuadSpec = preload("res://scripts/quad_spec.gd")
+
 @export var model_path := "res://drone/quad.gltf"
-## +1: the propeller turns clockwise seen from above (Betaflight's default direction for each motor).
-const SPIN := [1.0, -1.0, -1.0, 1.0]
+## The 5F arm the model is authored for (quad_spec.gd's default and the scale denominator of set_quad).
+const AUTHORED_ARM := 0.08
+## The camera mount's authored size (the generator's CameraMount scale): set_quad resets it to this over k, so
+## a bigger frame carries the same camera at the same eye point and the near-clip guarantee survives any scale.
+const AUTHORED_MOUNT_SCALE := Vector3(0.02, 0.02, 0.026)
+## +1: the propeller turns clockwise seen from above; the frame part's motor_spin overrides this (set_quad).
+var _spin: Array = [1.0, -1.0, -1.0, 1.0]
 ## A real propeller turns far too fast to show (30 000 RPM is 500 turns a second); the blade is drawn at this
 ## fraction of true speed — a visual estimate, tuned so a full-speed 5" draws about as fast as the old model did.
 const SLOWDOWN := 50.0
@@ -51,7 +58,7 @@ func _ready() -> void:
 func set_motors(rpm: PackedFloat32Array, delta: float) -> void:
 	for i in mini(_props.size(), rpm.size()):
 		# Positive rotation about +Y is counter-clockwise seen from above, so clockwise motors turn negatively.
-		_props[i].rotate_y(-SPIN[i] * (rpm[i] / 60.0) * TAU / SLOWDOWN * delta)
+		_props[i].rotate_y(-_spin[i] * (rpm[i] / 60.0) * TAU / SLOWDOWN * delta)
 		if i < _blades.size():
 			_blades[i].visible = rpm[i] < BLUR_RPM
 
@@ -70,6 +77,20 @@ func _instantiate_model() -> Node3D:
 		model = Node3D.new()
 	model.name = "Model"
 	return model
+
+
+## Scales the model to the quad's frame: the asset is authored for the 5F's arm, so `k` is the frame's own arm
+## over that. The camera mount keeps its authored size at the FPV eye point — a bigger frame carries the same
+## camera, and the near-clip guarantee survives any scale.
+func set_quad(path: String) -> void:
+	var k: float = QuadSpec.arm_m(path) / AUTHORED_ARM
+	_spin = QuadSpec.spin(path)
+	scale = Vector3.ONE * k
+	var found: Array = [] if _model == null else _model.find_children("CameraMount", "Node3D", true, false)
+	if not found.is_empty():
+		var mount := found[0] as Node3D
+		mount.position = FPV_EYE / k
+		mount.scale = AUTHORED_MOUNT_SCALE / k
 
 
 ## The blur disc stands in for the propeller at speed; drawn here, not in the asset, so its look stays tunable.

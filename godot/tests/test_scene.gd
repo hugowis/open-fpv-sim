@@ -6,6 +6,7 @@ const Drone = preload("res://drone/drone.gd")
 const FpvCamera = preload("res://drone/fpv_camera.gd")
 const ChaseCamera = preload("res://drone/chase_camera.gd")
 const Lens = preload("res://ui/lens.gd")
+const AppSettings = preload("res://scripts/settings.gd")
 
 
 ## A world like the one `OfsClient.get_world()` returns (Godot's frame).
@@ -196,6 +197,23 @@ func test_a_spinning_propeller_blurs_into_its_disc() -> void:
 	ok(blades[0].visible, "a slow propeller shows its blade")
 	ok(blades[1].visible, "a stopped motor's blade stays visible")
 	ok(not blades[2].visible, "a fast one hides it: the blur disc stands in")
+	drone.queue_free()
+
+
+func test_the_model_scales_with_the_quad_and_the_mount_stays_at_the_eye() -> void:
+	var drone := Drone.new()
+	await add_to_tree(drone)
+	var root: String = AppSettings.repo_root()
+	drone.set_quad(root.path_join("quads/opendrone-7lr-longrange.toml"))
+	near(drone.scale.x, 0.113 / 0.08, "the 7\" frame scales the model up", 1e-4)
+	var mount: Node3D = drone.find_children("CameraMount", "Node3D", true, false)[0]
+	ok(mount.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-4, "the mount stays at the FPV eye")
+	var corner: float = ((mount as MeshInstance3D).mesh.get_aabb().size * mount.global_transform.basis.get_scale() * 0.5).length()
+	ok(corner < 0.02, "and inside the near clip at 1.4x scale (corner %f)" % corner)
+	drone.set_quad(root.path_join("quads/opendrone-3t-toothpick.toml"))
+	near(drone.scale.x, 0.044 / 0.08, "the toothpick scales down", 1e-4)
+	drone.set_quad(root.path_join("quads/no-such-quad.toml"))
+	near(drone.scale.x, 1.0, "an unreadable quad keeps the authored size", 1e-6)
 	drone.queue_free()
 
 
