@@ -3,9 +3,12 @@
 //! metres from home, like the quad file's (up is a negative `d`); sizes are `[north, east, height]`.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use ofs_core::mesh::TriMesh;
 use serde::Deserialize;
 
+use crate::mesh::{load_glb_with, MAX_MESHES, MAX_MESH_TRIANGLES};
 use crate::{Checker, ConfigError, Problem, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
 
 pub const WORLD_SCHEMA_VERSION: u32 = 1;
@@ -67,8 +70,48 @@ pub struct WorldConfig {
     /// The ground's relief; absent = flat ground (the plane d = 0).
     #[serde(default)]
     pub terrain: Option<TerrainSection>,
+    /// Triangle-mesh `.glb` files placed in the world; they collide and block the signal.
+    #[serde(default)]
+    pub meshes: Vec<MeshSection>,
+    /// The RF loss of the materials the meshes name.
+    #[serde(default)]
+    pub materials: Vec<MaterialSection>,
     #[serde(skip)]
     pub source_path: PathBuf,
+}
+
+/// A `.glb` placed in the world: its origin goes to `position_ned_m`, turned by `heading_deg` (clockwise from north).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeshSection {
+    /// Letters, digits, `_` and `-`, unique among the meshes.
+    pub name: String,
+    /// Relative to the world file's directory, no `..`, ending `.glb`.
+    pub file: String,
+    #[serde(default)]
+    pub position_ned_m: [f64; 3],
+    #[serde(default)]
+    pub heading_deg: f64,
+}
+
+/// The loss, in dB, of a signal crossing a surface of the `.glb` material called `name`; a material not listed loses 0.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialSection {
+    pub name: String,
+    #[serde(default)]
+    pub rf_loss_db: f64,
+}
+
+/// A loaded `[[meshes]]` entry. `loss_db[m]` is the loss of the mesh's material `m` (0 if `[[materials]]` omits it);
+/// `path` is absolute, for the Godot client.
+#[derive(Debug, Clone)]
+pub struct WorldMeshData {
+    pub name: String,
+    pub path: PathBuf,
+    pub digest: u64,
+    pub mesh: Arc<TriMesh>,
+    pub loss_db: Vec<f64>,
 }
 
 /// The rules of the race the gates make.
@@ -421,6 +464,8 @@ impl WorldConfig {
             race: RaceSection::default(),
             courses: Vec::new(),
             terrain: None,
+            meshes: Vec::new(),
+            materials: Vec::new(),
             source_path: PathBuf::new(),
         }
     }
@@ -635,7 +680,73 @@ impl WorldConfig {
                 _ => c.check(false, &field("freq_mhz"), "give either freq_mhz, or band and channel"),
             }
         }
+        c.check(self.meshes.len() <= MAX_MESHES, "meshes", format!("at most {MAX_MESHES} meshes (got {})", self.meshes.len()));
+        let mut names = HashSet::new();
+        for (i, m) in self.meshes.iter().enumerate() {
+            let field = |f: &str| format!("meshes[{i}].{f}");
+            check_name(&mut c, &m.name, &field("name"), &mut names);
+            c.check(!m.file.starts_with(['/', '\\']) && !m.file.contains(':'), &field("file"), format!("must be a relative path (got {:?})", m.file));
+            c.check(!m.file.split(['/', '\\']).any(|s| s == ".."), &field("file"), format!("must not contain '..' (got {:?})", m.file));
+            c.check(m.file.ends_with(".glb"), &field("file"), format!("must end in .glb (got {:?})", m.file));
+            c.check(finite(&m.position_ned_m), &field("position_ned_m"), "values must be finite");
+            c.check(m.heading_deg.is_finite(), &field("heading_deg"), "must be finite");
+        }
+        let mut names = HashSet::new();
+        for (i, m) in self.materials.iter().enumerate() {
+            check_name(&mut c, &m.name, &format!("materials[{i}].name"), &mut names);
+            c.non_negative(m.rf_loss_db, &format!("materials[{i}].rf_loss_db"));
+        }
         c.0
+    }
+
+    /// [`load_meshes_with`](Self::load_meshes_with) at the default triangle cap.
+    pub fn load_meshes(&self) -> Result<Vec<WorldMeshData>, String> {
+        self.load_meshes_with(MAX_MESH_TRIANGLES)
+    }
+
+    /// Reads every `[[meshes]]` file (resolved against the world file's directory) into NED, at most
+    /// `max_total_triangles` in all. A world not loaded from disk has no meshes to load. Call it on a validated config.
+    pub fn load_meshes_with(&self, max_total_triangles: usize) -> Result<Vec<WorldMeshData>, String> {
+        self.load_meshes_checked(max_total_triangles).map_err(|p| format!("{}: {}", p.field, p.message))
+    }
+
+    fn load_meshes_checked(&self, max_total_triangles: usize) -> Result<Vec<WorldMeshData>, Problem> {
+        if self.source_path.as_os_str().is_empty() {
+            return Ok(Vec::new());
+        }
+        let dir = self.source_path.parent().unwrap_or(Path::new(""));
+        let (mut out, mut used) = (Vec::new(), 0usize);
+        let mut loaded_materials: Vec<Vec<String>> = Vec::new();
+        for (i, m) in self.meshes.iter().enumerate() {
+            let problem = |message: String| Problem { field: format!("meshes[{i}].file"), message };
+            let joined = dir.join(&m.file);
+            let path = joined.canonicalize().map(strip_verbatim).map_err(|e| problem(format!("{}: cannot read: {e}", joined.display())))?;
+            let g = load_glb_with(&path, m.position_ned_m, m.heading_deg, max_total_triangles - used).map_err(|e| {
+                let note = if used > 0 { format!(" (all meshes together: at most {max_total_triangles} triangles)") } else { String::new() };
+                problem(format!("{e}{note}"))
+            })?;
+            used += g.mesh.len();
+            loaded_materials.push(g.material_names);
+            out.push(WorldMeshData { name: m.name.clone(), path, digest: g.digest, mesh: Arc::new(g.mesh), loss_db: Vec::new() });
+        }
+        // A listed material no mesh uses is a typo that would silently lose nothing.
+        for (i, mat) in self.materials.iter().enumerate() {
+            if !loaded_materials.iter().flatten().any(|n| *n == mat.name) {
+                return Err(Problem { field: format!("materials[{i}].name"), message: format!("no loaded mesh has a material called {:?}", mat.name) });
+            }
+        }
+        for (data, names) in out.iter_mut().zip(&loaded_materials) {
+            data.loss_db = names.iter().map(|n| self.materials.iter().find(|m| &m.name == n).map_or(0.0, |m| m.rf_loss_db)).collect();
+        }
+        Ok(out)
+    }
+}
+
+/// Windows' `canonicalize` returns `\\?\C:\...`, which the Godot client cannot open.
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => p,
     }
 }
 
@@ -722,6 +833,7 @@ pub fn load(path: &Path) -> Result<WorldConfig, ConfigError> {
     if !problems.is_empty() {
         return Err(ConfigError::Invalid { path: path.to_path_buf(), problems });
     }
+    world.load_meshes_checked(MAX_MESH_TRIANGLES).map_err(|p| ConfigError::Invalid { path: path.to_path_buf(), problems: vec![p] })?;
     Ok(world)
 }
 

@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 use std::path::Path;
 
@@ -935,4 +937,174 @@ flat_radius_m = 5.0");
         found.iter().any(|p| p.starts_with("terrain.amplitude_m: the steepest slope is 60.0 degrees, over the 60 degree limit")),
         "{found:#?}"
     );
+}
+
+// --- [[meshes]] and [[materials]] ---
+
+const MESH_WORLD: &str = "schema_version = 1\nname = \"m\"\n[pilot]\nposition_ned_m = [0.0, 0.0, -1.7]\n[receiver]\n\
+    [[receiver.antennas]]\nname = \"omni\"\nkind = \"omni\"\ngain_dbi = 2.0\npolarization = \"rhcp\"\n";
+
+/// A `.glb` of two triangles per named material, one node each.
+fn glb(materials: &[&str]) -> Vec<u8> {
+    let t = [[0.0, 0.0, -1.0], [1.0, 0.0, -1.0], [0.0, 1.0, -1.0]];
+    let nodes: Vec<_> = materials.iter().map(|m| common::glb::GlbNode { name: m, triangles: vec![t, t], material: Some(m) }).collect();
+    common::glb::write_glb(&nodes)
+}
+
+/// Writes `MESH_WORLD + extra` and, beside it, `a.glb` (materials `wall`, `glass`: 4 triangles) and `b.glb` (`wall`: 2).
+fn mesh_world(dir: &Path, extra: &str) -> std::path::PathBuf {
+    fs::write(dir.join("a.glb"), glb(&["wall", "glass"])).unwrap();
+    fs::write(dir.join("b.glb"), glb(&["wall"])).unwrap();
+    write(dir, &format!("{MESH_WORLD}{extra}"))
+}
+
+fn mesh_problems(extra: &str) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    match world::load(&mesh_world(dir.path(), extra)) {
+        Err(ConfigError::Invalid { problems, .. }) => problems.into_iter().map(|p| format!("{}: {}", p.field, p.message)).collect(),
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+}
+
+fn assert_field(problems: &[String], field: &str) {
+    assert!(problems.iter().any(|p| p.starts_with(&format!("{field}: "))), "no problem on {field}: {problems:?}");
+}
+
+#[test]
+fn meshes_and_materials_parse() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(
+        dir.path(),
+        "[[meshes]]\nname = \"hall\"\nfile = \"a.glb\"\nposition_ned_m = [10.0, 0.0, 0.0]\nheading_deg = 90.0\n\
+         [[meshes]]\nname = \"shed\"\nfile = \"b.glb\"\n\
+         [[materials]]\nname = \"glass\"\nrf_loss_db = 2.0\n[[materials]]\nname = \"wall\"\nrf_loss_db = 18.0\n",
+    );
+    let w = world::load(&path).unwrap();
+    assert_eq!((w.meshes[0].name.as_str(), w.meshes[0].position_ned_m, w.meshes[0].heading_deg), ("hall", [10.0, 0.0, 0.0], 90.0));
+    assert_eq!((w.meshes[1].position_ned_m, w.meshes[1].heading_deg), ([0.0; 3], 0.0));
+    let data = w.load_meshes().unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0].name, "hall");
+    assert!(data[0].path.is_absolute() && data[0].path.ends_with("a.glb"), "{:?}", data[0].path);
+    assert!(!data[0].path.to_string_lossy().starts_with(r"\\?\"), "no verbatim prefix: {:?}", data[0].path);
+    assert_eq!(data[0].digest, ofs_core::rng::fnv1a64(&fs::read(dir.path().join("a.glb")).unwrap()));
+    assert_eq!(data[0].mesh.len(), 4);
+    // The loss follows the .glb's material order (wall, glass), not the world file's [[materials]] order.
+    assert_eq!(data[0].loss_db, [18.0, 2.0]);
+    assert_eq!(data[1].loss_db, [18.0]);
+}
+
+#[test]
+fn an_unlisted_material_loses_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"a.glb\"\n[[materials]]\nname = \"glass\"\nrf_loss_db = 2.0\n");
+    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, [0.0, 2.0]);
+}
+
+#[test]
+fn every_mesh_and_material_rule_names_its_field() {
+    let mesh = |body: &str| format!("[[meshes]]\nname = \"x\"\nfile = \"a.glb\"\n{body}");
+    let twice = "[[meshes]]\nname = \"x\"\nfile = \"a.glb\"\n[[meshes]]\nname = \"x\"\nfile = \"b.glb\"\n";
+    assert_field(&mesh_problems(twice), "meshes[1].name");
+    assert_field(&mesh_problems("[[meshes]]\nname = \"a b\"\nfile = \"a.glb\"\n"), "meshes[0].name");
+    for file in ["/etc/a.glb", "\\a.glb", "C:/a.glb", "../a.glb", "sub/../a.glb", "sub\\..\\a.glb", "a.gltf", "a"] {
+        let p = mesh_problems(&format!("[[meshes]]\nname = \"x\"\nfile = {file:?}\n"));
+        assert_field(&p, "meshes[0].file");
+        assert_eq!(p.len(), 1, "{file}: {p:?}");
+    }
+    for (body, field) in [
+        ("position_ned_m = [nan, 0.0, 0.0]", "meshes[0].position_ned_m"),
+        ("position_ned_m = [0.0, inf, 0.0]", "meshes[0].position_ned_m"),
+        ("heading_deg = nan", "meshes[0].heading_deg"),
+        ("heading_deg = -inf", "meshes[0].heading_deg"),
+    ] {
+        assert_field(&mesh_problems(&mesh(body)), field);
+    }
+    let many: String = (0..=ofs_config::mesh::MAX_MESHES).map(|i| format!("[[meshes]]\nname = \"m{i}\"\nfile = \"a.glb\"\n")).collect();
+    assert_field(&mesh_problems(&many), "meshes");
+    assert_field(&mesh_problems("[[materials]]\nname = \"x\"\n[[materials]]\nname = \"x\"\n"), "materials[1].name");
+    assert_field(&mesh_problems("[[materials]]\nname = \"x y\"\n"), "materials[0].name");
+    for loss in ["-1.0", "nan", "inf"] {
+        assert_field(&mesh_problems(&format!("[[materials]]\nname = \"x\"\nrf_loss_db = {loss}\n")), "materials[0].rf_loss_db");
+    }
+}
+
+#[test]
+fn a_material_no_mesh_uses_and_an_unreadable_file_are_refused_at_load() {
+    let p = mesh_problems("[[meshes]]\nname = \"hall\"\nfile = \"b.glb\"\n[[materials]]\nname = \"wall\"\n[[materials]]\nname = \"wal\"\n");
+    assert_eq!(p.len(), 1);
+    assert_field(&p, "materials[1].name");
+    let p = mesh_problems("[[meshes]]\nname = \"hall\"\nfile = \"b.glb\"\n[[meshes]]\nname = \"gone\"\nfile = \"gone.glb\"\n");
+    assert_field(&p, "meshes[1].file");
+    assert!(p[0].contains("gone.glb"), "{p:?}");
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"bad.glb\"\n");
+    fs::write(dir.path().join("bad.glb"), b"nope").unwrap();
+    match world::load(&path) {
+        Err(ConfigError::Invalid { problems, .. }) => {
+            assert_eq!(problems[0].field, "meshes[0].file");
+            assert!(problems[0].message.contains("bad.glb"), "{:?}", problems[0].message);
+        }
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_triangle_cap_counts_every_mesh_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(dir.path(), "[[meshes]]\nname = \"x\"\nfile = \"a.glb\"\n[[meshes]]\nname = \"y\"\nfile = \"b.glb\"\n");
+    let w = world::load(&path).unwrap();
+    assert_eq!(w.load_meshes_with(6).unwrap().len(), 2);
+    let e = w.load_meshes_with(5).unwrap_err();
+    assert!(e.starts_with("meshes[1].file: ") && e.contains("b.glb"), "{e}");
+    let e = w.load_meshes_with(3).unwrap_err();
+    assert!(e.starts_with("meshes[0].file: ") && e.contains("a.glb"), "{e}");
+}
+
+#[test]
+fn a_world_not_loaded_from_disk_has_no_meshes_to_load() {
+    let mut w = WorldConfig::open_field();
+    assert!(w.meshes.is_empty() && w.materials.is_empty());
+    assert!(w.load_meshes().unwrap().is_empty());
+    w.meshes.push(ofs_config::MeshSection { name: "x".into(), file: "x.glb".into(), position_ned_m: [0.0; 3], heading_deg: 0.0 });
+    assert!(w.load_meshes().unwrap().is_empty());
+}
+
+fn shipped_world(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../worlds").join(format!("{name}.toml"))
+}
+
+#[test]
+fn a_world_without_meshes_loads_exactly_as_before() {
+    let mut seen = 0;
+    for entry in fs::read_dir(shipped_world("x").parent().unwrap()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "toml") || path.file_stem().unwrap() == "hall" {
+            continue;
+        }
+        let w = world::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert!(w.meshes.is_empty() && w.materials.is_empty(), "{}", path.display());
+        assert!(w.load_meshes().unwrap().is_empty());
+        seen += 1;
+    }
+    assert!(seen >= 5, "found only {seen} worlds");
+}
+
+#[test]
+fn the_hall_loads_with_its_doorway_and_window_open() {
+    use glam::DVec3;
+    let w = world::load(&shipped_world("hall")).unwrap();
+    assert_eq!(w.pilot.position_ned_m, [5.0, 0.0, -1.7]);
+    let hall = &w.load_meshes().unwrap()[0];
+    assert_eq!(hall.loss_db, [18.0, 2.0], "concrete, glass");
+    let materials_crossed = |a: [f64; 3], b: [f64; 3]| -> Vec<u32> {
+        let mut m = Vec::new();
+        hall.mesh.crossings(DVec3::from(a), DVec3::from(b), &mut m);
+        m
+    };
+    assert_eq!(materials_crossed([5.0, 0.0, -1.7], [40.0, 0.0, -1.7]), Vec::<u32>::new(), "through the doorway");
+    assert_eq!(materials_crossed([5.0, -4.0, -1.7], [40.0, -4.0, -1.7]), [0], "through the south wall: concrete");
+    assert_eq!(materials_crossed([45.0, 0.0, -1.7], [45.0, 10.0, -1.7]), [0], "through the east wall: concrete");
+    assert_eq!(materials_crossed([40.0, 0.0, -3.5], [40.0, 10.0, -3.5]), [1], "through the window: glass only");
+    assert_eq!(materials_crossed([40.0, 0.0, -1.7], [40.0, 0.0, -9.0]), [0], "through the roof");
 }

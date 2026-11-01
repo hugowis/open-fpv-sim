@@ -1,0 +1,38 @@
+# A concrete hall with a doorway and a glass window, to see what walls do to the video link. The hall is the mesh in
+# assets/hall.glb (made by `cargo run -p ofs-config --example make_hall`): surfaces without thickness, footprint
+# north 30..50, east -6..6, 6 m tall under a flat roof, a 4 x 3 m doorway in the south wall (east -2..2) and a
+# 4 x 1 m glass window in the east wall (north 38..42, 3 to 4 m up). The pilot stands 25 m south of the doorway,
+# so the picture is clean there, and degrades as the quad flies behind the walls.
+#
+# Positions are NED metres from home (north, east, down: up is negative).
+# All values are estimates.
+schema_version = 1
+name = "Hall"
+
+[pilot]
+# 25 m south of the doorway, goggles 1.7 m up, looking north at it.
+position_ned_m = [5.0, 0.0, -1.7]
+facing_deg = 0.0
+
+[receiver]
+noise_floor_dbm = -93.0
+diversity = false
+
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+
+[[meshes]]
+name = "hall"
+file = "assets/hall.glb"
+
+# Per surface crossed. Typical figures at 5.8 GHz: a concrete wall 15 to 25 dB, window glass 2 to 4 dB.
+[[materials]]
+name = "concrete"
+rf_loss_db = 18.0
+
+[[materials]]
+name = "glass"
+rf_loss_db = 2.0
