@@ -48,6 +48,28 @@ pub fn load_glb_with(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, ma
     load(path, position_ned_m, heading_deg, max_triangles).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The reader does unchecked `usize` maths on the view and accessor ranges and a debug assertion on the stride; this
+/// bounds all of it first. An external buffer is left to the reader, which refuses it.
+fn check_accessor_range(acc: &gltf::Accessor, blob_len: usize) -> Result<(), String> {
+    let Some(view) = acc.view() else { return Ok(()) };
+    if !matches!(view.buffer().source(), gltf::buffer::Source::Bin) {
+        return Ok(());
+    }
+    let view_end = view.offset().checked_add(view.length()).filter(|e| *e <= blob_len);
+    if view_end.is_none() {
+        return Err(format!("a buffer view at {} of {} bytes is past the buffer ({blob_len} bytes)", view.offset(), view.length()));
+    }
+    let (size, stride) = (acc.size(), view.stride().unwrap_or(acc.size()));
+    if stride < size {
+        return Err(format!("a byteStride of {stride} is smaller than the {size}-byte element"));
+    }
+    let end = stride.checked_mul(acc.count() - 1).and_then(|n| n.checked_add(acc.offset())).and_then(|n| n.checked_add(size));
+    if end.is_none_or(|e| e > view.length()) {
+        return Err(format!("an accessor of {} elements at offset {} runs past its {}-byte buffer view", acc.count(), acc.offset(), view.length()));
+    }
+    Ok(())
+}
+
 fn load(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, max_triangles: usize) -> Result<LoadedGlb, String> {
     if !position_ned_m.iter().chain([&heading_deg]).all(|v| v.is_finite()) {
         return Err("position and heading must be finite".into());
@@ -104,6 +126,10 @@ fn load(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, max_triangles: 
                     if !matches!(i.data_type(), T::U8 | T::U16 | T::U32) || i.dimensions() != D::Scalar {
                         return Err(format!("indices must be unsigned SCALAR, not {:?} {:?}", i.data_type(), i.dimensions()));
                     }
+                }
+                let blob_len = gltf.blob.as_deref().map_or(0, <[u8]>::len);
+                for acc in prim.get(&gltf::Semantic::Positions).into_iter().chain(prim.indices()) {
+                    check_accessor_range(&acc, blob_len)?;
                 }
                 let reader = prim.reader(|b| match b.source() {
                     gltf::buffer::Source::Bin => gltf.blob.as_deref(),

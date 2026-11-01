@@ -1,0 +1,72 @@
+{
+ "version": 0.6,
+ "generator": "hand-written test fixture in the shape of an Overpass `out tags geom;` response",
+ "elements": [
+  {
+   "type": "way",
+   "id": 101,
+   "tags": {"building": "yes", "name": "Square", "addr:street": "ignored"},
+   "geometry": [
+    {"lat": 51.39, "lon": 30.099},
+    {"lat": 51.39, "lon": 30.0994},
+    {"lat": 51.3903, "lon": 30.0994},
+    {"lat": 51.3903, "lon": 30.099},
+    {"lat": 51.39, "lon": 30.099}
+   ]
+  },
+  {
+   "type": "way",
+   "id": 102,
+   "tags": {"building": "industrial", "height": "12.5"},
+   "geometry": [
+    {"lat": 51.391, "lon": 30.1},
+    {"lat": 51.391, "lon": 30.1006},
+    {"lat": 51.3912, "lon": 30.1006},
+    {"lat": 51.3912, "lon": 30.1003},
+    {"lat": 51.3915, "lon": 30.1003},
+    {"lat": 51.3915, "lon": 30.1},
+    {"lat": 51.391, "lon": 30.1}
+   ]
+  },
+  {
+   "type": "way",
+   "id": 103,
+   "tags": {"building": "yes"},
+   "geometry": [
+    {"lat": 51.392, "lon": 30.101},
+    {"lat": 51.392, "lon": 30.1014},
+    {"lat": 51.3923, "lon": 30.1014}
+   ]
+  },
+  {
+   "type": "way",
+   "id": 104,
+   "tags": {"building": "yes", "name": "Саркофаг", "name:en": "Sarcophagus", "height": "70", "roof:shape": "flat"},
+   "geometry": [
+    {"lat": 51.3895, "lon": 30.0985},
+    {"lat": 51.3895, "lon": 30.099},
+    {"lat": 51.3898, "lon": 30.099},
+    {"lat": 51.3898, "lon": 30.0985},
+    {"lat": 51.3895, "lon": 30.0985}
+   ]
+  },
+  {
+   "type": "way",
+   "id": 105,
+   "tags": {"building": "apartments", "building:levels": "5"},
+   "geometry": [
+    {"lat": 51.388, "lon": 30.097},
+    {"lat": 51.388, "lon": 30.0974},
+    {"lat": 51.3883, "lon": 30.0974},
+    {"lat": 51.3883, "lon": 30.097},
+    {"lat": 51.388, "lon": 30.097}
+   ]
+  },
+  {
+   "type": "relation",
+   "id": 106,
+   "tags": {"building": "yes", "type": "multipolygon"},
+   "members": [{"type": "way", "ref": 101, "role": "outer"}]
+  }
+ ]
+}

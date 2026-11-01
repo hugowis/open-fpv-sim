@@ -161,6 +161,10 @@ fn nested_nodes_apply_their_transforms() {
 
 /// A one-node GLB around `accessors`/`extra_nodes` JSON fragments over a 36-byte triangle buffer.
 fn glb_with(nodes: &str, accessors: &str, primitive: &str) -> Vec<u8> {
+    glb_with_views(nodes, accessors, primitive, r#"{"buffer":0,"byteLength":36}"#)
+}
+
+fn glb_with_views(nodes: &str, accessors: &str, primitive: &str, views: &str) -> Vec<u8> {
     let mut bin = Vec::new();
     for c in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
         bin.extend_from_slice(&c.to_le_bytes());
@@ -168,7 +172,7 @@ fn glb_with(nodes: &str, accessors: &str, primitive: &str) -> Vec<u8> {
     let json = format!(
         r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{nodes}],
         "meshes":[{{"primitives":[{primitive}]}}],"accessors":[{accessors}],
-        "bufferViews":[{{"buffer":0,"byteLength":36}}],"buffers":[{{"byteLength":36}}]}}"#
+        "bufferViews":[{views}],"buffers":[{{"byteLength":36}}]}}"#
     );
     pack_glb(&json, &bin)
 }
@@ -218,6 +222,45 @@ fn accessor_types_the_reader_cannot_take_are_errors_not_panics() {
     refused(&glb_with(node, u16_positions, r#"{"attributes":{"POSITION":0}}"#), "POSITION");
     let vec2_positions = POSITIONS.replace("VEC3", "VEC2").replace(",0]", "]");
     refused(&glb_with(node, &vec2_positions, r#"{"attributes":{"POSITION":0}}"#), "POSITION");
+}
+
+const NODE: &str = r#"{"name":"n","mesh":0}"#;
+const POSITION_PRIM: &str = r#"{"attributes":{"POSITION":0}}"#;
+
+#[test]
+fn a_short_byte_stride_is_an_error_not_a_panic() {
+    // 4 < 12 bytes of a F32 VEC3: the reader would subtract past the slice.
+    let view = r#"{"buffer":0,"byteLength":36,"byteStride":4}"#;
+    refused(&glb_with_views(NODE, POSITIONS, POSITION_PRIM, view), "byteStride");
+    // Still short at 8.
+    let view = r#"{"buffer":0,"byteLength":36,"byteStride":8}"#;
+    refused(&glb_with_views(NODE, POSITIONS, POSITION_PRIM, view), "byteStride");
+}
+
+#[test]
+fn an_overflowing_buffer_view_offset_is_an_error() {
+    let view = r#"{"buffer":0,"byteOffset":18446744073709551600,"byteLength":36}"#;
+    refused(&glb_with_views(NODE, POSITIONS, POSITION_PRIM, view), "past the buffer");
+}
+
+#[test]
+fn an_overflowing_accessor_offset_is_an_error() {
+    let overflow = r#"{"bufferView":0,"byteOffset":18446744073709551600,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}"#;
+    refused(&glb_with(NODE, overflow, POSITION_PRIM), "past its");
+    // An indices accessor too.
+    let accessors = format!("{POSITIONS},{{\"bufferView\":0,\"byteOffset\":18446744073709551600,\"componentType\":5125,\"count\":3,\"type\":\"SCALAR\"}}");
+    refused(&glb_with(NODE, &accessors, r#"{"attributes":{"POSITION":0},"indices":1}"#), "past its");
+    // And one whose count runs past its view without overflowing.
+    let long = POSITIONS.replace("\"count\":3", "\"count\":4");
+    refused(&glb_with(NODE, &long, POSITION_PRIM), "past its");
+}
+
+#[test]
+fn a_buffer_view_past_the_buffer_is_an_error() {
+    let view = r#"{"buffer":0,"byteOffset":12,"byteLength":36}"#;
+    refused(&glb_with_views(NODE, POSITIONS, POSITION_PRIM, view), "past the buffer");
+    let claims_more = r#"{"buffer":0,"byteLength":3600}"#;
+    refused(&glb_with_views(NODE, POSITIONS, POSITION_PRIM, claims_more), "past the buffer");
 }
 
 #[test]

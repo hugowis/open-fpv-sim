@@ -19,6 +19,8 @@
 | Godot client tests | `bash scripts/run-godot-tests.sh` (see "Godot pilot client" below) |
 | Real-time session (for Configurator) | `OFS_SITL_LAUNCH=<cmd> python python/examples/serve_realtime.py` |
 | Regenerate Python stubs | `python -m grpc_tools.protoc -I proto --python_out=python --pyi_out=python --grpc_python_out=python proto/ofs/v1/sim.proto` |
+| Build a world from OSM data | `cd tools/sitegen && python -m sitegen build <recipe.toml>` (and `fetch <recipe.toml>` once for a real site, never for the demo); see "Generating a world from real data" |
+| Site generator tests | `python -m pytest tools/sitegen/tests -q` (CI runs it in `core` and `windows`; Python 3.11 or newer, no install) |
 | Lint (CI runs it) | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | Regenerate the SITL patch | start from the M1 patch (`third_party/betaflight/ofs-sitl.patch` at commit c1514e2) applied to the pinned Betaflight checkout, run `add_serial_in_datagram.py` then `deterministic_boot.py` (both in `third_party/betaflight/tools/`; see their docstrings), then `add_serial_out_datagram.py` (M3a: UART TX bytes in the reply). Run the generators in that order. |
 
@@ -392,6 +394,26 @@ then `run(<the file's last t_s>)`; the flight replays (a climb to about 47 m, mo
 of one file are byte-identical in MCAP when they start from a saved EEPROM; the first replay in a fresh data directory
 differs, because that first Betaflight boot flashes the EEPROM and applies the diff. Close the game before replaying
 with Betaflight: the lockstep session's SITL cleanup kills the game's Betaflight.
+
+## Generating a world from real data
+`tools/sitegen/` builds a mesh world from a recipe (your decisions: placement, heights, materials, landmarks such as a
+vault, a striped stack and walls with openings) and an OpenStreetMap snapshot of building outlines. `fetch` downloads the
+snapshot once and you commit it (once the licence note is confirmed); `build` turns recipe and snapshot into a `.glb` and a world file, the same bytes every time:
+
+    cd tools/sitegen
+    python -m sitegen fetch <recipe.toml>    # once per real site, over the network; a polite Overpass client
+    python -m sitegen build <recipe.toml>    # offline; prints footprints, landmarks, triangles and what it skipped
+
+`tools/sitegen/tests/fixtures/demo/` is a working example: `build` it, but never `fetch` it (its snapshot is hand-made and the
+goldens depend on it, and its bounding box sits on real ground, so `fetch` would return real OpenStreetMap data;
+`tools/sitegen/README.md` says more). The recipe schema, the determinism and `doubleSided` rules, the
+frames and the limits (flat roofs, flat ground, no textures) are in `tools/sitegen/README.md`. **sitegen needs Python 3.11
+or newer** (it reads TOML with `tomllib`), although the rest of the repository still says 3.10; the output is read by the
+engine like any other mesh world (the "The world file" section above).
+
+The footprints are OpenStreetMap data (© OpenStreetMap contributors, ODbL 1.0, <https://www.openstreetmap.org/copyright>);
+the generated world file carries the line. Whether an ODbL snapshot may live in this GPLv3 repository is the open question
+of `docs/research/sitegen-licensing.md` (status: unconfirmed): do not commit a real snapshot before the owner has confirmed it.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.
