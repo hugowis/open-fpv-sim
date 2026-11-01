@@ -253,8 +253,8 @@ func _process(delta: float) -> void:
 	var racing: bool = telemetry.get("race_present", false) and not telemetry.get("race_finished", false)
 	world.set_course(int(telemetry.get("race_course_index", 0)))
 	world.set_next_gate(int(telemetry.get("race_next_gate", 0)) if racing else -1)
-	if telemetry.has("motor_cmd"):
-		drone.set_motors(telemetry["motor_cmd"], delta)
+	if telemetry.has("motor_rpm"):
+		drone.set_motors(telemetry["motor_rpm"], delta)
 	var detail: String = client.get_phase_detail()
 	if client.get_phase() == "failed" and TIPS.has(phase_kind):
 		detail += "\n" + TIPS[phase_kind]

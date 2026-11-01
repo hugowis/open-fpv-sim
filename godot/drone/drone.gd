@@ -1,17 +1,22 @@
 extends Node3D
 ## The drone: a glTF quad-X (godot/drone/quad.gltf, authored for the 5F frame — see QUAD_MODEL.md) drawn at the
-## pose the simulator reports. Propellers turn with the motor commands.
+## pose the simulator reports. Propellers turn at each motor's simulated speed.
 ##
 ## Godot's frame: forward is -Z, right is +X, up is +Y. The motor order is Betaflight's quad-X (M1 rear right,
 ## M2 front right, M3 rear left, M4 front left), as in quads/opendrone-5f-freestyle.toml.
 
 ## The model's node names are the contract: Frame (Plate, PlateTop, Arm1, Arm2), Battery, BatteryStrap,
-## Motor1..4, Prop1..4 (each holding a Blade), Antenna1..2, CameraMount (holding a Lens).
+## Motor1..4, Prop1..4 (each holding a Blade), Antenna1..2, CameraMount (holding a Lens). The glTF loader
+## uniquifies same-named nodes scene-wide (Blade, Blade2..4), so blades are looked up by the Blade* prefix.
 @export var model_path := "res://drone/quad.gltf"
 ## +1: the propeller turns clockwise seen from above (Betaflight's default direction for each motor).
 const SPIN := [1.0, -1.0, -1.0, 1.0]
-## A real propeller turns far too fast to show; this is the drawn speed at a full motor command, in rad/s.
-const DRAWN_SPIN := 60.0
+## A real propeller turns far too fast to show (30 000 RPM is 500 turns a second); the blade is drawn at this
+## fraction of true speed — a visual estimate, tuned so a full-speed 5" draws about as fast as the old model did.
+const SLOWDOWN := 50.0
+## Above this many RPM the drawn blade would only alias; it hides and the translucent disc stands in. A visual
+## estimate: idle and spool-up stay below it, hover and full throttle sit above.
+const BLUR_RPM := 3000.0
 ## The mount's authored up-tilt, used only when no FpvCamera child is mounted to say otherwise.
 const AUTHORED_UPTILT_DEG := 30.0
 ## The FPV camera's eye point (fpv_camera.gd): the camera mount is centred there, wholly inside the camera's
@@ -20,6 +25,7 @@ const FPV_EYE := Vector3(0.0, 0.02, -0.04)
 
 var _model: Node3D
 var _props: Array[Node3D] = []
+var _blades: Array[Node3D] = []
 
 
 func _ready() -> void:
@@ -33,14 +39,21 @@ func _ready() -> void:
 		var pivot := found[0] as Node3D
 		_props.append(pivot)
 		_add_disc(pivot)
+		var blades := pivot.find_children("Blade*", "Node3D", true, false)
+		if not blades.is_empty():
+			_blades.append(blades[0] as Node3D)
 	_apply_uptilt()
 
 
-## Turns the propellers: `commands` are the motor commands in [0, 1], `delta` the frame time.
-func set_motors(commands: PackedFloat32Array, delta: float) -> void:
-	for i in mini(_props.size(), commands.size()):
+## Turns the propellers: `rpm` are the motor speeds in revolutions per minute from the state stream, `delta` the
+## frame time. A stopped motor stops (a failed one shows), a windmilling descent turns; above BLUR_RPM the blade
+## hides and the disc stands in.
+func set_motors(rpm: PackedFloat32Array, delta: float) -> void:
+	for i in mini(_props.size(), rpm.size()):
 		# Positive rotation about +Y is counter-clockwise seen from above, so clockwise motors turn negatively.
-		_props[i].rotate_y(-SPIN[i] * commands[i] * DRAWN_SPIN * delta)
+		_props[i].rotate_y(-SPIN[i] * (rpm[i] / 60.0) * TAU / SLOWDOWN * delta)
+		if i < _blades.size():
+			_blades[i].visible = rpm[i] < BLUR_RPM
 
 
 ## Loads the model at runtime (GLTFDocument, not the editor's import step: the headless suites never import).

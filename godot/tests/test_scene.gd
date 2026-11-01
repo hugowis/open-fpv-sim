@@ -171,20 +171,31 @@ func test_the_world_is_only_scenery() -> void:
 	world.queue_free()
 
 
-func test_the_drone_has_four_propellers_that_follow_the_motor_commands() -> void:
+func test_the_propellers_follow_the_motor_speeds() -> void:
 	var drone := Drone.new()
 	await add_to_tree(drone)
 	eq(drone._props.size(), 4, "four propellers")
 	var before: Array = drone._props.map(func(p: Node3D) -> float: return p.rotation.y)
-	drone.set_motors(PackedFloat32Array([0.0, 0.5, 1.0, 0.5]), 0.01)
+	drone.set_motors(PackedFloat32Array([0.0, 6000.0, 12000.0, 6000.0]), 0.01)
 	var after: Array = drone._props.map(func(p: Node3D) -> float: return p.rotation.y)
-	near(after[0], before[0], "an idle motor does not turn its propeller")
-	ok(absf(after[2] - before[2]) > absf(after[1] - before[1]), "a harder commanded motor turns faster")
+	near(after[0], before[0], "a stopped motor does not turn its propeller")
+	ok(absf(after[2] - before[2]) > absf(after[1] - before[1]), "a faster motor turns its propeller faster")
 	# Betaflight's default directions: M1 and M4 clockwise (negative about +Y), M2 and M3 counter-clockwise.
 	ok(after[1] > before[1] and after[2] > before[2], "M2 and M3 turn counter-clockwise")
-	drone.set_motors(PackedFloat32Array([1.0, 0.0, 0.0, 1.0]), 0.01)
+	drone.set_motors(PackedFloat32Array([12000.0, 0.0, 0.0, 12000.0]), 0.01)
 	ok(drone._props[0].rotation.y < after[0] and drone._props[3].rotation.y < after[3], "M1 and M4 turn clockwise")
-	drone.set_motors(PackedFloat32Array([1.0]), 0.01)  # fewer commands than propellers: no error
+	drone.set_motors(PackedFloat32Array([1000.0]), 0.01)  # fewer speeds than propellers: no error
+	drone.queue_free()
+
+
+func test_a_spinning_propeller_blurs_into_its_disc() -> void:
+	var drone := Drone.new()
+	await add_to_tree(drone)
+	var blades := drone._props.map(func(p: Node3D) -> Node3D: return p.find_children("Blade*", "", true, false)[0])
+	drone.set_motors(PackedFloat32Array([1000.0, 0.0, 30000.0, 0.0]), 0.01)
+	ok(blades[0].visible, "a slow propeller shows its blade")
+	ok(blades[1].visible, "a stopped motor's blade stays visible")
+	ok(not blades[2].visible, "a fast one hides it: the blur disc stands in")
 	drone.queue_free()
 
 

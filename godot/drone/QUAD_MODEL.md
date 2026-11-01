@@ -17,5 +17,7 @@ geometry is the procedural model of PR #147 carried into an asset; the numbers' 
 
 The node names are the contract `drone.gd` loads by (a test pins them): `Frame` (`Plate`, `PlateTop`, `Arm1`,
 `Arm2`), `Battery`, `BatteryStrap`, `Motor1..4`, `Prop1..4` (each holding a `Blade`), `Antenna1..2`,
-`CameraMount` (holding a `Lens`). The blur discs, the propeller spin and the per-family scale are drawn in code
+`CameraMount` (holding a `Lens`). The loader (`GLTFDocument.generate_scene`) makes node names unique across the
+scene, so the four authored `Blade` nodes come back as `Blade`, `Blade2..4` — the code looks them up by the
+`Blade*` prefix. The blur discs, the propeller spin and the per-family scale are drawn in code
 (`drone.gd`, `quad_spec.gd`).
