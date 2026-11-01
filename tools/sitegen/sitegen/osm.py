@@ -1,3 +1,4 @@
+import http.client
 import json
 import math
 import os
@@ -34,16 +35,17 @@ class Way:
     ring: list  # (lat, lon) as delivered: a closed way repeats its first node last
 
 
-def _coord(n, key, lim):
-    v = n.get(key) if isinstance(n, dict) else None
-    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) <= lim
+def _coord(v, lim):
+    # The range test comes first: it also rejects NaN/inf and never overflows on a hostile huge JSON int, unlike isfinite/float.
+    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) <= lim
     return float(v) if ok else None
 
 
-def _ring(geometry):
+def _ring(points):
+    """[(lat, lon)] from (lat, lon) pairs, or None if any point is not a finite in-range number pair."""
     ring = []
-    for n in geometry:
-        lat, lon = _coord(n, "lat", 90), _coord(n, "lon", 180)
+    for lat, lon in points:
+        lat, lon = _coord(lat, 90), _coord(lon, 180)
         if lat is None or lon is None:
             return None
         ring.append((lat, lon))
@@ -64,7 +66,7 @@ def parse_overpass(data: dict) -> tuple[list[Way], dict[str, int]]:
             skipped["malformed"] += 1
         elif not isinstance(geom, list) or not geom:
             skipped["no_geometry"] += 1
-        elif (ring := _ring(geom)) is None:
+        elif (ring := _ring((n.get("lat"), n.get("lon")) if isinstance(n, dict) else (None, None) for n in geom)) is None:
             skipped["malformed"] += 1
         elif len(ring) < 4 or ring[0] != ring[-1]:
             skipped["open_way"] += 1
@@ -134,7 +136,11 @@ def read_snapshot(path) -> list[Way]:
             wid, tags = w["id"], w["tags"]
             if not isinstance(wid, int) or isinstance(wid, bool) or not isinstance(tags, dict):
                 raise TypeError("bad id or tags")
-            ways.append(Way(wid, tags, [(float(lat), float(lon)) for lat, lon in w["ring"]]))
+            if not all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items()):
+                raise TypeError("tags must map strings to strings")
+            if (ring := _ring(w["ring"])) is None:
+                raise ValueError("ring has a non-finite or out-of-range coordinate")
+            ways.append(Way(wid, tags, ring))
     except (KeyError, TypeError, ValueError) as e:
         raise ValueError(f"snapshot {path}: malformed way ({type(e).__name__}: {e})") from None
     return ways
@@ -150,10 +156,13 @@ def fetch(bbox, user_agent, *, opener=urllib.request.urlopen, sleep=time.sleep, 
                 data = json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             if e.code in RETRY_CODES and attempt < tries - 1:
+                e.close()
                 sleep(BACKOFF_S)
                 continue
+            e.close()
             raise FetchError(f"Overpass answered HTTP {e.code}") from None
-        except (OSError, ValueError) as e:  # URLError and TimeoutError are OSErrors; bad JSON/UTF-8 are ValueErrors
+        # URLError and TimeoutError are OSErrors, a truncated body is an HTTPException, bad JSON/UTF-8 are ValueErrors
+        except (OSError, http.client.HTTPException, ValueError) as e:
             raise FetchError(f"{type(e).__name__}: {e}") from None
         if not isinstance(data, dict) or not isinstance(data.get("elements"), list):
             raise FetchError("response is not an Overpass JSON object with an `elements` list")

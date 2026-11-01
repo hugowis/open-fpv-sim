@@ -1,3 +1,4 @@
+import http.client
 import json
 import math
 import urllib.error
@@ -102,6 +103,14 @@ def test_parse_survives_hostile_input():
     assert skipped == {"open_way": 0, "relation": 0, "no_geometry": 1, "malformed": 7}
 
 
+def test_parse_huge_int_coordinates_are_skipped_not_raised():
+    ring = [{"lat": 10**400, "lon": 0}, {"lat": 0, "lon": 0}, {"lat": 1, "lon": 1}, {"lat": 10**400, "lon": 0}]
+    ways, skipped = osm.parse_overpass({"elements": [
+        {"type": "way", "id": 1, "tags": {}, "geometry": ring},
+        {"type": "way", "id": 2, "tags": {}, "geometry": [{"lat": float("nan"), "lon": 0}]}]})
+    assert ways == [] and skipped["malformed"] == 2
+
+
 @pytest.mark.parametrize("tags, expected", [
     ({"height": "70"}, 70.0),
     ({"height": "70 m"}, 70.0),
@@ -156,6 +165,11 @@ def test_snapshot_is_sorted_and_stable_bytes(tmp_path):
     ('{"format": 2, "ways": []}', "format"),
     ('{"format": 1, "ways": [{"id": "x"}]}', "snapshot"),
     ('{"format": 1, "ways": [{"id": 1, "tags": {}, "ring": [[1]]}]}', "snapshot"),
+    ('{"format": 1, "ways": [{"id": 1, "tags": {}, "ring": [[1, %s]]}]}' % ("1" + "0" * 400), "coordinate"),
+    ('{"format": 1, "ways": [{"id": 1, "tags": {}, "ring": [[NaN, 1]]}]}', "coordinate"),
+    ('{"format": 1, "ways": [{"id": 1, "tags": {}, "ring": [[1, 1e999]]}]}', "coordinate"),
+    ('{"format": 1, "ways": [{"id": 1, "tags": {}, "ring": [[91, 1]]}]}', "coordinate"),
+    ('{"format": 1, "ways": [{"id": 1, "tags": {"height": 70}, "ring": []}]}', "strings"),
 ])
 def test_read_snapshot_rejects_malformed_files(tmp_path, text, msg):
     p = tmp_path / "bad.json"
@@ -238,3 +252,18 @@ def test_empty_response_does_not_overwrite_a_good_snapshot(tmp_path, capsys):
 def test_fetch_main_reports_a_bad_recipe(tmp_path, capsys):
     assert osm.fetch_main(tmp_path / "missing.toml", opener=FakeOpener([{}]), sleep=no_sleep) == 1
     assert "missing.toml" in capsys.readouterr().err
+
+
+def test_truncated_body_is_a_fetch_error_and_keeps_the_snapshot(tmp_path, capsys):
+    class Truncated(Resp):
+        def read(self):
+            raise http.client.IncompleteRead(b"{", 100)
+
+    rp = recipe_file(tmp_path)
+    snap = tmp_path / "demo.osm.json"
+    assert osm.fetch_main(rp, opener=FakeOpener([fixture_data()]), sleep=no_sleep) == 0
+    good = snap.read_bytes()
+    capsys.readouterr()
+    assert osm.fetch_main(rp, opener=lambda req, timeout=None: Truncated(b""), sleep=no_sleep) == 1
+    assert "IncompleteRead" in capsys.readouterr().err
+    assert snap.read_bytes() == good
