@@ -766,7 +766,7 @@ fn object_shape(o: &world_cfg::ObjectSection) -> Shape {
     match o.shape {
         world_cfg::Shape::Box => {
             let s = o.size_m.unwrap_or_default();
-            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5 }
+            Shape::Box { center, half: DVec3::new(s[0], s[1], s[2]) * 0.5, yaw_rad: 0.0 }
         }
         world_cfg::Shape::Cylinder => {
             Shape::Cylinder { center, radius: o.radius_m.unwrap_or_default(), half_height: o.height_m.unwrap_or_default() * 0.5 }

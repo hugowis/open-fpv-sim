@@ -155,7 +155,7 @@ fn a_dipole_crossed_to_the_handset_loses_20_db() {
 #[test]
 fn behind_a_building_the_rssi_drops_by_its_capped_knife_edge_loss() {
     let mut blocked_params = LinkParams::ideal(500);
-    let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(10.0, 10.0, 10.0) };
+    let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(10.0, 10.0, 10.0), yaw_rad: 0.0 };
     blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss_db: 25.0 }];
     let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     let (mut blocked, _, _telemetry_in, _fc) = rig(blocked_params, 1);

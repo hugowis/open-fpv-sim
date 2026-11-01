@@ -16,7 +16,7 @@ fn post(north: f64, east: f64) -> Vec<WorldObject> {
 fn roof() -> Vec<WorldObject> {
     vec![WorldObject {
         name: "roof".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5), yaw_rad: 0.0 },
     }]
 }
 
@@ -249,7 +249,7 @@ fn a_rotated_hit_turns_the_body_through_the_body_frame_inertia() {
     let p = params(
         vec![WorldObject {
             name: "wall".into(),
-            shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -5.0), half: DVec3::new(1.0, 2.0, 5.0) },
+            shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -5.0), half: DVec3::new(1.0, 2.0, 5.0), yaw_rad: 0.0 },
         }],
         vec![(DVec3::new(0.1, 0.06, 0.03), 0.02)],
         0.3,
@@ -291,7 +291,7 @@ fn contacts_with_no_objects_leave_the_body_alone() {
     // A body far from any object behaves exactly as with an empty world.
     let far = vec![WorldObject {
         name: "far".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1000.0, 0.0, -5.0), half: DVec3::new(5.0, 5.0, 5.0) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1000.0, 0.0, -5.0), half: DVec3::new(5.0, 5.0, 5.0), yaw_rad: 0.0 },
     }];
     let mut with = sim(params(far, vec![(BODY_SPHERE, R)], 0.3), state(DVec3::new(0.0, 0.0, -1.0), DVec3::ZERO));
     let mut without = sim(params(vec![], vec![(BODY_SPHERE, R)], 0.3), state(DVec3::new(0.0, 0.0, -1.0), DVec3::ZERO));
@@ -326,7 +326,7 @@ fn a_corner_penetration_is_resolved_in_one_step() {
     // in the wall for the next step.
     let wall = vec![WorldObject {
         name: "wall".into(),
-        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5) },
+        shape: ofs_core::shape::Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5), yaw_rad: 0.0 },
     }];
     let p = params(wall, vec![(BODY_SPHERE, R)], 0.3);
     let pos = corrected(&p, DVec3::new(-R + 0.008, 0.0, -R + 0.01));

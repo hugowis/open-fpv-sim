@@ -76,7 +76,7 @@ fn knife_edge_loss_matches_itu_r_p526() {
 
 #[test]
 fn signed_distances_of_the_shapes() {
-    let b = Shape::Box { center: DVec3::ZERO, half: DVec3::new(2.0, 1.0, 1.0) };
+    let b = Shape::Box { center: DVec3::ZERO, half: DVec3::new(2.0, 1.0, 1.0), yaw_rad: 0.0 };
     close(b.signed_distance(DVec3::new(5.0, 0.0, 0.0)), 3.0, 1e-12, "outside along north");
     close(b.signed_distance(DVec3::ZERO), -1.0, 1e-12, "the centre is 1 m from the nearest face");
     let c = Shape::Cylinder { center: DVec3::new(0.0, 0.0, -5.0), radius: 1.0, half_height: 5.0 };
@@ -87,12 +87,12 @@ fn signed_distances_of_the_shapes() {
 
 #[test]
 fn a_shape_standing_on_the_ground_is_rooted_below_it_and_a_floating_one_is_not() {
-    let wall = Shape::Box { center: DVec3::new(0.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0) };
+    let wall = Shape::Box { center: DVec3::new(0.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
     let p = DVec3::new(0.0, 0.0, -1.0); // inside the wall, 1 m above the ground and 5 m from its sides
     close(wall.signed_distance(p), -1.0, 1e-12, "unrooted: the bottom face is nearest");
     close(wall.rooted().signed_distance(p), -5.0, 1e-9, "rooted: the side faces are");
     close(wall.rooted().signed_distance(DVec3::new(0.0, 0.0, -25.0)), 5.0, 1e-9, "the top stays where it was");
-    let bar = Shape::Box { center: DVec3::new(0.0, 0.0, -2.5), half: DVec3::new(0.1, 1.6, 0.06) };
+    let bar = Shape::Box { center: DVec3::new(0.0, 0.0, -2.5), half: DVec3::new(0.1, 1.6, 0.06), yaw_rad: 0.0 };
     assert_eq!(bar.rooted(), bar, "a gate's top bar floats: unchanged");
     let pylon = Shape::Cylinder { center: DVec3::new(0.0, 0.0, -1.5), radius: 0.15, half_height: 1.5 };
     close(pylon.rooted().signed_distance(DVec3::new(0.0, 0.0, -4.0)), 1.0, 1e-9, "a rooted cylinder keeps its top");
@@ -101,7 +101,7 @@ fn a_shape_standing_on_the_ground_is_rooted_below_it_and_a_floating_one_is_not()
 
 #[test]
 fn a_building_on_the_path_costs_its_loss_and_a_clear_one_costs_nothing() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
     let lambda = wavelength_m(5800.0);
     let (a, b) = (DVec3::new(0.0, 0.0, -2.0), DVec3::new(100.0, 0.0, -2.0));
     close(obstruction_loss_db(&building, a, b, lambda), 25.0, 1e-9, "straight through: capped at rf_loss_db");
@@ -115,7 +115,7 @@ fn a_building_on_the_path_costs_its_loss_and_a_clear_one_costs_nothing() {
 #[test]
 fn the_loss_fades_in_over_a_few_metres_at_a_buildings_edge() {
     // The receiver is 100 m south of a 10 m wide building; the quad moves east behind it, 100 m north of it.
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0) }.rooted(), rf_loss_db: 30.0 };
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 30.0 };
     let lambda = wavelength_m(5800.0);
     let rx = DVec3::new(0.0, 0.0, -2.0);
     let loss_at = |east: f64| obstruction_loss_db(&building, rx, DVec3::new(200.0, east, -2.0), lambda);
@@ -130,7 +130,7 @@ fn the_loss_fades_in_over_a_few_metres_at_a_buildings_edge() {
 #[test]
 fn a_thin_object_on_a_long_path_is_still_found() {
     // A 0.5 m post exactly between two ends 4 km apart: a fixed sampling would step over it.
-    let post = Obstacle { shape: Shape::Box { center: DVec3::new(2000.0, 0.0, -5.0), half: DVec3::new(0.25, 0.25, 5.0) }.rooted(), rf_loss_db: 10.0 };
+    let post = Obstacle { shape: Shape::Box { center: DVec3::new(2000.0, 0.0, -5.0), half: DVec3::new(0.25, 0.25, 5.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 10.0 };
     let loss = obstruction_loss_db(&post, DVec3::new(0.0, 0.0, -2.0), DVec3::new(4000.0, 0.0, -2.0), wavelength_m(5800.0));
     assert!(loss > 5.0, "the post is in the way: {loss}");
 }
@@ -324,7 +324,7 @@ fn a_vertical_ray_over_the_ridge_is_finite() {
 
 #[test]
 fn obstruction_db_adds_terrain_to_the_objects() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
     let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
     let (a, b) = along_north(-2.0);
     let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);
@@ -400,7 +400,7 @@ fn a_material_past_the_end_of_the_table_loses_nothing() {
 
 #[test]
 fn no_meshes_changes_nothing() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0) }.rooted(), rf_loss_db: 25.0 };
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
     let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
     let (a, b) = along_north(-2.0);
     let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);

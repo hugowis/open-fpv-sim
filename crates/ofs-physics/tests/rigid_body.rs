@@ -42,12 +42,12 @@ fn params(mounts: Vec<MotorMount>, contacts: Vec<DVec3>) -> AirframeParams {
 
 /// A box occupying x in [0, 2], y in [-2, 2], z in [-1, 0]: a wall the quad's feet can press into.
 fn wall() -> Vec<WorldObject> {
-    vec![WorldObject { name: "wall".into(), shape: Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5) } }]
+    vec![WorldObject { name: "wall".into(), shape: Shape::Box { center: DVec3::new(1.0, 0.0, -0.5), half: DVec3::new(1.0, 2.0, 0.5), yaw_rad: 0.0 } }]
 }
 
 /// A roof to land on: a box whose top face is the plane z = -1.
 fn roof() -> Vec<WorldObject> {
-    vec![WorldObject { name: "roof".into(), shape: Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5) } }]
+    vec![WorldObject { name: "roof".into(), shape: Shape::Box { center: DVec3::new(0.0, 0.0, -0.5), half: DVec3::new(5.0, 5.0, 0.5), yaw_rad: 0.0 } }]
 }
 
 #[test]
