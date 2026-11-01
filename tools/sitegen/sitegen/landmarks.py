@@ -148,6 +148,7 @@ def stack(mb, center_ne, base_radius_m, top_radius_m, height_m, bands, segments=
         a = 2 * math.pi * k / segments
         return (cn + r * math.cos(a), ce + r * math.sin(a), -h)
 
+    # shortcut: open at both ends (no caps), a top-down view sees through it; add caps if a stack is ever viewed from above.
     out = MeshBuilder()
     hi, cum = height, 0.0
     for i, (mat, f) in enumerate(zip(mats, fracs)):
