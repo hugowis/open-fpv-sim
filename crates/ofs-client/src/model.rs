@@ -199,6 +199,8 @@ pub struct WorldObject {
     /// r, g, b in 0..1.
     pub color: [f64; 3],
     pub rf_loss_db: f64,
+    /// Box only: the heading of the box's north axis in degrees (0 = north, 90 = east, clockwise); 0 = axis-aligned.
+    pub yaw_deg: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -403,6 +405,7 @@ impl World {
                         height_m: o.height_m,
                         color: [c.x, c.y, c.z],
                         rf_loss_db: o.rf_loss_db,
+                        yaw_deg: o.yaw_deg,
                     }
                 })
                 .collect(),

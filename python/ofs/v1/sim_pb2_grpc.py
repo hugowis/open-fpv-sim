@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    """Simulator control, protocol version 18: protocol 17 plus a box's yaw (WorldObject.yaw_deg).
+    Protocol 17 was protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
     Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
@@ -167,7 +168,8 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    """Simulator control, protocol version 18: protocol 17 plus a box's yaw (WorldObject.yaw_deg).
+    Protocol 17 was protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
     Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
@@ -471,7 +473,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    """Simulator control, protocol version 18: protocol 17 plus a box's yaw (WorldObject.yaw_deg).
+    Protocol 17 was protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
     Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).

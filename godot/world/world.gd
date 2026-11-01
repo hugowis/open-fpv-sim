@@ -62,7 +62,7 @@ func build(world: Dictionary) -> void:
 	for o in world.get("objects", []):
 		match o.get("shape", ""):
 			"box":
-				_box(o["name"], o["center"], o["size"], o["color"])
+				_box(o["name"], o["center"], o["size"], o["color"], float(o.get("yaw_deg", 0.0)))
 			"cylinder":
 				_cylinder(o["name"], o["center"], o["radius"], o["height"], o["color"])
 	for m in world.get("meshes", []):
@@ -239,10 +239,16 @@ func _mesh(node_name: String, mesh: Mesh, color: Color, position_: Vector3) -> M
 	return instance
 
 
-func _box(node_name: String, center: Vector3, size: Vector3, color: Color) -> void:
+func _box(node_name: String, center: Vector3, size: Vector3, color: Color, yaw_deg := 0.0) -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = size
-	_add_built(_mesh(node_name, mesh, color, center))
+	var instance := _mesh(node_name, mesh, color, center)
+	# NED yaw h turns the box's north axis to the Godot image of heading h, (sin h, 0, -cos h); rotation.y
+	# of PI - h puts a node's +Z exactly there. The box is 180-symmetric, but skip the turn entirely for
+	# yaw 0 so today's nodes keep today's transform.
+	if not is_zero_approx(yaw_deg):
+		instance.rotation.y = PI - deg_to_rad(yaw_deg)
+	_add_built(instance)
 
 
 func _cylinder(node_name: String, center: Vector3, radius: float, height: float, color: Color) -> void:

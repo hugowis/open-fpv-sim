@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package ofs.v1;
 
-// Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+// Simulator control, protocol version 18: protocol 17 plus a box's yaw (WorldObject.yaw_deg).
+// Protocol 17 was protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
 // Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
 // Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
 // RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
@@ -436,6 +437,7 @@ message WorldObject {
   double height_m = 6;  // cylinder
   Vec3 color = 7;       // r, g, b in 0..1
   double rf_loss_db = 8;
+  double yaw_deg = 9;   // box only: heading of the box's north axis (0 = north, 90 = east, clockwise); 0 = axis-aligned
 }
 
 // A gate: an opening flown through in the direction of heading_deg (0 = north, clockwise), upright unless tilted.

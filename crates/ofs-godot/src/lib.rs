@@ -448,7 +448,7 @@ impl OfsClient {
     /// The loaded session's world in Godot's frame, or an empty Dictionary before it arrives: `name`,
     /// `pilot_position` (Vector3), `antennas` (Array of {`name`, `kind`, `aim`: Vector3}), `objects` (Array of {`name`,
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
-    /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`,
+    /// `color`: Color, `rf_loss_db`, `yaw_deg` (a box's, 0 = axis-aligned)}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`,
     /// `ground_y`: the terrain height under it, 0 on flat ground}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
     /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}) as declared,
@@ -484,6 +484,7 @@ impl OfsClient {
             e.set("height", o.height_m);
             e.set("color", Color::from_rgb(o.color[0] as f32, o.color[1] as f32, o.color[2] as f32));
             e.set("rf_loss_db", o.rf_loss_db);
+            e.set("yaw_deg", o.yaw_deg);
             objects.push(&e.to_variant());
         }
         let mut emitters = VarArray::new();
