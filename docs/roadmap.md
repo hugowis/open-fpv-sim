@@ -19,6 +19,11 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   millimetre of tangential sag, not a rigid hold) but the spheres' impulse friction creeps `g·sinθ·Δt` (0.4 mm/s on
   a 20° slope); the position correction translates the body out of every contact but never turns it.
 - The ground is the plane d = 0 unless the world has a `[terrain]` heightfield (#153); boxes are axis-aligned, and objects never collide with each other.
+- Triangle meshes (`[[meshes]]`, `.glb`): the quad's spheres and landing points collide with the surface (no inside, so a
+  mesh need not be watertight); a foot's force on a mesh is capped at `k × 5 mm` by its skin, and a mesh collides with
+  nothing but the quad. The Godot drawing of meshes was verified headless only. The caps (8 meshes, 400 000 triangles a
+  world, 64 MiB a file) are estimates; the sim and the Godot client must share a filesystem; only `heading_deg = 0` meshes
+  are claimed bit-identical across operating systems (`docs/research/collision.md`).
 
 ### Electrical
 - The thermal model has no airflow dependence (the thermal resistance is a constant) and nothing derates on
@@ -26,6 +31,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   (`docs/research/battery-and-thermal.md`).
 
 ### Radio (`docs/research/elrs-link.md`)
+- A mesh costs a path the loss of every surface it crosses (`[[materials]]` `rf_loss_db`), the same at every frequency: no
+  diffraction around its edges, no reflection and no thickness (one crossing, one loss).
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
   a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
 - Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one

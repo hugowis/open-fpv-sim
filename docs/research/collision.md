@@ -209,6 +209,71 @@ wall-clock gates flake.
 draws the same mesh the physics samples, so the picture is the physics' surface and a hill that blocks a link is one the
 pilot sees.
 
+## Triangle meshes
+
+A world can carry `[[meshes]]`: `.glb` files whose triangles are solid to the quad and block the radio (the world-file
+keys are in `docs/dev-setup.md`). The code is `crates/ofs-core/src/mesh.rs` (the triangles, the BVH and its two queries),
+`crates/ofs-config/src/mesh.rs` (the `.glb` loader), `collision.rs` and `rigid_body.rs` (the contacts) and
+`crates/ofs-rf/src/propagation.rs` (`mesh_loss_db`). The design is
+`docs/superpowers/specs/2026-11-01-mesh-worlds-and-chernobyl-design.md`.
+
+**The contact maths.** A mesh is a surface, not a solid: there is no inside or outside, so it need not be watertight, and
+the contact is two-sided. A sphere of radius r at `c` touches every triangle whose closest point `q` is within r of the
+centre (`within` walks a BVH that visits the left child first and uses only IEEE basic operations and `sqrt`, no fused
+multiply-add). Each such triangle is one contact: the penetration is `r − |c − q|` and the normal is the unit vector from `q`
+to `c` (the triangle's face normal when `c` is within 1e-12 m of `q`). Those contacts join the objects' and the ground's, so
+the position correction, the normal impulses and the friction run as above, and mesh j is one more object with the index
+`objects.len() + j` in the events (`HIT <mesh name>`).
+
+**Landing points** act on a mesh as a sphere of `MESH_POINT_RADIUS_M` = 5 mm, and only the **nearest** triangle of each mesh
+counts (the first in BVH order on a tie), as a shape would give one contact. Summing every triangle in reach would make the
+force depend on how the surface is tessellated: a point at a shared vertex would feel the spring once per triangle around
+it. The depth is `5 mm − distance`, the normal runs from the surface to the point, and the spring-damper and static
+friction are the ones above, so a quad parked within the friction angle of a mesh ramp stays put (the unit test pins a 20
+degree ramp). The price of the skin is a ceiling: a foot's spring force on a mesh is at most `k × 5 mm` (15 N at the
+shipped 3000 N/m) before the foot is through. On the shipped quad the 4 cm body sphere reaches 1 cm below the legs, so the
+spheres, which have no ceiling, catch the quad first.
+
+**No tunnelling at racing speed.** A sphere is pushed out of a surface the step its centre comes within r of it (out the
+far side if it has already crossed), so passing through needs a step longer than the sphere's radius: `v·Δt > r`, i.e.
+`v > r/Δt` = 160 m/s for the 2 cm prop spheres and 320 m/s for the 4 cm body sphere at 8 kHz. Racing speeds are far
+below (the unit test flies 30 m/s at a wall, which moves 3.75 mm a step).
+
+**Limits.**
+- A mesh collides with the quad's spheres and landing points only: not with objects, other meshes or any other part of the
+  airframe, and nothing is damaged.
+- Outside a mesh's bounding box (grown by the quad's bounding radius for the spheres, by 5 mm for the feet) it costs
+  nothing.
+- Determinism: the geometry uses only `+ − × ÷` and `sqrt`, so the BVH digest of a fixed mesh is pinned
+  (`crates/ofs-core/tests/mesh.rs`) and the queries answer the same on every OS. A non-zero `heading_deg` turns the
+  file with libm `sin` and `cos` at load time, so cross-OS bit-identity is only claimed for `heading_deg = 0` meshes. A
+  world without `[[meshes]]` is bit-identical to before (the flat-world pin).
+
+**The radio.** A mesh costs the signal the loss of every surface the straight path crosses: `mesh_loss_db` is the sum, over
+the segment's crossings with the mesh (merged where one passes through a shared edge or vertex), of the loss of the crossed
+triangle's material, from `[[materials]]` (0 when unlisted). It is added to the objects' and the terrain's obstruction on
+the video and the ExpressLRS links alike. The limits are the model's: the loss is frequency independent; there is **no
+diffraction around a mesh's edges** (the shadow behind a wall is sharp, and a path that skims a corner is untouched); there
+is **no reflection**; and there is **no thickness**, a crossing is a loss, so a wall modelled as two skins costs two losses
+and a wall modelled as one surface costs one. A glazed window is a surface with its own (small) loss; an opening is no
+surface and passes the signal. `worlds/hall.toml` has all three.
+
+**Cost.** Measured in release on Windows with the ignored timing test (`mesh_world_timing_is_recorded` in
+`crates/ofs-physics/tests/mesh_perf.rs`, run with `cargo test --release -p ofs-physics --test mesh_perf -- --ignored --nocapture`)
+on 2026-11-01, an AMD Ryzen 9 9900X3D, rustc 1.99.0: 10 s at 8 kHz of the rigid body alone (a 4 cm body sphere, four 2 cm
+prop spheres and four feet, 0.65 kg), dropped 0.3 m onto a rippled grid of 100 352 triangles so it bounces and then rests in
+contact every step, best of 3, against the same drop onto the plane d = 0:
+
+| Flight | Wall time for 10 s |
+|---|---|
+| 100 352-triangle mesh | 0.102 s (1.3 µs a step) |
+| no mesh | 0.011 s (0.14 µs a step) |
+
+So a mesh of that size adds about 9 ms of physics per simulated second, under 1 % of real time; the rest of the vehicle
+spends about 4 ms per simulated second (see "The ground", measured on another machine). The triangle cap is four times that
+mesh. It is a timing test, not a CI gate, because wall-clock gates flake. The Godot rendering of meshes has been verified
+headless only, by the Godot test suites; nobody has looked at it by eye yet.
+
 ## Events
 
 A sphere or a landing point that *starts* touching something (it was free the step before) with an inward speed
@@ -235,6 +300,9 @@ at the moment of first touch.
 | Terrain generator defaults (`seed` 0, `size_m` 400, `cell_m` 1, `amplitude_m` 8, `wavelength_m` 100, `octaves` 3, `persistence` 0.5, `flat_radius_m` 25) | as listed | estimates of gentle rolling hills, user-tunable (`[terrain]`); `worlds/hills.toml` uses a 600 m square, 12 m amplitude, 120 m wavelength, 30 m flat disc |
 | Terrain slope cap | 60 degrees | engineering choice: bounds the fold miss at r/2 and the contact point's sideways offset at r·sin θ |
 | Terrain grid limits | `cell_m` ≥ 0.25 m, at most 1025 nodes a side (4 MB), `size_m` ≤ 2000 m, `octaves` 1 to 6 | engineering choices bounding memory and bake time |
+| Mesh landing-point skin | 5 mm (`MESH_POINT_RADIUS_M`) | engineering choice: caps a foot's spring force on a mesh at `k × 5 mm` and, with the nearest triangle only, keeps it independent of the tessellation |
+| Mesh caps | 8 meshes, 400 000 triangles per world, 64 MiB per file | estimates bounding memory, load time and query cost (100 352 triangles measured above) |
+| Mesh query tolerances | 1e-12 m (the face normal stands in), 1e-9 (barycentric and segment-end slack, crossing merge), 1 mm (BVH box slack on segment tests) | engineering choices against rounding at shared edges |
 
 ## Where it shows
 

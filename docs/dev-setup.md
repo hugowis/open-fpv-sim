@@ -127,6 +127,29 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   digest and builds the mesh itself); the radio and video link are obstructed by the relief (#154), and objects with
   `rf_loss_db` stand on it. `worlds/hills.toml` is the big example (12 m hills); `worlds/park.toml` has gentle swells of
   about a metre with its course placed on the ground. The steepest slope may not pass 60 degrees.
+- `[[meshes]]` and `[[materials]]` — triangle meshes from `.glb` files, solid to the quad and in the way of the radio.
+  A mesh has a `name` (letters, digits, `_` and `-`, unique), a `file` (relative to the world file, ending `.glb`, no `..`,
+  no absolute path and no `:`), a `position_ned_m` and a `heading_deg` (clockwise from north; the file's origin goes to
+  the position). A material is the glTF material's name (any non-empty, unique string, matched exactly; an unnamed
+  one is called `default`) with an `rf_loss_db` (0 if it is not listed; a listed material that no mesh uses is an error).
+  `worlds/hall.toml` flies a concrete hall with a doorway and a glass window (`worlds/assets/hall.glb`, made by
+  `cargo run -p ofs-config --example make_hall`). Caps (estimates): 8 meshes, 400 000 triangles in all and 64 MiB per file.
+  - **The file** is in Godot's frame (x east, y up, -z north), so NED = (-z, x, -y). Only triangle lists are read (other
+    primitive modes are skipped); sparse accessors, external buffers and a node graph that is not a tree are refused, and
+    zero-area triangles are dropped. A node whose own name starts with `col_` is collision and radio only and Godot does not
+    draw it (children do not inherit the prefix); if the file has no `col_` node, the visible nodes are used for both.
+  - **Physics**: a sphere is tested against the *surface*, two-sided, so a mesh need not be watertight; the landing points
+    use only the nearest triangle, with a 5 mm skin. A hit is `HIT <mesh name>`. The maths and limits are in
+    `docs/research/collision.md`.
+  - **Radio**: a path loses the `rf_loss_db` of every surface it crosses, summed, at any frequency. There is no diffraction
+    around a mesh's edges (the shadow is sharp), no reflection, and no thickness: a wall drawn as two skins costs two
+    losses, a wall that is one surface costs one, a window is a surface with a small loss and an opening passes the signal.
+  - **The client** loads the same `.glb` itself: the protocol carries only the absolute path and an FNV-1a 64 digest
+    (`World.meshes`, protocol 17), so the simulator and the Godot client must share a filesystem. A client whose file differs
+    draws nothing for that mesh and `OfsClient.get_world()["meshes"]` says why. A repro bundle carries the mesh files under
+    `worlds/`. A world without `[[meshes]]` is bit-identical to before; a mesh with a non-zero `heading_deg` is turned with
+    libm `sin` and `cos` at load, so only `heading_deg = 0` meshes are claimed bit-identical across operating systems. The
+    Godot drawing has been verified headless only.
 
 The VTX part carries the antenna (`[vtx.antenna]`: kind, gain, polarization, `mount_frd`) and the pit-mode
 power (`pit_power_mw`); the quad's `[vtx]` references the part and keeps the wiring. The VTX transmits from
