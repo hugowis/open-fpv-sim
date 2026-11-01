@@ -84,3 +84,21 @@ name = \"tx\"
 	var item := Catalog.entry(DIR + "/repo/worlds/park.toml")
 	eq([item["label"], item["gates"], item["courses"]], ["Park", 1, ["Diamond", "Hunt"]], "the world's name stays its label, and a gate or emitter is not a course")
 	_fresh()
+
+
+func test_the_fc_kind_of_a_quad_file_is_scanned() -> void:
+	_fresh()
+	_write(DIR + "/q/sitl.toml", "name = \"A\"\n[fc]\nkind = \"sitl\"\n")
+	_write(DIR + "/q/stab.toml", "name = \"B\"\n[fc]\nkind = \"open_loop_stabilized\"\n# kind = \"open_loop_stabilized\"\n")
+	_write(DIR + "/q/outside.toml", "kind = \"open_loop_stabilized\"\n[fc]\nkind = \"sitl\"\n")
+	_write(DIR + "/q/kindred.toml", "[fc]\nkindred = \"open_loop_stabilized\"\nkind = \"open_loop\"\n")
+	_write(DIR + "/w/field.toml", "name = \"Field\"\n[[gates]]\nname = \"G0\"\n")
+	eq(Catalog.fc_kind(DIR + "/q/sitl.toml"), "sitl", "a sitl quad")
+	eq(Catalog.fc_kind(DIR + "/q/stab.toml"), "open_loop_stabilized", "a stabilized quad, comments ignored")
+	eq(Catalog.fc_kind(DIR + "/q/outside.toml"), "sitl", "a kind outside [fc] does not count")
+	eq(Catalog.fc_kind(DIR + "/q/kindred.toml"), "open_loop", "only a key named kind counts")
+	eq(Catalog.fc_kind(DIR + "/w/field.toml"), "", "a world file has no [fc]")
+	eq(Catalog.fc_kind(DIR + "/q/missing.toml"), "", "a missing file has no kind")
+	ok(Catalog.quad_is_stabilized(DIR + "/q/stab.toml"), "the predicate names the stabilized file")
+	ok(not Catalog.quad_is_stabilized(DIR + "/q/missing.toml"), "and nothing else")
+	_fresh()
