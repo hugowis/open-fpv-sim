@@ -108,7 +108,7 @@ docs/dev-setup.md. The file lives in Godot's per-user data dir,
 The game opens in a **main menu**: pick a world and a quad (the `*.toml` files in `worlds/` and `quads/`, in the
 checkout and in the data dir), race or free flight (for a world with gates; free flight hides the lap clock and the
 next-gate highlight) and the flight controller (Betaflight is offered when `OFS_SITL_LAUNCH` is set, else the flight is
-open loop), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose. **Esc** in
+open loop; a quad file with `[fc] kind = "open_loop_stabilized"` flies stabilized under either pick), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose. **Esc** in
 a flight comes back to it; **Settings** edits the settings below, including **Sound**: the client plays the quad's motors, prop wash, wind and
 collision thuds, generated live from the flight state (no audio files), and the `audio` setting turns it off. `--menu=off` (or `OFS_MENU=off`) boots straight into
 the flight, as before.

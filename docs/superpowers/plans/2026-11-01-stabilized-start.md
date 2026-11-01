@@ -49,7 +49,7 @@
 - Consumes: the Rust client's existing `Settings.stabilize` (`crates/ofs-client/src/model.rs:788-791`, default false) which the worker already sends in every `LoadRequest` (`crates/ofs-client/src/worker.rs:274-283`).
 - Produces: `OfsClient.start` accepts a `stabilize` bool (default false), documented beside `open_loop`; Task 3's GDScript relies on the key crossing.
 
-- [ ] **Step 1: Write the test** in `godot/tests/test_extension.gd` (after `test_invalid_settings_are_reported_as_text`, line 63):
+- [x] **Step 1: Write the test** in `godot/tests/test_extension.gd` (after `test_invalid_settings_are_reported_as_text`, line 63):
 
 ```gdscript
 func test_a_stabilized_start_is_valid_settings() -> void:
@@ -62,8 +62,8 @@ func test_a_stabilized_start_is_valid_settings() -> void:
 ```
 
   This pins the parse contract; it cannot fail before the change (an unknown dictionary key is silently ignored today — that silence is the bug), and the plan says so honestly. The wire-level proof is Task 3's e2e.
-- [ ] **Step 2: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: PASS (the new test passes against the old bridge; it is a contract pin, not the fix).
-- [ ] **Step 3: Implement** in `crates/ofs-godot/src/lib.rs`. In `parse_settings`, directly under the `open_loop` mapping (lines 635–637), add:
+- [x] **Step 2: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: PASS (the new test passes against the old bridge; it is a contract pin, not the fix).
+- [x] **Step 3: Implement** in `crates/ofs-godot/src/lib.rs`. In `parse_settings`, directly under the `open_loop` mapping (lines 635–637), add:
 
 ```rust
     if let Some(stabilize) = d.get("stabilize").and_then(|v| v.try_to::<bool>().ok()) {
@@ -72,8 +72,8 @@ func test_a_stabilized_start_is_valid_settings() -> void:
 ```
 
   And in the `start` doc comment (line 100), the key list "`seed`, `open_loop`, `overrun_policy`" becomes "`seed`, `open_loop`, `stabilize` (with `open_loop`: the built-in angle-mode stabilizer), `overrun_policy`".
-- [ ] **Step 4: Run** `cargo clippy -p ofs-godot --all-targets --locked -- -D warnings`, `cargo test -p ofs-godot --locked`, and `bash scripts/run-godot-tests.sh unit` in WSL (the runner rebuilds the extension) — Expected: all PASS.
-- [ ] **Step 5: Commit** `feat(godot): the bridge accepts a stabilize key (#172)`.
+- [x] **Step 4: Run** `cargo clippy -p ofs-godot --all-targets --locked -- -D warnings`, `cargo test -p ofs-godot --locked`, and `bash scripts/run-godot-tests.sh unit` in WSL (the runner rebuilds the extension) — Expected: all PASS.
+- [x] **Step 5: Commit** `feat(godot): the bridge accepts a stabilize key (#172)`.
 
 ### Task 2: The quad's fc kind in the catalog scanner
 
@@ -84,7 +84,7 @@ func test_a_stabilized_start_is_valid_settings() -> void:
 **Interfaces:**
 - Produces (Task 3 consumes): `static func fc_kind(path: String) -> String` — the `[fc] kind` value (`"sitl"`, `"open_loop"`, `"open_loop_stabilized"`; `""` when the file has no `[fc]` or cannot be read); `static func quad_is_stabilized(path: String) -> bool` — `fc_kind(path) == "open_loop_stabilized"`.
 
-- [ ] **Step 1: Write the failing tests** in `godot/tests/test_catalog.gd`:
+- [x] **Step 1: Write the failing tests** in `godot/tests/test_catalog.gd`:
 
 ```gdscript
 func test_the_fc_kind_of_a_quad_file_is_scanned() -> void:
@@ -105,8 +105,8 @@ func test_the_fc_kind_of_a_quad_file_is_scanned() -> void:
 	_fresh()
 ```
 
-- [ ] **Step 2: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: FAIL (`fc_kind` does not exist).
-- [ ] **Step 3: Implement** in `godot/scripts/catalog.gd`, after `entry()` (line 68), using `entry()`'s own scanning idioms:
+- [x] **Step 2: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: FAIL (`fc_kind` does not exist).
+- [x] **Step 3: Implement** in `godot/scripts/catalog.gd`, after `entry()` (line 68), using `entry()`'s own scanning idioms:
 
 ```gdscript
 ## The quad file's `[fc] kind` ("sitl", "open_loop", "open_loop_stabilized"; "" without a `[fc]` or when the file
@@ -131,8 +131,8 @@ static func quad_is_stabilized(path: String) -> bool:
 	return fc_kind(path) == "open_loop_stabilized"
 ```
 
-- [ ] **Step 4: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: PASS.
-- [ ] **Step 5: Commit** `feat(godot): the quad file's fc kind in the catalog scanner (#172)`.
+- [x] **Step 4: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: PASS.
+- [x] **Step 5: Commit** `feat(godot): the quad file's fc kind in the catalog scanner (#172)`.
 
 ### Task 3: Start asks for the stabilizer — the wiring and the e2e proof
 
@@ -145,7 +145,7 @@ static func quad_is_stabilized(path: String) -> bool:
 - Consumes: Task 1's bridge key; Task 2's `Catalog.quad_is_stabilized`.
 - Produces: `to_client_dict` always carries `"stabilize": bool(...)`; `_start_session` sets `session["stabilize"] = true` when the merged session is open loop and the quad scans stabilized. Nothing new is exported for other tasks.
 
-- [ ] **Step 1: Write the failing unit test** in `godot/tests/test_settings.gd` (after `test_the_client_dictionary_launches_a_server_only_when_one_is_configured`, line 47):
+- [x] **Step 1: Write the failing unit test** in `godot/tests/test_settings.gd` (after `test_the_client_dictionary_launches_a_server_only_when_one_is_configured`, line 47):
 
 ```gdscript
 func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
@@ -157,7 +157,7 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 		"stabilize is not a setting: the config file cannot set it")
 ```
 
-- [ ] **Step 2: Write the failing e2e block** in `godot/tests/e2e_open_loop.gd`, between the `race mode shows it` check (line 404) and `app.queue_free()` (line 406). The suite already boots `OFS_OPEN_LOOP=1` (line 83) — the refusing boot — and `data_dir`/`repo` are in scope (lines 82, 385):
+- [x] **Step 2: Write the failing e2e block** in `godot/tests/e2e_open_loop.gd`, between the `race mode shows it` check (line 404) and `app.queue_free()` (line 406). The suite already boots `OFS_OPEN_LOOP=1` (line 83) — the refusing boot — and `data_dir`/`repo` are in scope (lines 82, 385):
 
 ```gdscript
 	# The stabilized start (#172): under this open-loop boot, a quad file that is its own stabilizer flies stabilized —
@@ -181,8 +181,8 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 
 (Esc first — the suite's own idiom at its line 370 — because the race-mode flight above is still flying and `start` would return "already started"; Esc also opens the menu, so no explicit `open()` is needed. Throttle 0.9 is the suite's proven climb recipe at its line 98.)
 
-- [ ] **Step 3: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: FAIL (`to_client_dict` has no `stabilize` key). Then `bash scripts/run-godot-tests.sh open-loop` — Expected: FAIL on the new `_check`s: the phase is `failed` and the detail carries the server's refusal ("this quad file is open_loop_stabilized; load with stabilize = true, or without the open_loop_fc override") — the bug on record; keep that output in the task log.
-- [ ] **Step 4: Implement.** In `godot/scripts/settings.gd`'s `to_client_dict` (line 215), after `"open_loop": s["open_loop"],` add:
+- [x] **Step 3: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: FAIL (`to_client_dict` has no `stabilize` key). Then `bash scripts/run-godot-tests.sh open-loop` — Expected: FAIL on the new `_check`s: the phase is `failed` and the detail carries the server's refusal ("this quad file is open_loop_stabilized; load with stabilize = true, or without the open_loop_fc override") — the bug on record; keep that output in the task log.
+- [x] **Step 4: Implement.** In `godot/scripts/settings.gd`'s `to_client_dict` (line 215), after `"open_loop": s["open_loop"],` add:
 
 ```gdscript
 		"stabilize": bool(s.get("stabilize", false)),
@@ -198,8 +198,8 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 ```
 
   Nothing else in `_start_session`, `_on_menu_start` or the menu changes: `effective_open_loop` stays the menu's rule, and the menu-less boot's raw `open_loop` semantics are untouched.
-- [ ] **Step 5: Run** `bash scripts/run-godot-tests.sh unit` and `bash scripts/run-godot-tests.sh open-loop` in WSL — Expected: PASS (grep the output for `SCRIPT ERROR`; none may appear).
-- [ ] **Step 6: Commit** `fix(godot): Start asks for the stabilizer a stabilized quad needs (#172)`.
+- [x] **Step 5: Run** `bash scripts/run-godot-tests.sh unit` and `bash scripts/run-godot-tests.sh open-loop` in WSL — Expected: PASS (grep the output for `SCRIPT ERROR`; none may appear).
+- [x] **Step 6: Commit** `fix(godot): Start asks for the stabilizer a stabilized quad needs (#172)`.
 
 ### Task 4: Docs, changelog and the full gates
 
@@ -209,7 +209,7 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 **Interfaces:**
 - Consumes: nothing from earlier tasks beyond their existence.
 
-- [ ] **Step 1: Update `docs/scripted-flight.md`.** The paragraph's last two sentences (lines 90–92) — "The game has no `stabilize` option, but a quad file with `[fc] kind = "open_loop_stabilized"` flies stabilized in Godot just as in Python (the same gRPC path the Rust stabilizer test drives); there is no Godot-specific test for it." — become:
+- [x] **Step 1: Update `docs/scripted-flight.md`.** The paragraph's last two sentences (lines 90–92) — "The game has no `stabilize` option, but a quad file with `[fc] kind = "open_loop_stabilized"` flies stabilized in Godot just as in Python (the same gRPC path the Rust stabilizer test drives); there is no Godot-specific test for it." — become:
 
 ```
 The game has no `stabilize` option to pick, but it asks the server for the stabilizer itself when the chosen
@@ -218,7 +218,7 @@ flies stabilized in Godot just as in Python under every controller setting — `
 with that start.
 ```
 
-- [ ] **Step 2: Update `README.md`'s** menu paragraph: "and the flight controller (Betaflight is offered when `OFS_SITL_LAUNCH` is set, else the flight is open loop)" gains a closing clause — "… else the flight is open loop; a quad file with `[fc] kind = "open_loop_stabilized"` flies stabilized under either pick)". And `CHANGELOG.md` "Unreleased" gains, above the DVR section:
+- [x] **Step 2: Update `README.md`'s** menu paragraph: "and the flight controller (Betaflight is offered when `OFS_SITL_LAUNCH` is set, else the flight is open loop)" gains a closing clause — "… else the flight is open loop; a quad file with `[fc] kind = "open_loop_stabilized"` flies stabilized under either pick)". And `CHANGELOG.md` "Unreleased" gains, above the DVR section:
 
 ```markdown
 ### The stabilized start (#172)
@@ -230,10 +230,12 @@ with that start.
   now accepts a `stabilize` key. No protocol, settings or simulator change.
 ```
 
-- [ ] **Step 3: Run the full gates:** `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and in WSL `bash scripts/run-godot-tests.sh all` — Expected: PASS (the e2e suites include the menu-less boots; none may need a change). Check by reading that no golden under `crates/*/tests/golden/` appears in `git status`.
-- [ ] **Step 4: Commit** `docs: the stabilized start in scripted-flight, README and the changelog (#172)`.
+- [x] **Step 3: Run the full gates:** `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and in WSL `bash scripts/run-godot-tests.sh all` — Expected: PASS (the e2e suites include the menu-less boots; none may need a change). Check by reading that no golden under `crates/*/tests/golden/` appears in `git status`.
+- [x] **Step 4: Commit** `docs: the stabilized start in scripted-flight, README and the changelog (#172)`.
 
 ## Ledger
 
 - Ruled at planning (2026-11-01, `main` = `fdc4917`): the issue body's anchors have drifted — the refusal is `crates/ofs-sim/src/server.rs:301-313` (issue: 306-312) and the bridge's `open_loop` mapping is `crates/ofs-godot/src/lib.rs:635-637` (issue: 612-614); `python/ofs/client.py`'s `load` signature is at lines 474-495. Executors re-verify before citing.
 - Ruled at planning: the flight-school plan's Task (`docs/superpowers/plans/2026-10-31-flight-school.md`, line 208) still says "the bridge has no `stabilize` key" — historical after Task 1 here, but its behaviour (`open_loop: false` in the lesson choices) stays correct and unchanged; that plan's executor ledgers the wording, this pair does not edit it.
+- Executor (2026-11-01, `main` = `cf472df`): anchor drift from PR #176 re-verified. `crates/ofs-godot/src/lib.rs` `parse_settings` 606→621, `open_loop` mapping 635-637→650-652 (`start` doc key list stays line 100); `test_settings.gd` anchor test 47→42-54. All other anchors hold: `app.gd` 10/114-133/117, `settings.gd` 209-226/215, `catalog.gd` `entry()` ends 68, `test_extension.gd` 63, `e2e_open_loop.gd` 83/98/370/404/406/385, `README.md` ~110-111. `PROTOCOL_VERSION` is 17 (#176 moved it; this pair does not). CHANGELOG "Unreleased" now opens with "Triangle-mesh worlds (protocol 17)"; newest-first, so this pair's section goes at the top, not "above the DVR section" (the planning-time top).
+- Task 3: Ruling: the e2e recipe predates #176's parts library — a quad copied into `<data_dir>/quads/` cannot resolve its frame part (`part 'opendrone-5f' not found in any library root: …/e2e-data/library/frames`; the RED run failed on that, not on the stabilize refusal). Smallest spec-faithful fix: the e2e block copies `repo/library` to `data_dir/library` (a `_copy_tree` helper) beside the temp quad — the default sibling rule every shipped quad resolves by — rather than an `OFS_LIBRARY` env override, which would re-route library resolution for the whole suite. Spec D6's "the copy loads" is served; the shipped suites are untouched. Cost if wrong: ten helper lines in `e2e_open_loop.gd` and a longer e2e block; the mechanism itself is #176's to own.
