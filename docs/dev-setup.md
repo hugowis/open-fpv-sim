@@ -135,7 +135,8 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
   from north; the file's origin goes to the position). A material is the glTF material's name (any non-empty, unique
   string, matched exactly; an unnamed one is called `default`) with an `rf_loss_db` (0 if it is not listed; a listed material that no mesh uses is an error).
   `worlds/hall.toml` flies a concrete hall with a doorway and a glass window (`worlds/assets/hall.glb`, made by
-  `cargo run -p ofs-config --example make_hall`). Caps (estimates): 8 meshes, 400 000 triangles in all and 64 MiB per file.
+  `cargo run -p ofs-config --example make_hall`); `worlds/chernobyl.toml` is a generated one, the New Safe Confinement
+  from published dimensions (`docs/chernobyl-map.md`). Caps (estimates): 8 meshes, 400 000 triangles in all and 64 MiB per file.
   - **The file** is in Godot's frame (x east, y up, -z north), so NED = (-z, x, -y). Only triangle lists are read (other
     primitive modes are skipped); sparse accessors, external buffers and a node graph that is not a tree are refused, and
     zero-area triangles are dropped. A node whose own name starts with `col_` is collision and radio only, and Godot drops

@@ -87,6 +87,15 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 - look-section: a user world's dress surviving the analog chain (better-looking, not cleaner).
 - the #47 chore: none beyond the rerun viewer opening on a recording made before the bump.
 
+## The Chernobyl map (Stage A) — before it merges
+
+- **Fly `worlds/chernobyl.toml` in the Godot client** (`--world=worlds/chernobyl.toml`; `docs/chernobyl-map.md`). The
+  rendering of meshes has only been verified headless, never by eye. Start 150 m west of the door and fly in through it; look
+  at the arch from outside and from inside; feel the frame rate (288 triangles, so it should hold).
+- **Rule whether it reads as the New Safe Confinement** (spec ruling 12: recognisability is the owner's call). If not, say
+  what is wrong (the shape, the grey, the scale against the pilot); the dimensions are published, the door is not.
+- Post the result to #163 when the PR closes, as the other items do.
+
 ## Standing
 
 - #163 stays open until both waves' checks are in; this file points, #163 keeps.

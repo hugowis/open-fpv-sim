@@ -5,6 +5,30 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Chernobyl map (Stage A)
+#### Added
+- **`worlds/chernobyl.toml`**: the New Safe Confinement over reactor 4 (257 x 162 x 108 m from the operator's published
+  dimensions, axis east-west, `worlds/assets/chernobyl.glb`, 288 triangles), one 40 x 40 m door in the west end (a gameplay
+  liberty), the pilot 150 m west of it. Generated from `sites/chernobyl/recipe.toml`; every number there says where it comes
+  from (`sites/chernobyl/SOURCES.md`). What is measured and what is artistic: `docs/chernobyl-map.md`. The ventilation
+  stack VP-2 is absent on purpose (dismantled in 2013). A 7-inch quad flies in through the door untouched, hits the end
+  wall 30 m off its axis, and the arch's skin cuts the video link (`crates/ofs-sim/tests/chernobyl_world.rs`).
+- **sitegen reads multipolygon relations**: a closed outer ring becomes a footprint with id `-(relation_id * 100 + k)`; holes
+  are filled and counted (`relation_hole`). `fetch` asks for `relation["building"]` as well.
+- **sitegen keeps a footprint when its outline touches the extent** (it was: when the mean of its nodes was inside), so a
+  600 m hall with most of its length outside stays whole.
+- **sitegen breaches**: a `[[footprints]]` entry takes `openings` (the same entry as a `walls` landmark's), a hole in the
+  walls of an OpenStreetMap building; `python -m sitegen walls <recipe> <way id>` lists the walls of a footprint to write
+  them against.
+- **`WorldConfig` keeps the meshes `load` read**, so `load_meshes()` does not parse the `.glb` files a second time while
+  `meshes`, `materials` and `source_path` are unchanged.
+
+#### Notes
+- Stage A has no OpenStreetMap data (its snapshot is hand-made and empty). Stage B, the real snapshot with units 3 and 4, the
+  turbine hall and a breach in its wall, waits for the owner to confirm `docs/research/sitegen-licensing.md`.
+- The existing `worlds/*` and the flat world's digest are unchanged.
+- The Godot drawing of the arch has not been looked at by eye yet (`docs/human-check.md`).
+
 ### Site generator (tools/sitegen)
 #### Added
 - **`tools/sitegen`**: a standard-library Python tool (3.11 or newer) that turns a recipe (TOML) and an OpenStreetMap
