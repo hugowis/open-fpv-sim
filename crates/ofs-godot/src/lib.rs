@@ -97,8 +97,9 @@ impl OfsClient {
     /// Starts connecting; returns at once. Returns an empty string when it started, otherwise why it did not
     /// ("already started", or which setting is invalid). Keys: `quad_path` (required), `world_path` (empty or absent:
     /// the open field), `server_addr`, `server_bin` (a program to start when nothing answers), `data_dir`, `log_file`,
-    /// `env` (Dictionary of String to String for the started server), `seed`, `open_loop`, `overrun_policy` ("warn" or
-    /// "slow"), `state_rate_hz`, `stick_rate_hz`.
+    /// `env` (Dictionary of String to String for the started server), `seed`, `open_loop`, `stabilize` (with
+    /// `open_loop`: the built-in angle-mode stabilizer), `overrun_policy` ("warn" or "slow"), `state_rate_hz`,
+    /// `stick_rate_hz`.
     #[func]
     fn start(&mut self, settings: VarDictionary) -> GString {
         if self.client.is_some() {
@@ -649,6 +650,9 @@ fn parse_settings(d: &VarDictionary) -> Result<Settings, String> {
     }
     if let Some(open_loop) = d.get("open_loop").and_then(|v| v.try_to::<bool>().ok()) {
         settings.open_loop_fc = open_loop;
+    }
+    if let Some(stabilize) = d.get("stabilize").and_then(|v| v.try_to::<bool>().ok()) {
+        settings.stabilize = stabilize;
     }
     match string_key(d, "overrun_policy").as_deref() {
         None | Some("warn") => settings.overrun_policy = OverrunPolicy::Warn,

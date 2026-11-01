@@ -5,6 +5,14 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### The stabilized start (#172)
+#### Fixed
+- **The menu's Start no longer refuses an `open_loop_stabilized` quad under an open-loop setting.** The start asks
+  the server for the built-in stabilizer (`Load`'s `stabilize`, already on the wire since protocol 12) when the
+  chosen quad file's `[fc] kind` says the quad is its own stabilized FC — so the doc's promise ("flies stabilized in
+  Godot just as in Python") holds under every controller pick, menu or menu-less boot. The Godot bridge's `start`
+  now accepts a `stabilize` key. No protocol, settings or simulator change.
+
 ### Site generator (tools/sitegen)
 #### Added
 - **`tools/sitegen`**: a standard-library Python tool (3.11 or newer) that turns a recipe (TOML) and an OpenStreetMap
