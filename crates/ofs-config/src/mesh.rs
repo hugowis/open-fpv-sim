@@ -62,13 +62,29 @@ fn load(path: &Path, position_ned_m: [f64; 3], heading_deg: f64, max_triangles: 
     let mut triangles = 0usize;
     let mut stack: Vec<(gltf::Node, DMat4)> = scene.nodes().map(|n| (n, DMat4::IDENTITY)).collect();
     stack.reverse();
+    // glTF nodes form a tree; gltf-json checks neither cycles nor shared children, so a revisit is an error.
+    let mut seen = vec![false; gltf.nodes().len()];
     while let Some((node, parent)) = stack.pop() {
+        if std::mem::replace(&mut seen[node.index()], true) {
+            return Err(format!("node {} is reached twice: the node graph is not a tree", node.index()));
+        }
         let world = parent * DMat4::from_cols_array_2d(&node.transform().matrix().map(|c| c.map(f64::from)));
         if let Some(mesh) = node.mesh() {
             let collision = node.name().is_some_and(|n| n.starts_with(COLLISION_PREFIX));
             for prim in mesh.primitives() {
                 if prim.mode() != gltf::mesh::Mode::Triangles {
                     continue;
+                }
+                // Counts come straight from the JSON: bound them before any iterator allocates or does stride maths.
+                let limit = max_triangles.saturating_mul(3);
+                let accessors = prim.get(&gltf::Semantic::Positions).into_iter().chain(prim.indices());
+                for acc in accessors {
+                    if acc.sparse().is_some() {
+                        return Err("sparse accessors are not supported".into());
+                    }
+                    if acc.count() == 0 || acc.count() > limit {
+                        return Err(format!("an accessor of {} elements is empty or over the limit of {max_triangles} triangles", acc.count()));
+                    }
                 }
                 let reader = prim.reader(|b| match b.source() {
                     gltf::buffer::Source::Bin => gltf.blob.as_deref(),

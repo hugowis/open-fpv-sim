@@ -123,6 +123,9 @@ fn bad_files_are_errors_not_panics() {
         }
         let e = load_glb(&path, [0.0; 3], 0.0).unwrap_err();
         assert!(e.contains(&path.display().to_string()), "{name}: {e}");
+        if name == "nan" {
+            assert!(e.contains("finite"), "{e}");
+        }
     }
 }
 
@@ -154,4 +157,63 @@ fn nested_nodes_apply_their_transforms() {
     near(t.a, 5.0, 1.0, 0.0);
     near(t.b, 5.0, 3.0, 0.0);
     near(t.c, 5.0, 1.0, -2.0);
+}
+
+/// A one-node GLB around `accessors`/`extra_nodes` JSON fragments over a 36-byte triangle buffer.
+fn glb_with(nodes: &str, accessors: &str, primitive: &str) -> Vec<u8> {
+    let mut bin = Vec::new();
+    for c in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
+        bin.extend_from_slice(&c.to_le_bytes());
+    }
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{nodes}],
+        "meshes":[{{"primitives":[{primitive}]}}],"accessors":[{accessors}],
+        "bufferViews":[{{"buffer":0,"byteLength":36}}],"buffers":[{{"byteLength":36}}]}}"#
+    );
+    pack_glb(&json, &bin)
+}
+
+const POSITIONS: &str = r#"{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}"#;
+
+fn refused(bytes: &[u8], needle: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(&dir, bytes);
+    let e = load_glb(&path, [0.0; 3], 0.0).unwrap_err();
+    assert!(e.contains(&path.display().to_string()) && e.contains(needle), "{e}");
+}
+
+#[test]
+fn hostile_accessor_counts_are_errors_not_aborts() {
+    let prim = r#"{"attributes":{"POSITION":0}}"#;
+    let node = r#"{"name":"n","mesh":0}"#;
+    // Sparse, no bufferView, a count that would allocate tens of GB if iterated.
+    let sparse = r#"{"componentType":5126,"count":4000000000,"type":"VEC3","min":[0,0,0],"max":[1,1,0],
+        "sparse":{"count":1,"indices":{"bufferView":0,"componentType":5125},"values":{"bufferView":0}}}"#;
+    refused(&glb_with(node, sparse, prim), "sparse");
+    // A plain accessor over the cap, and one with count 0.
+    let huge = POSITIONS.replace("\"count\":3", "\"count\":4000000000");
+    refused(&glb_with(node, &huge, prim), "limit");
+    let zero = POSITIONS.replace("\"count\":3", "\"count\":0");
+    refused(&glb_with(node, &zero, prim), "empty");
+}
+
+#[test]
+fn bad_indices_are_errors() {
+    let node = r#"{"name":"n","mesh":0}"#;
+    let prim = r#"{"attributes":{"POSITION":0},"indices":1}"#;
+    let accessors = |count: u32| format!("{POSITIONS},{{\"bufferView\":0,\"byteOffset\":12,\"componentType\":5125,\"count\":{count},\"type\":\"SCALAR\"}}");
+    // The indices read the buffer from byte 12 as u32: the first is 1.0f32 = 0x3f800000, far past 3 vertices.
+    refused(&glb_with(node, &accessors(3), prim), "past");
+    refused(&glb_with(node, &accessors(4), prim), "multiple of 3");
+}
+
+#[test]
+fn node_cycles_and_fan_out_are_errors_not_hangs() {
+    let prim = r#"{"attributes":{"POSITION":0}}"#;
+    refused(&glb_with(r#"{"name":"a","children":[0]}"#, POSITIONS, prim), "not a tree");
+    refused(&glb_with(r#"{"name":"a","children":[1]},{"name":"b","children":[0]}"#, POSITIONS, prim), "not a tree");
+    // Each node lists the next one twice: 2^40 visits if walked as a DAG.
+    let chain: Vec<String> = (0..40).map(|i| format!(r#"{{"name":"n{i}","children":[{},{}]}}"#, i + 1, i + 1)).collect();
+    let nodes = format!("{},{{\"name\":\"end\",\"mesh\":0}}", chain.join(","));
+    refused(&glb_with(&nodes, POSITIONS, prim), "not a tree");
 }
