@@ -662,6 +662,7 @@ pub fn world_objects(world: &WorldConfig) -> Vec<WorldObject> {
 /// The quad file's radio, wired to the flight controller's UART: the joystick handset (at the world's `[handset]`),
 /// the link the quad file names (ELRS or fixed) and the CRSF receiver. `uart` is the receiver's output (the FC's UART RX); `telemetry_in` carries
 /// the FC's own CRSF telemetry back.
+#[allow(clippy::too_many_arguments)]
 fn radio_chain(
     cfg: &QuadConfig,
     opts: &BuildOptions,

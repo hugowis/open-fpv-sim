@@ -388,7 +388,7 @@ fn a_path_crossing_two_walls_loses_the_sum() {
     close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(15.0, 0.0, -1.0)), 18.0, 1e-12, "the first only");
     assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 50.0, -1.0), DVec3::new(30.0, 50.0, -1.0)), 0.0, "past the walls' edge");
     let (a, b) = (DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0));
-    close(obstruction_db(&[], None, &[m.clone()], a, b, 2400.0), 58.0, 1e-12, "obstruction_db carries it");
+    close(obstruction_db(&[], None, std::slice::from_ref(&m), a, b, 2400.0), 58.0, 1e-12, "obstruction_db carries it");
     close(obstruction_db(&[], None, &[m], a, b, 5800.0), 58.0, 1e-12, "at any frequency");
 }
 
