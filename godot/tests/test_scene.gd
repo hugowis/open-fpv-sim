@@ -188,24 +188,38 @@ func test_the_drone_has_four_propellers_that_follow_the_motor_commands() -> void
 	drone.queue_free()
 
 
-func test_the_drone_is_a_modelled_quad_the_fpv_camera_never_sees() -> void:
+func test_the_drone_is_a_gltf_model_the_fpv_camera_never_sees() -> void:
 	var drone := Drone.new()
+	var camera := FpvCamera.new()
+	camera.name = "FpvCamera"
+	camera.uptilt_deg = 15.0
+	drone.add_child(camera)
 	await add_to_tree(drone)
+	for part_name in ["Frame", "Plate", "Arm1", "Battery", "BatteryStrap", "Antenna1", "Antenna2", "CameraMount", "Lens", "Blade"]:
+		ok(not drone.find_children(part_name, "", true, false).is_empty(), "the asset has a %s" % part_name)
 	for i in [1, 2, 3, 4]:
-		ok(drone.get_node_or_null("Motor%d" % i) != null, "motor bell %d" % i)
-		ok(drone.get_node_or_null("Prop%d" % i) != null, "prop %d" % i)
-	ok(drone.get_node_or_null("Antenna1") != null and drone.get_node_or_null("Antenna2") != null, "two VTX antennas")
-	var eye := Vector3(0.0, 0.02, -0.04)  # fpv_camera.gd's _ready position, near = 0.02
-	var housing: MeshInstance3D = drone.get_node("CameraHousing")
-	eq(housing.position, eye, "the camera housing sits at the FPV camera's eye point")
-	var corner: float = ((housing.mesh as BoxMesh).size * 0.5).length()
-	ok(corner < 0.02, "the housing hides inside the near clip (corner %f)" % corner)
-	var plate: MeshInstance3D = drone.get_node("Plate")
-	var plate_nose: float = plate.position.z - (plate.mesh as BoxMesh).size.z * 0.5
-	ok(plate_nose >= eye.z, "the plate's nose stays behind the FPV camera")
-	var battery_material: StandardMaterial3D = drone.get_node("Battery").material_override
-	ok(battery_material.albedo_color.is_equal_approx(Color(0.9, 0.55, 0.1)), "the battery stays orange")
-	ok((drone.get_node("Plate").material_override as StandardMaterial3D).albedo_color.r < 0.2, "the plate is carbon")
+		ok(not drone.find_children("Motor%d" % i, "", true, false).is_empty(), "motor bell %d" % i)
+	eq(drone._props.size(), 4, "four propeller pivots")
+	var pivot: Vector3 = drone._props[0].position
+	ok(absf(pivot.x - 0.08) < 1e-4 and absf(pivot.y - 0.028) < 1e-4 and absf(pivot.z - 0.08) < 1e-4,
+		"M1's pivot at the authored rear-right motor: %s" % str(pivot))
+	eq(drone.find_children("Disc", "MeshInstance3D", true, false).size(), 4, "a blur disc under every propeller")
+	var mounts := drone.find_children("CameraMount", "MeshInstance3D", true, false)
+	eq(mounts.size(), 1, "one camera mount")
+	eq(mounts[0].position, Vector3(0.0, 0.02, -0.04), "the mount sits at the FPV camera's eye point")
+	var corner: float = ((mounts[0] as MeshInstance3D).mesh.get_aabb().size * mounts[0].scale * 0.5).length()
+	ok(corner < 0.02, "the mount hides inside the near clip (corner %f)" % corner)
+	near(mounts[0].rotation_degrees.x, 15.0, "the mount follows the camera's up-tilt, not the authored 30")
+	drone.queue_free()
+
+
+func test_a_model_that_does_not_load_leaves_a_flying_but_bare_drone() -> void:
+	var drone := Drone.new()
+	drone.model_path = "res://drone/there-is-no-such-model.gltf"
+	await add_to_tree(drone)
+	eq(drone._props.size(), 0, "no propeller pivots")
+	ok(drone.get_node_or_null("Model") != null, "the fallback node stands in")
+	drone.set_motors(PackedFloat32Array([0.0, 0.5, 1.0, 0.5]), 0.01)  # no crash
 	drone.queue_free()
 
 
