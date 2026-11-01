@@ -279,7 +279,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 16**. The fault catalog arrived in protocol 8, and its wire shapes live in
+The client and server speak **protocol 17**. The fault catalog arrived in protocol 8, and its wire shapes live in
 the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
 (`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
 `docs/research/faults.md` —
@@ -287,7 +287,7 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 16**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 17**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
@@ -297,7 +297,9 @@ passes (`Gate.pitch_deg`/`roll_deg`, `EVENT_KIND_GATE_HIT`, protocol 14), and th
 courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`course_index`/`mode`/`time_limit_s`/
 `time_left_s`, `ResetRace` taking a `ResetRaceRequest{course}`, protocol 15; Python `sim.reset_race(course)`), and the
 baked terrain grid (`World.terrain`: origin, cell size, node counts, heights and the digest, protocol 16). With a grid a
-reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`).
+reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`), and the
+world's triangle meshes (`World.meshes`: name, absolute path, placement and the file's digest, never the bytes; the Godot
+client loads each `.glb` itself and `get_world()` reports whether it matches, protocol 17).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

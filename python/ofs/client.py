@@ -23,7 +23,7 @@ from .errors import InvalidState, ProtocolMismatch, from_rpc_error
 from .reader import Log
 from .recording import Recording
 
-PROTOCOL_VERSION = 16
+PROTOCOL_VERSION = 17
 # A terrain world's grid is a big get_world reply; gRPC's default receive limit is 4 MiB (ofs_proto::MAX_RESPONSE_BYTES).
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 UNLOAD_TIMEOUT_S = 5.0

@@ -5,6 +5,16 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Meshes in the Godot world (protocol 17)
+#### Added
+- **Protocol 17**: `World.meshes` (`message Mesh`: `name`, absolute `path` on the simulator's machine, `position_ned_m`,
+  `heading_deg`, and the `digest` of the `.glb`, its FNV-1a 64 hash). The protocol never carries mesh bytes: the Godot
+  client loads the file itself. A world without `[[meshes]]` sends none, and nothing else changes for it.
+- **`ofs_client::WorldMesh`** (`World.meshes`, the position in Godot's frame) and `WorldMesh::verify()`, which reads the
+  file and names the path and the two digests (or the read error) when it is not the server's.
+- **`OfsClient.get_world()["meshes"]`**: an Array of {`name`, `path`, `position`, `heading_deg`, `digest_ok`, `error`}
+  (empty without meshes).
+
 ### Audio in the DVR (#159, part 2 of 2 of #36)
 #### Added
 - **The MP4 export has sound.** The flight sound of #158 is synthesised offline from what the recording saw and muxed as

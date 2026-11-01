@@ -234,8 +234,9 @@ fn antenna_msg(a: &world_cfg::AntennaSection) -> pb::ReceiverAntenna {
 }
 
 /// The world as the protocol carries it. Emitters given by band and channel carry their frequency. `terrain` is the
-/// grid the vehicle already baked: building it again here would stall the session lock for the whole bake.
-pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Terrain>) -> pb::World {
+/// grid the vehicle already baked: building it again here would stall the session lock for the whole bake. `meshes`
+/// are the vehicle's loaded meshes, in the order of `w.meshes`: only their names, paths and digests travel.
+pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Terrain>, meshes: &[ofs_config::WorldMeshData]) -> pb::World {
     pb::World {
         name: w.name.clone(),
         pilot_position_ned_m: vec3_of(w.pilot.position_ned_m),
@@ -315,6 +316,18 @@ pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Ter
                 digest: t.digest(),
             }
         }),
+        meshes: w
+            .meshes
+            .iter()
+            .zip(meshes)
+            .map(|(c, m)| pb::Mesh {
+                name: m.name.clone(),
+                path: m.path.to_string_lossy().into_owned(),
+                position_ned_m: vec3_of(c.position_ned_m),
+                heading_deg: c.heading_deg,
+                digest: m.digest,
+            })
+            .collect(),
     }
 }
 
@@ -792,7 +805,7 @@ mod tests {
     #[test]
     fn world_msg_carries_the_gates_and_state_msg_the_race() {
         let session = flat_session();
-        let world = world_msg(session.vehicle.world(), None);
+        let world = world_msg(session.vehicle.world(), None, &[]);
         assert_eq!(world.gates.len(), 3);
         let g = &world.gates[0];
         assert_eq!((g.name.as_str(), g.heading_deg, g.width_m, g.height_m), ("Gate0", 0.0, 3.08, 2.44));
@@ -820,10 +833,42 @@ mod tests {
         };
         let vehicle = crate::vehicle::build(&cfg, &opts, None).unwrap();
         let terrain = vehicle.terrain().expect("hills has a terrain");
-        let msg = world_msg(vehicle.world(), Some(&**terrain)).terrain.expect("the message carries the terrain");
+        let msg = world_msg(vehicle.world(), Some(&**terrain), &[]).terrain.expect("the message carries the terrain");
         assert_eq!(msg.digest, terrain.digest());
         assert_eq!(msg.heights, terrain.heights());
-        assert!(world_msg(vehicle.world(), None).terrain.is_none());
+        assert!(world_msg(vehicle.world(), None, &[]).terrain.is_none());
+    }
+
+    fn hall_vehicle() -> crate::vehicle::Vehicle {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hall.toml"))).unwrap();
+        let cfg = ofs_config::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml"))).unwrap();
+        let opts = crate::vehicle::BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-session-mesh-test"),
+            fc_override: Some(ofs_config::FcKind::OpenLoop),
+            world,
+        };
+        crate::vehicle::build(&cfg, &opts, None).unwrap()
+    }
+
+    #[test]
+    fn world_msg_carries_each_mesh_path_and_digest() {
+        let vehicle = hall_vehicle();
+        let msg = world_msg(vehicle.world(), None, vehicle.meshes());
+        let (data, cfg) = (&vehicle.meshes()[0], &vehicle.world().meshes[0]);
+        assert_eq!(msg.meshes.len(), 1);
+        let m = &msg.meshes[0];
+        assert_eq!((m.name.as_str(), m.digest, m.heading_deg), ("hall", data.digest, cfg.heading_deg));
+        assert_eq!(m.position_ned_m, Some(pb::Vec3 { x: cfg.position_ned_m[0], y: cfg.position_ned_m[1], z: cfg.position_ned_m[2] }));
+        let path = Path::new(&m.path);
+        assert!(path.is_absolute() && !m.path.starts_with(r"\?\") && path.ends_with("assets/hall.glb"), "{}", m.path);
+        assert_eq!(ofs_core::rng::fnv1a64(&std::fs::read(path).unwrap()), m.digest, "the digest is the file's");
+    }
+
+    #[test]
+    fn a_world_without_meshes_sends_none() {
+        let world = ofs_config::world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"))).unwrap();
+        assert!(world_msg(&world, None, &[]).meshes.is_empty());
     }
 
     #[test]
@@ -956,7 +1001,7 @@ mod tests {
     #[test]
     fn the_world_message_carries_the_world_file() {
         let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml"));
-        let msg = world_msg(&ofs_config::world::load(path).unwrap(), None);
+        let msg = world_msg(&ofs_config::world::load(path).unwrap(), None, &[]);
         assert_eq!(msg.name, "Flat field");
         assert_eq!(msg.pilot_position_ned_m, Some(pb::Vec3 { x: -3.0, y: 2.0, z: -1.7 }));
         let patch = &msg.antennas[1];

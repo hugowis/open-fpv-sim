@@ -477,7 +477,7 @@ impl Sim for SimService {
     async fn get_world(&self, _req: Request<pb::Empty>) -> Result<Response<pb::World>, Status> {
         self.blocking(|_, slot| {
             let vehicle = &loaded(slot)?.vehicle;
-            Ok(world_msg(vehicle.world(), vehicle.terrain().map(|t| &**t)))
+            Ok(world_msg(vehicle.world(), vehicle.terrain().map(|t| &**t), vehicle.meshes()))
         })
         .await
     }

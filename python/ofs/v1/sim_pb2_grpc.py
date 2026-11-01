@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class SimStub:
-    """Simulator control, protocol version 16: protocol 15 plus the baked terrain height grid (World.terrain).
+    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
     Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
@@ -166,7 +167,8 @@ class SimStub:
 
 
 class SimServicer:
-    """Simulator control, protocol version 16: protocol 15 plus the baked terrain height grid (World.terrain).
+    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
     Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and
@@ -469,7 +471,8 @@ def add_SimServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Sim:
-    """Simulator control, protocol version 16: protocol 15 plus the baked terrain height grid (World.terrain).
+    """Simulator control, protocol version 17: protocol 16 plus the world's triangle meshes (World.meshes: path and digest).
+    Protocol 16 was protocol 15 plus the baked terrain height grid (World.terrain).
     Protocol 15 was protocol 14 plus named courses and race modes (World.courses,
     RaceState.course/mode/time_limit_s/time_left_s, ResetRace choosing a course, RACE_MODE_TIME_ATTACK).
     Protocol 14 was protocol 13 plus the loaded parts' provenance on LoadReply, gate tilt and

@@ -32,3 +32,12 @@ def test_the_committed_stubs_match_the_proto(tmp_path):
     assert compiled == committed, (
         "python/ofs/v1 is out of date with proto/ofs/v1/sim.proto; regenerate it with the command in docs/dev-setup.md"
     )
+
+
+def test_the_stub_knows_the_worlds_meshes():
+    from ofs.v1 import sim_pb2
+
+    mesh = sim_pb2.Mesh(name="hall", path="/w/assets/hall.glb", position_ned_m=sim_pb2.Vec3(x=30.0), heading_deg=90.0, digest=2**63 + 5)
+    back = sim_pb2.World.FromString(sim_pb2.World(name="w", meshes=[mesh]).SerializeToString())
+    assert back.meshes[0] == mesh and back.meshes[0].digest == 2**63 + 5
+    assert not sim_pb2.World().meshes
