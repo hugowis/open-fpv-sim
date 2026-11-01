@@ -5,6 +5,26 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Site generator (tools/sitegen)
+#### Added
+- **`tools/sitegen`**: a standard-library Python tool (3.11 or newer) that turns a recipe (TOML) and an OpenStreetMap
+  snapshot into a `.glb` and a world file the mesh-world loader reads. `python -m sitegen fetch <recipe>` downloads the
+  snapshot once from Overpass (descriptive `User-Agent`, retries on 429, 502 and 504, never overwrites a good snapshot);
+  `python -m sitegen build <recipe>` extrudes the building footprints, adds parametric landmarks (an `arch` vault with end
+  doors, a banded `stack`, `walls` with openings and an optional flat roof) and prints a report with the footprints it
+  skipped and why. Recipe schema, rules and limits: `tools/sitegen/README.md`.
+- **Deterministic output**: the same recipe and snapshot give byte-identical files. The goldens `tools/sitegen/tests/golden/`
+  are pinned by the Python tests and loaded by the engine's own loader in `crates/ofs-config/tests/sitegen_golden.rs`.
+- **CI** runs the generator's tests in the `core` and `windows` jobs. No network, no new dependency.
+- **`docs/research/sitegen-licensing.md`**: what the ODbL asks of an OSM extract in this GPLv3 repository, how the generator
+  satisfies it, and the fallback. It is the implementer's reading, not legal advice.
+
+#### Notes
+- No real snapshot is committed: the owner confirms the licence note first (status: unconfirmed).
+- Not built: pitched roofs, a cooling-tower builder, elevation data, textures, relations and multipolygons, `col_`
+  collision proxies. Ground is flat; a stack is open at both ends.
+- The engine, the protocol and the existing worlds are unchanged.
+
 ### Triangle-mesh worlds (protocol 17)
 #### Added
 - **`[[meshes]]` and `[[materials]]` in the world file**: a `.glb` placed at `position_ned_m` and `heading_deg`, solid to

@@ -171,6 +171,12 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - `fcs/`, `receivers/` and `cameras/` part kinds.
 
 ### Tooling
+- The site generator (`tools/sitegen`, `tools/sitegen/README.md`) is piece 2 of the realistic Chernobyl map: a recipe and an
+  OpenStreetMap snapshot become a `.glb` and a world file, deterministically. Piece 1 (mesh worlds, protocol 17) and piece 2
+  are done; piece 3, the real map (its recipe and snapshot, true dimensions with sources, opening sizes against the shipped
+  quads, the `WorldConfig` mesh cache), is pending and waits for the owner to confirm the licence note
+  (`docs/research/sitegen-licensing.md`, status unconfirmed). Not built, deliberately: pitched roofs, a cooling-tower
+  builder, a DEM ground, textures, relations and multipolygons, `col_` collision proxies; a stack is open at both ends.
 - `mcap` is pinned to an upstream git revision (00e47a1b): switch to the crates.io release that carries
   foxglove/mcap#1838 once it ships, and re-run `crates/ofs-log/tests/determinism.rs`.
 - `rerun-sdk` is pinned to 0.39.x by the `rerun` extra: bump it deliberately (its Python API changes between minors).
