@@ -9,3 +9,4 @@
 *.gdextension text eol=lf
 godot/project.godot text eol=lf
 *.digests text eol=lf
+*.glb binary
