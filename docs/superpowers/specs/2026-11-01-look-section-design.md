@@ -103,7 +103,8 @@ migration, if ever wanted, is its own PR.
 
 ## Validation (in `WorldConfig::validate`, paths `look.<field>`)
 
-Every rule names its field and shows the value, the house style (`crates/ofs-config/src/world.rs`'s `Checker`):
+Every rule names its field and shows the value, the house style (the `Checker`, `crates/ofs-config/src/lib.rs:1017`,
+used throughout `world.rs`'s validate):
 
 - **Every colour**: finite, each component in [0, 1] — the `objects[i].color` rule (`world.rs:548`), one message per
   colour ("each value must be in [0, 1]").

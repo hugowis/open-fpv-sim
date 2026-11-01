@@ -76,7 +76,7 @@ move a file either way):
    (`continue-on-error: true`, not in `publish.needs`) runs beside the gating `windows-sitl` (`msys`) job; after a
    clean record (at least 10 green runs, branch runs counting as they did in B6's 13) one commit promotes it into
    `publish.needs` and **deletes the `msys` lane**, flipping `OFS_SITL_ENV`'s default. Rationale: the green record is
-   the currency this house pays for gating (the #145→#167 promotion; #118 still waits on one), so an unproven-on-
+   the currency this house pays for gating (the #145→#167 promotion; the macOS job is the one still `continue-on-error`), so an unproven-on-
    runners build must not gate `publish` on day one — and the doubling is temporary and free (a public repository's
    Actions minutes), while a direct swap would orphan the record and a permanent second lane would tax every run to
    protect a build the promotion demotes to fallback. End state: one gating lane, one artifact.

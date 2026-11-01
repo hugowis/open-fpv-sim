@@ -69,6 +69,24 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 - the minors: the 5F's full-throttle amperage against a bench expectation if one is ever available (#164's
   number is model-derived); a mag quad's compass in the Betaflight Configurator following declination (#165).
 
+## The platform-and-followups wave — before it merges
+
+- **Rule the specs' maintainer questions** (`docs/superpowers/specs/2026-11-01-*.md`): the ucrt64 lane's ≥10-run
+  promotion threshold (native-windows-sitl, the one number to retune); the look ceilings (energy 16, fog 0.05,
+  fog height ±1000 m) and whether the shipped five ever migrate their dress into TOMLs (look-section, ruled no);
+  whether a stabilized quad ships ahead of the school's (stabilized-start, ruled no).
+- **The sequencing facts:** #173's Godot half waits for #134's execution (the plan's Global Constraint stops and
+  re-plans otherwise); #172 lands independently of both waves (no protocol bump — the wire already had the key).
+
+## At execution — the platform wave's by-hand passes
+
+- native-windows-sitl: the ucrt64 exe starting from a plain PowerShell with no MSYS2 on `PATH`; the Configurator
+  port answering; the msys rebuild unchanged after the patch grows (its plan's research-doc task).
+- stabilized-start: open loop picked, a stabilized quad started, the sticks feeling like angle mode on a real
+  controller; the same flight from a `--menu=off` boot.
+- look-section: a user world's dress surviving the analog chain (better-looking, not cleaner).
+- the #47 chore: none beyond the rerun viewer opening on a recording made before the bump.
+
 ## Standing
 
 - #163 stays open until both waves' checks are in; this file points, #163 keeps.

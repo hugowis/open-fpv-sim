@@ -33,6 +33,8 @@
 
 ### Task 1: Close #107 with the evidence
 
+**Closed already, at planning time (2026-11-01): the evidence below was posted as #107's closing comment and the issue is CLOSED — this task is now a verification recipe, not a to-do.** If the close is ever reverted, step 1 re-verifies the table and step 2 re-posts it. Nothing in #105 is a precondition.
+
 The umbrella's ruling (`docs/superpowers/plans/2026-11-01-platform-followups.md`, tasks 1 and the dispositions): #107's done-when is satisfied on `main`; the pair's plan carries the close evidence. Nothing in #105 is a precondition. Run this task first, as soon as the wave's planning PR has merged.
 
 **Files:** none (a GitHub comment; no commit).
@@ -54,7 +56,7 @@ The umbrella's ruling (`docs/superpowers/plans/2026-11-01-platform-followups.md`
 > Closing on the evidence — all five done-when lines are satisfied on `main` (verified 2026-11-01 at `fdc4917`):
 > 1. The `windows-sitl` job (windows-latest, `msys2/setup-msys2`, cached on the build script + `third_party/betaflight/**`) builds and live-tests it; 14 m 42 s cold, 9 m 15 s cached — landed in #145 (`d71d001`).
 > 2. It runs the `sitl_live` (ofs-fc, ofs-sim) and `vtx_live` suites `--test-threads=1` and the ten Python SITL files against the `.exe` via `OFS_SITL_LAUNCH`, from the runner's PowerShell.
-> 3. It started non-blocking and was promoted into `publish.needs` on 2026-10-31 after 13 consecutive green runs (#167, `b37aae5`); the macOS job is the one still waiting on a record (#118).
+> 3. It started non-blocking and was promoted into `publish.needs` on 2026-10-31 after 13 consecutive green runs (#167, `b37aae5`); the macOS job is the one still `continue-on-error`.
 > 4. The exe and its two Cygwin DLLs are the `betaflight-sitl-windows` artifact (14 days); duration, real-time factor and flakiness are recorded in `docs/research/sitl-native-windows.md` (#148, `cb5882c`).
 > 5. `win_stubs.c` is guarded: a link the stub file does not cover fails with the symbols named (`scripts/build-sitl-windows.sh`, tested with a stub-less `IORead`).
 >
@@ -151,3 +153,4 @@ Spec call 1's second half. **Precondition:** at least 10 green runs of `windows-
 ## Ledger
 
 - 2026-11-01 (planning): the seven-file list, dyad's upstream `_WIN32` path, the `-static` channel and the Winsock bind semantics are cited from `docs/research/sitl-native-windows.md` and the current patch, not from a fresh ucrt64 compile — task 2 steps 2-5 re-derive each and any difference is recorded (task 5 step 3), not papered over.
+- 2026-11-01 (review): the "#118 still waits on a record" pointer was stale — #118 closed completed on 2026-10-25; the docs now cite the macOS job's `continue-on-error` status directly. Two sources on main carry the same stale pointer (`ci.yml`'s windows-sitl comment ~:177, `sitl-native-windows.md` ~:142 and ~:166) — tasks 4 and 6 edit both files and correct the comments in passing.

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --workspace --locked` green; `cargo +1.85 check -p ofs-godot` passes.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --workspace --locked` green; `cargo +1.85 check --workspace --all-targets --locked --exclude ofs-godot` passes (the crate pins `rust-version = "1.94"` and the msrv job skips it; stable clippy and test cover it).
 - No golden digest changes (`crates/ofs-radio/tests/golden/*`, `crates/ofs-sim/tests/golden/*`): nothing outside `crates/ofs-godot/src/lib.rs` changes on the Rust side.
 - No protocol bump: `LoadRequest.stabilize` is field 8, on the wire since protocol 12 (`proto/ofs/v1/sim.proto:101-103`). Whatever `PROTOCOL_VERSION` is at execution (16 at planning; the Consequence wave's pairs bump it), this pair must not move it.
 - No settings-chain fork: `stabilize` appears in no `defaults()`, `ENV_NAMES`, `FLAG_NAMES`, menu row or `ofs_client.cfg` write — it is a per-start derived key only (spec D4).
@@ -72,7 +72,7 @@ func test_a_stabilized_start_is_valid_settings() -> void:
 ```
 
   And in the `start` doc comment (line 100), the key list "`seed`, `open_loop`, `overrun_policy`" becomes "`seed`, `open_loop`, `stabilize` (with `open_loop`: the built-in angle-mode stabilizer), `overrun_policy`".
-- [ ] **Step 4: Run** `cargo clippy -p ofs-godot --all-targets --locked -- -D warnings`, `cargo test -p ofs-godot --locked`, `cargo +1.85 check -p ofs-godot`, and `bash scripts/run-godot-tests.sh unit` in WSL (the runner rebuilds the extension) — Expected: all PASS.
+- [ ] **Step 4: Run** `cargo clippy -p ofs-godot --all-targets --locked -- -D warnings`, `cargo test -p ofs-godot --locked`, and `bash scripts/run-godot-tests.sh unit` in WSL (the runner rebuilds the extension) — Expected: all PASS.
 - [ ] **Step 5: Commit** `feat(godot): the bridge accepts a stabilize key (#172)`.
 
 ### Task 2: The quad's fc kind in the catalog scanner
@@ -168,16 +168,18 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 	FileAccess.open(stabilized, FileAccess.WRITE).store_string(quad_text
 		.replace("kind = \"sitl\"", "kind = \"open_loop_stabilized\"")
 		.replace("name = \"OpenDrone 5F freestyle\"", "name = \"E2E stabilized 5F\""))
+	_press(app, KEY_ESCAPE)
 	app.settings["quad_path"] = stabilized
-	app.main_menu.open()
 	app.main_menu.row("start").pressed.emit()
 	var stabilized_flying: bool = await _wait_for(func(): return app.client.get_phase() == "flying", 30.0)
 	_check(stabilized_flying, "Start flies a stabilized quad under the open-loop boot (phase: %s %s)" % [app.client.get_phase(), app.client.get_phase_detail()])
 	_check(app.client.get_quad_name() == "E2E stabilized 5F", "the stabilized quad is the one flying: %s" % app.client.get_quad_name())
-	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.5, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.9, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
 	var lifted: bool = await _wait_for(func(): return app.drone.position.y > 0.5, 20.0)
 	_check(lifted, "and it lifts under the stabilizer: y = %.2f" % app.drone.position.y)
 ```
+
+(Esc first — the suite's own idiom at its line 370 — because the race-mode flight above is still flying and `start` would return "already started"; Esc also opens the menu, so no explicit `open()` is needed. Throttle 0.9 is the suite's proven climb recipe at its line 98.)
 
 - [ ] **Step 3: Run** `bash scripts/run-godot-tests.sh unit` in WSL — Expected: FAIL (`to_client_dict` has no `stabilize` key). Then `bash scripts/run-godot-tests.sh open-loop` — Expected: FAIL on the new `_check`s: the phase is `failed` and the detail carries the server's refusal ("this quad file is open_loop_stabilized; load with stabilize = true, or without the open_loop_fc override") — the bug on record; keep that output in the task log.
 - [ ] **Step 4: Implement.** In `godot/scripts/settings.gd`'s `to_client_dict` (line 215), after `"open_loop": s["open_loop"],` add:
@@ -228,7 +230,7 @@ with that start.
   now accepts a `stabilize` key. No protocol, settings or simulator change.
 ```
 
-- [ ] **Step 3: Run the full gates:** `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `cargo +1.85 check -p ofs-godot`, and in WSL `bash scripts/run-godot-tests.sh all` — Expected: PASS (the e2e suites include the menu-less boots; none may need a change). Check by reading that no golden under `crates/*/tests/golden/` appears in `git status`.
+- [ ] **Step 3: Run the full gates:** `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and in WSL `bash scripts/run-godot-tests.sh all` — Expected: PASS (the e2e suites include the menu-less boots; none may need a change). Check by reading that no golden under `crates/*/tests/golden/` appears in `git status`.
 - [ ] **Step 4: Commit** `docs: the stabilized start in scripted-flight, README and the changelog (#172)`.
 
 ## Ledger

@@ -136,8 +136,9 @@ at the e2e block of call 6. The sentence stops describing an exception and start
   the rest of the suite — the menu-less boot, the default quad's start — unchanged and green (the umbrella's
   menu-less rule).
 - The Rust gates (`cargo clippy --workspace --all-targets --locked -- -D warnings`,
-  `cargo test --workspace --locked`, `cargo +1.85 check -p ofs-godot`) stay green; no golden can move (nothing
-  outside `ofs-godot` changes).
+  `cargo test --workspace --locked`) stay green; no golden can move (nothing
+  outside `ofs-godot` changes. `ofs-godot` pins `rust-version = "1.94"`, so the msrv check is the workspace-level
+  `--exclude ofs-godot` form, as every earlier pair's plan has it).
 
 ## Docs
 
