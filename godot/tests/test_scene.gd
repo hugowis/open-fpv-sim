@@ -202,18 +202,38 @@ func test_a_spinning_propeller_blurs_into_its_disc() -> void:
 
 func test_the_model_scales_with_the_quad_and_the_mount_stays_at_the_eye() -> void:
 	var drone := Drone.new()
+	var camera := FpvCamera.new()
+	camera.name = "FpvCamera"
+	drone.add_child(camera)
 	await add_to_tree(drone)
 	var root: String = AppSettings.repo_root()
-	drone.set_quad(root.path_join("quads/opendrone-7lr-longrange.toml"))
-	near(drone.scale.x, 0.113 / 0.08, "the 7\" frame scales the model up", 1e-4)
-	var mount: Node3D = drone.find_children("CameraMount", "Node3D", true, false)[0]
-	ok(mount.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-4, "the mount stays at the FPV eye")
-	var corner: float = ((mount as MeshInstance3D).mesh.get_aabb().size * mount.global_transform.basis.get_scale() * 0.5).length()
-	ok(corner < 0.02, "and inside the near clip at 1.4x scale (corner %f)" % corner)
+	# k < 1 first: it is the failing side. Scaling the drone node itself (the old code) dragged the child camera
+	# to k * EYE while the mount stayed pinned at EYE — 20 mm apart at the toothpick's k = 0.55, dead-center of
+	# the FPV view; the model is scaled instead, so the camera keeps its authored eye at every frame size.
 	drone.set_quad(root.path_join("quads/opendrone-3t-toothpick.toml"))
-	near(drone.scale.x, 0.044 / 0.08, "the toothpick scales down", 1e-4)
+	near(drone._model.scale.x, 0.044 / 0.08, "the toothpick scales the model down", 1e-4)
+	ok(camera.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-6, "the camera keeps its authored eye (the drone node is not scaled)")
+	var mount: Node3D = drone.find_children("CameraMount", "Node3D", true, false)[0]
+	ok(mount.global_position.distance_to(camera.global_position) < camera.near,
+		"the mount hides inside the camera's near clip at 0.55x (distance %f)" % mount.global_position.distance_to(camera.global_position))
+	var corner: float = ((mount as MeshInstance3D).mesh.get_aabb().size * mount.global_transform.basis.get_scale() * 0.5).length()
+	ok(corner < camera.near, "and so does the mount's corner (corner %f)" % corner)
+	drone.set_quad(root.path_join("quads/opendrone-7lr-longrange.toml"))
+	near(drone._model.scale.x, 0.113 / 0.08, "the 7\" frame scales the model up", 1e-4)
+	ok(camera.global_position.distance_to(Vector3(0.0, 0.02, -0.04)) < 1e-6, "the camera keeps its eye at 1.4x too")
+	ok(mount.global_position.distance_to(camera.global_position) < camera.near,
+		"the mount stays within the near clip at 1.4x (distance %f)" % mount.global_position.distance_to(camera.global_position))
+	# The plate's nose, camera-relative (the old procedural test's check): out of the FPV picture — behind the
+	# camera, inside the near clip, or outside the field of view.
+	var plate: MeshInstance3D = drone.find_children("Plate", "MeshInstance3D", true, false)[0]
+	var nose := Vector3(plate.global_position.x, plate.global_position.y,
+		plate.global_position.z - plate.global_transform.basis.z.length() * plate.mesh.get_aabb().size.z * 0.5)
+	var to_nose: Vector3 = nose - camera.global_position
+	var off_axis: float = rad_to_deg(to_nose.angle_to(-camera.global_transform.basis.z))
+	ok(to_nose.z >= 0.0 or to_nose.length() < camera.near or off_axis > camera.fov * 0.5,
+		"the plate's nose stays out of the FPV picture at 1.4x (off-axis %f°, %f m away)" % [off_axis, to_nose.length()])
 	drone.set_quad(root.path_join("quads/no-such-quad.toml"))
-	near(drone.scale.x, 1.0, "an unreadable quad keeps the authored size", 1e-6)
+	near(drone._model.scale.x, 1.0, "an unreadable quad keeps the authored size", 1e-6)
 	drone.queue_free()
 
 
@@ -236,6 +256,7 @@ func test_the_drone_is_a_gltf_model_the_fpv_camera_never_sees() -> void:
 	var mounts := drone.find_children("CameraMount", "MeshInstance3D", true, false)
 	eq(mounts.size(), 1, "one camera mount")
 	eq(mounts[0].position, Vector3(0.0, 0.02, -0.04), "the mount sits at the FPV camera's eye point")
+	ok(mounts[0].scale.is_equal_approx(Drone.AUTHORED_MOUNT_SCALE), "the loaded mount's size matches drone.gd's constant (set_quad resets to it)")
 	var corner: float = ((mounts[0] as MeshInstance3D).mesh.get_aabb().size * mounts[0].scale * 0.5).length()
 	ok(corner < 0.02, "the mount hides inside the near clip (corner %f)" % corner)
 	near(mounts[0].rotation_degrees.x, 15.0, "the mount follows the camera's up-tilt, not the authored 30")

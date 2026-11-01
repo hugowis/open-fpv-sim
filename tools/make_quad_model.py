@@ -76,7 +76,7 @@ views = [
 accessors = [
     {"bufferView": 0, "componentType": 5126, "count": len(positions) // 3, "type": "VEC3", "max": [0.5, 0.5, 0.5], "min": [-0.5, -0.5, -0.5]},
     {"bufferView": 1, "componentType": 5126, "count": len(normals) // 3, "type": "VEC3"},
-    {"bufferView": 2, "componentType": 5123, "count": len(indices), "type": "SCALAR", "max": [len(positions) - 1], "min": [0]},
+    {"bufferView": 2, "componentType": 5123, "count": len(indices), "type": "SCALAR", "max": [len(positions) // 3 - 1], "min": [0]},
 ]
 colors = [CARBON, ARM_COLOR, BATTERY, STRAP, BELL, PROP, ANTENNA[0], ANTENNA[1], HOUSING, LENS]
 materials = [

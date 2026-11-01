@@ -80,12 +80,14 @@ func _instantiate_model() -> Node3D:
 
 
 ## Scales the model to the quad's frame: the asset is authored for the 5F's arm, so `k` is the frame's own arm
-## over that. The camera mount keeps its authored size at the FPV eye point — a bigger frame carries the same
-## camera, and the near-clip guarantee survives any scale.
+## over that. The MODEL is scaled, never this node — a child FpvCamera keeps its authored eye at every frame size,
+## and the mount (inside the model) keeps its authored size at the FPV eye point, so the near-clip guarantee
+## survives any scale.
 func set_quad(path: String) -> void:
 	var k: float = QuadSpec.arm_m(path) / AUTHORED_ARM
 	_spin = QuadSpec.spin(path)
-	scale = Vector3.ONE * k
+	if _model != null:
+		_model.scale = Vector3.ONE * k
 	var found: Array = [] if _model == null else _model.find_children("CameraMount", "Node3D", true, false)
 	if not found.is_empty():
 		var mount := found[0] as Node3D

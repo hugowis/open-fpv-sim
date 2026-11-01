@@ -33,6 +33,8 @@ func test_a_zero_arm_frame_falls_back_instead_of_vanishing() -> void:
 	FileAccess.open(dir.path_join("library/frames/zero.toml"), FileAccess.WRITE).store_string(
 		"[frame]\nmotor_positions_frd_m = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]\n")
 	near(QuadSpec.arm_m(dir.path_join("quads/z.toml")), 0.08, "a degenerate arm falls back, never a zero scale")
+	DirAccess.remove_absolute(dir.path_join("quads/z.toml"))
+	DirAccess.remove_absolute(dir.path_join("library/frames/zero.toml"))
 
 
 func test_a_frame_part_beside_its_quads_is_found() -> void:
@@ -44,3 +46,5 @@ func test_a_frame_part_beside_its_quads_is_found() -> void:
 		"[frame]\nmotor_positions_frd_m = [[-0.05, 0.06, 0.0], [0.05, 0.06, 0.0], [-0.05, -0.06, 0.0], [0.05, -0.06, 0.0]]\nmotor_spin = [-1, 1, 1, -1]\n")
 	near(QuadSpec.arm_m(dir.path_join("quads/x.toml")), 0.06, "the library beside the quads, like ofs-config")
 	eq(QuadSpec.spin(dir.path_join("quads/x.toml")), [-1.0, 1.0, 1.0, -1.0], "reversed directions read too")
+	DirAccess.remove_absolute(dir.path_join("quads/x.toml"))
+	DirAccess.remove_absolute(dir.path_join("library/frames/my-frame.toml"))
