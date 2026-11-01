@@ -35,7 +35,7 @@ relative to the recipe's directory, and `output.glb` is relative to the world fi
 `out/demo.toml` and `out/assets/demo.glb` beside the recipe. To use a generated world, put it under `worlds/` and point the
 game at it (`--world=`, or `load(world=...)`).
 
-`fetch` is meant to run once per real site: commit the snapshot, then every `build` is offline and repeatable. CI never touches
+`fetch` is meant to run once per real site: commit the snapshot (once the licence note is confirmed), then every `build` is offline and repeatable. CI never touches
 the network.
 
 ## The recipe
@@ -167,7 +167,7 @@ are kept: `building`, `height`, `building:levels`, `name`, `name:en`, `man_made`
 counts the elements it drops: `open_way`, `relation`, `no_geometry`, `malformed`.
 
 A hand-written snapshot works too (the demo's is one); give it `"format": 1` and a `"ways"` list. See the licence note for
-what to do about the attribution when the outlines are not from OSM.
+`build` always writes the OpenStreetMap credit into the world header, even for hand-made outlines (over-crediting is harmless).
 
 ## Overpass etiquette (what `fetch` does)
 

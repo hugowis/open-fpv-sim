@@ -398,7 +398,7 @@ with Betaflight: the lockstep session's SITL cleanup kills the game's Betaflight
 ## Generating a world from real data
 `tools/sitegen/` builds a mesh world from a recipe (your decisions: placement, heights, materials, landmarks such as a
 vault, a striped stack and walls with openings) and an OpenStreetMap snapshot of building outlines. `fetch` downloads the
-snapshot once and you commit it; `build` turns recipe and snapshot into a `.glb` and a world file, the same bytes every time:
+snapshot once and you commit it (once the licence note is confirmed); `build` turns recipe and snapshot into a `.glb` and a world file, the same bytes every time:
 
     cd tools/sitegen
     python -m sitegen fetch <recipe.toml>    # once per real site, over the network; a polite Overpass client

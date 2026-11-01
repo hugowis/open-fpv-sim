@@ -23,7 +23,7 @@ repository). The format follows Keep a Changelog.
 - No real snapshot is committed: the owner confirms the licence note first (status: unconfirmed).
 - Not built: pitched roofs, a cooling-tower builder, elevation data, textures, relations and multipolygons, `col_`
   collision proxies. Ground is flat; a stack is open at both ends.
-- The engine, the protocol and the existing worlds are unchanged.
+- The engine changes only in the `.glb` loader, which now refuses a short byteStride or an out-of-range offset instead of panicking in a debug build.
 
 ### Triangle-mesh worlds (protocol 17)
 #### Added

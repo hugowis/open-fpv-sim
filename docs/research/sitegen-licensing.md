@@ -24,9 +24,10 @@ The site generator (`tools/sitegen/README.md`) turns building outlines from Open
 
 1. **Attribution of the Produced Work (4.3).** Creating a Produced Work needs no notices, but publicly using one requires a notice that the contents came from the database and are available under the ODbL. The OSMF guidelines say what that looks like in practice: credit "OpenStreetMap" (the older "© OpenStreetMap contributors" is still accepted), make it clear the data is under the ODbL, link to <https://www.openstreetmap.org/copyright> where a link is possible and print the URL where it is not. For a game the guidelines allow a splash screen, credits or a menu, with details reachable somewhere. For a dataset they ask for the attribution and the licence text or a link to it where users will look, such as a readme.
 2. **Share-alike for the Derivative Database (4.4).** A Derivative Database that is publicly used must be licensed under the ODbL (or a later version or a compatible licence). Extracting or re-utilising a substantial part of the contents into a new database counts as making one (4.4(b)). Section 4.4(c) adds that a Derivative Database is treated as publicly used, and so must comply, if a Produced Work created from it is publicly used. For this repository that means: publishing the generated world makes the committed snapshot a publicly used Derivative Database, which is why the snapshot has to stay ODbL.
-3. **Limits of share-alike (4.5).** Making a Produced Work from the database does not create a Derivative Database for the purposes of 4.4 (4.5(b)), so the Produced Work is not forced under the ODbL. A **Collective Database** (the database in unmodified form as one of several independent databases in a collection, definition in 1.0) need not be licensed under the ODbL as a whole, although the licence still applies to the database inside it (4.5(a)). Internal use is not public use (4.5(c)).
+3. **Limits of share-alike (4.5).** Making a Produced Work from the database does not create a Derivative Database for the purposes of 4.4 (4.5(b)), so the Produced Work is not forced under the ODbL. A **Collective Database** (the database in unmodified form as one of several independent databases in a collection, definition in 1.0) need not be licensed under the ODbL as a whole, although the licence still applies to the database inside it (4.5(a)).
 4. **Notices on the Database itself (4.2).** Whoever publicly conveys the database or a Derivative Database includes the licence or its URI and keeps existing notices intact.
 5. **No technical measures against the licence (4.7).** Nothing in the repository may restrict what the ODbL lets a recipient do with the snapshot.
+6. **Access to the Derivative Database (4.6) - the reviewer's reading, from memory of the licence, NOT verified against the text; the owner must check section 4.6.** As remembered: whoever publicly uses a Derivative Database, or a Produced Work made from one, must also offer recipients the Derivative Database (or a file of the changes) in machine-readable form. Practical consequence if that is right: any channel that ships the generated `.glb` or world file (a release asset, a client build) must also offer the snapshot.
 
 ## Reading for this repository
 
@@ -67,7 +68,7 @@ If the owner decides the ODbL cannot sit in this repository, or that the `.glb` 
 
 1. Do not commit a snapshot. Keep the fetch and the build local, and commit only the recipe (which has no OSM geometry) and the instructions. Each contributor then fetches their own snapshot with `python -m sitegen fetch`; the generated world stays on their machine. The Chernobyl map would not ship.
 2. Or build the site from hand-measured landmarks only (no snapshot geometry), citing its own sources as above.
-3. Or put the snapshot, and possibly the generated mesh, in a separate repository or release asset that carries the ODbL, and keep the GPLv3 repository to the generator.
+3. Or put the snapshot, and possibly the generated mesh, in a separate repository or release asset that carries the ODbL, and keep the GPLv3 repository to the generator. The snapshot must travel with the mesh (see 4.6 above).
 
 None of these needs a change to the generator, apart from allowing an empty snapshot path for option 2 if that route is chosen.
 
@@ -75,10 +76,11 @@ None of these needs a change to the generator, apart from allowing an empty snap
 
 Status: UNCONFIRMED. Tick each line, date it, and change the status line at the top when all are done.
 
-- [ ] I read the ODbL 1.0 (sections 1.0, 4.2 to 4.5, 4.7) and agree with the "Reading for this repository" section, or I amended it.
+- [ ] I read the ODbL 1.0 (sections 1.0, 4.2 to 4.7) and agree with the "Reading for this repository" section, or I amended it.
 - [ ] A committed snapshot is ODbL and is marked as such where a reader of the repository will find it (decision on gap 2).
 - [ ] The generated `.glb` and world file may be distributed under GPLv3 with the OSM attribution, or I chose to mark them "contains ODbL data" as well.
 - [ ] I accept, or reject, the interpretation that the snapshot sitting in this repository is a Collective Database situation (the ODbL for that file, the GPLv3 for the rest). It is an interpretation, not a statement of the licence.
+- [ ] Anything that distributes the generated world (release asset, client build) also offers the snapshot (section 4.6).
 - [ ] I decided how the Chernobyl world credits OpenStreetMap in the game (gap 1).
 - [ ] I accept the fallback above if any of these cannot be met.
 
