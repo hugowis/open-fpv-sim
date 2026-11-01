@@ -57,7 +57,7 @@ Decided in the spec (`docs/superpowers/specs/2026-10-31-quad-model-design.md`), 
 - Consumes: nothing new — the numbers come from `godot/drone/drone.gd`'s current procedural build (`ead8a1f`) and `library/frames/opendrone-5f.toml:11-13`.
 - Produces: `@export var model_path := "res://drone/quad.gltf"`; `var _model: Node3D` (named `Model`, child of the drone); `_props: Array[Node3D]` filled from the asset's `Prop1..4` pivots; a code-drawn `Disc` (`MeshInstance3D`, translucent cylinder, radius 0.0635) under each pivot; the node names `Frame` (children `Plate`, `PlateTop`, `Arm1`, `Arm2`), `Battery`, `BatteryStrap`, `Motor1..Motor4`, `Prop1..Prop4` (each holding a `Blade`), `Antenna1`, `Antenna2`, `CameraMount` (holding a `Lens`) — Tasks 2-4 and the tests rely on these names.
 
-- [ ] **Step 1: Write the failing tests.** In `godot/tests/test_scene.gd`, replace `test_the_drone_is_a_modelled_quad_the_fpv_camera_never_sees` (lines 191-209) with:
+- [x] **Step 1: Write the failing tests.** In `godot/tests/test_scene.gd`, replace `test_the_drone_is_a_modelled_quad_the_fpv_camera_never_sees` (lines 191-209) with:
 
 ```gdscript
 func test_the_drone_is_a_gltf_model_the_fpv_camera_never_sees() -> void:
@@ -95,9 +95,9 @@ func test_a_model_that_does_not_load_leaves_a_flying_but_bare_drone() -> void:
 	drone.queue_free()
 ```
 
-- [ ] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit` (WSL). Expected: FAIL in the two new tests (no `Model` node, `_props` empty; a `push_error` about the missing glTF in the second) and only there — `test_the_drone_has_four_propellers_that_follow_the_motor_commands` still passes (the `set_motors` surface is untouched).
+- [x] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit` (WSL). Expected: FAIL in the two new tests (no `Model` node, `_props` empty; a `push_error` about the missing glTF in the second) and only there — `test_the_drone_has_four_propellers_that_follow_the_motor_commands` still passes (the `set_motors` surface is untouched).
 
-- [ ] **Step 3: Write the generator** `tools/make_quad_model.py` (Python 3, stdlib only, deterministic output — the geometry is `drone.gd`'s procedural model carried number-for-number into an asset):
+- [x] **Step 3: Write the generator** `tools/make_quad_model.py` (Python 3, stdlib only, deterministic output — the geometry is `drone.gd`'s procedural model carried number-for-number into an asset):
 
 ```python
 #!/usr/bin/env python3
@@ -271,7 +271,7 @@ The node names are the contract `drone.gd` loads by (a test pins them): `Frame` 
 
 Run `python tools/make_quad_model.py` and verify `godot/drone/quad.gltf` is valid JSON (`python -c "import json;json.load(open('godot/drone/quad.gltf'))"`) and ~4-6 KB.
 
-- [ ] **Step 4: Rewrite `godot/drone/drone.gd`.** New content in full (the doc comment, constants and `set_motors` keep their current shape — `SPIN` and `DRAWN_SPIN` survive until Task 2; `_material` and `_add_box` go — their geometry now lives in the asset):
+- [x] **Step 4: Rewrite `godot/drone/drone.gd`.** New content in full (the doc comment, constants and `set_motors` keep their current shape — `SPIN` and `DRAWN_SPIN` survive until Task 2; `_material` and `_add_box` go — their geometry now lives in the asset):
 
 ```gdscript
 extends Node3D
@@ -364,9 +364,9 @@ func _apply_uptilt() -> void:
 
 If the 4.7 `append_from_file`/`generate_scene` signatures differ from the calls above (they grew a `state` parameter in 4.3), follow the editor docs — do not invent a fallback loader; the two tests are the oracle either way.
 
-- [ ] **Step 5: Run the suite, verify it passes.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the two new tests green, `test_the_drone_has_four_propellers_that_follow_the_motor_commands` still green, every other suite unchanged in failures. If the run's `--import` pass created `godot/drone/quad.gltf.import`, it is committed with the asset.
+- [x] **Step 5: Run the suite, verify it passes.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the two new tests green, `test_the_drone_has_four_propellers_that_follow_the_motor_commands` still green, every other suite unchanged in failures. If the run's `--import` pass created `godot/drone/quad.gltf.import`, it is committed with the asset.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/make_quad_model.py godot/drone/quad.gltf godot/drone/QUAD_MODEL.md godot/drone/drone.gd godot/tests/test_scene.gd
@@ -385,7 +385,7 @@ git commit -m "feat(godot): the quad becomes a glTF model (#130)"
 - Consumes: Task 1's `_props` pivots and `Blade` children; `get_telemetry`'s `motor_rpm` key (`crates/ofs-godot/src/lib.rs:274-275`; re-verify after the #167 rebase).
 - Produces: `func set_motors(rpm: PackedFloat32Array, delta: float) -> void` — rpm in revolutions per minute, the state stream's per-motor speed; `const SLOWDOWN := 50.0` and `const BLUR_RPM := 3000.0` (visual estimates, marked in code); `var _blades: Array[Node3D]`. Task 4's preview and the e2e suites need nothing from this task beyond `set_motors` not erroring on short arrays.
 
-- [ ] **Step 1: Write the failing tests.** In `godot/tests/test_scene.gd`, replace `test_the_drone_has_four_propellers_that_follow_the_motor_commands` (lines 174-188) with:
+- [x] **Step 1: Write the failing tests.** In `godot/tests/test_scene.gd`, replace `test_the_drone_has_four_propellers_that_follow_the_motor_commands` (lines 174-188) with:
 
 ```gdscript
 func test_the_propellers_follow_the_motor_speeds() -> void:
@@ -416,9 +416,9 @@ func test_a_spinning_propeller_blurs_into_its_disc() -> void:
 	drone.queue_free()
 ```
 
-- [ ] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL in the two rewritten tests (`set_motors` still expects commands; no blade hiding).
+- [x] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL in the two rewritten tests (`set_motors` still expects commands; no blade hiding).
 
-- [ ] **Step 3: Implement.** In `godot/drone/drone.gd`: delete the `DRAWN_SPIN` constant and add next to `SPIN`:
+- [x] **Step 3: Implement.** In `godot/drone/drone.gd`: delete the `DRAWN_SPIN` constant and add next to `SPIN`:
 
 ```gdscript
 ## A real propeller turns far too fast to show (30 000 RPM is 500 turns a second); the blade is drawn at this
@@ -450,9 +450,9 @@ Update the file's doc comment: "Propellers turn with the motor commands" becomes
 		drone.set_motors(telemetry["motor_rpm"], delta)
 ```
 
-- [ ] **Step 4: Run the suites, verify they pass.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS, no other suite changed. Then `bash scripts/run-godot-tests.sh open-loop` — the e2e boots the default path with the new key; expected PASS (the drawn pose assertions there do not read the props).
+- [x] **Step 4: Run the suites, verify they pass.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS, no other suite changed. Then `bash scripts/run-godot-tests.sh open-loop` — the e2e boots the default path with the new key; expected PASS (the drawn pose assertions there do not read the props).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add godot/drone/drone.gd godot/scripts/app.gd godot/tests/test_scene.gd
@@ -470,7 +470,7 @@ git commit -m "feat(godot): propellers turn at the simulated motor speeds (#130)
 - Consumes: the quad TOMLs' top-level `frame = "id"` (all four shipped quads, `quads/*.toml`) and the frame parts' `motor_positions_frd_m` / `motor_spin` under `[frame]` (`library/frames/*.toml`); the library roots rule of `crates/ofs-config/src/lib.rs:140-155` (a `library/` beside the quads that reference it) — re-verify that function at execution.
 - Produces: `QuadSpec.arm_m(quad_path: String) -> float` (the frame's arm in metres, `DEFAULT_ARM_M = 0.08` when unreadable); `QuadSpec.spin(quad_path: String) -> Array` (four floats, `DEFAULT_SPIN = [1.0, -1.0, -1.0, 1.0]` when unreadable); `QuadSpec.frame_part(quad_path: String) -> String`; `QuadSpec.roots(quad_path: String) -> Array`; in `drone.gd`: `const AUTHORED_ARM := 0.08`, `var _spin: Array` (replacing the `SPIN` constant), `func set_quad(path: String) -> void`. Task 4 and the app call `set_quad`.
 
-- [ ] **Step 1: Write the failing tests.** Create `godot/tests/test_quad_spec.gd`:
+- [x] **Step 1: Write the failing tests.** Create `godot/tests/test_quad_spec.gd`:
 
 ```gdscript
 extends "res://tests/testing.gd"
@@ -531,9 +531,9 @@ func test_the_model_scales_with_the_quad_and_the_mount_stays_at_the_eye() -> voi
 
 Register the suite: in `godot/tests/run_tests.gd`'s `SUITES`, add `"res://tests/test_quad_spec.gd",` after `"res://tests/test_scene.gd",`.
 
-- [ ] **Step 2: Run the tests, verify they fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL — `res://scripts/quad_spec.gd` does not preload (and `set_quad` does not exist in test_scene's new test).
+- [x] **Step 2: Run the tests, verify they fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL — `res://scripts/quad_spec.gd` does not preload (and `set_quad` does not exist in test_scene's new test).
 
-- [ ] **Step 3: Implement.** Create `godot/scripts/quad_spec.gd`:
+- [x] **Step 3: Implement.** Create `godot/scripts/quad_spec.gd`:
 
 ```gdscript
 extends RefCounted
@@ -655,9 +655,9 @@ func set_quad(path: String) -> void:
 
 In `godot/scripts/app.gd`: after `main_menu.setup(settings, overridden)` (in `_ready`, ~line 76) add `drone.set_quad(settings["quad_path"])`, and in `_start_session` after `session.merge(choices, true)` (~line 116) add `drone.set_quad(session["quad_path"])`.
 
-- [ ] **Step 4: Run the tests, verify they pass.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the three quad_spec tests and the scaling test green; the prop tests still green (`_spin` defaults to the same directions).
+- [x] **Step 4: Run the tests, verify they pass.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the three quad_spec tests and the scaling test green; the prop tests still green (`_spin` defaults to the same directions).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add godot/scripts/quad_spec.gd godot/tests/test_quad_spec.gd godot/tests/run_tests.gd godot/drone/drone.gd godot/scripts/app.gd godot/tests/test_scene.gd
@@ -675,7 +675,7 @@ git commit -m "feat(godot): the model scales with the quad's frame (#130)"
 - Consumes: `Drone.set_quad(path)` (Task 3).
 - Produces: `QuadPreview` (a `SubViewportContainer`): `func set_quad(path: String) -> void` (rebuilds the model; "" or unreadable shows the authored 5F), `func model() -> Node3D`; `MainMenu.preview()` returns the widget. This is the unit #128's workbench re-hosts — keep it free of menu-specific behaviour.
 
-- [ ] **Step 1: Write the failing tests.** Create `godot/tests/test_quad_preview.gd`:
+- [x] **Step 1: Write the failing tests.** Create `godot/tests/test_quad_preview.gd`:
 
 ```gdscript
 extends "res://tests/testing.gd"
@@ -719,9 +719,9 @@ func test_the_menu_previews_the_selected_quad_and_the_choice_still_emits() -> vo
 
 Register the suite: in `godot/tests/run_tests.gd`'s `SUITES`, add `"res://tests/test_quad_preview.gd",` after `"res://tests/test_quad_spec.gd",`.
 
-- [ ] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL — `res://ui/quad_preview.gd` does not preload, and the menu has no `preview()`.
+- [x] **Step 2: Run the suite, verify the new tests fail.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: FAIL — `res://ui/quad_preview.gd` does not preload, and the menu has no `preview()`.
 
-- [ ] **Step 3: Implement.** Create `godot/ui/quad_preview.gd`:
+- [x] **Step 3: Implement.** Create `godot/ui/quad_preview.gd`:
 
 ```gdscript
 extends SubViewportContainer
@@ -806,9 +806,9 @@ func preview():
 
 Wire the two re-pointings: in `_ready()` after `_quad.changed.connect(...)` (line 67) add `_quad.changed.connect(func(path) -> void: _preview.set_quad(path))`; in `_refresh()` after `_fill(_quad, "Quad", "quad_path", _quads)` (line 125) add `_preview.set_quad(settings["quad_path"])`.
 
-- [ ] **Step 4: Run the suite, verify it passes.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the two new tests and every existing menu test green (the rows, hints and focus behaviour are untouched by a `MOUSE_FILTER_IGNORE` container).
+- [x] **Step 4: Run the suite, verify it passes.** Run: `bash scripts/run-godot-tests.sh unit`. Expected: PASS — the two new tests and every existing menu test green (the rows, hints and focus behaviour are untouched by a `MOUSE_FILTER_IGNORE` container).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add godot/ui/quad_preview.gd godot/tests/test_quad_preview.gd godot/ui/main_menu.gd godot/tests/run_tests.gd godot/tests/test_main_menu.gd
@@ -824,7 +824,7 @@ git commit -m "feat(godot): a turning quad preview in the main menu (#130)"
 - Consumes: everything shipped by Tasks 1-4.
 - Produces: the documented surface; the by-hand checklist that feeds #163.
 
-- [ ] **Step 1: Add the changelog entry.** In `CHANGELOG.md` under `## Unreleased`, after the heightfield section's blocks, add:
+- [x] **Step 1: Add the changelog entry.** In `CHANGELOG.md` under `## Unreleased`, after the heightfield section's blocks, add:
 
 ```markdown
 ### A real 3D model for the quad (#130)
@@ -847,18 +847,18 @@ git commit -m "feat(godot): a turning quad preview in the main menu (#130)"
   generator. No protocol, server or Rust change.
 ```
 
-- [ ] **Step 2: Update the README.** In "The Godot pilot client": after the sentence ending `like real goggles.` (lines 94-97) insert `The drone itself is a glTF model (`godot/drone/quad.gltf`, regenerated by `tools/make_quad_model.py`) that scales with the chosen quad's frame and turns its propellers at the simulated motor speeds.` And in the main-menu paragraph, replace `open loop), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose.` (lines 110-111) with `open loop), then **Start flying**; a small preview beside the choices shows the chosen quad turning. The menu moves with the arrows or the d-pad and remembers what you chose.` Re-verify both anchors against the rebased file first.
+- [x] **Step 2: Update the README.** In "The Godot pilot client": after the sentence ending `like real goggles.` (lines 94-97) insert `The drone itself is a glTF model (`godot/drone/quad.gltf`, regenerated by `tools/make_quad_model.py`) that scales with the chosen quad's frame and turns its propellers at the simulated motor speeds.` And in the main-menu paragraph, replace `open loop), then **Start flying**. The menu moves with the arrows or the d-pad and remembers what you chose.` (lines 110-111) with `open loop), then **Start flying**; a small preview beside the choices shows the chosen quad turning. The menu moves with the arrows or the d-pad and remembers what you chose.` Re-verify both anchors against the rebased file first.
 
-- [ ] **Step 3: Run the full gate.** `bash scripts/run-godot-tests.sh all` (WSL; the e2e suites start `ofs-sim`). Expected: PASS — every unit suite and the open-loop and errors e2e suites (the betaflight suite runs only with `OFS_SITL_LAUNCH`; note if it ran). No Rust code changed, so no cargo gate applies; run nothing under `cargo` beyond what the test script itself builds.
+- [x] **Step 3: Run the full gate.** `bash scripts/run-godot-tests.sh all` (WSL; the e2e suites start `ofs-sim`). Expected: PASS — every unit suite and the open-loop and errors e2e suites (the betaflight suite runs only with `OFS_SITL_LAUNCH`; note if it ran). No Rust code changed, so no cargo gate applies; run nothing under `cargo` beyond what the test script itself builds.
 
-- [ ] **Step 4: Do the by-hand checks** (headless Godot draws nothing; these land as #130's section of #163):
+- [x] **Step 4: Do the by-hand checks** (headless Godot draws nothing; these land as #130's section of #163):
   - The chase camera (**C** from a flight): a recognisable quad-X — plates, X arms, bells, orange battery, two antennas, tilted camera — not boxes; the props spool, blur to discs at speed, and stop with the motors (cut the throttle in a dive: windmilling).
   - The FPV view shows no nose slivers, before and after **R** (reload).
   - The frame rate feels as before on the dev machine (a before/after eyeball of the chase view; the model is one instanced scene, cheaper than the ~20 meshes built per `_ready` before).
   - The menu: the preview turns, and stepping the quad row rescales the model (toothpick to 7LR).
   - Optional, with a display: `godot --path godot -s res://tests/shots.gd -- --out=<dir>` and eyeball `start_chase.png`. If no display, state that it was not done.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CHANGELOG.md README.md

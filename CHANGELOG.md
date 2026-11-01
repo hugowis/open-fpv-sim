@@ -5,6 +5,25 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### A real 3D model for the quad (#130)
+
+#### Added
+- **`godot/drone/quad.gltf`**: the drone in the chase camera is a glTF model now, not boxes drawn in code —
+  generated from the part files' geometry by `tools/make_quad_model.py` (provenance and the node-name contract
+  in `godot/drone/QUAD_MODEL.md`), instantiated at runtime through Godot's glTF loader. The FPV view is
+  unchanged: the camera mount stays inside the camera's near clip at every scale.
+- **Propellers turn at each motor's own speed** (the state's `motor_rpm`, on the wire since the flight audio):
+  a stopped motor stops, a windmilling descent turns, and above 3000 RPM the blade hides and the blur disc
+  stands in.
+- **The model scales with the quad's frame** — `motor_positions_frd_m` of the frame part, read client-side: the
+  toothpick reads small, the 7" long-range big.
+- **A turning preview of the selected quad in the main menu** (`godot/ui/quad_preview.gd`), the unit the
+  workbench (#128) will re-host.
+
+#### Changed
+- `drone.gd`'s `set_motors` takes motor speeds in RPM, not motor commands; the model-building code moved to the
+  generator. No protocol, server or Rust change.
+
 ### The stabilized start (#172)
 #### Fixed
 - **The menu's Start no longer refuses an `open_loop_stabilized` quad under an open-loop setting.** The start asks
@@ -32,7 +51,6 @@ repository). The format follows Keep a Changelog.
 - Not built: pitched roofs, a cooling-tower builder, elevation data, textures, relations and multipolygons, `col_`
   collision proxies. Ground is flat; a stack is open at both ends.
 - The engine changes only in the `.glb` loader, which now refuses a short byteStride or an out-of-range offset instead of panicking in a debug build.
-
 ### Triangle-mesh worlds (protocol 17)
 #### Added
 - **`[[meshes]]` and `[[materials]]` in the world file**: a `.glb` placed at `position_ned_m` and `heading_deg`, solid to
