@@ -1,0 +1,78 @@
+# A 100 x 100 m demo site for the generator's tests: three footprints from the snapshot (one more is skipped),
+# one landmark of each kind, and a [world] that loads in the engine.
+[site]
+name = "demo"
+origin = [51.39, 30.10]
+half_extent_m = [50.0, 50.0]
+snapshot = "demo.osm.json"
+
+[output]
+world = "out/demo.toml"
+glb = "assets/demo.glb"
+
+[colors]
+building = [0.55, 0.52, 0.48]
+concrete = [0.62, 0.62, 0.6]
+brick = [0.55, 0.25, 0.2]
+white = [0.9, 0.9, 0.88]
+
+[[materials]]
+name = "building"
+rf_loss_db = 12.0
+
+[[materials]]
+name = "concrete"
+rf_loss_db = 18.0
+
+[[footprints]]
+id = 1002
+skip = true
+
+[[footprints]]
+id = 1003
+height_m = 20.0
+
+[[landmarks]]
+kind = "arch"
+name = "hangar"
+center_ned_m = [30.0, 30.0]
+heading_deg = 90.0
+span_m = 10.0
+length_m = 16.0
+height_m = 8.0
+material = "concrete"
+end_doors = [["front", 4.0, 3.0]]
+
+[[landmarks]]
+kind = "stack"
+name = "chimney"
+center_ned_m = [-35.0, 0.0]
+base_radius_m = 3.0
+top_radius_m = 1.5
+height_m = 15.0
+bands = [["white", 0.25], ["brick", 0.25], ["white", 0.25], ["brick", 0.25]]
+
+[[landmarks]]
+kind = "walls"
+name = "ruin"
+corners_ned_m = [[35.0, -30.0], [35.0, -10.0], [45.0, -10.0], [45.0, -30.0]]
+height_m = 5.0
+material = "concrete"
+openings = [[0, 8.0, 4.0, 0.0, 3.0]]
+
+[world]
+name = "Чорнобиль Демо"
+
+[world.pilot]
+position_ned_m = [-45.0, 0.0, -1.7]
+facing_deg = 0.0
+
+[world.receiver]
+noise_floor_dbm = -93.0
+diversity = false
+
+[[world.receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
