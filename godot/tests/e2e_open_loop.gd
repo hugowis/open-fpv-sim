@@ -78,6 +78,16 @@ func _avi_frames(path: String) -> Array:
 	return frames
 
 
+## Copies a directory tree. The quad parts library resolves from `library/` beside the quads dir (#176), so a quad
+## written into the e2e data dir needs the library copied beside it, exactly like a self-contained install.
+func _copy_tree(from: String, to: String) -> void:
+	DirAccess.make_dir_recursive_absolute(to)
+	for file in DirAccess.get_files_at(from):
+		DirAccess.copy_absolute(from.path_join(file), to.path_join(file))
+	for dir in DirAccess.get_directories_at(from):
+		_copy_tree(from.path_join(dir), to.path_join(dir))
+
+
 func _run() -> void:
 	var data_dir := OS.get_user_data_dir().path_join("e2e-data")
 	OS.set_environment("OFS_OPEN_LOOP", "1")
@@ -402,6 +412,25 @@ func _run() -> void:
 	app.settings["race_start"] = true
 	await _wait_for(func(): return false, 0.3)
 	_check(app.hud.race_text().begins_with("RACE"), "race mode shows it: '%s'" % app.hud.race_text())
+
+	# The stabilized start (#172): under this open-loop boot, a quad file that is its own stabilizer flies stabilized —
+	# Start asks the server for the stabilizer instead of being refused at Load (docs/scripted-flight.md).
+	var stabilized: String = data_dir.path_join("quads").path_join("e2e-stabilized.toml")
+	DirAccess.make_dir_recursive_absolute(stabilized.get_base_dir())
+	_copy_tree(repo.path_join("library"), data_dir.path_join("library"))
+	var quad_text := FileAccess.get_file_as_string(repo.path_join("quads").path_join("opendrone-5f-freestyle.toml"))
+	FileAccess.open(stabilized, FileAccess.WRITE).store_string(quad_text
+		.replace("kind = \"sitl\"", "kind = \"open_loop_stabilized\"")
+		.replace("name = \"OpenDrone 5F freestyle\"", "name = \"E2E stabilized 5F\""))
+	_press(app, KEY_ESCAPE)
+	app.settings["quad_path"] = stabilized
+	app.main_menu.row("start").pressed.emit()
+	var stabilized_flying: bool = await _wait_for(func(): return app.client.get_phase() == "flying", 30.0)
+	_check(stabilized_flying, "Start flies a stabilized quad under the open-loop boot (phase: %s %s)" % [app.client.get_phase(), app.client.get_phase_detail()])
+	_check(app.client.get_quad_name() == "E2E stabilized 5F", "the stabilized quad is the one flying: %s" % app.client.get_quad_name())
+	app.sticks_override = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.9, "aux": [1.0, -1.0, -1.0, -1.0], "status": ""}
+	var lifted: bool = await _wait_for(func(): return app.drone.position.y > 0.5, 20.0)
+	_check(lifted, "and it lifts under the stabilizer: y = %.2f" % app.drone.position.y)
 
 	app.queue_free()
 	await process_frame
