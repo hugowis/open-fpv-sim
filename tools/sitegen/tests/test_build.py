@@ -375,3 +375,41 @@ def test_walls_cli_accepts_a_negative_id(tmp_path):
     assert p.stdout.splitlines()[0].split() == ["0", "0.0", "0.0", "20.0", "180"]
     p = subprocess.run([*cmd, "-5"], cwd=TESTS.parent, capture_output=True, text=True, encoding="utf-8")
     assert p.returncode == 1 and "-5" in p.stderr and p.stdout == ""
+
+
+def test_a_footprint_whose_box_exactly_touches_the_extent_edge_is_kept(tmp_path):
+    from sitegen.geo import Projection
+
+    ring = [(0.0, 60 / DEG), (0.0, 70 / DEG), (10 / DEG, 70 / DEG), (10 / DEG, 60 / DEG), (0.0, 60 / DEG)]
+    edge = Projection(0.0, 0.0).to_ned(*ring[0])[1]  # the box's west side, to the last bit
+    results = {}
+    for name, east in (("on", edge), ("inside", edge - 1e-6)):
+        r = mini(tmp_path / name, ways=[(0, 0, 10), ring])
+        r.write_text(r.read_text(encoding="utf-8").replace("[50.0, 50.0]", f"[50.0, {east!r}]"), encoding="utf-8", newline="\n")
+        results[name] = build_site(r, tmp_path / name / "o").skipped
+    assert results == {"on": {}, "inside": {"outside_extent": 1}}  # edges included; one hair short and it is out
+
+
+BOWTIE = [(0.0, 0.0), (0.0, 0.0002), (0.0002, 0.0), (0.0002, 0.0002), (0.0, 0.0)]
+
+
+@pytest.mark.parametrize("reason, head, ways", [
+    ("recipe_skip", "skip = true\n", [(0, 0, 10), (0, 0, 10)]),
+    ("outside_extent", "", [(0, 0, 10), (0, 100, 10)]),
+    ("bad_ring", "", [(0, 0, 10), BOWTIE]),
+])
+def test_openings_on_a_skipped_footprint_are_reported_not_silent(tmp_path, reason, head, ways):
+    r = mini(tmp_path, f"[[footprints]]\nid = 2\n{head}openings = [[0, 1.0, 2.0, 0.0, 2.0]]\n", ways=ways)
+    rep = build_site(r, tmp_path / "o")
+    assert rep.skipped == {reason: 1} and rep.footprints_used == 1
+    assert [w for w in rep.warnings if "openings" in w] == [f"footprint 2: openings ignored, skipped as {reason}"]
+
+
+def test_a_roof_that_cannot_be_triangulated_names_the_footprint_and_the_roof(tmp_path, monkeypatch):
+    def fail(ring):
+        raise ValueError("no ear found: ring is not a simple counter-clockwise polygon")
+
+    monkeypatch.setattr("sitegen.landmarks.triangulate", fail)
+    with pytest.raises(BuildError, match=r"^footprint 1\.roof: no ear found"):
+        build_site(mini(tmp_path, FP + "openings = [[0, 5.0, 4.0, 0.0, 3.0]]\n"), tmp_path / "o")
+

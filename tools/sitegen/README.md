@@ -173,7 +173,7 @@ intended change, `python tests/make_golden.py` rewrites the goldens; review the 
   cp1252. Do not let an editor change the encoding or the line endings.
 - **A footprint is a closed OSM way or a closed outer ring of a multipolygon relation.** Open ways are not buildings. A
   relation (`type=multipolygon` or a `building` tag) becomes one footprint per closed outer ring, with the relation's tags;
-  the ring is the `outer` members joined end to end (in member order, a member may be reversed, endpoints must match
+  the ring is the `outer` members joined end to end (in any order, greedy; a member may be reversed, endpoints must match
   exactly). Its id is `-(relation_id * 100 + k)`, `k` = 1, 2, ... in the order the rings close, at most 99 per relation.
   Negative so it never collides with a way id; a `[[footprints]]` override takes it like any other id.
   **Holes are filled**: `inner` members are ignored and counted as `relation_hole`. A relation with no closable outer

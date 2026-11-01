@@ -55,7 +55,7 @@ def _ring(points):
 
 
 def _stitch(pieces):
-    """Closed rings (first point repeated last) from open polylines joined end to end, greedy in order; a piece may be reversed."""
+    """Closed rings (first point repeated last) from open polylines joined end to end, greedy and in any order; a piece may be reversed."""
     pieces, rings = [list(p) for p in pieces if len(p) > 1], []
     while pieces:
         cur = pieces.pop(0)

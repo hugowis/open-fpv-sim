@@ -1,4 +1,5 @@
 import http.client
+import itertools
 import json
 import math
 import urllib.error
@@ -137,6 +138,20 @@ def test_outer_ring_is_stitched_from_member_ways_in_either_direction():
     ways, _ = osm.parse_overpass(relations())
     ring = next(w for w in ways if w.id == -50001).ring
     assert ring == [(51.388, 30.097), (51.388, 30.0974), (51.3883, 30.0974), (51.3883, 30.097), (51.388, 30.097)]
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(range(3))))
+@pytest.mark.parametrize("flips", list(itertools.product([False, True], repeat=3)))
+def test_a_relation_stitches_into_one_ring_in_any_member_order_and_direction(order, flips):
+    rel = next(e for e in json.loads(RELATIONS.read_text(encoding="utf-8"))["elements"] if e["id"] == 500)
+    members = []
+    for i, flip in zip(order, flips):
+        m = dict(rel["members"][i])
+        m["geometry"] = m["geometry"][::-1] if flip else m["geometry"]
+        members.append(m)
+    ways, skipped = osm.parse_overpass({"elements": [dict(rel, members=members)]})
+    assert [w.id for w in ways] == [-50001] and ways[0].ring[0] == ways[0].ring[-1] and skipped["relation"] == 0
+    assert len(ways[0].ring) == 5  # pieces of 3, 2 and 2 points share two joints: four corners and the closing repeat
 
 
 def test_relation_ring_ids_count_from_one_and_are_capped_at_99():

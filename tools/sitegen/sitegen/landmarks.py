@@ -204,7 +204,11 @@ def walls(mb, corners_ne, height_m, material, openings=(), roof=False):
         for s0, s1, z0, z1 in rects:
             _quad(out, at(s0, z0), at(s1, z0), at(s1, z1), at(s0, z1), material, normal)
     if roof:  # flat, front face up (NED up is negative down)
-        for a, b, c in triangulate(ring):
+        try:
+            roof_tris = triangulate(ring)
+        except ValueError as e:
+            raise _err("roof", str(e)) from None
+        for a, b, c in roof_tris:
             _tri(out, (*ring[a], -height), (*ring[b], -height), (*ring[c], -height), material, (0.0, 0.0, -1.0))
     mb.extend(out)
 

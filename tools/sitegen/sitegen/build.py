@@ -69,6 +69,11 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
     def skip(reason):
         rep.skipped[reason] = rep.skipped.get(reason, 0) + 1
 
+    def skip_with_openings(reason, fid, o):  # the author wrote the openings, so say they went unused
+        skip(reason)
+        if o and o.openings:
+            rep.warnings.append(f"footprint {fid}: openings ignored, skipped as {reason}")
+
     seen = set()
     for w in sorted(ways, key=lambda w: w.id):  # sorted stably: the first of a duplicated id wins
         if w.id in seen:
@@ -77,17 +82,17 @@ def build_site(recipe_path: Path, out_dir: Path | None = None) -> BuildReport:
         seen.add(w.id)
         i, o = over.get(w.id, (None, None))
         if o and o.skip:
-            skip("recipe_skip")
+            skip_with_openings("recipe_skip", w.id, o)
             continue
         ring = normalize_ring([proj.to_ned(*p) for p in w.ring])
         if ring is None:
-            skip("bad_ring")
+            skip_with_openings("bad_ring", w.id, o)
             continue
         # Touching the extent is enough: a long building (a 600 m turbine hall) stays whole when only part of it is inside.
         (n0, n1), (e0, e1) = ((min(v), max(v)) for v in zip(*ring))
         hn, he = site.half_extent_m
         if n0 > hn or n1 < -hn or e0 > he or e1 < -he:
-            skip("outside_extent")
+            skip_with_openings("outside_extent", w.id, o)
             continue
         material = o.material if o and o.material else "building"
         if material not in recipe.colors:
