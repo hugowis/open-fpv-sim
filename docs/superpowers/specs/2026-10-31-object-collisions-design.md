@@ -3,7 +3,8 @@
 Epic #160 (Consequence: real terrain, crash damage and sound). Part 2 (#157, crash damage) rides the seams this
 design leaves; #28 (rotated boxes) is the representation sibling that may land first — everything here consumes
 `ofs_core::shape::Shape` through its signed distance and normal, never an axis-aligned assumption, so rotation
-composes without a change here.
+composes (one exception, handled in the plan: a mover's contact points derive from the shape's own local-frame
+corners, never from the AABB, so a yawed mover's corners are its own).
 
 The phase umbrella plan (`docs/superpowers/plans/2026-10-31-consequence-completion.md`) was still uncommitted when this
 was written; it ships in the same PR beside this pair. The epic #160 body is the binding contract this design follows:
@@ -160,7 +161,8 @@ The world data is the single source of truth for the motion's declaration; the `
 of where the crate is (a ballistic bounce is contact-dependent — no client may re-derive it). Clients: the Rust
 client (`crates/ofs-client/src/model.rs`) gains the motion and the moving objects and the event kind; Python
 (dataclasses with defaults, `_event` names `"object_collision"`) after the stubs regenerate; Godot's `world.gd`
-moves the existing `Object_<name>` node from each state's moving-object entry (the NED→Godot frame the build
+moves the object's existing node (named by its plain `[[objects]]` name, like every static — `world.gd` sets
+`instance.name = node_name` unprefixed) from each state's moving-object entry (the NED→Godot frame the build
 already uses), and `app.gd` toasts the new event.
 
 ## Performance
