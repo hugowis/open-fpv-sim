@@ -13,10 +13,16 @@ note, with the open question of whether it is fine under this repository's GPLv3
 Run from `tools/sitegen`, or from the repository root with `PYTHONPATH=tools/sitegen`:
 
     cd tools/sitegen
-    python -m sitegen fetch tests/fixtures/demo/recipe.toml    # download the snapshot the recipe names (network)
-    python -m sitegen build tests/fixtures/demo/recipe.toml    # recipe + snapshot -> .glb + world file
+    python -m sitegen fetch path/to/recipe.toml    # download the snapshot the recipe names (network)
+    python -m sitegen build path/to/recipe.toml    # recipe + snapshot -> .glb + world file
 
     PYTHONPATH=tools/sitegen python -m sitegen build path/to/recipe.toml    # from the repository root
+
+The demo, which needs no network: `python -m sitegen build tests/fixtures/demo/recipe.toml`. **Never `fetch` the demo.** Its
+snapshot is hand-made (its `source_note` says so) and the goldens are built from it; the demo's coordinates are real, so a
+fetch would replace it with real OpenStreetMap data, break the goldens and put ODbL data into the repository ahead of the
+licence decision. A build of the demo writes under `tests/fixtures/demo/out/`, which `.gitignore` excludes. The command line has
+no output-directory option (the tests pass `out_dir` to `build_site`, in Python); a recipe's `output.world` decides where files go.
 
 | Command | What it does | Exit |
 |---|---|---|
@@ -29,7 +35,7 @@ relative to the recipe's directory, and `output.glb` is relative to the world fi
 `out/demo.toml` and `out/assets/demo.glb` beside the recipe. To use a generated world, put it under `worlds/` and point the
 game at it (`--world=`, or `load(world=...)`).
 
-`fetch` is meant to run once per site: commit the snapshot, then every `build` is offline and repeatable. CI never touches
+`fetch` is meant to run once per real site: commit the snapshot, then every `build` is offline and repeatable. CI never touches
 the network.
 
 ## The recipe
@@ -52,7 +58,7 @@ An unknown key anywhere is an error, and a bad recipe reports every problem at o
 | `[defaults]` | `building_height_m` | no | Height of a footprint with no usable height tag. Default 8. |
 | | `level_height_m` | no | Metres per `building:levels`. Default 3. |
 | `[colors]` | `<material> = [r, g, b]` | yes | Each in 0..1. A `building` entry is required; every material a triangle uses needs one. |
-| `[[materials]]` | `name`, `rf_loss_db` | no | Copied into the world file's `[[materials]]`; `rf_loss_db` >= 0. Names are unique. |
+| `[[materials]]` | `name`, `rf_loss_db` | no (the table) | Copied into the world file's `[[materials]]`. Within an entry both keys are required; `rf_loss_db` >= 0; names are unique. |
 | `[[footprints]]` | `id` | yes | An OSM way id, unique in the recipe. |
 | | `skip` | no | `true` leaves the building out. |
 | | `height_m` | no | > 0. Overrides the height rules. |
