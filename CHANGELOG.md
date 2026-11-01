@@ -45,7 +45,7 @@ repository). The format follows Keep a Changelog.
 
 #### Notes
 - No real snapshot is committed: the owner confirms the licence note first (status: unconfirmed).
-- Not built: pitched roofs, a cooling-tower builder, elevation data, textures, relations and multipolygons (built since, see Chernobyl map (Stage A)), `col_`
+- Not built: pitched roofs, a cooling-tower builder, elevation data, textures, `col_`
   collision proxies. Ground is flat; a stack is open at both ends.
 - The engine changes only in the `.glb` loader, which now refuses a short byteStride or an out-of-range offset instead of panicking in a debug build.
 

@@ -29,7 +29,7 @@ name = "NSC"
 # OpenStreetMap outline in Stage B.
 center_ned_m = [0.0, 0.0]
 # source: https://en.wikipedia.org/wiki/Chernobyl_New_Safe_Confinement "constructed 180 metres (590 ft) west of reactor 4, and slid into place";
-# Wikidata Q1506085 coordinates before the slide: 51.389, 30.094, after: 51.389, 30.099 (due east). The axis is east-west.
+# Wikidata Q1506085 coordinates before the slide: 51.389, 30.094, after: 51.389, 30.099 (the move is east; at 0.001 degrees of precision the direction is inferred). The axis is east-west.
 heading_deg = 90.0
 # source: https://chnpp.gov.ua/en/infocenter/news/204-projects/nsc-construction/578-q-q578 "Span of Arch: 257m"
 span_m = 257.0

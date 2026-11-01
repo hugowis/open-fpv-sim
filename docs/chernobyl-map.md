@@ -28,7 +28,7 @@ decision that is not a fact about the site.
 | Arch length | 162 m | measured | the same page, "Length: 162m" |
 | Arch height | 108 m | measured | the same page, "Height: 108m" |
 | Axis east-west (`heading_deg = 90`) | built 180 m west of reactor 4 and slid over it | measured, direction inferred | <https://en.wikipedia.org/wiki/Chernobyl_New_Safe_Confinement>; Wikidata Q1506085 moved 0.005 degrees of longitude east after the slide |
-| World origin | 51.38972 N, 30.09917 E | estimate | the "Chernobyl disaster" point on Wikipedia; no source gives reactor 4 itself, so it is within tens of metres of it |
+| World origin | 51.38972 N, 30.09917 E | estimate | the "Chernobyl disaster" point on Wikipedia; no source gives reactor 4 itself, so it is within tens of metres of it. It has no effect on Stage A's output (identical bytes with another origin) and places the OpenStreetMap outlines in Stage B |
 | Arch centre at the origin | `[0, 0]` | estimate | refined against the OpenStreetMap outline in Stage B |
 | Radio loss of the cladding | 40 dB per skin crossed | estimate | a steel-clad shell at 5.8 GHz; not measured |
 | Receiver | -93 dBm floor, omni 2 dBi, rhcp | estimate | the same as `worlds/hall.toml` |
@@ -48,15 +48,20 @@ The ventilation stack VP-2, 75.5 m tall on the roof of unit 4 with its top 150 m
 October and 25 November 2013 so that the NSC could be slid over reactor 4
 (<https://world-nuclear-news.org/Articles/Chernobyl-ventilation-stack-removed>). The arch and the stack never stood
 together. The map is the present-day site, so no chimney is built, and a test (`test_no_chimney_is_built`) caps the height at
-the arch's 108 m. As of 2026-11-01 OpenStreetMap still maps a 125 m chimney where VP-2 stood (way 301362167); that is stale and is not built either.
+108.5 m, the arch's 108 m plus a margin. As of 2026-11-01 OpenStreetMap still maps a 125 m chimney where VP-2 stood (way 301362167); that is stale and is not built either.
 
 ## Flying it
 
-The game: set `world_path` in the settings to the file, or start it with `OFS_WORLD=worlds/chernobyl.toml` or
-`--world=worlds/chernobyl.toml` (`docs/dev-setup.md`, "The world file and the analog video link"). The client passes the
-string to the server unchanged and the server opens it as a path, so a relative path like this one works only when the
-server starts in the repository root (as `godot --path godot` is started in the README); from anywhere else use the
-absolute path. A bare name (`chernobyl`) is not documented for the game, only for Python. From Python:
+The easiest way is the game's main menu: it lists every `worlds/*.toml` of the checkout by absolute path
+(`godot/scripts/catalog.gd`), so "Chernobyl" is in the World row and works from any directory. Other ways to name it:
+`--world=chernobyl` or `OFS_WORLD=chernobyl`, a bare name, which the server resolves to `worlds/chernobyl.toml` beside the
+quad file's directory (`ofs_config::world::resolve`, called at `crates/ofs-sim/src/server.rs:298`); that works because the
+game's default quad path is absolute. The client passes the string to the server unchanged (`godot/scripts/settings.gd`), so
+a relative path (`--world=worlds/chernobyl.toml`, `OFS_WORLD=worlds/chernobyl.toml`, or `world_path` in the settings) works
+only when the server starts in the repository root, as `godot --path godot` is started in the README; from anywhere else
+use the absolute path. (Both routes are read from the code, not run in the engine; the menu, given a bare name, would add a "chernobyl" row of
+its own beside the listed one.) See also `docs/dev-setup.md`, "The world file and the analog video link". From Python, run from
+the repository root (the quad path below is relative; or use absolute paths):
 
 ```python
 sim.load("quads/opendrone-7lr-longrange.toml", world="chernobyl")   # a bare name: worlds/chernobyl.toml beside the quad's directory

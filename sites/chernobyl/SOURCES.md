@@ -9,7 +9,7 @@ with a stated reason), or **artistic** (a gameplay or look decision, not a fact 
 
 | Value | What it is | Source | Kind |
 |---|---|---|---|
-| `origin = [51.38972, 30.09917]` | NED origin of the world, used as the reactor 4 area | <https://en.wikipedia.org/wiki/Chernobyl_disaster>: "51.38972°N 30.09917°E", labelled "Chernobyl disaster", the same point as the Location field (the plant); five decimals, about 1 m of notation, accuracy not stated. The Chernobyl NPP article gives the plant at "51.38917°N 30.09944°E" (about 60 m south, 20 m east). Wikidata's NSC (Q1506085) after the slide reads 51.389, 30.099, precision 0.001 | estimate: no source gives reactor 4 itself; this is the plant/disaster point, within tens of metres of it |
+| `origin = [51.38972, 30.09917]` | NED origin of the world, used as the reactor 4 area | <https://en.wikipedia.org/wiki/Chernobyl_disaster>: "51.38972°N 30.09917°E", labelled "Chernobyl disaster", the same point as the Location field (the plant); five decimals, about 1 m of notation, accuracy not stated. The Chernobyl NPP article gives the plant at "51.38917°N 30.09944°E" (about 60 m south, 20 m east). Wikidata's NSC (Q1506085) after the slide reads 51.389, 30.099, precision 0.001 | estimate: no source gives reactor 4 itself; this is the plant/disaster point, within tens of metres of it. The origin has no effect on Stage A's output (the same bytes with another origin); it places the OSM outlines in Stage B |
 | `half_extent_m = [300.0, 300.0]` | The area the build keeps | none | artistic |
 | `span_m = 257.0` | Arch width | <https://chnpp.gov.ua/en/infocenter/news/204-projects/nsc-construction/578-q-q578>: "Span of Arch: 257m"; also Structurae (<https://structurae.net/en/structures/chernobyl-new-safe-confinement>, "arches span 257 m", read through a search result: the page itself answers 403 to a script) | published |
 | `length_m = 162.0` | Arch length along its axis | the same page: "Length: 162m"; Structurae "length 162 m" | published |
@@ -31,7 +31,7 @@ external length of 165 m (and a body text length of 150 m, internal span 245 m, 
 
 ## What the map deliberately omits
 
-- **The ventilation stack VP-2** (150 m, on the roof of unit 4) was dismantled from 31 October to 25 November 2013 so the NSC
+- **The ventilation stack VP-2** (75.5 m tall on the roof of unit 4, its top 150 m above ground) was dismantled from 31 October to 25 November 2013 so the NSC
   could be slid over reactor 4 (<https://world-nuclear-news.org/Articles/Chernobyl-ventilation-stack-removed>). The NSC and VP-2 never
   stood together; the map is the present-day site, so no chimney is built (`test_no_chimney_is_built` caps the height at 108.5 m).
 - The old sarcophagus, now inside the NSC, and everything else on the site. Stage B adds the surrounding buildings from
