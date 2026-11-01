@@ -202,7 +202,7 @@ fn an_emitter_interferes_less_the_further_its_channel_is() {
 #[test]
 fn a_building_between_the_quad_and_the_pilot_costs_its_loss() {
     let mut world = open_field();
-    let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0) };
+    let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
     world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
     let params = bare(world);
     let open = bare(open_field());
@@ -456,7 +456,7 @@ fn odd_positions_give_finite_values() {
     // At the goggles (zero distance), inside a building, below the ground plane (a crash can dip there): the
     // simulator's per-step check stops on any non-finite signal, so the link must never produce one.
     let mut world = open_field();
-    let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0) };
+    let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
     world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
     let mut rig = Rig::new(faded(world), 1);
     for pos in [DVec3::new(0.0, 0.0, -1.7), DVec3::new(100.0, 0.0, -5.0), DVec3::new(10.0, 0.0, 0.5), DVec3::new(1e5, 0.0, -10.0)] {

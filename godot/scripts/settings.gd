@@ -213,6 +213,7 @@ static func to_client_dict(s: Dictionary) -> Dictionary:
 		"server_addr": s["server_addr"],
 		"seed": s["seed"],
 		"open_loop": s["open_loop"],
+		"stabilize": bool(s.get("stabilize", false)),
 		"overrun_policy": s["overrun_policy"],
 		"state_rate_hz": s["state_rate_hz"],
 		"stick_rate_hz": s["stick_rate_hz"],

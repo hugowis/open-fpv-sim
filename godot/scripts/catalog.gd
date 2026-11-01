@@ -66,3 +66,25 @@ static func entry(path: String) -> Dictionary:
 				else:
 					courses.append(named)
 	return {"path": path, "label": label, "gates": gates, "courses": courses}
+
+
+## The quad file's `[fc] kind` ("sitl", "open_loop", "open_loop_stabilized"; "" without a `[fc]` or when the file
+## cannot be read — never stabilized, so a broken file still fails at Load with the server's config error).
+static func fc_kind(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var kind := ""
+	var table := ""
+	for line in FileAccess.get_file_as_string(path).split("\n"):
+		var t := line.strip_edges()
+		if t.begins_with("["):
+			table = t
+		elif table == "[fc]" and t.begins_with("kind") and t.contains("=") and t.split("=", true, 1)[0].strip_edges() == "kind":
+			kind = t.split("=", true, 1)[1].strip_edges().trim_prefix("\"").get_slice("\"", 0)
+	return kind
+
+
+## Whether the quad file at `path` carries its own angle-mode stabilizer: an open-loop load of it must ask for the
+## stabilizer or the server refuses (`crates/ofs-sim/src/server.rs`, the open_loop_stabilized refusal).
+static func quad_is_stabilized(path: String) -> bool:
+	return fc_kind(path) == "open_loop_stabilized"

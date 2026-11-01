@@ -54,6 +54,15 @@ func test_the_client_dictionary_launches_a_server_only_when_one_is_configured() 
 	eq(d["quad_path"], s["quad_path"], "quad path")
 
 
+func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
+	var s := AppSettings.defaults()
+	eq(AppSettings.to_client_dict(s)["stabilize"], false, "no stabilize asked by default")
+	s["stabilize"] = true
+	eq(AppSettings.to_client_dict(s)["stabilize"], true, "a session carrying stabilize forwards it")
+	ok(not AppSettings.resolve({"stabilize": true}, {}, PackedStringArray()).has("stabilize"),
+		"stabilize is not a setting: the config file cannot set it")
+
+
 func test_the_world_and_the_video_effects_come_from_every_source() -> void:
 	var s := AppSettings.resolve({"video_effects": false}, {"OFS_WORLD": "worlds/other.toml"}, PackedStringArray())
 	eq(s["world_path"], "worlds/other.toml", "OFS_WORLD")

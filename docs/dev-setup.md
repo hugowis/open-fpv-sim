@@ -117,7 +117,8 @@ A world file (`schema_version = 1`, NED metres from home like the quad file, siz
 - `[pilot]` — where the goggles are and which way the pilot faces;
 - `[receiver]` — the noise floor, diversity, and the goggle antennas (`omni` or `patch` with a beamwidth; gain,
   polarization, aim relative to the pilot's facing);
-- `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal).
+- `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal);
+  a box may carry `yaw_deg` (the heading of its north axis, clockwise from north; absent = axis-aligned).
   The game draws them from the world the server loaded (`GetWorld`), so what you see is what the video link sees.
   The quad collides with them (`docs/research/collision.md`);
 - `[[emitters]]` — other transmitters (a frequency, or a band and channel, and a power), which interfere with
@@ -306,7 +307,7 @@ M3e manual check (needs a controller and, for the Tramp check, real Betaflight w
 
 ## The fault catalog (M4b)
 
-The client and server speak **protocol 17**. The fault catalog arrived in protocol 8, and its wire shapes live in
+The client and server speak **protocol 18**. The fault catalog arrived in protocol 8, and its wire shapes live in
 the `Fault` oneof of `proto/ofs/v1/sim.proto`; the injectable Python dataclasses are in `python/ofs/faults.py`
 (`sim.inject(...)` / `sim.clear_faults()`), and the models, constants and their estimate status are in
 `docs/research/faults.md` —
@@ -314,7 +315,7 @@ regenerate the stubs with the table's protoc recipe after changing the proto.
 
 ## Recording, scripted inputs and the package (M4c)
 
-The client and server speak **protocol 17**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
+The client and server speak **protocol 18**: `StartRecording`/`StopRecording`, `PlayInputs`/`StopInputs`,
 `StartInputsRecording`/`StopInputsRecording` (M5), a fault's optional `at_s`, world names in `LoadRequest.world_path`,
 `HandshakeReply.logs_dir`, gates with lap timing (`World.gates`, `State.race`, M8a), the stabilizer flags
 `LoadRequest.open_loop_fc`/`LoadRequest.stabilize` (M8b), the `DownlinkLoss` fault (`Fault.downlink_loss = 10`,
@@ -326,7 +327,9 @@ courses with a race mode (`World.courses`/`default_course`, `RaceState.course`/`
 baked terrain grid (`World.terrain`: origin, cell size, node counts, heights and the digest, protocol 16). With a grid a
 reply can pass 4 MiB, so the Rust and Python clients accept messages of up to 16 MiB (`ofs_proto::MAX_RESPONSE_BYTES`), and the
 world's triangle meshes (`World.meshes`: name, absolute path, placement and the file's digest, never the bytes; the Godot
-client loads each `.glb` itself and `get_world()` reports whether it matches, protocol 17).
+client loads each `.glb` itself and `get_world()` reports whether it matches, protocol 17), and
+a box's yaw (`WorldObject.yaw_deg`, protocol 18; 0 = axis-aligned, so a world that writes no yaw is
+unchanged on the wire).
 
 - **Recordings** land in `<data_dir>/logs/<quad stem>-<n>.mcap`; the server names them and never writes a
   client-supplied path. The recorder (`crates/ofs-log`) is the last model of each tick and only reads the bus. A

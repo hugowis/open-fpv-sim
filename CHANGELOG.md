@@ -29,6 +29,32 @@ repository). The format follows Keep a Changelog.
 - The existing `worlds/*` and the flat world's digest are unchanged.
 - The Godot drawing of the arch has not been looked at by eye yet (`docs/human-check.md`).
 
+### Rotated boxes in the world (#28)
+#### Added
+- **`yaw_deg` on a box in `[[objects]]`** (degrees clockwise from north, 0 = north, 90 = east; the heading of the
+  box's own north axis): the collision solver pushes along the rotated faces, the radio and video obstruction sees
+  the rotated solid, and the Godot client draws the rotated box — one geometry, `ofs_core::shape::Shape::Box {
+  center, half, yaw_rad }`. Absent = axis-aligned. `yaw_deg` on a cylinder is a validation problem.
+- **Protocol 18** (breaking): `WorldObject.yaw_deg` (field 9, `double`, box only; 0 = axis-aligned). The Godot bridge
+  exposes it as `get_world()["objects"][i]["yaw_deg"]`, the Python `WorldObject.yaw_deg` defaults to 0.0, and
+  `world.gd` turns the node by `PI - deg_to_rad(yaw)`.
+- **Meadow's Gate1 bar**: `worlds/meadow.toml` gets the bar its header said it was missing (`yaw_deg = 135.0`,
+  across the diagonal travel).
+
+#### Changed
+- Nothing for a world that writes no yaw: same shapes, same flights, same bus digest (pinned by
+  `crates/ofs-sim/tests/rotated_boxes.rs` beside the flat-world pin), radio goldens untouched. The identity fast
+  path (`yaw_rad == 0.0`) computes no trig, so it is bit-identical on every OS. A yawed box's signed distance does
+  (libm `sin`/`cos`), so only yawed worlds are machine-claimed.
+
+### The stabilized start (#172)
+#### Fixed
+- **The menu's Start no longer refuses an `open_loop_stabilized` quad under an open-loop setting.** The start asks
+  the server for the built-in stabilizer (`Load`'s `stabilize`, already on the wire since protocol 12) when the
+  chosen quad file's `[fc] kind` says the quad is its own stabilized FC — so the doc's promise ("flies stabilized in
+  Godot just as in Python") holds under every controller pick, menu or menu-less boot. The Godot bridge's `start`
+  now accepts a `stabilize` key. No protocol, settings or simulator change.
+
 ### Site generator (tools/sitegen)
 #### Added
 - **`tools/sitegen`**: a standard-library Python tool (3.11 or newer) that turns a recipe (TOML) and an OpenStreetMap

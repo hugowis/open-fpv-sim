@@ -56,6 +56,29 @@ fn the_shipped_world_loads() {
 }
 
 #[test]
+fn yaw_deg_parses_and_defaults() {
+    // LaunchPad, the flat world's first object, is a box; Pylon1L right after it is a cylinder.
+    let yawed = world_text().replace("size_m = [3.0, 3.0, 0.02]", "size_m = [3.0, 3.0, 0.02]\nyaw_deg = 135.0");
+    let dir = tempfile::tempdir().unwrap();
+    let w = world::load(&write(dir.path(), &yawed)).unwrap();
+    assert_eq!(w.objects[0].yaw_deg, Some(135.0));
+    assert_eq!(w.objects[1].yaw_deg, None, "an object without the key carries no yaw");
+    let bare = world::load(Path::new(WORLD)).unwrap();
+    assert!(bare.objects.iter().all(|o| o.yaw_deg.is_none()), "the shipped world's objects are unchanged");
+}
+
+#[test]
+fn every_yaw_problem_is_reported_at_once() {
+    let text = world_text()
+        .replace("size_m = [3.0, 3.0, 0.02]", "size_m = [3.0, 3.0, 0.02]\nyaw_deg = nan")
+        .replace("shape = \"cylinder\"\ncenter_ned_m = [15.0, -6.0, -1.5]", "shape = \"cylinder\"\nyaw_deg = 10.0\ncenter_ned_m = [15.0, -6.0, -1.5]");
+    let found = problems(&text);
+    for expected in ["objects[0].yaw_deg: must be finite", "objects[1].yaw_deg: yaw_deg is for a box"] {
+        assert!(found.contains(&expected.to_string()), "{expected} in {found:?}");
+    }
+}
+
+#[test]
 fn the_circuit_world_loads() {
     let w = world::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/circuit.toml"))).unwrap();
     let gates: Vec<(&str, [f64; 3], f64)> = w.gates.iter().map(|g| (g.name.as_str(), g.center_ned_m, g.heading_deg)).collect();
@@ -119,9 +142,11 @@ fn the_meadow_world_loads() {
     assert!(w.gates.iter().all(|g| g.width_m == 8.0 && g.height_m == 5.0));
     assert_eq!(w.gates[2].pitch_deg, 20.0, "the west gate leans up with the climb");
     let names: Vec<&str> = w.objects.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(names.len(), 17, "gate frames (8), trees (6), barn, hay bales (2)");
+    assert_eq!(names.len(), 18, "gate frames (9: Gate1 has its bar), trees (6), barn, hay bales (2)");
     let post = w.objects.iter().find(|o| o.name == "Gate1PostL").unwrap();
     assert_eq!(post.center_ned_m, [57.12, 47.88, -2.5], "Gate1's posts sit across the 45-degree travel");
+    let bar = w.objects.iter().find(|o| o.name == "Gate1Bar").unwrap();
+    assert_eq!((bar.shape, bar.size_m, bar.yaw_deg), (Shape::Box, Some([8.3, 0.15, 0.15]), Some(135.0)), "the bar Gate1 was missing, yawed across the travel");
     let barn = w.objects.iter().find(|o| o.name == "Barn").unwrap();
     assert_eq!((barn.shape, barn.size_m, barn.rf_loss_db), (Shape::Box, Some([10.0, 6.0, 6.0]), 25.0));
     assert_eq!(w.emitters.len(), 1);

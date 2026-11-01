@@ -98,7 +98,7 @@ with `a = g(sinθ − μ·cosθ)`. The unit tests pin both on an incline (95 % a
 3 %), the flat deceleration `μ·g` and the stop that stays stopped. The old law, `μ·N·v_t/max(|v_t|, 5 cm/s)`, was
 viscous below 5 cm/s: a resting quad crept down any slope.
 
-The limits: the incline tests use a synthetic ramp (the world's shapes are axis-aligned boxes and cylinders; the
+The limits: the incline tests use a synthetic ramp (the world's shapes are boxes — a yaw turns no vertical face — and cylinders; the
 slopes to land on are the terrain's, see "The ground"); the anchor lives per (point, object), so a point sliding
 across an object's edge onto another starts over; the static sag is real (a millimetre or so), not a rigid hold; `friction_coeff` is one number for the
 ground and every object, and the spheres' and the points' share nothing but its value (`[collision]` for the
@@ -126,6 +126,25 @@ the claim failed by 0.24 mm — so the radius is 2 cm (see `docs/roadmap.md`).
 
 And nothing is missed between steps: at 8 kHz the 30 m/s quad moves 3.75 mm per step, and a sphere is found the
 step its centre crosses the surface.
+
+## Rotated boxes
+
+A box in `[[objects]]` may carry `yaw_deg` (clockwise from north); inside `Shape` it is `yaw_rad`, and every query
+rotates the point into the box's local frame and the answer back out: `signed_distance` and `normal` run today's
+axis-aligned formula on `local = R(-yaw)·(p - center)` (the normal's north/east pair rotates forward again,
+`world = R(yaw)·n`), and `bounds` is the exact AABB of the rotated footprint,
+`(|c|·hₓ + |s|·h_y, |s|·hₓ + |c|·h_y, h_z)` — the extremes of a rotated rectangle are its corners, so the broad
+phase never misses. A rotated box stays convex, so the RF golden-section search over the signed distance is still
+exact. `rooted_on` grows the box straight down, which a yaw does not touch: the rooted shape is again a rotated
+box. No consumer has rotation code of its own — the spheres, the landing points and both links read the one enum.
+
+Two rules keep a yaw-free world byte-identical. The identity fast path: every geometry method branches first on
+`yaw_rad == 0.0` and runs today's expressions unchanged (`-0.0` equals `0.0`, so it is identity too) — the branch
+is the guarantee, not an IEEE argument, and it computes no trig. Canonicalization at the config boundary:
+`object_shape` maps the file's degrees through `rem_euclid(360).to_radians()` (exact), so `0`, `360` and `720` all
+land on exactly `0.0`. A non-zero yaw puts `sin`/`cos` inside the SDF — libm, whose last bits differ per OS — so
+only unrotated worlds are claimed bit-identical across operating systems; a yawed world replays exactly on one
+machine, which is what the lockstep digest compares.
 
 ## The ground
 

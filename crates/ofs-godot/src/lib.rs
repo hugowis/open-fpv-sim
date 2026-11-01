@@ -97,8 +97,9 @@ impl OfsClient {
     /// Starts connecting; returns at once. Returns an empty string when it started, otherwise why it did not
     /// ("already started", or which setting is invalid). Keys: `quad_path` (required), `world_path` (empty or absent:
     /// the open field), `server_addr`, `server_bin` (a program to start when nothing answers), `data_dir`, `log_file`,
-    /// `env` (Dictionary of String to String for the started server), `seed`, `open_loop`, `overrun_policy` ("warn" or
-    /// "slow"), `state_rate_hz`, `stick_rate_hz`.
+    /// `env` (Dictionary of String to String for the started server), `seed`, `open_loop`, `stabilize` (with
+    /// `open_loop`: the built-in angle-mode stabilizer), `overrun_policy` ("warn" or "slow"), `state_rate_hz`,
+    /// `stick_rate_hz`.
     #[func]
     fn start(&mut self, settings: VarDictionary) -> GString {
         if self.client.is_some() {
@@ -447,7 +448,7 @@ impl OfsClient {
     /// The loaded session's world in Godot's frame, or an empty Dictionary before it arrives: `name`,
     /// `pilot_position` (Vector3), `antennas` (Array of {`name`, `kind`, `aim`: Vector3}), `objects` (Array of {`name`,
     /// `shape` ("box" or "cylinder"), `center`: Vector3, `size`: Vector3 (a box's), `radius`, `height` (a cylinder's),
-    /// `color`: Color, `rf_loss_db`}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`,
+    /// `color`: Color, `rf_loss_db`, `yaw_deg` (a box's, 0 = axis-aligned)}), `emitters` (Array of {`name`, `position`: Vector3, `freq_mhz`, `power_mw`,
     /// `ground_y`: the terrain height under it, 0 on flat ground}) and
     /// `gates` (Array of {`name`, `center`: Vector3 (the middle of the opening), `heading_deg` (the direction of travel,
     /// clockwise from north), `width`, `height`, `pitch_deg`, `roll_deg` (the tilt after the heading)}) as declared,
@@ -483,6 +484,7 @@ impl OfsClient {
             e.set("height", o.height_m);
             e.set("color", Color::from_rgb(o.color[0] as f32, o.color[1] as f32, o.color[2] as f32));
             e.set("rf_loss_db", o.rf_loss_db);
+            e.set("yaw_deg", o.yaw_deg);
             objects.push(&e.to_variant());
         }
         let mut emitters = VarArray::new();
@@ -649,6 +651,9 @@ fn parse_settings(d: &VarDictionary) -> Result<Settings, String> {
     }
     if let Some(open_loop) = d.get("open_loop").and_then(|v| v.try_to::<bool>().ok()) {
         settings.open_loop_fc = open_loop;
+    }
+    if let Some(stabilize) = d.get("stabilize").and_then(|v| v.try_to::<bool>().ok()) {
+        settings.stabilize = stabilize;
     }
     match string_key(d, "overrun_policy").as_deref() {
         None | Some("warn") => settings.overrun_policy = OverrunPolicy::Warn,
