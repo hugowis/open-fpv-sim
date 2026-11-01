@@ -1113,7 +1113,7 @@ fn a_world_without_meshes_loads_exactly_as_before() {
     let mut seen = 0;
     for entry in fs::read_dir(shipped_world("x").parent().unwrap()).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_none_or(|e| e != "toml") || path.file_stem().unwrap() == "hall" {
+        if path.extension().is_none_or(|e| e != "toml") || ["hall", "chernobyl"].contains(&path.file_stem().unwrap().to_str().unwrap()) {
             continue;
         }
         let w = world::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -1141,4 +1141,85 @@ fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
     assert_eq!(materials_crossed([45.0, 0.0, -1.7], [45.0, 10.0, -1.7]), [0], "through the east wall: concrete");
     assert_eq!(materials_crossed([40.0, 0.0, -3.5], [40.0, 10.0, -3.5]), [1], "through the window: glass only");
     assert_eq!(materials_crossed([40.0, 0.0, -1.7], [40.0, 0.0, -9.0]), [0], "through the roof");
+}
+
+#[test]
+fn chernobyl_loads_and_the_pilot_sees_the_nsc_door() {
+    use glam::DVec3;
+    let w = world::load(&shipped_world("chernobyl")).unwrap();
+    assert_eq!((w.name.as_str(), w.pilot.position_ned_m), ("Chernobyl", [0.0, -231.0, -1.7]));
+    let nsc = &w.load_meshes().unwrap()[0];
+    assert_eq!(nsc.loss_db, [40.0]);
+    let mut m = Vec::new();
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(0.0, -81.0, -20.0), &mut m);
+    assert!(m.is_empty(), "the door is open");
+    // A mesh that loaded empty would pass the line above: this one crosses the closed end wall beside the door.
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(25.0, -76.0, -10.0), &mut m);
+    assert!(!m.is_empty(), "the closed end wall beside the door is crossed");
+}
+
+/// The shipped hall copied to a temp dir with its relative layout; returns the world path and the `.glb` path.
+fn hall_copy(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    fs::create_dir_all(dir.join("assets")).unwrap();
+    let glb = dir.join("assets/hall.glb");
+    fs::copy(shipped_world("hall").parent().unwrap().join("assets/hall.glb"), &glb).unwrap();
+    fs::copy(shipped_world("hall"), dir.join("hall.toml")).unwrap();
+    (dir.join("hall.toml"), glb)
+}
+
+#[test]
+fn load_meshes_after_load_reads_the_file_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    fs::remove_file(&glb).unwrap();
+    let (a, b) = (w.load_meshes().unwrap(), w.load_meshes().unwrap());
+    assert!(std::sync::Arc::ptr_eq(&a[0].mesh, &b[0].mesh));
+}
+
+#[test]
+fn a_changed_mesh_section_is_reloaded_not_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let mut w = world::load(&path).unwrap();
+    let before = w.load_meshes().unwrap()[0].mesh.bounds();
+    let bytes = fs::read(&glb).unwrap();
+    fs::remove_file(&glb).unwrap();
+    fs::write(&glb, bytes).unwrap();
+    w.meshes[0].position_ned_m[0] += 10.0;
+    let after = w.load_meshes().unwrap()[0].mesh.bounds();
+    assert!((after.min.x - before.min.x - 10.0).abs() < 1e-9 && (after.max.x - before.max.x - 10.0).abs() < 1e-9, "{before:?} -> {after:?}");
+}
+
+#[test]
+fn load_meshes_with_a_small_cap_still_refuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    let e = w.load_meshes_with(3).unwrap_err();
+    assert!(e.starts_with("meshes[0].file: "), "{e}");
+}
+
+#[test]
+fn a_cloned_world_shares_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, glb) = hall_copy(dir.path());
+    let w = world::load(&path).unwrap();
+    let c = w.clone();
+    fs::remove_file(&glb).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&w.load_meshes().unwrap()[0].mesh, &c.load_meshes().unwrap()[0].mesh));
+}
+
+#[test]
+fn a_changed_material_loss_is_not_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = hall_copy(dir.path());
+    let mut w = world::load(&path).unwrap();
+    let before = w.load_meshes().unwrap()[0].loss_db.clone();
+    assert!(!before.is_empty());
+    w.materials[0].rf_loss_db += 7.0;
+    let after = w.load_meshes().unwrap()[0].loss_db.clone();
+    assert_ne!(after, before, "the loss of a material changed after load");
+    let named = &w.materials[0].name;
+    assert!(after.iter().zip(&before).any(|(a, b)| (a - b - 7.0).abs() < 1e-9), "{named}: {before:?} -> {after:?}");
 }

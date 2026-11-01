@@ -1,4 +1,5 @@
 import http.client
+import itertools
 import json
 import math
 import urllib.error
@@ -11,6 +12,7 @@ import pytest
 from sitegen import osm
 
 FIXTURE = Path(__file__).parent / "fixtures" / "overpass_small.json"
+RELATIONS = Path(__file__).parent / "fixtures" / "overpass_relations.json"
 UA = "test-agent/1"
 BBOX = (51.38, 30.09, 51.40, 30.11)
 RECIPE = """
@@ -80,7 +82,7 @@ def no_sleep(s):
 def test_parse_skips_open_ways_and_relations_and_counts_them():
     ways, skipped = osm.parse_overpass(fixture_data())
     assert [w.id for w in ways] == [101, 102, 104, 105]
-    assert skipped == {"open_way": 1, "relation": 1, "no_geometry": 0, "malformed": 0}
+    assert skipped == {"open_way": 1, "relation": 1, "no_geometry": 0, "malformed": 0, "relation_hole": 0}
     assert ways[0].ring[0] == ways[0].ring[-1] == (51.39, 30.099)
     assert ways[2].tags["name"] == "Саркофаг"
     assert "addr:street" not in ways[0].tags
@@ -100,7 +102,7 @@ def test_parse_survives_hostile_input():
     ]}
     ways, skipped = osm.parse_overpass(data)
     assert [w.id for w in ways] == [4]
-    assert skipped == {"open_way": 0, "relation": 0, "no_geometry": 1, "malformed": 7}
+    assert skipped == {"open_way": 0, "relation": 0, "no_geometry": 1, "malformed": 7, "relation_hole": 0}
 
 
 def test_parse_huge_int_coordinates_are_skipped_not_raised():
@@ -109,6 +111,102 @@ def test_parse_huge_int_coordinates_are_skipped_not_raised():
         {"type": "way", "id": 1, "tags": {}, "geometry": ring},
         {"type": "way", "id": 2, "tags": {}, "geometry": [{"lat": float("nan"), "lon": 0}]}]})
     assert ways == [] and skipped["malformed"] == 2
+
+
+def relations():
+    return json.loads(RELATIONS.read_text(encoding="utf-8"))
+
+
+def square(s=0.0):
+    return [{"lat": s, "lon": 0}, {"lat": s, "lon": 1}, {"lat": s + 0.0005, "lon": 1}, {"lat": s + 0.0005, "lon": 0}, {"lat": s, "lon": 0}]
+
+
+def rel(rid, members, tags=None):
+    return {"type": "relation", "id": rid, "tags": {"building": "yes"} if tags is None else tags, "members": members}
+
+
+def test_relation_with_one_closed_outer_becomes_a_way():
+    ways, skipped = osm.parse_overpass(relations())
+    hall = next(w for w in ways if w.id == -(8705336 * 100 + 1))
+    assert hall.tags == {"building": "industrial", "name": "Турбінний зал", "name:en": "Turbine hall"}
+    assert hall.ring[0] == hall.ring[-1] == (51.389, 30.099) and len(hall.ring) == 5
+    assert [w.id for w in ways] == [-870533601, -50001]
+    assert skipped["relation"] == 1
+
+
+def test_outer_ring_is_stitched_from_member_ways_in_either_direction():
+    ways, _ = osm.parse_overpass(relations())
+    ring = next(w for w in ways if w.id == -50001).ring
+    assert ring == [(51.388, 30.097), (51.388, 30.0974), (51.3883, 30.0974), (51.3883, 30.097), (51.388, 30.097)]
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(range(3))))
+@pytest.mark.parametrize("flips", list(itertools.product([False, True], repeat=3)))
+def test_a_relation_stitches_into_one_ring_in_any_member_order_and_direction(order, flips):
+    rel = next(e for e in json.loads(RELATIONS.read_text(encoding="utf-8"))["elements"] if e["id"] == 500)
+    members = []
+    for i, flip in zip(order, flips):
+        m = dict(rel["members"][i])
+        m["geometry"] = m["geometry"][::-1] if flip else m["geometry"]
+        members.append(m)
+    ways, skipped = osm.parse_overpass({"elements": [dict(rel, members=members)]})
+    assert [w.id for w in ways] == [-50001] and ways[0].ring[0] == ways[0].ring[-1] and skipped["relation"] == 0
+    assert len(ways[0].ring) == 5  # pieces of 3, 2 and 2 points share two joints: four corners and the closing repeat
+
+
+def test_relation_ring_ids_count_from_one_and_are_capped_at_99():
+    outers = [{"type": "way", "ref": i, "role": "outer", "geometry": square(i / 1000)} for i in range(1, 102)]
+    ways, skipped = osm.parse_overpass({"elements": [rel(7, outers[:2]), rel(8, outers)]})
+    assert [w.id for w in ways if w.id > -800] == [-702, -701]
+    assert sorted(w.id for w in ways if w.id <= -800) == [-899 + i for i in range(99)] and len(ways) == 101
+    assert skipped["relation"] == 2
+
+
+def test_relation_hole_is_counted_not_built():
+    ways, skipped = osm.parse_overpass(relations())
+    assert skipped["relation_hole"] == 1
+    assert len(next(w for w in ways if w.id == -870533601).ring) == 5
+
+
+def test_unclosable_relation_is_skipped_and_counted_never_raises():
+    outer = {"type": "way", "ref": 1, "role": "outer"}
+    nan = {"lat": float("nan"), "lon": 0}
+    data = {"elements": [
+        rel(1, [{**outer, "geometry": square()[:3]}]),  # open chain
+        rel(2, []),
+        rel(3, [outer, {**outer, "geometry": []}]),  # no geometry
+        rel(4, [{**outer, "geometry": [nan, *square()[1:]]}]),
+        rel(5, "members"),
+        rel(6, ["junk", 3, None]),
+        rel(7, [{**outer, "ref": "x", "geometry": square()}]),
+        rel(8, [{**outer, "geometry": [{"lat": 10**400, "lon": 0}, *square()[1:]]}]),
+        rel(9, [{**outer, "geometry": [{"lat": 91, "lon": 0}, *square()[1:]]}]),
+        rel(10, [{**outer, "geometry": [{"lat": 0}, *square()[1:]]}]),
+        {"type": "relation", "id": 11, "tags": {"building": "yes"}},
+        {"type": "relation", "id": "x", "tags": {"building": "yes"}, "members": []},
+        {"type": "relation", "id": 12, "tags": {"type": "route"}, "members": [{**outer, "geometry": square()}]},
+    ]}
+    ways, skipped = osm.parse_overpass(data)
+    assert ways == []
+    assert sum(skipped.values()) == 13 and skipped["malformed"] >= 1 and skipped["relation_hole"] == 0
+
+
+@pytest.mark.parametrize("tags, built", [({"type": "multipolygon"}, True), ({"building": "yes"}, True), ({"type": "route"}, False)])
+def test_a_relation_needs_the_multipolygon_type_or_a_building_tag(tags, built):
+    ways, _ = osm.parse_overpass({"elements": [rel(1, [{"type": "way", "ref": 1, "role": "outer", "geometry": square()}], tags)]})
+    assert bool(ways) is built
+
+
+def test_snapshot_round_trips_negative_ids_sorted(tmp_path):
+    ways, _ = osm.parse_overpass(relations())
+    ways += osm.parse_overpass(fixture_data())[0]
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    osm.write_snapshot(a, ways, BBOX, "note")
+    osm.write_snapshot(b, list(reversed(ways)), BBOX, "note")
+    assert a.read_bytes() == b.read_bytes()
+    ids = [w["id"] for w in json.loads(a.read_bytes())["ways"]]
+    assert ids == sorted(ids) and ids[:2] == [-870533601, -50001]
+    assert osm.read_snapshot(a) == sorted(ways, key=lambda w: w.id)
 
 
 @pytest.mark.parametrize("tags, expected", [
@@ -185,7 +283,14 @@ def test_fetch_retries_on_502_then_succeeds():
     req = op.calls[0]
     assert req.full_url == "https://overpass-api.de/api/interpreter" and req.get_method() == "POST"
     body = urllib.parse.unquote_plus(req.data.decode("ascii"))
-    assert '[out:json][timeout:60];way["building"](51.38,30.09,51.4,30.11);out tags geom;' in body
+    assert ('[out:json][timeout:60]; (way["building"](51.38,30.09,51.4,30.11); '
+            'relation["building"](51.38,30.09,51.4,30.11);); out tags geom;') in body
+
+
+def test_fetch_query_asks_for_relations_too():
+    q = osm._query(BBOX)
+    assert q == ('[out:json][timeout:60]; (way["building"](51.38,30.09,51.4,30.11); '
+                 'relation["building"](51.38,30.09,51.4,30.11);); out tags geom;')
 
 
 def test_fetch_gives_up_after_tries():

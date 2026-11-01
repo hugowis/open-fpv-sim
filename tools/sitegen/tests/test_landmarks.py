@@ -206,3 +206,15 @@ def test_landmark_errors_name_the_landmark_and_field():
     shed = Landmark("walls", "shed", {"corners": [[48.0, 2.0]], "height_m": 3, "material": "w"})
     with pytest.raises(ValueError, match=r"^shed\.corners"):
         build_landmark(MeshBuilder(), shed, proj)
+
+
+def test_a_roof_that_cannot_be_triangulated_is_named_roof(monkeypatch):
+    def fail(ring):
+        raise ValueError("no ear found: ring is not a simple counter-clockwise polygon")
+
+    monkeypatch.setattr("sitegen.landmarks.triangulate", fail)
+    with pytest.raises(ValueError, match=r"^roof: no ear found"):
+        walls(MeshBuilder(), SQUARE, 3.0, "w", roof=True)
+    shed = Landmark("walls", "shed", {"corners": [[48.0, 2.0], [48.0, 2.001], [48.001, 2.001]], "height_m": 3, "material": "w", "roof": True})
+    with pytest.raises(ValueError, match=r"^shed\.roof: no ear found"):
+        build_landmark(MeshBuilder(), shed, Projection(48.0, 2.0))

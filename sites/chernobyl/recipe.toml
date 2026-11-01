@@ -1,0 +1,62 @@
+# Chernobyl reactor area, present day. Stage A: the New Safe Confinement (NSC) alone, from published dimensions; no
+# OpenStreetMap data yet (the snapshot is hand-made and empty). Every number says where it comes from: `# source:` with
+# the URL and the figure as published, or `estimate`, or `artistic` (a gameplay liberty). See SOURCES.md.
+[site]
+name = "chernobyl"
+# NED origin. source: https://en.wikipedia.org/wiki/Chernobyl_disaster "51.38972°N 30.09917°E" (the disaster site, the
+# plant's reactor area; no separate reactor 4 coordinate is published). Wikidata's NSC (Q1506085) after the slide:
+# 51.389, 30.099, precision 0.001. estimate: reactor 4 is within a few tens of metres of this point.
+origin = [51.38972, 30.09917]
+half_extent_m = [300.0, 300.0]  # artistic: covers the NSC (257 m wide) and its surroundings
+snapshot = "chernobyl.osm.json"
+
+[output]
+world = "../../worlds/chernobyl.toml"
+glb = "assets/chernobyl.glb"
+
+[colors]
+building = [0.55, 0.52, 0.48]  # artistic: required by the recipe schema; nothing uses it in Stage A
+nsc_cladding = [0.72, 0.74, 0.76]  # artistic: light steel grey
+
+[[materials]]
+name = "nsc_cladding"
+rf_loss_db = 40.0  # estimate: a steel-clad shell at 5.8 GHz; not measured
+
+[[landmarks]]
+kind = "arch"
+name = "NSC"
+# estimate: the arch is centred on the origin, which is the published reactor-area point above; refined against the
+# OpenStreetMap outline in Stage B.
+center_ned_m = [0.0, 0.0]
+# source: https://en.wikipedia.org/wiki/Chernobyl_New_Safe_Confinement "constructed 180 metres (590 ft) west of reactor 4, and slid into place";
+# Wikidata Q1506085 coordinates before the slide: 51.389, 30.094, after: 51.389, 30.099 (the move is east; at 0.001 degrees of precision the direction is inferred). The axis is east-west.
+heading_deg = 90.0
+# source: https://chnpp.gov.ua/en/infocenter/news/204-projects/nsc-construction/578-q-q578 "Span of Arch: 257m"
+span_m = 257.0
+# source: https://chnpp.gov.ua/en/infocenter/news/204-projects/nsc-construction/578-q-q578 "Length: 162m"
+length_m = 162.0
+# source: https://chnpp.gov.ua/en/infocenter/news/204-projects/nsc-construction/578-q-q578 "Height: 108m"
+height_m = 108.0
+material = "nsc_cladding"
+segments = 48  # artistic: a smooth enough vault
+# artistic: a 40 x 40 m door in the WEST end (heading 90 puts "front" at the east, so "back" is the west; the east end
+# nearly touches unit 3). The real building has a closed end wall; the door is a gameplay liberty so a quad can fly in.
+end_doors = [["back", 40.0, 40.0]]
+
+[world]
+name = "Chernobyl"
+
+[world.pilot]
+# artistic: 150 m west of the door (the west end is at east = -81 m: half of the 162 m length), eye 1.7 m up, facing east.
+position_ned_m = [0.0, -231.0, -1.7]
+facing_deg = 90.0
+
+[world.receiver]
+noise_floor_dbm = -93.0
+diversity = false
+
+[[world.receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
