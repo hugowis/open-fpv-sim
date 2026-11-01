@@ -131,6 +131,12 @@ impl BundleSource {
             Some(p) => {
                 let name = file_name(p)?;
                 files.push((Path::new("worlds").join(&name), read(p, "world")?));
+                // Mesh files sit beside the world file by the same relative path, so the replay finds them.
+                let world = ofs_config::world::load(p).map_err(|e| format!("loading the world {}: {e}", p.display()))?;
+                let mut seen = std::collections::BTreeSet::new();
+                for m in world.meshes.iter().filter(|m| seen.insert(m.file.as_str())) {
+                    files.push((Path::new("worlds").join(&m.file), read(&p.parent().unwrap_or(Path::new("")).join(&m.file), "mesh")?));
+                }
                 Some(format!("worlds/{name}"))
             }
             None => None,
@@ -605,6 +611,45 @@ mod tests {
         let dir = write_bundle(&src, &v, &error).unwrap();
         assert!(dir.join("worlds/flat.toml").is_file());
         assert_eq!(bundle_toml(&dir)["world"].as_str(), Some("worlds/flat.toml"));
+    }
+
+    /// A bundle of the shipped quad failing in `worlds/hall.toml` (which has a mesh).
+    fn hall_bundle(logs: &Path) -> (PathBuf, Vehicle) {
+        let hall = repo("worlds/hall.toml");
+        let src = test_source_for(logs, &repo("quads/opendrone-5f-freestyle.toml"), Some(&hall), None);
+        let cfg = ofs_config::load(&src.quad_path).unwrap();
+        let opts = BuildOptions {
+            seed: 1,
+            data_dir: std::env::temp_dir().join("ofs-repro-unit"),
+            fc_override: Some(FcKind::OpenLoop),
+            world: ofs_config::world::load(&hall).unwrap(),
+        };
+        let mut v = build(&cfg, &opts, None).unwrap();
+        let error = fail(&mut v);
+        (write_bundle(&src, &v, &error).unwrap(), v)
+    }
+
+    #[test]
+    fn a_world_with_meshes_copies_them_into_the_bundle() {
+        let logs = tempfile::tempdir().unwrap();
+        let (dir, _) = hall_bundle(logs.path());
+        assert_eq!(std::fs::read(dir.join("worlds/assets/hall.glb")).unwrap(), std::fs::read(repo("worlds/assets/hall.glb")).unwrap());
+        assert!(dir.join("worlds/hall.toml").is_file());
+    }
+
+    #[test]
+    fn a_bundle_with_a_mesh_replays() {
+        let (logs, work) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (dir, v) = hall_bundle(logs.path());
+        // The world the replay loads is the bundle's: its mesh file is inside the bundle.
+        let bundled = ofs_config::world::load(&dir.join("worlds/hall.toml")).unwrap().load_meshes().unwrap();
+        assert!(bundled[0].path.ends_with(Path::new("opendrone-5f-freestyle-1.repro/worlds/assets/hall.glb")),"{:?}", bundled[0].path);
+        let outcome = replay(&dir, &work.path().join("data")).unwrap();
+        assert!(outcome.reproduced && outcome.exact, "{outcome:?}");
+        assert_eq!(outcome.digest, v.digest());
+        // And it is that copy that counts: spoil it and the replay no longer builds.
+        std::fs::write(dir.join("worlds/assets/hall.glb"), b"not a glb").unwrap();
+        assert!(replay(&dir, &work.path().join("data")).unwrap_err().contains("hall.glb"));
     }
 
     fn copy_dir(from: &Path, to: &Path) {
