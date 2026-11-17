@@ -11,8 +11,8 @@ use ofs_core::mesh::MeshHit;
 use ofs_sim::vehicle::{build, link_params, BuildOptions, Sticks};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-/// The pilot's eye, 150 m west of the door.
-const PILOT: DVec3 = DVec3::new(0.0, -231.0, -1.7);
+/// The pilot's eye, 150 m west of the door (the arch centre is at north -53.946, east -27.065).
+const PILOT: DVec3 = DVec3::new(-53.946, -258.065, -1.7);
 
 fn chernobyl() -> WorldConfig {
     ofs_config::world::load(Path::new(&format!("{ROOT}/worlds/chernobyl.toml"))).unwrap()
@@ -32,7 +32,7 @@ struct Flight {
 
 fn fly(world: WorldConfig, north: f64, seconds: f64) -> Flight {
     let mut cfg = quad();
-    cfg.initial.position_ned_m = [north, -181.0, -2.0];
+    cfg.initial.position_ned_m = [-53.946 + north, -208.065, -2.0];
     cfg.initial.yaw_deg = 90.0;
     // The test flies from its own start, not the world's spawn.
     let mut world = world;
@@ -40,7 +40,7 @@ fn fly(world: WorldConfig, north: f64, seconds: f64) -> Flight {
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoopStabilized), world };
     let mut v = build(&cfg, &opts, None).unwrap();
     // Throttle this low and a half stick forward: the stabilised quad climbs slowly east at about 20 m/s, so it crosses
-    // the door's plane (east -81) some 10 m up and is deep inside the arch after 10 s.
+    // the door's plane (east -108.065) some 10 m up and is deep inside the arch after 10 s.
     v.set_sticks(&Sticks { throttle: 0.28, pitch: 0.5, ..Sticks::default() }).unwrap();
     let mut first_object = None;
     for _ in 0..(seconds * 100.0) as usize {
@@ -52,7 +52,8 @@ fn fly(world: WorldConfig, north: f64, seconds: f64) -> Flight {
     Flight { digest: v.digest(), hits: v.state().collision_event_count, first_object, end: v.state().pos_ned_m }
 }
 
-const SECONDS: f64 = 10.0;
+// Eight seconds: through the door and inside, but short of the shelter and stabilisation structures in the arch.
+const SECONDS: f64 = 8.0;
 
 #[test]
 fn the_world_loads_with_one_mesh() {
@@ -66,7 +67,7 @@ fn the_world_loads_with_one_mesh() {
 fn the_quad_starts_west_of_the_door() {
     let world = chernobyl();
     let spawn = world.initial.clone().expect("the world names a spawn");
-    assert!(spawn.position_ned_m[1] < -81.0, "spawn east {} is inside the arch", spawn.position_ned_m[1]);
+    assert!(spawn.position_ned_m[1] < -108.065, "spawn east {} is inside the arch", spawn.position_ned_m[1]);
     let cfg = quad();
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoopStabilized), world };
     let v = build(&cfg, &opts, None).unwrap();
@@ -85,8 +86,8 @@ fn the_pilot_is_not_inside_geometry() {
 fn a_quad_flies_in_through_the_west_door_untouched() {
     let f = fly(chernobyl(), 0.0, SECONDS);
     assert_eq!(f.hits, 0, "first hit on object {:?}", f.first_object);
-    // The door is at east -81; 20 m inside is -61. The arch's far wall is at +81.
-    assert!(f.end.y > -61.0 && f.end.y < 81.0, "ended at east {}", f.end.y);
+    // The door is at east -108.065; the arch's far wall is at east 53.935.
+    assert!(f.end.y > -108.065 && f.end.y < 53.935, "ended at east {}", f.end.y);
 }
 
 #[test]
@@ -95,7 +96,7 @@ fn the_same_flight_30_m_off_the_door_axis_hits_the_end_wall() {
     assert!(f.hits > 0, "ended at {:?}", f.end);
     // Meshes follow the objects in the collision indices: the first hit is the arch, not a ground bounce.
     assert_eq!(f.first_object, Some(chernobyl().objects.len() as i32));
-    assert!(f.end.y < -61.0, "stopped outside the arch at east {}", f.end.y);
+    assert!(f.end.y < -88.065, "stopped outside the arch at east {}", f.end.y);
 }
 
 #[test]
@@ -111,11 +112,12 @@ fn the_video_link_is_cut_by_the_arch_skin_and_not_through_the_door() {
     let meshes = world.load_meshes().unwrap();
     let params = link_params(quad().vtx.as_ref().unwrap(), &world, None, &meshes).unwrap();
     let obstruction = |north: f64, east: f64| ofs_video::link::vtx_paths(&params, DVec3::new(north, east, -2.0), DQuat::IDENTITY, 5800.0)[0].obstruction_db;
-    // The pilot is at PILOT and the quad at the given point: the line to (40, -40) crosses the end wall (east -81) at
-    // north 31, outside the door's +-20 m.
-    let behind = obstruction(40.0, -40.0);
+    // The pilot is at PILOT and the quad at the given point: the line to the off-axis point crosses the end wall
+    // (east -108.065) at north 31 relative to the door axis, outside the door's +-20 m. The on-axis point is 8 m
+    // inside the door, before the shelter and stabilisation structures.
+    let behind = obstruction(-13.946, -100.0);
     assert!(behind >= 40.0, "behind the end wall {behind} dB");
-    assert_eq!(obstruction(0.0, -40.0), 0.0, "straight through the door");
+    assert_eq!(obstruction(-53.946, -100.0), 0.0, "straight through the door");
 }
 
 #[test]

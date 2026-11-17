@@ -418,8 +418,9 @@ or newer** (it reads TOML with `tomllib`), although the rest of the repository s
 engine like any other mesh world (the "The world file" section above).
 
 The footprints are OpenStreetMap data (© OpenStreetMap contributors, ODbL 1.0, <https://www.openstreetmap.org/copyright>);
-the generated world file carries the line. Whether an ODbL snapshot may live in this GPLv3 repository is the open question
-of `docs/research/sitegen-licensing.md` (status: unconfirmed): do not commit a real snapshot before the owner has confirmed it.
+the generated world file carries the line. The licence note `docs/research/sitegen-licensing.md` is confirmed (2026-11-17)
+and the Chernobyl snapshot is committed under the ODbL. A new site's snapshot still needs its own check before it is
+committed.
 
 ## Troubleshooting (Windows)
 Live SITL tests run from Windows against SITL in WSL, and SITL's datagrams reach the Windows host through the Windows Firewall.

@@ -1,6 +1,7 @@
-# Chernobyl reactor area, present day. Stage A: the New Safe Confinement (NSC) alone, from published dimensions; no
-# OpenStreetMap data yet (the snapshot is hand-made and empty). Every number says where it comes from: `# source:` with
-# the URL and the figure as published, or `estimate`, or `artistic` (a gameplay liberty). See SOURCES.md.
+# Chernobyl reactor area, present day. Stage B: the New Safe Confinement (NSC) from published dimensions, plus the
+# surrounding buildings and the turbine hall from the OpenStreetMap snapshot (`chernobyl.osm.json`, ODbL 1.0). Every
+# number says where it comes from: `# source:` with the URL and the figure as published, or `estimate`, or `artistic`
+# (a gameplay liberty). See SOURCES.md and docs/research/sitegen-licensing.md.
 [site]
 name = "chernobyl"
 # NED origin. source: https://en.wikipedia.org/wiki/Chernobyl_disaster "51.38972°N 30.09917°E" (the disaster site, the
@@ -15,19 +16,23 @@ world = "../../worlds/chernobyl.toml"
 glb = "assets/chernobyl.glb"
 
 [colors]
-building = [0.55, 0.52, 0.48]  # artistic: required by the recipe schema; nothing uses it in Stage A
+building = [0.55, 0.52, 0.48]  # artistic: concrete grey for the OSM buildings
 nsc_cladding = [0.45, 0.47, 0.50]  # artistic: steel grey, dark enough to read the vault's facets in the sun
 
 [[materials]]
 name = "nsc_cladding"
 rf_loss_db = 40.0  # estimate: a steel-clad shell at 5.8 GHz; not measured
 
+[[materials]]
+name = "building"
+rf_loss_db = 30.0  # estimate: concrete walls at 5.8 GHz; not measured
+
 [[landmarks]]
 kind = "arch"
 name = "NSC"
-# estimate: the arch is centred on the origin, which is the published reactor-area point above; refined against the
-# OpenStreetMap outline in Stage B.
-center_ned_m = [0.0, 0.0]
+# source: the centre of the bounding box of the OpenStreetMap NSC outline (way 456732992, ODbL 1.0), projected to NED;
+# the outline is skipped below and the arch stands in its place. estimate: the arch's own centre is within a metre or so.
+center_ned_m = [-53.946, -27.065]
 # source: https://en.wikipedia.org/wiki/Chernobyl_New_Safe_Confinement "constructed 180 metres (590 ft) west of reactor 4, and slid into place";
 # Wikidata Q1506085 coordinates before the slide: 51.389, 30.094, after: 51.389, 30.099 (the move is east; at 0.001 degrees of precision the direction is inferred). The axis is east-west.
 heading_deg = 90.0
@@ -43,18 +48,47 @@ segments = 48  # artistic: a smooth enough vault
 # nearly touches unit 3). The real building has a closed end wall; the door is a gameplay liberty so a quad can fly in.
 end_doors = [["back", 40.0, 40.0]]
 
+# The OSM footprints (ODbL 1.0). The NSC outline is replaced by the arch landmark above; the unit 4 ruins overlap the
+# shelter object. The rest are kept as context, with their OSM heights made explicit.
+[[footprints]]
+id = 456732992  # "Укриття-2" (NSC outline): replaced by the arch landmark
+skip = true
+
+[[footprints]]
+id = 500551950  # "IV енергоблок" (unit 4 ruins): overlap the shelter object
+skip = true
+
+[[footprints]]
+id = 500551951  # "Об'єкт Укриття" (shelter object inside the arch)
+height_m = 65.0
+
+[[footprints]]
+id = 500551953  # Designed Stabilisation Steel Structure
+height_m = 63.0
+
+[[footprints]]
+id = 326145079  # "III енергоблок" (unit 3)
+height_m = 70.0
+
+[[footprints]]
+id = -870533601  # turbine hall, main ring (relation 8705336)
+height_m = 50.0
+# artistic: the 2013 collapse, about 600 m2 of roof and wall (30 m wide, 20 m high, bottom 5 m), in the west end wall
+# nearest unit 4; the wall index comes from `python -m sitegen walls <recipe> -870533601`.
+openings = [[21, 18.0, 30.0, 5.0, 25.0]]
+
 [world]
 name = "Chernobyl"
 
 [world.initial]
 # The quad starts 100 m west of the door, outside the arch (the test's flight starts here); the pilot stands 50 m
-# further west. Without this the quad would start at the world origin, inside the arch.
-position_ned_m = [0.0, -181.0, -2.0]
+# further west. The door is at north -53.946, east -108.065 (the arch centre minus half its 162 m length).
+position_ned_m = [-53.946, -208.065, -2.0]
 yaw_deg = 90.0
 
 [world.pilot]
-# artistic: 150 m west of the door (the west end is at east = -81 m: half of the 162 m length), eye 1.7 m up, facing east.
-position_ned_m = [0.0, -231.0, -1.7]
+# artistic: 150 m west of the door, eye 1.7 m up, facing east.
+position_ned_m = [-53.946, -258.065, -1.7]
 facing_deg = 90.0
 
 [world.receiver]
@@ -72,7 +106,7 @@ polarization = "rhcp"
 [[world.objects]]
 name = "DoorPostL"
 shape = "box"
-center_ned_m = [-20.5, -81.0, -20.0]
+center_ned_m = [-74.446, -108.065, -20.0]
 size_m = [1.0, 1.0, 41.0]
 color = [0.08, 0.09, 0.10]
 rf_loss_db = 40.0
@@ -80,7 +114,7 @@ rf_loss_db = 40.0
 [[world.objects]]
 name = "DoorPostR"
 shape = "box"
-center_ned_m = [20.5, -81.0, -20.0]
+center_ned_m = [-33.446, -108.065, -20.0]
 size_m = [1.0, 1.0, 41.0]
 color = [0.08, 0.09, 0.10]
 rf_loss_db = 40.0
@@ -88,7 +122,7 @@ rf_loss_db = 40.0
 [[world.objects]]
 name = "DoorLintel"
 shape = "box"
-center_ned_m = [0.0, -81.0, -40.5]
+center_ned_m = [-53.946, -108.065, -40.5]
 size_m = [41.0, 1.0, 1.0]
 color = [0.08, 0.09, 0.10]
 rf_loss_db = 40.0
