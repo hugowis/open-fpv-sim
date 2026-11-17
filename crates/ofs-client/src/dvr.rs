@@ -218,6 +218,18 @@ impl DvrWriter {
     /// hand JPEG bytes of that size (Godot's encoder does). Creates the file's directory; fails if the file exists
     /// (a recording never overwrites another).
     pub fn start(path: PathBuf, fps: u32, width: u32, height: u32) -> Result<DvrWriter, String> {
+        if fps == 0 {
+            return Err("fps must be greater than 0".into());
+        }
+        if width == 0 || height == 0 {
+            return Err("width and height must be greater than 0".into());
+        }
+        if width > u32::from(u16::MAX) || height > u32::from(u16::MAX) {
+            return Err(format!("width and height must be at most {} (the AVI frame rectangle is 16-bit)", u16::MAX));
+        }
+        if u64::from(width) * u64::from(height) * 3 > u64::from(u32::MAX) {
+            return Err(format!("{width}x{height} is too large for a 32-bit AVI frame size"));
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", path.display()))?;
         }
@@ -241,7 +253,10 @@ impl DvrWriter {
                     summary
                 })
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&path);
+                e.to_string()
+            })?;
         Ok(DvrWriter { tx: Some(tx), handle: Some(handle), dropped, truncated, path })
     }
 
@@ -320,6 +335,19 @@ mod tests {
             summary.frames,
             "one index entry per frame"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_start_with_a_bad_size_or_rate_creates_no_file() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-start-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (fps, width, height) in [(50, 0, 2), (50, 4, 0), (0, 4, 2), (50, 65_536, 2), (50, 4, 65_536)] {
+            let path = dir.join(format!("bad-{fps}-{width}-{height}.avi"));
+            let _ = std::fs::remove_file(&path);
+            assert!(DvrWriter::start(path.clone(), fps, width, height).is_err(), "{fps} {width} {height}");
+            assert!(!path.exists(), "no file for {fps} {width} {height}");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 }
