@@ -46,7 +46,8 @@ func test_the_client_dictionary_launches_a_server_only_when_one_is_configured() 
 	s["sitl_launch"] = "wsl.exe -d Ubuntu -e /home/me/betaflight_SITL.elf"
 	var d := AppSettings.to_client_dict(s)
 	eq(d["server_bin"], "C:/x/ofs-sim.exe", "server binary")
-	eq(d["log_file"], String(s["data_dir"]).path_join("ofs-sim.log"), "log file")
+	eq(String(d["log_file"]).get_base_dir(), s["data_dir"], "the log sits in the data dir")
+	ok(String(d["log_file"]).ends_with("ofs-sim.log"), "log file: %s" % d["log_file"])
 	eq(d["env"], {"OFS_SITL_LAUNCH": "wsl.exe -d Ubuntu -e /home/me/betaflight_SITL.elf"}, "SITL launch for the server")
 	s["server_bin"] = ""
 	d = AppSettings.to_client_dict(s)
