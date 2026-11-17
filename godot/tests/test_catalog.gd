@@ -102,3 +102,17 @@ func test_the_fc_kind_of_a_quad_file_is_scanned() -> void:
 	ok(Catalog.quad_is_stabilized(DIR + "/q/stab.toml"), "the predicate names the stabilized file")
 	ok(not Catalog.quad_is_stabilized(DIR + "/q/missing.toml"), "and nothing else")
 	_fresh()
+
+
+func test_a_relative_root_lists_its_files() -> void:
+	var rel := "build/catalog-relative-test"
+	var base := DirAccess.open(".")
+	ok(base != null, "the working directory opens")
+	base.make_dir_recursive(rel + "/worlds")
+	var file := FileAccess.open(rel + "/worlds/rel.toml", FileAccess.WRITE)
+	file.store_string("name = \"Relative\"\n")
+	file.close()
+	var items := Catalog.list([rel + "/worlds"])
+	eq(items.size(), 1, "a relative root lists its file")
+	if items.size() == 1:
+		eq(items[0]["label"], "Relative", "with its label")

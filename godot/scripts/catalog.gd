@@ -15,9 +15,10 @@ static func list(dirs: Array) -> Array:
 	var seen := {}
 	var out := []
 	for dir in dirs:
-		if not DirAccess.dir_exists_absolute(dir):
+		var access := DirAccess.open(dir)
+		if access == null:
 			continue
-		for file in DirAccess.get_files_at(dir):
+		for file in access.get_files():
 			var path: String = String(dir).path_join(file).simplify_path()
 			if file.get_extension() == "toml" and not seen.has(path):
 				seen[path] = true
