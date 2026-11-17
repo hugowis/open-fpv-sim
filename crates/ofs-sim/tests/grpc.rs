@@ -668,6 +668,18 @@ async fn an_inputs_file_larger_than_grpcs_default_limit_plays() {
 }
 
 #[tokio::test]
+async fn an_inputs_time_past_the_run_limit_is_refused_not_wrapped() {
+    let mut c = start().await;
+    load_open_loop(&mut c).await;
+    let err = c
+        .play_inputs(InputsFile { name: "long.csv".into(), csv: "t_s,throttle\n86401,1\n".into() })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(&err), "config");
+    assert!(err.message().contains("past the 86400 s limit"), "{}", err.message());
+}
+
+#[tokio::test]
 async fn scripted_inputs_and_a_pilot_exclude_each_other() {
     let mut c = start().await;
     c.load(open_loop(Mode::Realtime)).await.unwrap();
