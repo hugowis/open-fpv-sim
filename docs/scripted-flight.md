@@ -87,7 +87,7 @@ armed with the throttle down before the altitude loop may raise it. A lap takes 
   Betaflight.
 
 Not covered: an IMU-fed or filtered stabilizer, altitude or position hold inside it, acro/rate mode, and any claim that
-its response matches a real Betaflight tune (see issue #51). The game has no `stabilize` option to pick, but it asks
-the server for the stabilizer itself when the chosen quad's kind is `open_loop_stabilized` (an open-loop start sends
-`stabilize` through the bridge), so such a file flies stabilized in Godot just as in Python under every controller
-setting — `godot/tests/e2e_open_loop.gd` ends with that start.
+its response matches a real Betaflight tune (see issue #51). The game has no `stabilize` option to pick: its open-loop
+start always asks for the stabilizer (the menu's Open loop is stabilized), so a quad file with `[fc] kind =
+"open_loop_stabilized"` flies stabilized in Godot just as in Python under every controller setting —
+`godot/tests/e2e_open_loop.gd` ends with that start.

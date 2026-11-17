@@ -8,7 +8,6 @@ const AppSettings = preload("res://scripts/settings.gd")
 const ControlsMenu = preload("res://ui/controls_menu.gd")
 const MainMenu = preload("res://ui/main_menu.gd")
 const FlightAudio = preload("res://drone/flight_audio.gd")
-const Catalog = preload("res://scripts/catalog.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -117,9 +116,9 @@ func _ready() -> void:
 func _start_session(choices := {}) -> void:
 	var session := settings.duplicate()
 	session.merge(choices, true)
-	# A quad file that is its own stabilized FC must be asked for as such: an open-loop load of it without the
-	# stabilizer is refused by the server. Derived per start, never a setting (docs/scripted-flight.md).
-	if session["open_loop"] and Catalog.quad_is_stabilized(session["quad_path"]):
+	# Open loop in the game flies on the built-in angle-mode stabilizer: without it every motor follows the throttle
+	# and the quad cannot be steered (crates/ofs-fc/src/open_loop.rs). The Python API keeps the throttle-only stand-in.
+	if session["open_loop"]:
 		session["stabilize"] = true
 	drone.set_quad(session["quad_path"])
 	# A new session numbers its worlds from the start, and has no faults or recordings yet.

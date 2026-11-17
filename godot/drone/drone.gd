@@ -33,6 +33,7 @@ const FPV_EYE := Vector3(0.0, 0.02, -0.04)
 var _model: Node3D
 var _props: Array[Node3D] = []
 var _blades: Array[Node3D] = []
+var _discs: Array[Node3D] = []
 
 
 func _ready() -> void:
@@ -45,7 +46,7 @@ func _ready() -> void:
 			continue
 		var pivot := found[0] as Node3D
 		_props.append(pivot)
-		_add_disc(pivot)
+		_discs.append(_add_disc(pivot))
 		var blades := pivot.find_children("Blade*", "Node3D", true, false)
 		if not blades.is_empty():
 			_blades.append(blades[0] as Node3D)
@@ -59,8 +60,11 @@ func set_motors(rpm: PackedFloat32Array, delta: float) -> void:
 	for i in mini(_props.size(), rpm.size()):
 		# Positive rotation about +Y is counter-clockwise seen from above, so clockwise motors turn negatively.
 		_props[i].rotate_y(-_spin[i] * (rpm[i] / 60.0) * TAU / SLOWDOWN * delta)
+		var blurred := rpm[i] >= BLUR_RPM
 		if i < _blades.size():
-			_blades[i].visible = rpm[i] < BLUR_RPM
+			_blades[i].visible = not blurred
+		if i < _discs.size():
+			_discs[i].visible = blurred
 
 
 ## Loads the model at runtime (GLTFDocument, not the editor's import step: the headless suites never import).
@@ -96,7 +100,7 @@ func set_quad(path: String) -> void:
 
 
 ## The blur disc stands in for the propeller at speed; drawn here, not in the asset, so its look stays tunable.
-func _add_disc(pivot: Node3D) -> void:
+func _add_disc(pivot: Node3D) -> Node3D:
 	var disc := MeshInstance3D.new()
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.0635
@@ -104,11 +108,13 @@ func _add_disc(pivot: Node3D) -> void:
 	mesh.height = 0.001
 	disc.mesh = mesh
 	disc.name = "Disc"
+	disc.visible = false  # only a blurred propeller shows it (set_motors)
 	var material := StandardMaterial3D.new()
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.albedo_color = Color(1, 1, 1, 0.12)
 	disc.material_override = material
 	pivot.add_child(disc)
+	return disc
 
 
 ## The mount's tilt follows the mounted FpvCamera's configured up-tilt (main.tscn mounts one as this node's

@@ -6,6 +6,10 @@
 schema_version = 1
 name = "Chernobyl"
 
+[initial]
+position_ned_m = [0.0, -181.0, -2.0]
+yaw_deg = 90.0
+
 [pilot]
 position_ned_m = [0.0, -231.0, -1.7]
 facing_deg = 90.0
@@ -19,6 +23,30 @@ name = "omni"
 kind = "omni"
 gain_dbi = 2.0
 polarization = "rhcp"
+
+[[objects]]
+name = "DoorPostL"
+shape = "box"
+center_ned_m = [-20.5, -81.0, -20.0]
+size_m = [1.0, 1.0, 41.0]
+color = [0.08, 0.09, 0.1]
+rf_loss_db = 40.0
+
+[[objects]]
+name = "DoorPostR"
+shape = "box"
+center_ned_m = [20.5, -81.0, -20.0]
+size_m = [1.0, 1.0, 41.0]
+color = [0.08, 0.09, 0.1]
+rf_loss_db = 40.0
+
+[[objects]]
+name = "DoorLintel"
+shape = "box"
+center_ned_m = [0.0, -81.0, -40.5]
+size_m = [41.0, 1.0, 1.0]
+color = [0.08, 0.09, 0.1]
+rf_loss_db = 40.0
 
 [[meshes]]
 name = "chernobyl"

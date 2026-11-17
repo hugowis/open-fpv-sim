@@ -193,10 +193,14 @@ func test_a_spinning_propeller_blurs_into_its_disc() -> void:
 	var drone := Drone.new()
 	await add_to_tree(drone)
 	var blades := drone._props.map(func(p: Node3D) -> Node3D: return p.find_children("Blade*", "", true, false)[0])
+	var discs := drone._props.map(func(p: Node3D) -> Node3D: return p.find_children("Disc", "MeshInstance3D", true, false)[0])
 	drone.set_motors(PackedFloat32Array([1000.0, 0.0, 30000.0, 0.0]), 0.01)
 	ok(blades[0].visible, "a slow propeller shows its blade")
 	ok(blades[1].visible, "a stopped motor's blade stays visible")
 	ok(not blades[2].visible, "a fast one hides it: the blur disc stands in")
+	ok(not discs[0].visible, "a slow propeller hides its disc")
+	ok(not discs[1].visible, "a stopped motor hides its disc")
+	ok(discs[2].visible, "a fast one shows its disc")
 	drone.queue_free()
 
 

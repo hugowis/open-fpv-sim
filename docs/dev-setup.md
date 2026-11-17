@@ -115,6 +115,8 @@ one omni, nothing else). The game loads `worlds/flat.toml` by default.
 
 A world file (`schema_version = 1`, NED metres from home like the quad file, sizes `[north, east, height]`) has:
 - `[pilot]` — where the goggles are and which way the pilot faces;
+- `[initial]` — where the quad starts (`position_ned_m`, `yaw_deg`), overriding the quad file's own `[initial]`;
+  absent = the quad's. `worlds/chernobyl.toml` uses it to start outside the arch;
 - `[receiver]` — the noise floor, diversity, and the goggle antennas (`omni` or `patch` with a beamwidth; gain,
   polarization, aim relative to the pilot's facing);
 - `[[objects]]` — boxes and vertical cylinders with a colour and an `rf_loss_db` (0: transparent to the signal);

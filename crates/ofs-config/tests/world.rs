@@ -475,6 +475,38 @@ aim_az_deg = -30.0
 }
 
 #[test]
+fn a_world_file_may_place_the_quad() {
+    let world = written_world(
+        r#"schema_version = 1
+name = "spawn field"
+[initial]
+position_ned_m = [0.0, -181.0, -2.0]
+yaw_deg = 90.0
+[pilot]
+position_ned_m = [-3.0, 2.0, -1.7]
+[[receiver.antennas]]
+name = "omni"
+kind = "omni"
+gain_dbi = 2.0
+polarization = "rhcp"
+"#,
+    )
+    .unwrap();
+    let spawn = world.initial.expect("the world names a spawn");
+    assert_eq!(spawn.position_ned_m, [0.0, -181.0, -2.0]);
+    assert_eq!(spawn.yaw_deg, 90.0);
+}
+
+#[test]
+fn a_non_finite_spawn_is_refused() {
+    let found = problems(&world_text().replace(
+        "[pilot]",
+        "[initial]\nposition_ned_m = [nan, 0.0, 0.0]\nyaw_deg = 0.0\n\n[pilot]",
+    ));
+    assert!(found.iter().any(|p| p.starts_with("initial.position_ned_m") && p.contains("finite")), "{found:#?}");
+}
+
+#[test]
 fn handset_validation_problems_are_collected() {
     let err = written_world(
         r#"schema_version = 1

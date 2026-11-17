@@ -65,10 +65,10 @@ func test_the_rows_list_the_files_and_show_the_saved_choice() -> void:
 func test_choices_are_emitted_to_be_saved_and_the_course_row_follows_the_world() -> void:
 	var m := await _menu()
 	var menu = m[0]
-	ok(not menu.row("mode").visible, "no race option for a world without gates")
+	ok(menu.row("mode").disabled and menu.row("mode").text == "Flight mode: Free flight", "a world without gates shows free flight, disabled")
 	menu.row("world").set_value(DIR + "/data/worlds/zz-course.toml")
 	menu.row("world").changed.emit(DIR + "/data/worlds/zz-course.toml")
-	ok(menu.row("mode").visible, "a course offers race or free flight")
+	ok(not menu.row("mode").disabled, "a course offers race or free flight")
 	menu.row("mode").step(1)
 	menu.row("quad").set_value(DIR + "/data/quads/zz-b.toml")
 	menu.row("quad").changed.emit(DIR + "/data/quads/zz-b.toml")
@@ -94,10 +94,10 @@ name = \"Line\"
 name = \"Hunt\"
 ")
 	menu.open()
-	ok(not menu.row("course").visible, "a world without courses: no course row")
+	ok(menu.row("course").disabled and menu.row("course").text == "Course: Default", "a world without courses shows Default, disabled")
 	menu.row("world").set_value(DIR + "/data/worlds/zz-courses.toml")
 	menu.row("world").changed.emit(DIR + "/data/worlds/zz-courses.toml")
-	ok(menu.row("course").visible, "two courses: the row appears")
+	ok(not menu.row("course").disabled, "two courses: the row is enabled")
 	eq(menu.row("course").text, "Course: Default", "the world's own course until the pilot picks")
 	menu.row("course").step(2)
 	eq(m[2].back(), ["course", "Hunt"], "a pick is emitted by name")
@@ -106,7 +106,7 @@ name = \"Hunt\"
 	eq(menu.row("course").text, "Course: Hunt", "and remembered")
 	menu.row("world").set_value(DIR + "/data/worlds/zz-course.toml")
 	menu.row("world").changed.emit(DIR + "/data/worlds/zz-course.toml")
-	ok(not menu.row("course").visible, "one gate, no courses: no row")
+	ok(menu.row("course").disabled, "one gate, no courses: the row is disabled")
 	menu.free()
 
 
@@ -123,7 +123,7 @@ func test_the_buttons_emit() -> void:
 func test_without_a_launch_command_the_flight_is_open_loop() -> void:
 	var m := await _menu({"sitl_launch": ""})
 	var menu = m[0]
-	eq(menu.row("controller").text, "Flight controller: Open loop", "only open loop is offered")
+	eq(menu.row("controller").text, "Flight controller: Open loop (stabilized)", "only the stabilized open loop is offered")
 	ok(menu.row("controller").disabled, "and it is locked")
 	ok(menu.hint().contains("SITL launch command"), "with the way out: %s" % menu.hint())
 	ok(Menu.effective_open_loop(m[1]), "the session runs open loop")

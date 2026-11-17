@@ -11,7 +11,8 @@ are in `sites/chernobyl/SOURCES.md`; the numbers themselves are in `sites/cherno
   the radio and video link.
 - **One door**, 40 x 40 m, in the **west** end. The east end has none: it nearly touches unit 3, and the real building has a
   closed wall at both ends.
-- **The pilot** stands 150 m west of the door (`[0, -231, -1.7]`, eye height, facing east).
+- **The pilot** stands 150 m west of the door (`[0, -231, -1.7]`, eye height, facing east); the quad starts 100 m west
+  of the door (`[0, -181, -2]`), outside the arch.
 - Flat ground, one omni receiver (the same as `worlds/hall.toml`), no gates, no other objects.
 
 There is no OpenStreetMap data in it yet: `sites/chernobyl/chernobyl.osm.json` is a hand-made, empty snapshot, and the
@@ -35,7 +36,7 @@ decision that is not a fact about the site.
 | Door | 40 x 40 m, west end only | artistic | the real end walls are closed; the door is there so a quad can fly in |
 | Pilot spot | 150 m west of the door, facing east | artistic | a place to start from |
 | Vault facets | 48 | artistic | a smooth enough arch |
-| Cladding colour | light steel grey | artistic | |
+| Cladding colour | steel grey | artistic | dark enough to read the vault's facets in the sun |
 | Kept area | 300 m half extent each way | artistic | covers the arch and its surroundings |
 
 Not modelled: the internal height of the vault is 92.5 m (Wikipedia) against the 108 m outer height; the generator builds
@@ -68,8 +69,8 @@ sim.load("quads/opendrone-7lr-longrange.toml", world="chernobyl")   # a bare nam
 sim.load("quads/opendrone-7lr-longrange.toml", world="worlds/chernobyl.toml")   # a path: from the repository root, or absolute
 ```
 
-You start 150 m west of the door. Fly east and in: a 7-inch quad (about 0.4 m tip to tip) passes the 40 m door without
-touching anything. Come in 30 m off the door's axis and you hit the end wall (`HIT chernobyl`). The checks are in
+The pilot stands 150 m west of the door; the quad starts 100 m west of it, outside the arch. Fly east and in: a 7-inch
+quad (about 0.4 m tip to tip) passes the 40 m door without touching anything. Come in 30 m off the door's axis and you hit the end wall (`HIT chernobyl`). The checks are in
 `crates/ofs-sim/tests/chernobyl_world.rs`; the cost of the extra mesh is recorded in `docs/research/collision.md`
 (about 7 ms more per simulated second, 0.127 s against 0.053 s for 10 s of flight).
 

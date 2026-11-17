@@ -327,7 +327,7 @@ pub struct HomeSection {
     pub alt_m: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InitialSection {
     pub position_ned_m: [f64; 3],

@@ -140,10 +140,10 @@ func _refresh() -> void:
 	_preview.set_quad(settings["quad_path"])
 	var no_firmware: bool = settings["sitl_launch"] == ""
 	_controller.setup(_title("Flight controller", "open_loop"), [true] if no_firmware else [false, true],
-		["Open loop"] if no_firmware else ["Betaflight", "Open loop"])
+		["Open loop (stabilized)"] if no_firmware else ["Betaflight", "Open loop (stabilized)"])
 	_controller.set_value(effective_open_loop(settings))
 	_controller.disabled = locks.has("open_loop") or no_firmware
-	_hint.text = "Betaflight needs a SITL launch command: set it in Settings." if no_firmware else ""
+	_hint.text = "Betaflight needs a SITL launch command: set it in Settings. Open loop flies on the built-in stabilizer." if no_firmware else ""
 	_refresh_mode()
 	_refresh_course()
 
@@ -159,21 +159,20 @@ func _title(label: String, key: String) -> String:
 	return "%s (%s)" % [label, locks[key]] if locks.has(key) else label
 
 
-## Race or free flight, offered only for a world that declares a course.
+## Race or free flight: a world without a course shows free flight, disabled, so the rows below never move.
 func _refresh_mode() -> void:
-	_mode.visible = _has_course(settings["world_path"])
+	var has_course := _has_course(settings["world_path"])
 	_mode.setup(_title("Flight mode", "race_start"), [true, false], ["Race", "Free flight"])
-	_mode.set_value(settings["race_start"])
-	_mode.disabled = locks.has("race_start")
+	_mode.set_value(settings["race_start"] if has_course else false)
+	_mode.disabled = locks.has("race_start") or not has_course
 
 
-## The course row, for a world that declares at least two: "Default" (the world's own) and each course by name.
+## The course row: "Default" (the world's own) and each course by name; disabled below two courses.
 func _refresh_course() -> void:
 	var names := _course_names(settings["world_path"])
-	_course.visible = names.size() >= 2
 	_course.setup(_title("Course", "course"), [""] + names, ["Default"] + names)
-	_course.set_value(settings["course"])
-	_course.disabled = locks.has("course")
+	_course.set_value(settings["course"] if names.size() >= 2 else "")
+	_course.disabled = locks.has("course") or names.size() < 2
 
 
 func _course_names(world_path: String) -> Array:
@@ -186,5 +185,5 @@ func _has_course(world_path: String) -> bool:
 
 func _on_world(path: String) -> void:
 	choice_changed.emit("world_path", path)
-	_mode.visible = _has_course(path)
+	_refresh_mode()
 	_refresh_course()

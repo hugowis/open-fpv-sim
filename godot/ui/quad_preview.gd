@@ -18,6 +18,7 @@ func _ready() -> void:
 	stretch = true
 	_viewport = SubViewport.new()
 	_viewport.transparent_bg = true
+	_viewport.own_world_3d = true  # else it renders the game's world (the FPV drone) behind the preview model
 	add_child(_viewport)
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.35, 0.25, 0.45)
