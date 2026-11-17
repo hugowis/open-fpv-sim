@@ -239,7 +239,7 @@ impl DvrWriter {
             }
             _ => format!("{}: {e}", path.display()),
         })?;
-        let header = Header { microsec_per_frame: 1_000_000 / fps.max(1), fps, width, height };
+        let header = Header { microsec_per_frame: 1_000_000 / fps, fps, width, height };
         let (tx, rx) = sync_channel(FRAME_CHANNEL_CAPACITY);
         let dropped = std::sync::Arc::new(AtomicU64::new(0));
         let dropped_in_thread = dropped.clone();
@@ -274,6 +274,10 @@ impl DvrWriter {
     /// frame is dropped and counted. Returns whether the frame was accepted (the audio log follows the video).
     pub fn write_frame(&self, jpeg: Vec<u8>) -> bool {
         let Some(tx) = &self.tx else { return false };
+        if self.truncated() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
         let accepted = tx.try_send(jpeg).is_ok();
         if !accepted {
             self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -342,12 +346,26 @@ mod tests {
     fn a_start_with_a_bad_size_or_rate_creates_no_file() {
         let dir = std::env::temp_dir().join(format!("ofs-dvr-start-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        for (fps, width, height) in [(50, 0, 2), (50, 4, 0), (0, 4, 2), (50, 65_536, 2), (50, 4, 65_536)] {
+        for (fps, width, height) in [(50, 0, 2), (50, 4, 0), (0, 4, 2), (50, 65_536, 2), (50, 4, 65_536), (50, 65_535, 65_535)] {
             let path = dir.join(format!("bad-{fps}-{width}-{height}.avi"));
             let _ = std::fs::remove_file(&path);
             assert!(DvrWriter::start(path.clone(), fps, width, height).is_err(), "{fps} {width} {height}");
             assert!(!path.exists(), "no file for {fps} {width} {height}");
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_frame_after_the_cap_is_refused_and_counted() {
+        let (tx, _rx) = sync_channel(1);
+        let writer = DvrWriter {
+            tx: Some(tx),
+            handle: None,
+            dropped: std::sync::Arc::new(AtomicU64::new(0)),
+            truncated: std::sync::Arc::new(AtomicBool::new(true)),
+            path: PathBuf::from("unused.avi"),
+        };
+        assert!(!writer.write_frame(vec![0xFF]));
+        assert_eq!(writer.dropped.load(Ordering::Relaxed), 1, "the refused frame is counted as dropped");
     }
 }
