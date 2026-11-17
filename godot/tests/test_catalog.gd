@@ -63,9 +63,16 @@ func test_a_chosen_path_outside_the_roots_stays_in_the_list() -> void:
 
 
 func test_roots_are_the_checkout_and_the_data_dir() -> void:
-	var roots := Catalog.roots({"data_dir": "C:/x/data"}, "quads")
+	var data_dir := ProjectSettings.globalize_path("res://data")
+	var roots := Catalog.roots({"data_dir": data_dir}, "quads")
 	eq(roots.size(), 2, "two roots")
-	ok(roots[0].ends_with("/quads") and roots[1] == "C:/x/data/quads", "roots: %s" % str(roots))
+	ok(roots[0].ends_with("/quads") and roots[1] == data_dir.path_join("quads"), "roots: %s" % str(roots))
+	var relative := Catalog.roots({"data_dir": "relative-data"}, "quads")
+	eq(
+		relative[1],
+		ProjectSettings.globalize_path("res://").path_join("relative-data").path_join("quads").simplify_path(),
+		"a relative data dir is absolute under the project: %s" % relative[1]
+	)
 
 func test_the_courses_of_a_world_are_listed_in_file_order() -> void:
 	_fresh()
