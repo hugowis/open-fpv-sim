@@ -18,6 +18,25 @@ repository). The format follows Keep a Changelog.
 - **Chernobyl starts the quad 100 m west of the door**, outside the arch (the world's `[initial]`), instead of at the
   origin inside it.
 
+### Chernobyl map (Stage B)
+#### Added
+- **The real OpenStreetMap snapshot** (`sites/chernobyl/chernobyl.osm.json`, 40 buildings, ODbL 1.0) and the surrounding
+  buildings: units 3 and 4, the shelter object, the stabilisation structure, the turbine hall and the service buildings,
+  with their OSM heights. The NSC outline and the unit 4 ruins are skipped; the arch replaces the first.
+- **The turbine hall** (OSM relation 8705336, about 600 m long) with a 30 x 20 m breach in its west end wall, bottom 5 m
+  (the 2013 collapse; artistic).
+- **The arch centre** refined to the OSM NSC outline's bounding-box centre `[-53.946, -27.065]`; the pilot and spawn move
+  with it (150 m / 100 m west of the door).
+- The OSM buildings block the radio and video at 30 dB per wall (estimate).
+
+#### Fixed
+- `sitegen fetch` asks Overpass for `out body geom`: `out tags geom` returns a relation with no members, so the turbine
+  hall was silently skipped.
+
+#### Notes
+- The OSM licence note is confirmed (`docs/research/sitegen-licensing.md`); the snapshot is committed under the ODbL.
+  The game's help screen and the README credit OpenStreetMap.
+
 ### Chernobyl map (Stage A)
 #### Added
 - **`worlds/chernobyl.toml`**: the New Safe Confinement over reactor 4 (257 x 162 x 108 m from the operator's published
@@ -101,7 +120,7 @@ repository). The format follows Keep a Changelog.
   satisfies it, and the fallback. It is the implementer's reading, not legal advice.
 
 #### Notes
-- No real snapshot is committed: the owner confirms the licence note first (status: unconfirmed).
+- The licence note is confirmed (2026-11-17); the Chernobyl snapshot is committed under the ODbL in Stage B.
 - Not built: pitched roofs, a cooling-tower builder, elevation data, textures, `col_`
   collision proxies. Ground is flat; a stack is open at both ends.
 - The engine changes only in the `.glb` loader, which now refuses a short byteStride or an out-of-range offset instead of panicking in a debug build.

@@ -284,13 +284,13 @@ def test_fetch_retries_on_502_then_succeeds():
     assert req.full_url == "https://overpass-api.de/api/interpreter" and req.get_method() == "POST"
     body = urllib.parse.unquote_plus(req.data.decode("ascii"))
     assert ('[out:json][timeout:60]; (way["building"](51.38,30.09,51.4,30.11); '
-            'relation["building"](51.38,30.09,51.4,30.11);); out tags geom;') in body
+            'relation["building"](51.38,30.09,51.4,30.11);); out body geom;') in body
 
 
 def test_fetch_query_asks_for_relations_too():
     q = osm._query(BBOX)
     assert q == ('[out:json][timeout:60]; (way["building"](51.38,30.09,51.4,30.11); '
-                 'relation["building"](51.38,30.09,51.4,30.11);); out tags geom;')
+                 'relation["building"](51.38,30.09,51.4,30.11);); out body geom;')
 
 
 def test_fetch_gives_up_after_tries():

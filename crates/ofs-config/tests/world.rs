@@ -1179,14 +1179,14 @@ fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
 fn chernobyl_loads_and_the_pilot_sees_the_nsc_door() {
     use glam::DVec3;
     let w = world::load(&shipped_world("chernobyl")).unwrap();
-    assert_eq!((w.name.as_str(), w.pilot.position_ned_m), ("Chernobyl", [0.0, -231.0, -1.7]));
+    assert_eq!((w.name.as_str(), w.pilot.position_ned_m), ("Chernobyl", [-53.946, -258.065, -1.7]));
     let nsc = &w.load_meshes().unwrap()[0];
-    assert_eq!(nsc.loss_db, [40.0]);
+    assert_eq!(nsc.loss_db, [30.0, 40.0], "concrete buildings and the steel cladding");
     let mut m = Vec::new();
-    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(0.0, -81.0, -20.0), &mut m);
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(-53.946, -108.065, -20.0), &mut m);
     assert!(m.is_empty(), "the door is open");
     // A mesh that loaded empty would pass the line above: this one crosses the closed end wall beside the door.
-    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(25.0, -76.0, -10.0), &mut m);
+    nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(-28.946, -103.065, -10.0), &mut m);
     assert!(!m.is_empty(), "the closed end wall beside the door is crossed");
 }
 

@@ -87,15 +87,19 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 - look-section: a user world's dress surviving the analog chain (better-looking, not cleaner).
 - the #47 chore: none beyond the rerun viewer opening on a recording made before the bump.
 
-## The Chernobyl map (Stage A) — before it merges
+## The Chernobyl map (Stage B) — before it merges
 
 - **Fly `worlds/chernobyl.toml` in the Godot client**: pick "Chernobyl" in the main menu's World row (it works from any
   directory), or start with `--world=chernobyl` (a bare name); a relative `--world=worlds/chernobyl.toml` needs the game
   started from the repository root (`docs/chernobyl-map.md`, "Flying it"). The rendering of meshes has only been verified
-  headless, never by eye. Start 150 m west of the door and fly in through it; look
-  at the arch from outside and from inside; feel the frame rate (288 triangles, so it should hold).
-- **Rule whether it reads as the New Safe Confinement** (spec ruling 12: recognisability is the owner's call). If not, say
-  what is wrong (the shape, the grey, the scale against the pilot); the dimensions are published, the door is not.
+  headless, never by eye. The pilot stands 150 m west of the door and the quad starts 100 m west; fly in through the door,
+  look at the arch and the OSM surroundings from outside and inside, and feel the frame rate (1259 triangles, so it should
+  hold). The shelter object and the stabilisation structure stand inside the arch; the turbine hall is east of it, with a
+  30 x 20 m breach in its west end wall.
+- **Rule whether the site now reads as Chernobyl** (spec ruling 12: recognisability is the owner's call). If not, say what
+  is wrong (the surroundings, the scale, the arch, the turbine hall); the arch dimensions are published, the door and the
+  breach are gameplay liberties.
+- **Check the credit**: the help screen (F1) and the README name OpenStreetMap and the ODbL.
 - Post the result to #163 when the PR closes, as the other items do.
 
 ## Standing

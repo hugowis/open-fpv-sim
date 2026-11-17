@@ -27,6 +27,7 @@ const HELP_LINES := [
 	"H  show / hide this HUD",
 	"F1 this help        F2 controls setup        F11 fullscreen        Esc back to the menu",
 	"Arm with the aux 1 switch; aux 2 selects Angle mode.",
+	"The Chernobyl map uses OpenStreetMap data: © OpenStreetMap contributors, ODbL 1.0.",
 ]
 
 var _status := Label.new()

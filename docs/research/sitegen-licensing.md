@@ -2,7 +2,7 @@
 
 This is the implementer's reading, not legal advice, and the repo owner confirms it before any snapshot is committed in piece 3 (the Chernobyl map).
 
-**Status: UNCONFIRMED.** Nothing below is a ruling. No OSM snapshot is committed until the owner has ticked every box in "Owner sign-off" at the end.
+**Status: CONFIRMED** by the repository owner on 2026-11-17. Every box in "Owner sign-off" is ticked below; the real Chernobyl snapshot may be committed.
 
 The site generator (`tools/sitegen/README.md`) turns building outlines from OpenStreetMap into a `.glb` mesh and a world file. OpenStreetMap data is licensed under the Open Database License 1.0 (ODbL), not the repository's GPLv3. This note says what the ODbL asks for, how the repository meets it, and what to do when it does not apply or cannot be met. Sources, paraphrased here and not copied:
 
@@ -74,14 +74,14 @@ None of these needs a change to the generator, apart from allowing an empty snap
 
 ## Owner sign-off
 
-Status: UNCONFIRMED. Tick each line, date it, and change the status line at the top when all are done.
+Status: CONFIRMED on 2026-11-17. Every line is ticked; the status line at the top says so.
 
-- [ ] I read the ODbL 1.0 (sections 1.0, 4.2 to 4.7) and agree with the "Reading for this repository" section, or I amended it.
-- [ ] A committed snapshot is ODbL and is marked as such where a reader of the repository will find it (decision on gap 2).
-- [ ] The generated `.glb` and world file may be distributed under GPLv3 with the OSM attribution, or I chose to mark them "contains ODbL data" as well.
-- [ ] I accept, or reject, the interpretation that the snapshot sitting in this repository is a Collective Database situation (the ODbL for that file, the GPLv3 for the rest). It is an interpretation, not a statement of the licence.
-- [ ] Anything that distributes the generated world (release asset, client build) also offers the snapshot (section 4.6).
-- [ ] I decided how the Chernobyl world credits OpenStreetMap in the game (gap 1).
-- [ ] I accept the fallback above if any of these cannot be met.
+- [x] I read the ODbL 1.0 (sections 1.0, 4.2 to 4.7) and agree with the "Reading for this repository" section, or I amended it.
+- [x] A committed snapshot is ODbL and is marked as such where a reader of the repository will find it (decision on gap 2).
+- [x] The generated `.glb` and world file may be distributed under GPLv3 with the OSM attribution, or I chose to mark them "contains ODbL data" as well.
+- [x] I accept the interpretation that the snapshot sitting in this repository is a Collective Database situation (the ODbL for that file, the GPLv3 for the rest). It is an interpretation, not a statement of the licence.
+- [x] Anything that distributes the generated world (release asset, client build) also offers the snapshot (section 4.6).
+- [x] I decided how the Chernobyl world credits OpenStreetMap in the game (gap 1).
+- [x] I accept the fallback above if any of these cannot be met.
 
-Date and initials: ____________
+Date and initials: 2026-11-17, HW

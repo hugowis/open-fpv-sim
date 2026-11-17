@@ -152,7 +152,8 @@ def height_of(tags, building_height_m, level_height_m) -> float:
 
 def _query(bbox):
     b = ",".join(str(v) for v in bbox)
-    return '[out:json][timeout:60]; (way["building"](%s); relation["building"](%s);); out tags geom;' % (b, b)
+    # `body` is needed for a relation's members (and their geometry): `out tags geom` returns a relation with no members.
+    return '[out:json][timeout:60]; (way["building"](%s); relation["building"](%s);); out body geom;' % (b, b)
 
 
 def write_snapshot(path, ways, bbox, source_note):

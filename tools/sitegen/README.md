@@ -5,8 +5,8 @@ a triangle mesh (`.glb`) and a world file the simulator loads (`[[meshes]]`, see
 `docs/dev-setup.md`). Pure standard library, Python 3.11 or newer (it reads TOML with `tomllib`); nothing to install.
 
 Building outlines come from OpenStreetMap contributors, ODbL 1.0 (<https://www.openstreetmap.org/copyright>). The licence
-note, with the open question of whether it is fine under this repository's GPLv3, is `docs/research/sitegen-licensing.md`
-(status: unconfirmed). **No real snapshot is committed until the owner has confirmed that note.**
+note is `docs/research/sitegen-licensing.md`; it is confirmed (2026-11-17), and the Chernobyl snapshot is committed under
+the ODbL. A new site's snapshot still needs its own check before it is committed.
 
 ## Commands
 
