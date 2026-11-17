@@ -42,16 +42,26 @@ func test_flags_without_a_value_mean_true_and_junk_is_ignored() -> void:
 func test_the_client_dictionary_launches_a_server_only_when_one_is_configured() -> void:
 	var s := AppSettings.defaults()
 	s["server_bin"] = "C:/x/ofs-sim.exe"
-	s["data_dir"] = "C:/x/data"
+	s["data_dir"] = ProjectSettings.globalize_path("res://data")
 	s["sitl_launch"] = "wsl.exe -d Ubuntu -e /home/me/betaflight_SITL.elf"
 	var d := AppSettings.to_client_dict(s)
 	eq(d["server_bin"], "C:/x/ofs-sim.exe", "server binary")
-	eq(d["log_file"], "C:/x/data/ofs-sim.log", "log file")
+	eq(d["log_file"], String(s["data_dir"]).path_join("ofs-sim.log"), "log file")
 	eq(d["env"], {"OFS_SITL_LAUNCH": "wsl.exe -d Ubuntu -e /home/me/betaflight_SITL.elf"}, "SITL launch for the server")
 	s["server_bin"] = ""
 	d = AppSettings.to_client_dict(s)
 	ok(not d.has("server_bin") and not d.has("env"), "attach only")
 	eq(d["quad_path"], s["quad_path"], "quad path")
+
+
+func test_a_relative_data_dir_is_resolved_against_the_project_for_the_server() -> void:
+	var s := AppSettings.defaults()
+	s["server_bin"] = "ofs-sim"
+	s["data_dir"] = "relative-data"
+	var d := AppSettings.to_client_dict(s)
+	var expected := ProjectSettings.globalize_path("res://").path_join("relative-data").simplify_path()
+	eq(d["data_dir"], expected, "the server gets an absolute path under the project")
+	eq(d["log_file"], expected.path_join("ofs-sim.log"), "the log follows it")
 
 
 func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:

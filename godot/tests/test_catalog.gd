@@ -116,3 +116,8 @@ func test_a_relative_root_lists_its_files() -> void:
 	eq(items.size(), 1, "a relative root lists its file")
 	if items.size() == 1:
 		eq(items[0]["label"], "Relative", "with its label")
+	var access := DirAccess.open(rel + "/worlds")
+	if access != null:
+		access.remove("rel.toml")
+	base.remove(rel + "/worlds")
+	base.remove(rel)
