@@ -205,11 +205,14 @@ impl RecorderHandle {
         if self.is_recording() {
             return Err(RecordError::AlreadyRecording);
         }
-        // Validate before creating the file: a refused request leaves nothing behind.
-        let signals = recorded_signals(bus, requests);
-        resolve(requests, &signals, base_hz).map_err(RecordError::Spec)?;
         let file = File::create_new(path).map_err(|e| RecordError::from_create(path, &e))?;
-        self.start_with(bus, base_hz, requests, Box::new(BufWriter::new(file)), path)
+        match self.start_with(bus, base_hz, requests, Box::new(BufWriter::new(file)), path) {
+            Ok(names) => Ok(names),
+            Err(e) => {
+                let _ = std::fs::remove_file(path);
+                Err(e)
+            }
+        }
     }
 
     /// `start` with the writer given (tests use a failing one). `path` is only reported back.
