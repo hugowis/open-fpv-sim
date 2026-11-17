@@ -27,7 +27,7 @@ var _pads: Array = []
 
 func _ready() -> void:
 	visible = false
-	set_anchors_preset(Control.PRESET_CENTER)
+	set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	grow_horizontal = Control.GROW_DIRECTION_BOTH
 	grow_vertical = Control.GROW_DIRECTION_BOTH
 	var style := StyleBoxFlat.new()

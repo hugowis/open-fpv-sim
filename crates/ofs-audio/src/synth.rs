@@ -3,10 +3,10 @@ use std::f64::consts::TAU;
 
 const SLEW_TAU_S: f64 = 0.02;
 const WASH_SPLIT_HZ: f64 = 600.0;
-const THUD_HZ: f64 = 90.0;
+const THUD_HZ: f64 = 110.0;
 const THUD_TAU_S: f64 = 0.04;
-const CLICK_TAU_S: f64 = 0.005;
-const CLICK_LOWPASS_HZ: f64 = 800.0;
+const CLICK_TAU_S: f64 = 0.008;
+const CLICK_LOWPASS_HZ: f64 = 2500.0;
 /// Below this the thud envelope counts as finished (-60 dB), so silence is exact again.
 const THUD_FLOOR: f64 = 1e-3;
 /// A slewed gain this close to a zero target snaps to it.
@@ -137,7 +137,7 @@ impl Synth {
                 // The tone is the blade-pass plus its 2x and 3x harmonics, without the rpm/60 component (a call made
                 // in implementation). shortcut: the harmonics alias above Nyquist once the blade-pass passes ~7.35 kHz,
                 // upgrade when #159 needs band-limited output.
-                mix += v.gain * (a.sin() + 0.35 * (2.0 * a).sin() + 0.15 * (3.0 * a).sin());
+                mix += v.gain * (a.sin() + 0.45 * (2.0 * a).sin() + 0.25 * (3.0 * a).sin() + 0.10 * (4.0 * a).sin());
             }
 
             slew(&mut self.wash, self.wash_target, k);

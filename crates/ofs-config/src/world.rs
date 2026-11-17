@@ -9,7 +9,7 @@ use ofs_core::mesh::TriMesh;
 use serde::Deserialize;
 
 use crate::mesh::{load_glb_with, MAX_MESHES, MAX_MESH_TRIANGLES};
-use crate::{Checker, ConfigError, Problem, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
+use crate::{Checker, ConfigError, InitialSection, Problem, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
 
 pub const WORLD_SCHEMA_VERSION: u32 = 1;
 
@@ -43,6 +43,9 @@ pub enum Shape {
 pub struct WorldConfig {
     pub schema_version: u32,
     pub name: String,
+    /// Where the quad starts; absent = the quad file's own `[initial]`.
+    #[serde(default)]
+    pub initial: Option<InitialSection>,
     pub pilot: PilotSection,
     pub receiver: ReceiverSection,
     /// The pilot's handset; the ELRS uplink transmits from here.
@@ -468,6 +471,7 @@ impl WorldConfig {
         WorldConfig {
             schema_version: WORLD_SCHEMA_VERSION,
             name: "open field".into(),
+            initial: None,
             pilot: PilotSection { position_ned_m: [0.0, 0.0, -1.7], facing_deg: 0.0 },
             receiver: ReceiverSection {
                 noise_floor_dbm: default_noise_floor_dbm(),
@@ -532,6 +536,10 @@ impl WorldConfig {
         c.check(finite(&p.position_ned_m), "pilot.position_ned_m", "values must be finite");
         c.check(p.position_ned_m[2].is_nan() || p.position_ned_m[2] <= 0.0, "pilot.position_ned_m", format!("the pilot must not be below the ground (d = {} > 0)", p.position_ned_m[2]));
         c.check(p.facing_deg.is_finite(), "pilot.facing_deg", "must be finite");
+        if let Some(i) = &self.initial {
+            c.check(finite(&i.position_ned_m), "initial.position_ned_m", "values must be finite");
+            c.check(i.yaw_deg.is_finite(), "initial.yaw_deg", "must be finite");
+        }
         let r = &self.receiver;
         c.check(r.noise_floor_dbm.is_finite(), "receiver.noise_floor_dbm", "must be finite");
         c.check(r.latency_ms <= 1000, "receiver.latency_ms", format!("must be at most 1000 ms (got {})", r.latency_ms));

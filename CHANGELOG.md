@@ -5,6 +5,19 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Pilot client
+#### Fixed
+- **The calibration wizard is centred** (it was anchored off the top-left corner, half off-screen, because its anchors
+  were set after it entered the tree).
+- **The menu preview no longer draws the game's FPV drone behind the turning model** (the preview viewport now has its
+  own 3D world).
+- **The menu rows no longer move when the world changes**: Flight mode and Course stay in place, disabled when the world
+  has no course or fewer than two.
+- **Open loop flies on the built-in angle-mode stabilizer** (the menu says so), so every map can be flown without
+  Betaflight; the Python API keeps the throttle-only stand-in.
+- **Chernobyl starts the quad 100 m west of the door**, outside the arch (the world's `[initial]`), instead of at the
+  origin inside it.
+
 ### Chernobyl map (Stage A)
 #### Added
 - **`worlds/chernobyl.toml`**: the New Safe Confinement over reactor 4 (257 x 162 x 108 m from the operator's published

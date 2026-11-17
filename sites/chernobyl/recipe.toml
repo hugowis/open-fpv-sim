@@ -16,7 +16,7 @@ glb = "assets/chernobyl.glb"
 
 [colors]
 building = [0.55, 0.52, 0.48]  # artistic: required by the recipe schema; nothing uses it in Stage A
-nsc_cladding = [0.72, 0.74, 0.76]  # artistic: light steel grey
+nsc_cladding = [0.45, 0.47, 0.50]  # artistic: steel grey, dark enough to read the vault's facets in the sun
 
 [[materials]]
 name = "nsc_cladding"
@@ -46,6 +46,12 @@ end_doors = [["back", 40.0, 40.0]]
 [world]
 name = "Chernobyl"
 
+[world.initial]
+# The quad starts 100 m west of the door, outside the arch (the test's flight starts here); the pilot stands 50 m
+# further west. Without this the quad would start at the world origin, inside the arch.
+position_ned_m = [0.0, -181.0, -2.0]
+yaw_deg = 90.0
+
 [world.pilot]
 # artistic: 150 m west of the door (the west end is at east = -81 m: half of the 162 m length), eye 1.7 m up, facing east.
 position_ned_m = [0.0, -231.0, -1.7]
@@ -60,3 +66,29 @@ name = "omni"
 kind = "omni"
 gain_dbi = 2.0
 polarization = "rhcp"
+
+# A dark frame around the west door: the opening is a hole in the shell, and without the frame it reads as grey on
+# grey from the spawn (the interior is the same cladding). The posts and lintel sit outside the 40 x 40 m opening.
+[[world.objects]]
+name = "DoorPostL"
+shape = "box"
+center_ned_m = [-20.5, -81.0, -20.0]
+size_m = [1.0, 1.0, 41.0]
+color = [0.08, 0.09, 0.10]
+rf_loss_db = 40.0
+
+[[world.objects]]
+name = "DoorPostR"
+shape = "box"
+center_ned_m = [20.5, -81.0, -20.0]
+size_m = [1.0, 1.0, 41.0]
+color = [0.08, 0.09, 0.10]
+rf_loss_db = 40.0
+
+[[world.objects]]
+name = "DoorLintel"
+shape = "box"
+center_ned_m = [0.0, -81.0, -40.5]
+size_m = [41.0, 1.0, 1.0]
+color = [0.08, 0.09, 0.10]
+rf_loss_db = 40.0

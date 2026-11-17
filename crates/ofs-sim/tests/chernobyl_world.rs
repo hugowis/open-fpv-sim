@@ -34,6 +34,9 @@ fn fly(world: WorldConfig, north: f64, seconds: f64) -> Flight {
     let mut cfg = quad();
     cfg.initial.position_ned_m = [north, -181.0, -2.0];
     cfg.initial.yaw_deg = 90.0;
+    // The test flies from its own start, not the world's spawn.
+    let mut world = world;
+    world.initial = None;
     let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoopStabilized), world };
     let mut v = build(&cfg, &opts, None).unwrap();
     // Throttle this low and a half stick forward: the stabilised quad climbs slowly east at about 20 m/s, so it crosses
@@ -57,6 +60,17 @@ fn the_world_loads_with_one_mesh() {
     let meshes = world.load_meshes().unwrap();
     assert_eq!(meshes.len(), 1);
     assert_eq!(meshes[0].name, "chernobyl");
+}
+
+#[test]
+fn the_quad_starts_west_of_the_door() {
+    let world = chernobyl();
+    let spawn = world.initial.clone().expect("the world names a spawn");
+    assert!(spawn.position_ned_m[1] < -81.0, "spawn east {} is inside the arch", spawn.position_ned_m[1]);
+    let cfg = quad();
+    let opts = BuildOptions { seed: 1, data_dir: std::env::temp_dir().join("ofs-test-data"), fc_override: Some(FcKind::OpenLoopStabilized), world };
+    let v = build(&cfg, &opts, None).unwrap();
+    assert_eq!(v.state().pos_ned_m, DVec3::new(spawn.position_ned_m[0], spawn.position_ned_m[1], spawn.position_ned_m[2]));
 }
 
 #[test]

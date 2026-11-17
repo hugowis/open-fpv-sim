@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status: done** — implemented in `c61277b` ("fix: address the 2026-11-17 audit findings (#187)"). The task boxes below were marked after the merge.
+
 **Goal:** Fix the two data-loss bugs and the small correctness/doc drift found in the 2026-11-17 whole-repo audit.
 
 **Architecture:** Small, isolated changes in the crates and files that own each behavior. No new dependencies, no format changes beyond a truthful `truncated` flag on the DVR summary. Each task is independently testable and committable.
@@ -115,7 +117,7 @@ The cap is the smallest complete fix. OpenDML would allow recordings past 4 GiB 
 - Produces: GDScript `OfsClient.dvr_truncated(feed: String) -> bool` and the `dvr_stop` dictionary key `"truncated": bool`
 - Produces: GDScript `Dvr.truncated() -> bool` and `Dvr.stop()` summary key `"truncated"`
 
-- [ ] **Step 1: Write the failing Rust test for the cap**
+- [x] **Step 1: Write the failing Rust test for the cap**
 
 Add a `#[cfg(test)] mod tests` at the end of `crates/ofs-client/src/dvr.rs`:
 
@@ -156,12 +158,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test -p ofs-client dvr::tests::a_recording_stops_at_the_avi_limit -- --nocapture`
 Expected: FAIL to compile — `writer_with_limit` and `summary.truncated` do not exist.
 
-- [ ] **Step 3: Implement the cap in `dvr.rs`**
+- [x] **Step 3: Implement the cap in `dvr.rs`**
 
 Extend the existing `use std::sync::atomic::{AtomicU64, Ordering};` with `AtomicBool`, and add the constant near `DVR_FPS`:
 
@@ -213,12 +215,12 @@ pub fn truncated(&self) -> bool {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cargo test -p ofs-client dvr::tests::a_recording_stops_at_the_avi_limit -- --nocapture`
 Expected: PASS.
 
-- [ ] **Step 5: Expose the flag through the Rust client and the Godot binding**
+- [x] **Step 5: Expose the flag through the Rust client and the Godot binding**
 
 In `crates/ofs-client/src/client.rs`:
 
@@ -242,7 +244,7 @@ fn dvr_truncated(&self, feed: GString) -> bool {
 
 Add `d.set("truncated", summary.truncated);` to `dvr_stop`'s dictionary.
 
-- [ ] **Step 6: Stop the recording from GDScript and say why**
+- [x] **Step 6: Stop the recording from GDScript and say why**
 
 In `godot/ui/dvr.gd`, add:
 
@@ -283,7 +285,7 @@ var limit := " (stopped at the 4 GiB AVI limit)" if summary.get("truncated", fal
 
 Append `limit` as a third `%s` in both toast format strings.
 
-- [ ] **Step 7: Extend the Godot mock and write the failing auto-stop test**
+- [x] **Step 7: Extend the Godot mock and write the failing auto-stop test**
 
 In `godot/tests/test_dvr.gd`, add to `MockClient`:
 
@@ -317,12 +319,12 @@ func test_a_truncated_recording_stops_itself_and_says_why() -> void:
 	s["dvr"].queue_free()
 ```
 
-- [ ] **Step 8: Run the Godot unit suite**
+- [x] **Step 8: Run the Godot unit suite**
 
 Run: `GODOT_BIN=build/godot-dl/Godot_v4.7.2-stable_win64_console.exe bash scripts/run-godot-tests.sh unit`
 Expected: PASS, including the new test.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add crates/ofs-client/src/dvr.rs crates/ofs-client/src/client.rs crates/ofs-godot/src/lib.rs godot/ui/dvr.gd godot/scripts/app.gd godot/tests/test_dvr.gd
@@ -342,7 +344,7 @@ git commit -m "fix(dvr): stop at the AVI 1.0 size limit and report truncation"
 - Consumes: `ofs_core::scheduler::MAX_RUN_FOR_S`
 - Produces: `inputs::parse` refuses `t_s > MAX_RUN_FOR_S` with a message containing `past the 86400 s limit`
 
-- [ ] **Step 1: Write the failing unit test**
+- [x] **Step 1: Write the failing unit test**
 
 In `crates/ofs-sim/src/inputs.rs`'s test module:
 
@@ -356,12 +358,12 @@ fn a_time_past_the_simulators_run_limit_is_refused() {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test -p ofs-sim inputs::tests::a_time_past_the_simulators_run_limit_is_refused`
 Expected: FAIL — `parse` accepts 86401.
 
-- [ ] **Step 3: Implement the cap**
+- [x] **Step 3: Implement the cap**
 
 At the top of `crates/ofs-sim/src/inputs.rs`:
 
@@ -383,12 +385,12 @@ In `crates/ofs-sim/src/vehicle.rs:1486`, make the addition saturating as defense
 let ticks = inputs.rows.iter().map(|(t, _)| now.saturating_add(tick_at(*t, base_hz))).collect();
 ```
 
-- [ ] **Step 4: Run the unit test to verify it passes**
+- [x] **Step 4: Run the unit test to verify it passes**
 
 Run: `cargo test -p ofs-sim inputs::tests::a_time_past_the_simulators_run_limit_is_refused`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing gRPC test**
+- [x] **Step 5: Write the failing gRPC test**
 
 Add beside the other `play_inputs` tests in `crates/ofs-sim/tests/grpc.rs`:
 
@@ -406,12 +408,12 @@ async fn an_inputs_time_past_the_run_limit_is_refused_not_wrapped() {
 }
 ```
 
-- [ ] **Step 6: Run it to verify it passes**
+- [x] **Step 6: Run it to verify it passes**
 
 Run: `cargo test -p ofs-sim --test grpc an_inputs_time_past_the_run_limit_is_refused_not_wrapped`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/ofs-sim/src/inputs.rs crates/ofs-sim/src/vehicle.rs crates/ofs-sim/tests/grpc.rs
@@ -429,7 +431,7 @@ git commit -m "fix(inputs): refuse t_s past the simulator's run limit"
 **Interfaces:**
 - Produces: `DvrWriter::start` returns `Err` and creates no file for `fps = 0`, `width = 0`, `height = 0`, or a dimension above `u16::MAX`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to the `dvr.rs` test module:
 
@@ -448,12 +450,12 @@ fn a_start_with_a_bad_size_or_rate_creates_no_file() {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test -p ofs-client dvr::tests::a_start_with_a_bad_size_or_rate_creates_no_file`
 Expected: FAIL — the 0×0 and oversize starts succeed and create files.
 
-- [ ] **Step 3: Implement the validation and cleanup**
+- [x] **Step 3: Implement the validation and cleanup**
 
 At the top of `DvrWriter::start`, before `create_dir_all`:
 
@@ -481,12 +483,12 @@ On the thread spawn, remove the created file before returning the error:
 })?;
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cargo test -p ofs-client dvr::tests::a_start_with_a_bad_size_or_rate_creates_no_file`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/ofs-client/src/dvr.rs
@@ -502,7 +504,7 @@ git commit -m "fix(dvr): validate start arguments and remove a file when the wri
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Edit the list and the counts**
+- [x] **Step 1: Edit the list and the counts**
 
 Add `quads/opendrone-5f-ibus.toml` to the file list at `README.md:198-199`.
 
@@ -512,7 +514,7 @@ Change the paragraph at line 204:
 - "The five 5\" freestyle ones" → "The six 5\" freestyle ones"
 - "(and four variants)" → "(and five variants)"
 
-- [ ] **Step 2: Verify the numbers against the directory**
+- [x] **Step 2: Verify the numbers against the directory**
 
 Run:
 
@@ -523,7 +525,7 @@ grep -n "Nine quads\|six 5\|five variants\|opendrone-5f-ibus" README.md
 
 Expected: `9`; the grep shows the new text and the ibus file.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md
@@ -541,7 +543,7 @@ git commit -m "docs: list all nine shipped quads"
 **Interfaces:**
 - Produces: `Catalog.list` accepts absolute, `user://` and plain relative roots.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `godot/tests/test_catalog.gd`:
 
@@ -562,12 +564,12 @@ func test_a_relative_root_lists_its_files() -> void:
 
 `build/` is already a scratch directory; the test leaves the file there and rewrites it on the next run.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `GODOT_BIN=build/godot-dl/Godot_v4.7.2-stable_win64_console.exe bash scripts/run-godot-tests.sh unit`
 Expected: FAIL — `Catalog.list` returns an empty array for the relative root.
 
-- [ ] **Step 3: Use `DirAccess.open`**
+- [x] **Step 3: Use `DirAccess.open`**
 
 Replace the static calls in `Catalog.list`:
 
@@ -582,12 +584,12 @@ for dir in dirs:
 
 `DirAccess.open` returns `null` for a missing directory and accepts absolute, `user://` and relative paths.
 
-- [ ] **Step 4: Run the Godot unit suite**
+- [x] **Step 4: Run the Godot unit suite**
 
 Run: `GODOT_BIN=build/godot-dl/Godot_v4.7.2-stable_win64_console.exe bash scripts/run-godot-tests.sh unit`
 Expected: PASS, including the existing catalog tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add godot/scripts/catalog.gd godot/tests/test_catalog.gd
@@ -604,7 +606,7 @@ git commit -m "fix(godot): list quads and worlds from a relative data dir"
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Write the failing assertion**
+- [x] **Step 1: Write the failing assertion**
 
 In `a_schema_4_quad_file_is_refused_with_the_migration_message`, add:
 
@@ -621,12 +623,12 @@ Import the constants at the top of the test file if they are not already in scop
 use ofs_config::{MIN_SCHEMA_VERSION, SCHEMA_VERSION};
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test -p ofs-config --test config a_schema_4_quad_file_is_refused_with_the_migration_message`
 Expected: FAIL — the message says "reads schemas 5 and 6".
 
-- [ ] **Step 3: Use the constants in the message**
+- [x] **Step 3: Use the constants in the message**
 
 In `crates/ofs-config/src/lib.rs:769`:
 
@@ -639,12 +641,12 @@ let message = format!(
 );
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cargo test -p ofs-config --test config a_schema_4_quad_file_is_refused_with_the_migration_message`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/ofs-config/src/lib.rs crates/ofs-config/tests/config.rs
@@ -660,18 +662,18 @@ git commit -m "fix(config): name the current schema range in the schema-4 error"
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Replace the description**
+- [x] **Step 1: Replace the description**
 
 ```toml
 description = "The simulator's gRPC protocol messages and stubs shared by the server and its Rust clients"
 ```
 
-- [ ] **Step 2: Verify the crate still checks**
+- [x] **Step 2: Verify the crate still checks**
 
 Run: `cargo check -p ofs-proto --locked`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/ofs-proto/Cargo.toml
@@ -687,7 +689,7 @@ git commit -m "docs(proto): describe the crate without a protocol number"
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Add the Windows case**
+- [x] **Step 1: Add the Windows case**
 
 In the `case "$(uname -s)" in` block:
 
@@ -701,17 +703,17 @@ MINGW*|MSYS*|CYGWIN*)
 
 The SHA-512 is the one verified against the 4.7.2 release's `SHA512-SUMS.txt` on 2026-11-17.
 
-- [ ] **Step 2: Check the script syntax**
+- [x] **Step 2: Check the script syntax**
 
 Run: `bash -n scripts/run-godot-tests.sh`
 Expected: exit 0.
 
-- [ ] **Step 3: Run the unit suite with no `GODOT_BIN`**
+- [x] **Step 3: Run the unit suite with no `GODOT_BIN`**
 
 Run: `bash scripts/run-godot-tests.sh unit`
 Expected: the script finds `build/godot-dl/Godot_v4.7.2-stable_win64_console.exe` (already downloaded), prints `Godot: …`, builds, and passes the unit suites.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/run-godot-tests.sh
@@ -728,12 +730,12 @@ git commit -m "test(godot): download the Windows editor on Windows"
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Run the existing regression test first**
+- [x] **Step 1: Run the existing regression test first**
 
 Run: `cargo test -p ofs-log --test recorder start_and_stop_refuse_the_wrong_state_and_an_existing_file`
 Expected: PASS. It asserts that a refused request creates no file.
 
-- [ ] **Step 2: Remove the duplicate resolve**
+- [x] **Step 2: Remove the duplicate resolve**
 
 In `RecorderHandle::start`, delete the pre-create `resolve` line and the `signals` binding used only by it:
 
@@ -758,12 +760,12 @@ match self.start_with(bus, base_hz, requests, Box::new(BufWriter::new(file)), pa
 
 `start_with` still resolves once, so a bad spec now creates the file, fails, and removes it. The existing test pins that outcome.
 
-- [ ] **Step 3: Run the regression test again**
+- [x] **Step 3: Run the regression test again**
 
 Run: `cargo test -p ofs-log --test recorder start_and_stop_refuse_the_wrong_state_and_an_existing_file`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/ofs-log/src/recorder.rs
@@ -776,7 +778,7 @@ git commit -m "refactor(log): resolve the recording spec once"
 
 **Files:** none.
 
-- [ ] **Step 1: Format and lint**
+- [x] **Step 1: Format and lint**
 
 Run:
 
@@ -786,7 +788,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 Expected: exit 0, no warnings.
 
-- [ ] **Step 2: Rust tests**
+- [x] **Step 2: Rust tests**
 
 Run:
 
@@ -796,7 +798,7 @@ cargo test --workspace --locked
 
 Expected: all tests pass. Live SITL tests are skipped without `OFS_SITL_LAUNCH`.
 
-- [ ] **Step 3: Build the server and the Godot extension**
+- [x] **Step 3: Build the server and the Godot extension**
 
 Run:
 
@@ -806,7 +808,7 @@ cargo build -p ofs-sim -p ofs-godot --locked
 
 Expected: exit 0.
 
-- [ ] **Step 4: Godot unit and open-loop suites**
+- [x] **Step 4: Godot unit and open-loop suites**
 
 Run:
 
@@ -816,7 +818,7 @@ GODOT_BIN=build/godot-dl/Godot_v4.7.2-stable_win64_console.exe bash scripts/run-
 
 Expected: the unit, open-loop, errors and terrain suites pass; the Betaflight suite is skipped without `OFS_SITL_LAUNCH`.
 
-- [ ] **Step 5: Python suites**
+- [x] **Step 5: Python suites**
 
 Run:
 
@@ -827,7 +829,7 @@ Run:
 
 Expected: all tests pass (live SITL tests skip).
 
-- [ ] **Step 6: Commit any leftover generated files**
+- [x] **Step 6: Commit any leftover generated files**
 
 Run `git status`. If the Godot import or the tests wrote tracked files, restore them; do not commit `build/` or `godot/.godot/`.
 

@@ -1002,10 +1002,11 @@ pub fn build_seeded(
         meshes: meshes.iter().map(|m| WorldMesh::new(m.name.clone(), m.mesh.clone())).collect(),
     };
     let terrain = airframe.terrain.clone();
+    let start = opts.world.initial.as_ref().unwrap_or(&cfg.initial);
     let initial = BodyState {
-        pos_ned_m: v3(cfg.initial.position_ned_m),
+        pos_ned_m: v3(start.position_ned_m),
         vel_ned_mps: DVec3::ZERO,
-        att: DQuat::from_rotation_z(cfg.initial.yaw_deg.to_radians()),
+        att: DQuat::from_rotation_z(start.yaw_deg.to_radians()),
         rate_frd_radps: DVec3::ZERO,
     };
     models.push(Box::new(RigidBody::new(airframe, initial, &mut bus)));
