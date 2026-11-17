@@ -383,7 +383,15 @@ impl OfsClient {
         }
     }
 
-    /// Stops the `feed` recording: `{frames, dropped_frames, bytes}`, or empty when it was not recording.
+    /// Whether this feed's writer hit the AVI size limit (the recording is no longer growing).
+    #[func]
+    fn dvr_truncated(&self, feed: GString) -> bool {
+        let Some(client) = self.client.as_ref() else { return false };
+        let Some(feed) = DvrFeed::parse(&feed.to_string()) else { return false };
+        client.dvr_truncated(feed)
+    }
+
+    /// Stops the `feed` recording: `{frames, dropped_frames, bytes, truncated}`, or empty when it was not recording.
     #[func]
     fn dvr_stop(&self, feed: GString) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -393,6 +401,7 @@ impl OfsClient {
         d.set("frames", summary.frames as i64);
         d.set("dropped_frames", summary.dropped_frames as i64);
         d.set("bytes", summary.bytes as i64);
+        d.set("truncated", summary.truncated);
         d
     }
 

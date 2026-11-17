@@ -220,6 +220,7 @@ func _process(delta: float) -> void:
 	last_sticks = sticks_override if sticks_override != null else controls.read(Input, focused, delta)
 	client.set_sticks(last_sticks["roll"], last_sticks["pitch"], last_sticks["yaw"], last_sticks["throttle"], PackedFloat32Array(last_sticks["aux"]))
 	_poll_dvr_exports()
+	_poll_dvr_limit()
 	flight_audio.active = client.get_phase() == "flying"
 	flight_audio.pump()
 	if not chase_view:
@@ -374,10 +375,11 @@ func _stop_dvr(chase: bool) -> void:
 		hud.add_toast("DVR failed: the writer stopped abnormally%s" % (" (the chase camera is not recorded)" if chase else ""), "error")
 		return
 	var saved := "%d frames saved" % summary.get("frames", 0)
+	var limit := " (stopped at the 4 GiB AVI limit)" if summary.get("truncated", false) else ""
 	if chase:
-		hud.add_toast("DVR stopped: the chase camera is not recorded (%s)%s" % [saved, _dvr_drop_note(summary)], "warn")
+		hud.add_toast("DVR stopped: the chase camera is not recorded (%s)%s%s" % [saved, _dvr_drop_note(summary), limit], "warn")
 	else:
-		hud.add_toast("DVR: %s%s" % [saved, _dvr_drop_note(summary)])
+		hud.add_toast("DVR: %s%s%s" % [saved, _dvr_drop_note(summary), limit])
 	var mode: String = settings.get("dvr_export", "none")
 	if mode == "none" or client == null or int(summary.get("frames", 0)) == 0:
 		return  # nothing to export from an empty recording
@@ -385,6 +387,13 @@ func _stop_dvr(chase: bool) -> void:
 		var error: String = client.dvr_export(path, mode)
 		if error != "":
 			hud.add_toast("DVR export failed: %s" % error, "warn")
+
+
+## Stops a recording whose writer hit the 4 GiB AVI limit; the toast in `_stop_dvr` says why.
+func _poll_dvr_limit() -> void:
+	if dvr.recording and dvr.truncated():
+		_stop_dvr(false)
+		_sync_dvr()
 
 
 ## Toasts the exports that finished since the last frame. A failure only warns: the AVI is never touched.

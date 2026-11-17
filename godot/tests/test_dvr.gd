@@ -47,9 +47,13 @@ class MockClient:
 		stopped_feeds.append(feed)
 		if fail_stop or feed == fail_stop_feed:
 			return {}
-		return {"frames": counts.get(feed, 0), "dropped_frames": dropped.get(feed, 0), "bytes": 0}
+		return {"frames": counts.get(feed, 0), "dropped_frames": dropped.get(feed, 0), "bytes": 0, "truncated": truncated.get(feed, false)}
 
 	var dropped := {}  # frames each feed's writer queue dropped
+	var truncated := {}  # feed -> bool: the writer hit the AVI limit
+
+	func dvr_truncated(feed: String) -> bool:
+		return truncated.get(feed, false)
 
 	var exports: Array = []  # [path, mode] per dvr_export call
 	var export_results: Array = []
@@ -217,7 +221,7 @@ func test_the_binding_exports_a_finished_recording_as_frames() -> void:
 		ok(results[0]["ok"], "it succeeded: %s" % str(results[0]))
 		eq(results[0]["kind"], "frames", "of kind frames")
 		eq(results[0]["path"], path, "for that recording")
-		eq(results[0]["detail"], out_dir, "into the frames directory")
+		eq(String(results[0]["detail"]).replace("\\", "/"), out_dir.replace("\\", "/"), "into the frames directory")
 		eq(DirAccess.get_files_at(out_dir).size(), 1, "holding the frame")
 	client.free()
 
@@ -954,3 +958,21 @@ func test_a_current_field_is_encoded_as_a_jpeg_at_the_dvr_quality() -> void:
 	dvr.stop()
 	dvr.queue_free()
 	viewport.queue_free()
+
+
+func test_a_truncated_recording_stops_itself_and_says_why() -> void:
+	var s := await _app_shell()
+	var app = s["app"]
+	var client = s["client"]
+	s["menu"]._dvr.button_pressed = true
+	_feed_field(s["dvr"], 1)
+	client.truncated["goggles"] = true
+	app._poll_dvr_limit()
+	ok(not s["dvr"].recording, "the cap stops the recording")
+	ok(not s["menu"].dvr_on(), "the checkbox follows")
+	ok(not s["hud"]._rec.visible, "REC hides")
+	ok("4 GiB" in " ".join(s["hud"].toast_texts()), "the toast says why: %s" % str(s["hud"].toast_texts()))
+	app.free()
+	s["menu"].queue_free()
+	s["hud"].queue_free()
+	s["dvr"].queue_free()
