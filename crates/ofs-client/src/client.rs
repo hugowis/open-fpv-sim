@@ -238,6 +238,11 @@ impl Client {
         }
     }
 
+    /// Whether this feed's writer hit the AVI size limit (the recording is no longer growing).
+    pub fn dvr_truncated(&self, feed: DvrFeed) -> bool {
+        lock(&self.dvr)[feed as usize].as_ref().is_some_and(|(writer, _)| writer.truncated())
+    }
+
     /// Stops the `feed` recording; the summary reports frames, drops and bytes.
     pub fn dvr_stop(&self, feed: DvrFeed) -> Result<DvrSummary, String> {
         let (writer, audio) = lock(&self.dvr)[feed as usize].take().ok_or_else(|| "not recording".to_string())?;

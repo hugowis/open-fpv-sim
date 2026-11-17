@@ -196,19 +196,19 @@ Every shipped value is an estimate recorded in the open — the ledger is
 (which carried the `[frame]`, `[ground]`, `[motor]`, `[prop]`, `[esc]`, `[battery]` and `[vtx]` hardware
 inline) are refused at load with a message naming the move; the shipped quads
 (`quads/opendrone-5f-freestyle.toml`, `quads/opendrone-5f-tramp.toml`, `quads/opendrone-5f-weak-link.toml`,
-`quads/opendrone-5f-900mhz.toml`, `quads/opendrone-5f-fixed-link.toml`)
+`quads/opendrone-5f-900mhz.toml`, `quads/opendrone-5f-fixed-link.toml`, `quads/opendrone-5f-ibus.toml`)
 are the worked example of the migration.
 
 ### The quads
 
-Eight quads ship. The five 5" freestyle ones are one airframe in five radio and VTX configurations; the other three
+Nine quads ship. The six 5" freestyle ones are one airframe in six radio and VTX configurations; the other three
 are different aircraft, assembled from their own library parts, and fly differently (figures are the running
 vehicle's with a full pack, pinned by `crates/ofs-sim/tests/quads.rs`; every part value is an estimate, see the ledger):
 
 | Quad file | Class and pack | All-up weight | Thrust-to-weight | Hover throttle, power | Radio |
 |---|---|---|---|---|---|
 | `opendrone-3t-toothpick` | 3" 125 mm, 3S 450 mAh | 105 g | 4.2 | 44 %, 25 W | ELRS 2.4 GHz, 250 Hz, 100 mW |
-| `opendrone-5f-freestyle` (and four variants) | 5" 6S 1300 mAh | 650 g | 9.4 | 27 %, 106 W | ELRS 2.4 GHz, 500 Hz, 250 mW |
+| `opendrone-5f-freestyle` (and five variants) | 5" 6S 1300 mAh | 650 g | 9.4 | 27 %, 106 W | ELRS 2.4 GHz, 500 Hz, 250 mW |
 | `opendrone-5r-race` | 5" 6S 1300 mAh | 540 g | 14.8 | 19 %, 86 W | ELRS 2.4 GHz, 500 Hz, 100 mW |
 | `opendrone-7lr-longrange` | 7" 320 mm, 6S 4000 mAh Li-ion | 900 g | 6.3 | 24 %, 100 W | ELRS 900 MHz, 200 Hz, 1 W |
 

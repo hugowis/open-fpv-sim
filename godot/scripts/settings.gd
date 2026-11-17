@@ -220,8 +220,17 @@ static func to_client_dict(s: Dictionary) -> Dictionary:
 	}
 	if s["server_bin"] != "":
 		d["server_bin"] = s["server_bin"]
-		d["data_dir"] = s["data_dir"]
-		d["log_file"] = String(s["data_dir"]).path_join("ofs-sim.log")
+		var data_dir := _absolute_data_dir(String(s["data_dir"]))
+		d["data_dir"] = data_dir
+		d["log_file"] = data_dir.path_join("ofs-sim.log")
 		if s["sitl_launch"] != "":
 			d["env"] = {"OFS_SITL_LAUNCH": s["sitl_launch"]}
 	return d
+
+
+## A relative data dir is relative to the Godot project (the base `DirAccess` and `FileAccess` use); the server
+## process would otherwise resolve it against its own working directory, so the menu and the server would disagree.
+static func _absolute_data_dir(path: String) -> String:
+	if path.is_absolute_path():
+		return path
+	return ProjectSettings.globalize_path("res://").path_join(path).simplify_path()

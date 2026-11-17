@@ -8,7 +8,7 @@
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::thread::JoinHandle;
 
@@ -17,6 +17,8 @@ const FRAME_CHANNEL_CAPACITY: usize = 50;
 /// The capture cadence: recordings are tied to received fields.
 pub const DVR_FPS: u32 = 50;
 const AVIIF_KEYFRAME: u32 = 0x10;
+/// The largest file AVI 1.0 can describe: the RIFF size field is `u32` and counts the bytes after it.
+const MAX_AVI_FILE_BYTES: u64 = u32::MAX as u64 + 8;
 
 /// A recording feed: each has its own writer in the client. `Goggles` is the FPV composite; `Clean` is the
 /// camera without the video degradation or OSD.
@@ -42,6 +44,7 @@ pub struct DvrSummary {
     pub frames: u64,
     pub dropped_frames: u64,
     pub bytes: u64,
+    pub truncated: bool,
 }
 
 struct Header {
@@ -146,17 +149,31 @@ fn patch_sizes(file: &mut File, patches: [(u64, u32); 4]) -> std::io::Result<()>
     file.flush()
 }
 
-fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> Result<DvrSummary, String> {
+fn writer_with_limit(
+    mut file: File,
+    header: Header,
+    rx: Receiver<Vec<u8>>,
+    max_bytes: u64,
+    truncated: &AtomicBool,
+) -> Result<DvrSummary, String> {
     let [riff_size_at, movi_size_at, avih_frames_at, strh_length_at] =
         write_header(&mut file, &header).expect("the DVR header write failed");
     let mut frames = 0u64;
     let mut index: Vec<u32> = Vec::new();
+    let mut data_end = file.stream_position().expect("the DVR position failed");
     while let Ok(jpeg) = rx.recv() {
         let size = jpeg.len() as u32;
+        let chunk = 8 + u64::from(size) + u64::from(size & 1);
+        // The final file includes this frame plus one more 16-byte index entry; stop before any field would wrap.
+        if data_end + chunk + 8 + 16 * (frames + 1) > max_bytes {
+            truncated.store(true, Ordering::Relaxed);
+            break;
+        }
         file.write_all(b"00dc").and_then(|_| file.write_all(&size.to_le_bytes())).and_then(|_| file.write_all(&jpeg)).expect("the DVR frame write failed");
         if jpeg.len() % 2 == 1 {
             file.write_all(&[0u8]).expect("the DVR pad write failed");
         }
+        data_end += chunk;
         index.push(size);
         frames += 1;
     }
@@ -184,7 +201,7 @@ fn writer(mut file: File, header: Header, rx: Receiver<Vec<u8>>) -> Result<DvrSu
         (riff_size_at as u64, (end - 8) as u32),
     ];
     patch_sizes(&mut file, patches).map_err(|e| format!("the DVR finalize failed: {e}"))?;
-    Ok(DvrSummary { frames, dropped_frames: 0, bytes: end })
+    Ok(DvrSummary { frames, dropped_frames: 0, bytes: end, truncated: truncated.load(Ordering::Relaxed) })
 }
 
 /// A recording in progress. `stop` finalizes; dropping without `stop` also finalizes (the writer thread joins).
@@ -192,6 +209,7 @@ pub struct DvrWriter {
     tx: Option<SyncSender<Vec<u8>>>,
     handle: Option<JoinHandle<Result<DvrSummary, String>>>,
     dropped: std::sync::Arc<AtomicU64>,
+    truncated: std::sync::Arc<AtomicBool>,
     path: PathBuf,
 }
 
@@ -200,6 +218,18 @@ impl DvrWriter {
     /// hand JPEG bytes of that size (Godot's encoder does). Creates the file's directory; fails if the file exists
     /// (a recording never overwrites another).
     pub fn start(path: PathBuf, fps: u32, width: u32, height: u32) -> Result<DvrWriter, String> {
+        if fps == 0 {
+            return Err("fps must be greater than 0".into());
+        }
+        if width == 0 || height == 0 {
+            return Err("width and height must be greater than 0".into());
+        }
+        if width > u32::from(u16::MAX) || height > u32::from(u16::MAX) {
+            return Err(format!("width and height must be at most {} (the AVI frame rectangle is 16-bit)", u16::MAX));
+        }
+        if u64::from(width) * u64::from(height) * 3 > u64::from(u32::MAX) {
+            return Err(format!("{width}x{height} is too large for a 32-bit AVI frame size"));
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", path.display()))?;
         }
@@ -209,20 +239,25 @@ impl DvrWriter {
             }
             _ => format!("{}: {e}", path.display()),
         })?;
-        let header = Header { microsec_per_frame: 1_000_000 / fps.max(1), fps, width, height };
+        let header = Header { microsec_per_frame: 1_000_000 / fps, fps, width, height };
         let (tx, rx) = sync_channel(FRAME_CHANNEL_CAPACITY);
         let dropped = std::sync::Arc::new(AtomicU64::new(0));
         let dropped_in_thread = dropped.clone();
+        let truncated = std::sync::Arc::new(AtomicBool::new(false));
+        let truncated_in_thread = truncated.clone();
         let handle = std::thread::Builder::new()
             .name("ofs-dvr".into())
             .spawn(move || {
-                writer(file, header, rx).map(|mut summary| {
+                writer_with_limit(file, header, rx, MAX_AVI_FILE_BYTES, &truncated_in_thread).map(|mut summary| {
                     summary.dropped_frames += dropped_in_thread.load(Ordering::Relaxed);
                     summary
                 })
             })
-            .map_err(|e| e.to_string())?;
-        Ok(DvrWriter { tx: Some(tx), handle: Some(handle), dropped, path })
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&path);
+                e.to_string()
+            })?;
+        Ok(DvrWriter { tx: Some(tx), handle: Some(handle), dropped, truncated, path })
     }
 
     /// The recording's file, for toasts.
@@ -230,10 +265,19 @@ impl DvrWriter {
         &self.path
     }
 
+    /// True once the writer hit the AVI size limit and stopped accepting frames.
+    pub fn truncated(&self) -> bool {
+        self.truncated.load(Ordering::Relaxed)
+    }
+
     /// Hands one frame to the writer. JPEG bytes of the declared size. When the writer thread is saturated the
     /// frame is dropped and counted. Returns whether the frame was accepted (the audio log follows the video).
     pub fn write_frame(&self, jpeg: Vec<u8>) -> bool {
         let Some(tx) = &self.tx else { return false };
+        if self.truncated() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
         let accepted = tx.try_send(jpeg).is_ok();
         if !accepted {
             self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -259,5 +303,69 @@ impl Drop for DvrWriter {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_recording_stops_at_the_avi_limit_and_finalizes_a_valid_file() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-limit-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("limit.avi");
+        let file = File::create_new(&path).unwrap();
+        let header = Header { microsec_per_frame: 20_000, fps: 50, width: 4, height: 2 };
+        let (tx, rx) = sync_channel(4);
+        let truncated = std::sync::atomic::AtomicBool::new(false);
+        let handle = std::thread::spawn(move || writer_with_limit(file, header, rx, 1024, &truncated));
+        for _ in 0..50 {
+            let _ = tx.send(vec![0xFF; 100]);
+        }
+        drop(tx);
+        let summary = handle.join().unwrap().unwrap();
+
+        assert!(summary.truncated, "the writer reports the cap");
+        assert!(summary.frames > 0 && summary.frames < 50, "some frames, not all: {}", summary.frames);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() as u64 <= 1024, "the file stays within the cap: {}", bytes.len());
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as u64, bytes.len() as u64 - 8, "RIFF size");
+        let idx = bytes.len() - (8 + 16 * summary.frames as usize);
+        assert_eq!(&bytes[idx..idx + 4], b"idx1", "the index is the last block");
+        assert_eq!(
+            u32::from_le_bytes(bytes[idx + 4..idx + 8].try_into().unwrap()) as u64 / 16,
+            summary.frames,
+            "one index entry per frame"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_start_with_a_bad_size_or_rate_creates_no_file() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-start-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (fps, width, height) in [(50, 0, 2), (50, 4, 0), (0, 4, 2), (50, 65_536, 2), (50, 4, 65_536), (50, 65_535, 65_535)] {
+            let path = dir.join(format!("bad-{fps}-{width}-{height}.avi"));
+            let _ = std::fs::remove_file(&path);
+            assert!(DvrWriter::start(path.clone(), fps, width, height).is_err(), "{fps} {width} {height}");
+            assert!(!path.exists(), "no file for {fps} {width} {height}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_frame_after_the_cap_is_refused_and_counted() {
+        let (tx, _rx) = sync_channel(1);
+        let writer = DvrWriter {
+            tx: Some(tx),
+            handle: None,
+            dropped: std::sync::Arc::new(AtomicU64::new(0)),
+            truncated: std::sync::Arc::new(AtomicBool::new(true)),
+            path: PathBuf::from("unused.avi"),
+        };
+        assert!(!writer.write_frame(vec![0xFF]));
+        assert_eq!(writer.dropped.load(Ordering::Relaxed), 1, "the refused frame is counted as dropped");
     }
 }

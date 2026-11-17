@@ -766,10 +766,12 @@ pub fn load_with_library_env(path: &Path, library_env: Option<&str>) -> Result<Q
     match raw.get("schema_version").and_then(toml::Value::as_integer) {
         Some(v) if v >= i64::from(MIN_SCHEMA_VERSION) && v <= i64::from(SCHEMA_VERSION) => {}
         Some(4) => {
-            let message = "unsupported schema_version 4 (this build reads schemas 5 and 6); schema 5 moves the [frame], \
-                           [ground], [motor], [prop], [esc], [battery] and [vtx] hardware sections into library/ part \
-                           files with per-parameter provenance and the quad references them by id — see the \
-                           \"Component library\" section of README.md".to_string();
+            let message = format!(
+                "unsupported schema_version 4 (this build reads schemas {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}); schema 5 moves the [frame], \
+                 [ground], [motor], [prop], [esc], [battery] and [vtx] hardware sections into library/ part \
+                 files with per-parameter provenance and the quad references them by id — see the \
+                 \"Component library\" section of README.md"
+            );
             return Err(parse_err(message));
         }
         Some(v @ ..=3) => {

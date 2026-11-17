@@ -151,10 +151,12 @@ func stop() -> Dictionary:
 	var summary := {}
 	var failed := false
 	var dropped := 0
+	var truncated := false
 	for i in _feeds.size():
 		var one: Dictionary = _client.dvr_stop(_feeds[i]["feed"])
 		failed = failed or one.is_empty()
 		dropped += int(one.get("dropped_frames", 0))
+		truncated = truncated or bool(one.get("truncated", false))
 		if i == 0:
 			summary = one
 	_feeds = []
@@ -163,8 +165,17 @@ func stop() -> Dictionary:
 	else:
 		summary["dropped_frames"] = dropped
 		summary["paths"] = paths
+		summary["truncated"] = truncated
 	stopped.emit(summary)
 	return summary
+
+
+## True once any feed's writer hit the 4 GiB AVI limit: the recording must be stopped.
+func truncated() -> bool:
+	for entry in _feeds:
+		if _client.dvr_truncated(entry["feed"]):
+			return true
+	return false
 
 
 ## The path stem (no extension) of a recording none of whose files exists yet: the muxer never overwrites, so two starts

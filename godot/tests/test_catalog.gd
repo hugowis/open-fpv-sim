@@ -63,9 +63,16 @@ func test_a_chosen_path_outside_the_roots_stays_in_the_list() -> void:
 
 
 func test_roots_are_the_checkout_and_the_data_dir() -> void:
-	var roots := Catalog.roots({"data_dir": "C:/x/data"}, "quads")
+	var data_dir := ProjectSettings.globalize_path("res://data")
+	var roots := Catalog.roots({"data_dir": data_dir}, "quads")
 	eq(roots.size(), 2, "two roots")
-	ok(roots[0].ends_with("/quads") and roots[1] == "C:/x/data/quads", "roots: %s" % str(roots))
+	ok(roots[0].ends_with("/quads") and roots[1] == data_dir.path_join("quads"), "roots: %s" % str(roots))
+	var relative := Catalog.roots({"data_dir": "relative-data"}, "quads")
+	eq(
+		relative[1],
+		ProjectSettings.globalize_path("res://").path_join("relative-data").path_join("quads").simplify_path(),
+		"a relative data dir is absolute under the project: %s" % relative[1]
+	)
 
 func test_the_courses_of_a_world_are_listed_in_file_order() -> void:
 	_fresh()
@@ -102,3 +109,22 @@ func test_the_fc_kind_of_a_quad_file_is_scanned() -> void:
 	ok(Catalog.quad_is_stabilized(DIR + "/q/stab.toml"), "the predicate names the stabilized file")
 	ok(not Catalog.quad_is_stabilized(DIR + "/q/missing.toml"), "and nothing else")
 	_fresh()
+
+
+func test_a_relative_root_lists_its_files() -> void:
+	var rel := "build/catalog-relative-test"
+	var base := DirAccess.open(".")
+	ok(base != null, "the working directory opens")
+	base.make_dir_recursive(rel + "/worlds")
+	var file := FileAccess.open(rel + "/worlds/rel.toml", FileAccess.WRITE)
+	file.store_string("name = \"Relative\"\n")
+	file.close()
+	var items := Catalog.list([rel + "/worlds"])
+	eq(items.size(), 1, "a relative root lists its file")
+	if items.size() == 1:
+		eq(items[0]["label"], "Relative", "with its label")
+	var access := DirAccess.open(rel + "/worlds")
+	if access != null:
+		access.remove("rel.toml")
+	base.remove(rel + "/worlds")
+	base.remove(rel)

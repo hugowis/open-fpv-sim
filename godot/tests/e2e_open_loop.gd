@@ -293,9 +293,11 @@ func _run() -> void:
 		var frames := _avi_frames(ProjectSettings.globalize_path(started[0]))
 		# The DVR is a screen recorder: it writes one frame per field boundary the client actually renders, not one
 		# per simulated 20 ms. A runner slower than 50 Hz renders fewer boundaries; that is the pilot's picture.
+		# This loop samples at `process_frame`, one step before the app's `_process` captures: on such a runner the
+		# first and last sampled boundaries fall outside the capture window, hence the two-frame slack.
 		var expected := seen_targets.size()
 		_check(expected > 0, "the client rendered at least one field boundary")
-		_check(frames.size() >= expected - 1 and frames.size() <= expected + 3,
+		_check(frames.size() >= expected - 2 and frames.size() <= expected + 3,
 			"%d frames for %d rendered field boundaries (%.2f simulated seconds)" % [frames.size(), expected, t1 - t0])
 		_check(frames.all(func(f: PackedByteArray) -> bool: return f.size() > 2 and f[0] == 0xFF and f[1] == 0xD8),
 			"every frame is a JPEG")

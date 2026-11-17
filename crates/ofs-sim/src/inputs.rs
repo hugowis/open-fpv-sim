@@ -1,6 +1,7 @@
 //! Scripted stick and link inputs (spec §5): a CSV of `t_s`, stick columns, `tx` and `link_loss`, validated once,
 //! played back sample-and-hold at tick boundaries.
 use ofs_core::names::RC_AUX_COUNT;
+use ofs_core::scheduler::MAX_RUN_FOR_S;
 
 /// The columns an inputs file may have; `t_s` is required and at least one input column is required.
 pub const COLUMNS: [&str; 11] =
@@ -179,6 +180,9 @@ pub fn parse(name: &str, text: &str) -> Result<Inputs, String> {
         if t < 0.0 {
             problems.push(format!("{name} line {line}: t_s {t} is negative"));
         }
+        if t > MAX_RUN_FOR_S {
+            problems.push(format!("{name} line {line}: t_s {t} is past the {MAX_RUN_FOR_S} s limit"));
+        }
         if let Some(prev) = last_t {
             if t <= prev {
                 problems.push(format!("{name} line {line}: t_s {t} does not increase (previous row {prev})"));
@@ -337,5 +341,13 @@ mod tests {
         assert_eq!(tick_at(0.3, 8000), 2400, "0.3 * 8000 is 2400.0000000000005 in floating point");
         assert_eq!(tick_at(0.00001, 8000), 1);
         assert_eq!(tick_at(1.0 / 3.0, 8000), 2667);
+    }
+
+    #[test]
+    fn a_time_past_the_simulators_run_limit_is_refused() {
+        let ok = parse("long.csv", "t_s,yaw\n86400,0\n").unwrap();
+        assert_eq!(ok.duration_s(), 86_400.0, "the limit itself is allowed");
+        let err = parse("long.csv", "t_s,yaw\n86401,0\n").unwrap_err();
+        assert!(err.contains("past the 86400 s limit"), "{err}");
     }
 }

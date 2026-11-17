@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ofs_config::{load, ConfigError, FcKind, RadioKind, VtxKind};
+use ofs_config::{load, ConfigError, FcKind, MIN_SCHEMA_VERSION, RadioKind, SCHEMA_VERSION, VtxKind};
 
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
 const LIBRARY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../library");
@@ -165,6 +165,10 @@ fn a_schema_4_quad_file_is_refused_with_the_migration_message() {
     let err = load(&write_quad(dir.path(), &old)).unwrap_err();
     let message = err.to_string();
     assert!(message.contains("schema_version 4"), "{message}");
+    assert!(
+        message.contains(&format!("reads schemas {MIN_SCHEMA_VERSION} to {SCHEMA_VERSION}")),
+        "{message}"
+    );
     assert!(message.contains("library"), "{message}");
 }
 

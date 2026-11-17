@@ -1483,7 +1483,7 @@ impl Vehicle {
         }
         let now = self.scheduler.tick();
         let base_hz = self.base_hz();
-        let ticks = inputs.rows.iter().map(|(t, _)| now + tick_at(*t, base_hz)).collect();
+        let ticks = inputs.rows.iter().map(|(t, _)| now.saturating_add(tick_at(*t, base_hz))).collect();
         self.journal.push(now, Action::PlayInputs(inputs.clone()));
         self.playback = Some(Playback { inputs, ticks, next: 0 });
         self.apply_due(); // rows at t_s = 0 apply now

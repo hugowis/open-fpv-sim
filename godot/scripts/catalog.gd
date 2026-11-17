@@ -6,7 +6,7 @@ const AppSettings = preload("res://scripts/settings.gd")
 
 ## The directories that hold `kind` ("worlds" or "quads"): the checkout's, then the data dir's.
 static func roots(settings: Dictionary, kind: String) -> Array:
-	return [AppSettings.repo_root().path_join(kind), String(settings["data_dir"]).path_join(kind)]
+	return [AppSettings.repo_root().path_join(kind), AppSettings._absolute_data_dir(String(settings["data_dir"])).path_join(kind)]
 
 
 ## The `*.toml` files directly in `dirs` as {path, label, gates, courses}, sorted by label. A file reached through two
@@ -15,9 +15,10 @@ static func list(dirs: Array) -> Array:
 	var seen := {}
 	var out := []
 	for dir in dirs:
-		if not DirAccess.dir_exists_absolute(dir):
+		var access := DirAccess.open(dir)
+		if access == null:
 			continue
-		for file in DirAccess.get_files_at(dir):
+		for file in access.get_files():
 			var path: String = String(dir).path_join(file).simplify_path()
 			if file.get_extension() == "toml" and not seen.has(path):
 				seen[path] = true
