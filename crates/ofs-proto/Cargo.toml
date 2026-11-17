@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Protocol 2 messages and gRPC stubs shared by the simulator server and its Rust clients"
+description = "The simulator's gRPC protocol messages and stubs shared by the server and its Rust clients"
 
 [dependencies]
 tonic.workspace = true
