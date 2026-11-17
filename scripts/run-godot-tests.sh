@@ -23,6 +23,11 @@ case "$(uname -s)" in
         GODOT_SHA512="38aa16e5bba2083941fc5b3e54be0089bd4cc35e32415f5b9fd9a8a6a7b9818255d44532ea8ef94b5aef56c4b407c2d634fa4f657e4ebe681ebbf59b7bac69ca"
         GODOT_REL_BIN="Godot.app/Contents/MacOS/Godot"
         ;;
+    MINGW*|MSYS*|CYGWIN*)
+        GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+        GODOT_SHA512="83decd58fdf67b9d657958a1ae6bf1929c20785315a81effe245874cdc57acb709bf868e00778a96984338c1b29dafdb453c6847747694621c6ecf5da2259993"
+        GODOT_REL_BIN="Godot_v${GODOT_VERSION}-stable_win64_console.exe"
+        ;;
     *)
         GODOT_ASSET="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
         GODOT_SHA512="9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65"
