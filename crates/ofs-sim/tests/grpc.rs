@@ -899,3 +899,29 @@ wavelength_m = 64.0
     assert_eq!(t.heights.len(), 1025 * 1025);
     assert!(t.heights.len() * 4 > 4 * 1024 * 1024, "the grid alone is past tonic's default limit");
 }
+
+#[tokio::test]
+async fn a_large_world_load_does_not_stall_other_calls() {
+    let mut c = start_big_reply().await;
+    let world = std::env::temp_dir().join(format!("ofs-big-world-{}.toml", std::process::id()));
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/hills.toml")).unwrap();
+    // 3201 x 3201 terrain nodes: the load bakes and checks the grid before it builds a session.
+    std::fs::write(&world, source.replace("size_m = 600.0", "size_m = 800.0")).unwrap();
+
+    let mut loading = c.clone();
+    let world_path = world.to_string_lossy().into_owned();
+    let started = std::time::Instant::now();
+    let load = tokio::spawn(async move {
+        loading.load(LoadRequest { world_path, ..open_loop(Mode::Lockstep) }).await
+    });
+    // Let the request reach the server and start the parse before asking for anything else.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    c.handshake(HandshakeRequest { protocol_version: PROTOCOL_VERSION }).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(150),
+        "Handshake waited {:?}: the world parse ran on the runtime",
+        started.elapsed()
+    );
+    load.await.unwrap().unwrap();
+    std::fs::remove_file(&world).ok();
+}

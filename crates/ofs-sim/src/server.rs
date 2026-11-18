@@ -291,13 +291,22 @@ impl Sim for SimService {
     async fn load(&self, req: Request<pb::LoadRequest>) -> Result<Response<pb::LoadReply>, Status> {
         let req = req.into_inner();
         let (mode, policy) = load_mode_and_policy(&req)?;
-        let cfg = ofs_config::load(Path::new(&req.quad_path)).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?;
-        let world = if req.world_path.is_empty() {
-            WorldConfig::open_field()
-        } else {
-            let path = ofs_config::world::resolve(&req.world_path, Path::new(&req.quad_path));
-            ofs_config::world::load(&path).map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
-        };
+        let quad_path = req.quad_path.clone();
+        let world_path = req.world_path.clone();
+        let (cfg, world) = tokio::task::spawn_blocking(move || {
+            let cfg = ofs_config::load(Path::new(&quad_path))
+                .map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?;
+            let world = if world_path.is_empty() {
+                WorldConfig::open_field()
+            } else {
+                let path = ofs_config::world::resolve(&world_path, Path::new(&quad_path));
+                ofs_config::world::load(&path)
+                    .map_err(|e| error("config", Code::InvalidArgument, e.to_string()))?
+            };
+            Ok::<_, Status>((cfg, world))
+        })
+        .await
+        .map_err(|e| Status::internal(format!("the config parse panicked: {e}")))??;
         if req.stabilize && !req.open_loop_fc {
             return Err(error("invalid_argument", Code::InvalidArgument, "stabilize needs open_loop_fc"));
         }
@@ -595,7 +604,12 @@ impl Sim for SimService {
     async fn play_inputs(&self, req: Request<pb::InputsFile>) -> Result<Response<pb::Empty>, Status> {
         let file = req.into_inner();
         let name = if file.name.is_empty() { "inputs".to_string() } else { file.name };
-        let inputs = inputs::parse(&name, &file.csv).map_err(|m| error("config", Code::InvalidArgument, m))?;
+        let csv = file.csv;
+        let parse_name = name.clone();
+        let inputs = tokio::task::spawn_blocking(move || inputs::parse(&parse_name, &csv))
+            .await
+            .map_err(|e| Status::internal(format!("the inputs parse panicked: {e}")))?
+            .map_err(|m| error("config", Code::InvalidArgument, m))?;
         self.blocking(move |shared, slot| {
             let s = loaded(slot)?;
             if shared.pilot.load(Ordering::Acquire) {
