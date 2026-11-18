@@ -98,7 +98,11 @@ func _copy_tree(from: String, to: String) -> void:
 
 func _run() -> void:
 	var data_dir := OS.get_user_data_dir().path_join("e2e-data")
+	var repo: String = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+	# The test's own choices, not the developer's user://ofs_client.cfg (another worktree's quad or world).
 	OS.set_environment("OFS_OPEN_LOOP", "1")
+	OS.set_environment("OFS_QUAD", repo.path_join("quads").path_join("opendrone-5f-freestyle.toml"))
+	OS.set_environment("OFS_WORLD", repo.path_join("worlds").path_join("flat.toml"))
 	OS.set_environment("OFS_MENU", "off")  # the menu-less boot; the menu is exercised at the end
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", data_dir)
@@ -402,7 +406,6 @@ func _run() -> void:
 	cancel.pressed = true
 	app.controls_menu._input(cancel)
 	_check(app.main_menu.is_open() and not app.controls_menu.is_open(), "Escape on it goes back to the menu")
-	var repo: String = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 	var weak: String = repo.path_join("quads").path_join("opendrone-5f-weak-link.toml")
 	app.settings["world_path"] = repo.path_join("worlds").path_join("circuit.toml")
 	app.settings["quad_path"] = weak
