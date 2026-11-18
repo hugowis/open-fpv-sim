@@ -20,23 +20,26 @@ fn values_are_clamped_to_the_field_widths() {
 }
 
 #[test]
-fn the_model_sends_one_quarter_of_the_pack_current_in_each_of_four_frames() {
+fn the_model_sends_each_escs_own_current_and_a_share_of_the_pack_charge() {
     let mut bus = Bus::new();
     let v = bus.signal::<f64>(names::BATTERY_VOLTAGE);
-    let i = bus.signal::<f64>(names::BATTERY_CURRENT);
     let c = bus.signal::<f64>(names::BATTERY_CONSUMED);
     bus.set(v, 24.6);
-    bus.set(i, 8.0);
     bus.set(c, 120.0);
+    let currents = [0.5, 1.0, 2.0, 4.5];
+    for (k, amps) in currents.into_iter().enumerate() {
+        let i = bus.signal::<f64>(&names::esc_bus_current(k));
+        bus.set(i, amps);
+    }
     let uart = Wire::new(256);
     let mut model = EscTelemetry::new(uart.clone(), 4, 80, 7.0, &mut bus);
     assert_eq!(model.rate_divisor(), 80);
     model.step(&StepCtx { tick: 0, time_s: 0.0, dt_s: 1.0 / 8000.0 }, &mut bus).unwrap();
     let bytes = uart.take(256);
     assert_eq!(bytes.len(), 4 * FRAME_SIZE);
-    for frame in bytes.chunks(FRAME_SIZE) {
+    for (k, frame) in bytes.chunks(FRAME_SIZE).enumerate() {
         assert_eq!(&frame[1..3], &[0x09, 0x9C], "pack voltage in every frame");
-        assert_eq!(&frame[3..5], &[0x00, 0xC8], "2.00 A = 8.00 A / 4");
+        assert_eq!(&frame[3..5], &((currents[k] * 100.0) as u16).to_be_bytes(), "ESC {k}'s own current");
         assert_eq!(&frame[5..7], &[0x00, 0x1E], "30 mAh = 120 mAh / 4");
         assert_eq!(frame[9], crc8(&frame[..9]));
     }

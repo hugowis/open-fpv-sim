@@ -284,6 +284,11 @@ fn esc_telemetry_frames_become_battery_state() {
             current: bus.signal(names::BATTERY_CURRENT),
             consumed: bus.signal(names::BATTERY_CONSUMED),
         };
+        // The ESC frames carry each ESC's own current; Betaflight sums them to the pack's 8 A.
+        for i in 0..4 {
+            let current = bus.signal(&names::esc_bus_current(i));
+            bus.set(current, 2.0);
+        }
         let esc = EscTelemetry::new(uart.clone(), 4, 80, 7.0, bus);
         Some(Box::new(Both(vec![Box::new(battery), Box::new(esc)])))
     });

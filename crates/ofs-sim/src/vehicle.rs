@@ -379,9 +379,9 @@ struct Handles {
     att: Signal<DQuat>,
     rate: Signal<DVec3>,
     vbat: Signal<f64>,
-    ibat: Signal<f64>,
     cell_voltage: Vec<Signal<f64>>,
     omega: Vec<Signal<f64>>,
+    esc_current: Vec<Signal<f64>>,
     cmd: Vec<Signal<f64>>,
     roll: Signal<f64>,
     pitch: Signal<f64>,
@@ -439,9 +439,9 @@ impl Handles {
             att: bus.signal(names::BODY_ATT),
             rate: bus.signal(names::BODY_RATE_FRD),
             vbat: bus.signal(names::BATTERY_VOLTAGE),
-            ibat: bus.signal(names::BATTERY_CURRENT),
             cell_voltage: (0..cells).map(|k| bus.signal(&names::battery_cell_voltage(k))).collect(),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
+            esc_current: (0..motors).map(|i| bus.signal(&names::esc_bus_current(i))).collect(),
             cmd: (0..motors).map(|i| bus.signal(&names::motor_cmd(i))).collect(),
             roll: bus.signal(names::RC_ROLL),
             pitch: bus.signal(names::RC_PITCH),
@@ -1726,7 +1726,9 @@ impl Vehicle {
         let b = self.scheduler.bus();
         let h = &self.h;
         let battery_voltage_v = b.get(h.vbat);
-        let battery_current_a = b.get(h.ibat);
+        // The instantaneous pack draw: the battery model's own current is sampled at its configured rate (1 kHz on
+        // the shipped quads) and would hold a clamped ESC tick for up to a millisecond.
+        let battery_current_a = h.esc_current.iter().map(|s| b.get(*s)).sum();
         // The battery model's own cell voltages: the weak-cell fault sits on the cell it names.
         let battery_cell_voltages = h.cell_voltage.iter().map(|s| b.get(*s)).collect();
         VehicleState {

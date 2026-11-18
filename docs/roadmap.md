@@ -204,6 +204,9 @@ These explain behaviour that would otherwise look like a bug.
 - **The motor protocol stays PWM**; **the FC telemetry is outside the lockstep digest** (determinism is pinned by
   the ELRS byte-stream test and the live runs); **battery values pass through Betaflight verbatim**, including its
   ESC-sensor consumption summed over motor slots and its 0.1 V units.
+- **The reported pack current is the instantaneous sum of the ESC bus currents**, not the battery model's own
+  `battery.current_a`: that signal is sampled at the battery's configured rate (1 kHz on the shipped quads) and
+  drives the SOC and the sag. The KISS frames carry each ESC's own current, so Betaflight sums the same value.
 - **A stale SITL binary is refused loudly but harmlessly**: it prints one `no such open UART` line per datagram.
 - **SITL quads need uniform motor pole pairs** (one `motor_poles` setting), and the diff's `motor_poles` must equal
   2 × `pole_pairs` (checked at load); rotor inertia is per motor.
