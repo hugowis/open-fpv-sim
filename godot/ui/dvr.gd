@@ -170,7 +170,7 @@ func stop() -> Dictionary:
 	return summary
 
 
-## True once any feed's writer hit the 4 GiB AVI limit: the recording must be stopped.
+## True once any feed's writer hit the recording size limit: the recording must be stopped.
 func truncated() -> bool:
 	for entry in _feeds:
 		if _client.dvr_truncated(entry["feed"]):

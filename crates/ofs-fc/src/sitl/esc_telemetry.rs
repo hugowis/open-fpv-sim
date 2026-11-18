@@ -31,10 +31,10 @@ pub fn kiss_frame(temperature_c: u8, voltage_v: f64, current_a: f64, consumed_ma
     f
 }
 
-/// Writes `motors` identical frames every period to the UART wired to Betaflight's ESC-sensor port. Betaflight sums
-/// current and consumption over its motor slots and averages voltage and RPM, so each frame carries a share of
-/// the pack current and charge and the pack voltage; frame `k` carries ESC `k`'s temperature (the thermal model's
-/// `esc.{k}.temp_c`, rounded and clamped to a byte).
+/// Writes `motors` frames every period to the UART wired to Betaflight's ESC-sensor port. Betaflight sums the
+/// currents and consumption over its motor slots and averages voltage and RPM: frame `k` carries ESC `k`'s own
+/// input current and temperature, and a share of the pack charge and the pack voltage. (The battery model's own
+/// `battery.current_a` is sampled at its 1 kHz rate and is not the per-ESC current.)
 ///
 /// eRPM = mechanical rpm × pole pairs (uniform on SITL quads; enforced by ofs-config).
 pub struct EscTelemetry {
@@ -43,7 +43,7 @@ pub struct EscTelemetry {
     divisor: u32,
     pole_pairs: f64,
     voltage: Signal<f64>,
-    current: Signal<f64>,
+    esc_current: Vec<Signal<f64>>,
     consumed: Signal<f64>,
     omega: Vec<Signal<f64>>,
     temperature: Vec<Signal<f64>>,
@@ -58,7 +58,7 @@ impl EscTelemetry {
             divisor,
             pole_pairs,
             voltage: bus.signal(names::BATTERY_VOLTAGE),
-            current: bus.signal(names::BATTERY_CURRENT),
+            esc_current: (0..motors).map(|i| bus.signal(&names::esc_bus_current(i))).collect(),
             consumed: bus.signal(names::BATTERY_CONSUMED),
             omega: (0..motors).map(|i| bus.signal(&names::motor_omega(i))).collect(),
             // Without a thermal model driving it, an ESC reads the ambient, not 0 °C.
@@ -84,7 +84,7 @@ impl Model for EscTelemetry {
             let frame = kiss_frame(
                 temperature,
                 bus.get(self.voltage),
-                bus.get(self.current) / share,
+                bus.get(self.esc_current[k]),
                 bus.get(self.consumed) / share,
                 mean_rpm * self.pole_pairs,
             );

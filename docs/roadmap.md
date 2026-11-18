@@ -63,7 +63,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
   then). H.264 export needs an ffmpeg with libx264 and an AAC encoder on `PATH`, and an export still running when
   the game quits is lost. The audio leads the picture by the goggles' latency (40 ms) and has no VTX buzzer (the sim
-  has no buzzer model).
+  has no buzzer model). A recording that passes 4 GiB continues in OpenDML `AVIX` segments; the first segment stays
+  AVI 1.0 and the export reads every segment.
 - Flight audio (#158, `docs/superpowers/specs/2026-10-31-flight-audio-design.md`), played live in the client:
   airspeed is ground speed (the simulation has no wind yet), a hard landing and an object hit sound the same
   (one thud), and the tone is the blade-pass fundamental plus 2x and 3x harmonics, which alias above about
@@ -204,6 +205,9 @@ These explain behaviour that would otherwise look like a bug.
 - **The motor protocol stays PWM**; **the FC telemetry is outside the lockstep digest** (determinism is pinned by
   the ELRS byte-stream test and the live runs); **battery values pass through Betaflight verbatim**, including its
   ESC-sensor consumption summed over motor slots and its 0.1 V units.
+- **The reported pack current is the instantaneous sum of the ESC bus currents**, not the battery model's own
+  `battery.current_a`: that signal is sampled at the battery's configured rate (1 kHz on the shipped quads) and
+  drives the SOC and the sag. The KISS frames carry each ESC's own current, so Betaflight sums the same value.
 - **A stale SITL binary is refused loudly but harmlessly**: it prints one `no such open UART` line per datagram.
 - **SITL quads need uniform motor pole pairs** (one `motor_poles` setting), and the diff's `motor_poles` must equal
   2 × `pole_pairs` (checked at load); rotor inertia is per motor.

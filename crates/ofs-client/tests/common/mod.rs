@@ -151,5 +151,5 @@ impl Probe {
     }
 }
 
-pub const LONG: Duration = Duration::from_secs(15);
+pub const LONG: Duration = Duration::from_secs(30);
 pub const SHORT: Duration = Duration::from_secs(5);

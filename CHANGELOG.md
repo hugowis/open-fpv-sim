@@ -5,6 +5,19 @@ repository). The format follows Keep a Changelog.
 
 ## Unreleased
 
+### Simulator
+#### Fixed
+- **`Load` and `PlayInputs` no longer parse on the async runtime**: a large world or inputs file is read on a
+  blocking thread, so another RPC is served while it parses (#185).
+- **The reported pack current is the instantaneous sum of the four ESC bus currents**, not the battery model's held
+  1 kHz sample: after the startup clamp's 180 A, the 5F's full-throttle reading follows the electrical model (about
+  31 A) instead of holding the clamp. The KISS frames carry each ESC's own current, so Betaflight sums the same value
+  (#164).
+
+#### Changed
+- **DVR recordings continue past 4 GiB** in OpenDML `RIFF/AVIX` segments with a `dmlh` total-frame field; the first
+  segment stays AVI 1.0, the export reads every segment, and the size cap is 64 GiB (#186).
+
 ### Pilot client
 #### Fixed
 - **The calibration wizard is centred** (it was anchored off the top-left corner, half off-screen, because its anchors

@@ -268,3 +268,29 @@ fn set_sticks_clamps_what_it_accepts() {
     v.set_sticks(&Sticks { throttle: -1.0, ..Sticks::default() }).unwrap();
     assert_eq!(rc(&v, names::RC_THROTTLE), 0.0);
 }
+
+#[test]
+fn full_throttle_current_is_the_startup_clamp_then_the_electrical_model() {
+    let cfg = load(Path::new(QUAD)).unwrap();
+    let motor = &cfg.motors[0];
+    let ke = 60.0 / (2.0 * std::f64::consts::PI * motor.kv_rpm_per_v);
+    let mut v = vehicle(1);
+    v.set_sticks(&throttle(1.0)).unwrap();
+
+    v.run_for(0.05).unwrap();
+    let early = v.state();
+    assert!((early.battery_current_a - 4.0 * 45.0).abs() < 1.0, "startup clamp: {}", early.battery_current_a);
+
+    v.run_for(1.0).unwrap();
+    let s = v.state();
+    let expected: f64 = s.motor_rpm.iter().map(|rpm| {
+        let omega = rpm * 2.0 * std::f64::consts::PI / 60.0;
+        (s.battery_voltage_v - ke * omega) / motor.resistance_ohm
+    }).sum();
+    assert!(
+        (s.battery_current_a - expected).abs() < 2.0,
+        "steady current {} should follow the model {} (clamp is 180 A)",
+        s.battery_current_a,
+        expected
+    );
+}
