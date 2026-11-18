@@ -188,6 +188,7 @@ message OsdFrame {
   bool present = 3;    // false: no OSD, released, or silent for a second
   uint32 cols = 4;
   uint32 rows = 5;
+  // Row-major: char | page << 8 | blink << 10 | sys << 11 (sys = displayPortSystemElement_e + 1, 0 = a text cell).
   repeated uint32 cells = 6;
 }
 
