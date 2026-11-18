@@ -82,13 +82,13 @@ fn frames_are_copied_verbatim_and_numbered_from_one() {
 fn an_unfinalized_avi_still_exports() {
     let dir = fresh_dir("unfinalized");
     let avi = dir.join("rec.avi");
-    let frame = [7u8; 10]; // chunks of 18 bytes after the 224-byte header (movi fourcc at 220)
+    let frame = [7u8; 10]; // chunks of 18 bytes after the 480-byte header (movi fourcc at 476)
     write_avi(&avi, &[&frame, &frame, &frame]);
     let mut bytes = std::fs::read(&avi).unwrap();
-    for at in [4, 216, 48, 140] {
+    for at in [4, 472, 48, 140] {
         bytes[at..at + 4].copy_from_slice(&[0; 4]);
     }
-    let movi_end = 224 + 3 * 18;
+    let movi_end = 480 + 3 * 18;
     let crashed = dir.join("crashed.avi");
     std::fs::write(&crashed, &bytes[..movi_end]).unwrap(); // no idx1
     assert_eq!(export_frames(&crashed).unwrap().1, 3);

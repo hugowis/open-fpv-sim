@@ -17,8 +17,10 @@ const FRAME_CHANNEL_CAPACITY: usize = 50;
 /// The capture cadence: recordings are tied to received fields.
 pub const DVR_FPS: u32 = 50;
 const AVIIF_KEYFRAME: u32 = 0x10;
-/// The largest file AVI 1.0 can describe: the RIFF size field is `u32` and counts the bytes after it.
-const MAX_AVI_FILE_BYTES: u64 = u32::MAX as u64 + 8;
+/// AVI 1.0's 32-bit sizes cap one RIFF segment; a longer recording starts a `RIFF/AVIX` segment.
+const AVI_SEGMENT_BYTES: u64 = u32::MAX as u64 + 8;
+/// The total cap: about 70 hours at 50 fps and typical 640x480 frames.
+const MAX_DVR_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 /// A recording feed: each has its own writer in the client. `Goggles` is the FPV composite; `Clean` is the
 /// camera without the video degradation or OSD.
@@ -66,17 +68,17 @@ fn put16(bytes: &mut Vec<u8>, value: u16) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Writes the fixed layout. Returns the file offsets of the four fields patched at stop: the outer RIFF size,
-/// the `movi` LIST size, `avih.dwTotalFrames` and `strh.dwLength`. (The index's offsets are relative to the
-/// position right after the `movi` fourcc, counting the fourcc: the first frame sits at 4.)
-fn write_header(file: &mut File, h: &Header) -> std::io::Result<[usize; 4]> {
+/// Writes the fixed layout. Returns the file offsets of the five fields patched at stop: the outer RIFF size,
+/// the `movi` LIST size, `avih.dwTotalFrames`, `strh.dwLength` and the OpenDML total frame count. (The index's
+/// offsets are relative to the position right after the `movi` fourcc, counting the fourcc: the first frame sits at 4.)
+fn write_header(file: &mut File, h: &Header) -> std::io::Result<[usize; 5]> {
     let mut b = Vec::with_capacity(224);
     put(&mut b, b"RIFF");
     let riff_size_at = 4;
     put32(&mut b, 0);
     put(&mut b, b"AVI ");
     put(&mut b, b"LIST");
-    put32(&mut b, 192); // hdrl: "hdrl" + avih + strl
+    put32(&mut b, 448); // hdrl: "hdrl" + avih + strl + dmlh
     put(&mut b, b"hdrl");
     put(&mut b, b"avih");
     put32(&mut b, 56);
@@ -129,45 +131,115 @@ fn write_header(file: &mut File, h: &Header) -> std::io::Result<[usize; 4]> {
     for _ in 0..4 {
         put32(&mut b, 0); // X/Y pels, colors used, colors important
     }
-    debug_assert_eq!(b.len(), 212);
+    put(&mut b, b"dmlh");
+    put32(&mut b, 248); // dwTotalFrames + 61 reserved DWORDs
+    let dmlh_frames_at = b.len();
+    put32(&mut b, 0); // dwTotalFrames, patched
+    for _ in 0..61 {
+        put32(&mut b, 0);
+    }
+    debug_assert_eq!(b.len(), 468);
     put(&mut b, b"LIST");
-    let movi_size_at = 216;
+    let movi_size_at = 472;
     put32(&mut b, 0); // patched
     put(&mut b, b"movi");
     file.write_all(&b)?;
-    Ok([riff_size_at, movi_size_at, avih_frames_at, strh_length_at])
+    Ok([riff_size_at, movi_size_at, avih_frames_at, strh_length_at, dmlh_frames_at])
 }
 
-/// Seeks to each `(offset, value)` pair and patches it in, then flushes: the four size/length fields that make
-/// the file a valid AVI. A failure anywhere leaves the file unfinalized, so the caller reports it instead of
-/// claiming the frames were saved.
-fn patch_sizes(file: &mut File, patches: [(u64, u32); 4]) -> std::io::Result<()> {
-    for (at, value) in patches {
+/// Seeks to each `(offset, value)` pair and patches it in, then flushes: the size/length fields that make the
+/// file a valid AVI. A failure anywhere leaves the file unfinalized, so the caller reports it instead of claiming
+/// the frames were saved.
+fn patch_sizes(file: &mut File, patches: &[(u64, u32)]) -> std::io::Result<()> {
+    for &(at, value) in patches {
         file.seek(SeekFrom::Start(at))?;
         file.write_all(&value.to_le_bytes())?;
     }
     file.flush()
 }
 
+/// Starts a `RIFF/AVIX` segment: a `movi` LIST for the next frames. Returns the absolute offsets of the
+/// segment's RIFF size and `movi` size fields.
+fn write_segment_header(file: &mut File) -> std::io::Result<[usize; 2]> {
+    let start = file.stream_position()? as usize;
+    let mut b = Vec::with_capacity(24);
+    put(&mut b, b"RIFF");
+    put32(&mut b, 0);
+    put(&mut b, b"AVIX");
+    put(&mut b, b"LIST");
+    put32(&mut b, 0);
+    put(&mut b, b"movi");
+    file.write_all(&b)?;
+    Ok([start + 4, start + 16])
+}
+
+/// Writes a segment's `idx1` and patches its RIFF and `movi` sizes, then leaves the position at the segment's
+/// end. The index offsets are relative to the segment's `movi` fourcc, as AVI 1.0 requires.
+fn finish_segment(
+    file: &mut File,
+    index: &[u32],
+    segment_start: u64,
+    riff_size_at: usize,
+    movi_size_at: usize,
+) -> std::io::Result<u64> {
+    let mut idx = Vec::with_capacity(8 + index.len() * 16);
+    put(&mut idx, b"idx1");
+    put32(&mut idx, (index.len() * 16) as u32);
+    let mut offset = 4u32;
+    for size in index {
+        put(&mut idx, b"00dc");
+        put32(&mut idx, AVIIF_KEYFRAME);
+        put32(&mut idx, offset);
+        put32(&mut idx, *size);
+        offset += 8 + size + (size & 1);
+    }
+    file.write_all(&idx)?;
+    let end = file.stream_position()?;
+    let movi_end = end - idx.len() as u64;
+    // The movi LIST's size counts the 'movi' fourcc plus every chunk (movi_data_at = movi_size_at + 4).
+    let patches = [
+        (movi_size_at as u64, (movi_end - (movi_size_at + 4) as u64) as u32),
+        (riff_size_at as u64, (end - segment_start - 8) as u32),
+    ];
+    patch_sizes(file, &patches)?;
+    file.seek(SeekFrom::Start(end))?;
+    Ok(end)
+}
+
 fn writer_with_limit(
     mut file: File,
     header: Header,
     rx: Receiver<Vec<u8>>,
+    segment_bytes: u64,
     max_bytes: u64,
     truncated: &AtomicBool,
 ) -> Result<DvrSummary, String> {
-    let [riff_size_at, movi_size_at, avih_frames_at, strh_length_at] =
+    let [mut riff_size_at, mut movi_size_at, avih_frames_at, strh_length_at, dmlh_frames_at] =
         write_header(&mut file, &header).expect("the DVR header write failed");
-    let mut frames = 0u64;
+    let mut segment_start = 0u64;
+    let mut segment_frames = 0u64;
+    let mut total_frames = 0u64;
+    let mut first_frames = None;
     let mut index: Vec<u32> = Vec::new();
     let mut data_end = file.stream_position().expect("the DVR position failed");
     while let Ok(jpeg) = rx.recv() {
         let size = jpeg.len() as u32;
         let chunk = 8 + u64::from(size) + u64::from(size & 1);
         // The final file includes this frame plus one more 16-byte index entry; stop before any field would wrap.
-        if data_end + chunk + 8 + 16 * (frames + 1) > max_bytes {
+        let index_cost = 8 + 16 * (segment_frames + 1);
+        if data_end + chunk + index_cost > max_bytes {
             truncated.store(true, Ordering::Relaxed);
             break;
+        }
+        if segment_frames > 0 && data_end + chunk + index_cost > segment_start + segment_bytes {
+            data_end = finish_segment(&mut file, &index, segment_start, riff_size_at, movi_size_at)
+                .expect("the DVR segment finalize failed");
+            first_frames.get_or_insert(segment_frames);
+            segment_start = data_end;
+            [riff_size_at, movi_size_at] = write_segment_header(&mut file).expect("the DVR segment header failed");
+            data_end = file.stream_position().expect("the DVR position failed");
+            segment_frames = 0;
+            index.clear();
         }
         file.write_all(b"00dc").and_then(|_| file.write_all(&size.to_le_bytes())).and_then(|_| file.write_all(&jpeg)).expect("the DVR frame write failed");
         if jpeg.len() % 2 == 1 {
@@ -175,33 +247,21 @@ fn writer_with_limit(
         }
         data_end += chunk;
         index.push(size);
-        frames += 1;
+        segment_frames += 1;
+        total_frames += 1;
     }
-    // The sender is gone: the queue is drained, finalize. The index write and the position read panic into the
-    // join's Err on failure; the patching returns its first failure to `stop()` instead of a summary.
-    let mut idx = Vec::with_capacity(8 + index.len() * 16);
-    put(&mut idx, b"idx1");
-    put32(&mut idx, (index.len() * 16) as u32);
-    let mut offset = 4u32;
-    for size in &index {
-        put(&mut idx, b"00dc");
-        put32(&mut idx, AVIIF_KEYFRAME);
-        put32(&mut idx, offset);
-        put32(&mut idx, *size);
-        offset += 8 + size + (size & 1);
-    }
-    file.write_all(&idx).expect("the DVR index write failed");
-    let end = file.stream_position().expect("the DVR position failed");
-    let movi_end = end - idx.len() as u64;
-    // The movi LIST's size counts the 'movi' fourcc plus every chunk (movi_data_at = movi_size_at + 4).
+    // The sender is gone: the queue is drained, finalize the last segment. The index write and the position
+    // read panic into the join's Err on failure; the patching returns its first failure to `stop()`.
+    let end = finish_segment(&mut file, &index, segment_start, riff_size_at, movi_size_at)
+        .expect("the DVR segment finalize failed");
+    let first_frames = first_frames.unwrap_or(total_frames);
     let patches = [
-        (avih_frames_at as u64, frames as u32),
-        (strh_length_at as u64, frames as u32),
-        (movi_size_at as u64, (movi_end - (movi_size_at + 4) as u64) as u32),
-        (riff_size_at as u64, (end - 8) as u32),
+        (avih_frames_at as u64, first_frames as u32),
+        (strh_length_at as u64, first_frames as u32),
+        (dmlh_frames_at as u64, total_frames as u32),
     ];
-    patch_sizes(&mut file, patches).map_err(|e| format!("the DVR finalize failed: {e}"))?;
-    Ok(DvrSummary { frames, dropped_frames: 0, bytes: end, truncated: truncated.load(Ordering::Relaxed) })
+    patch_sizes(&mut file, &patches).map_err(|e| format!("the DVR finalize failed: {e}"))?;
+    Ok(DvrSummary { frames: total_frames, dropped_frames: 0, bytes: end, truncated: truncated.load(Ordering::Relaxed) })
 }
 
 /// A recording in progress. `stop` finalizes; dropping without `stop` also finalizes (the writer thread joins).
@@ -248,7 +308,7 @@ impl DvrWriter {
         let handle = std::thread::Builder::new()
             .name("ofs-dvr".into())
             .spawn(move || {
-                writer_with_limit(file, header, rx, MAX_AVI_FILE_BYTES, &truncated_in_thread).map(|mut summary| {
+                writer_with_limit(file, header, rx, AVI_SEGMENT_BYTES, MAX_DVR_BYTES, &truncated_in_thread).map(|mut summary| {
                     summary.dropped_frames += dropped_in_thread.load(Ordering::Relaxed);
                     summary
                 })
@@ -311,7 +371,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_recording_stops_at_the_avi_limit_and_finalizes_a_valid_file() {
+    fn a_recording_stops_at_the_total_size_cap_and_finalizes_a_valid_file() {
         let dir = std::env::temp_dir().join(format!("ofs-dvr-limit-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
@@ -320,7 +380,7 @@ mod tests {
         let header = Header { microsec_per_frame: 20_000, fps: 50, width: 4, height: 2 };
         let (tx, rx) = sync_channel(4);
         let truncated = std::sync::atomic::AtomicBool::new(false);
-        let handle = std::thread::spawn(move || writer_with_limit(file, header, rx, 1024, &truncated));
+        let handle = std::thread::spawn(move || writer_with_limit(file, header, rx, 1024, 1024, &truncated));
         for _ in 0..50 {
             let _ = tx.send(vec![0xFF; 100]);
         }
@@ -339,6 +399,51 @@ mod tests {
             summary.frames,
             "one index entry per frame"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_recording_rolls_to_avix_segments_and_keeps_every_frame() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-roll-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("roll.avi");
+        let file = File::create_new(&path).unwrap();
+        let header = Header { microsec_per_frame: 20_000, fps: 50, width: 4, height: 2 };
+        let (tx, rx) = sync_channel(64);
+        let truncated = std::sync::atomic::AtomicBool::new(false);
+        let handle = std::thread::spawn(move || writer_with_limit(file, header, rx, 1024, MAX_DVR_BYTES, &truncated));
+        for i in 0..50u8 {
+            tx.send(vec![i; 100]).unwrap();
+        }
+        tx.send(vec![0xFF; 2048]).unwrap(); // larger than a whole segment
+        drop(tx);
+        let summary = handle.join().unwrap().unwrap();
+
+        assert_eq!(summary.frames, 51, "every frame is kept, including the oversized one");
+        assert!(!summary.truncated);
+
+        let bytes = std::fs::read(&path).unwrap();
+        let mut pos = 0usize;
+        let mut segments = 0usize;
+        let mut total = 0usize;
+        while pos + 12 <= bytes.len() {
+            assert_eq!(&bytes[pos..pos + 4], b"RIFF", "segment {segments}");
+            let size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            let form = &bytes[pos + 8..pos + 12];
+            assert_eq!(form, if segments == 0 { b"AVI " } else { b"AVIX" }, "segment {segments} form");
+            let end = pos + 8 + size;
+            assert!(end <= bytes.len(), "segment {segments} fits");
+            let segment = &bytes[pos..end];
+            let idx = segment.windows(4).position(|w| w == b"idx1").expect("each segment has an index");
+            total += u32::from_le_bytes(segment[idx + 4..idx + 8].try_into().unwrap()) as usize / 16;
+            segments += 1;
+            pos = end;
+        }
+        assert!(segments >= 2, "the tiny limit rolls at least once");
+        assert_eq!(total, 51, "the segments' indexes add up");
+        let dmlh = bytes.windows(4).position(|w| w == b"dmlh").expect("the OpenDML total");
+        assert_eq!(u32::from_le_bytes(bytes[dmlh + 8..dmlh + 12].try_into().unwrap()), 51, "dmlh total frames");
         std::fs::remove_dir_all(&dir).ok();
     }
 
