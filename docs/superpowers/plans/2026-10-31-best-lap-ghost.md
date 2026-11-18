@@ -40,6 +40,19 @@
 - The ghost when the pilot resets mid-lap or the race finishes must park at the start, not keep flying the old lap (task 5's e2e check and the `pose_at(0.0)` branch).
 - The delta when the pilot is nowhere near the ghost's line (a cut course, a crash off-track) must stay a sane number, not spike or flip sign wildly (task 4's `test_delta_is_negative_ahead_and_positive_behind` and the far-away case).
 
+## Refresh 2026-11-18 (binding; current `main` is `fe78030`, protocol 18)
+
+The design's `Refresh 2026-11-18` amendments are the authority. Task deltas and the current environment:
+
+- Protocol 18, not 15. The stale pointers: the quad name is `server.rs:382`; the free-flight mutation is `app.gd:252`; the menu-less e2e boot is `e2e_open_loop.gd:99`. The real quad glTF has landed (#130), so the ghost inherits it; there is no box fallback.
+- Godot tests run natively on Windows: `bash scripts/run-godot-tests.sh unit` and `all` (it downloads Godot 4.7.2 into `build/godot-dl`). No WSL. `cargo +1.85` only if that toolchain is installed; otherwise use the current toolchain. `cargo fmt` is not a gate and must not reformat the tree.
+- **Task 1:** `LapCapture` tracks its own `best_clean_s` and captures the fastest **clean** lap, not `last_lap_s == best_lap_s`. Replace the base plan's `only_a_lap_that_beats_the_session_best_is_captured` with `a_dirty_session_best_does_not_block_a_slower_clean_lap` and `the_fastest_clean_lap_replaces_the_previous`; add `a_reset_before_the_first_lap_clears_the_window`. A completed lap is detected by `race.laps` rising; clean = no collision time in `[now - lap_s, now]`; hold the candidate for one further state so a late collision event vetoes; `COLLISION_MEMORY = 8`; a reset (`!running`, `laps` drop, or a `best_lap_s` drop) clears the window and `best_clean_s`.
+- **Task 3:** `records.json` is written to a temp file and renamed; a failed parse keeps the file. `offer_capture` receives only clean captures; the store keeps the strictly faster one.
+- **Task 4:** `ghost.gd` extends the current `drone.gd` (the glTF model); `pose_at`/`delta` stay pure and take the lap time from the app.
+- **Task 5:** the ghost's pose and the delta use the **drawn** lap time: `race_lap_s - (telemetry.time_s - fpv.render_time_s)`, clamped to 0. The HUD's BEST is the record best whenever a record exists (the ghost's lap), else the session best; LAST stays the session's last. When `settings["race_start"]` is off or `racing` is false, drain `take_lap_capture()` and hide the ghost. The e2e clears the app's records store (or uses a test-only records path) before its no-record check, so a developer's `user://records.json` cannot make the ghost appear.
+- **Task 6:** the menu's Default course resolves to `World.default_course` (which `[race] course` may set to a course other than the first), else the first declared course or the implicit `""`.
+- **Task 7:** update `docs/race-timing.md`, `docs/roadmap.md`, `README.md` and `CHANGELOG.md`; the design's amended calls are already on the branch.
+
 ---
 
 ### Task 1: The lap capture (ofs-client)
