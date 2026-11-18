@@ -232,6 +232,7 @@ func sim_text() -> String:
 func update_view(view: Dictionary) -> void:
 	var t: Dictionary = view.get("telemetry", {})
 	var phase: String = view.get("phase", "")
+	var race_delta: float = view.get("race_delta", NAN)
 	_status.text = "%s  |  %s camera" % [view.get("quad", "") if view.get("quad", "") != "" else "Open FPV Sim", view.get("camera", "FPV")]
 	if t.is_empty():
 		_sim.text = phase.capitalize()
@@ -263,7 +264,7 @@ func update_view(view: Dictionary) -> void:
 		else:
 			_vtx.text = ""
 		_update_video(t)
-		_update_race(t)
+		_update_race(t, race_delta)
 		_flight.text = "ALT   %.1f m
 SPEED %.1f m/s
 CLIMB %+.1f m/s
@@ -298,7 +299,7 @@ func _update_video(t: Dictionary) -> void:
 ## gate to fly through next (START once every gate is passed), the time on this lap and, after the first lap, the last
 ## and best. "RACE FINISHED ..." once the lap limit is reached. A named course leads the line ("DIAMOND   LAP ...");
 ## a time attack counts down ("HUNT   LEFT 0:41.2   LAP 3   ...") and ends in "TIME UP". Empty without gates.
-func _update_race(t: Dictionary) -> void:
+func _update_race(t: Dictionary, race_delta: float = NAN) -> void:
 	if not t.get("race_present", false):
 		_race.text = ""
 		return
@@ -321,6 +322,8 @@ func _update_race(t: Dictionary) -> void:
 	text += "LAP %s   NEXT %s   %s" % [lap_label, "START" if next_gate == 0 else str(next_gate), _clock(t.get("race_lap_s", 0.0))]
 	if laps > 0:
 		text += "   LAST %.1f   BEST %.1f" % [t.get("race_last_lap_s", 0.0), t.get("race_best_lap_s", 0.0)]
+	if is_finite(race_delta):
+		text += "   %+.1f" % race_delta
 	_race.text = text
 
 

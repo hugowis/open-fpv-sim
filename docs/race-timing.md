@@ -75,7 +75,8 @@ with one pitched gate.
   flown again at once (`reset_race("Hunt")` and **Shift+N** switch course: see below). It raises `race_reset`, and the `race.*` signals go back to zero. A world without gates refuses
   it (`InvalidState`). The state is read at ticks, so a `get_state` before the next tick still shows the old race; the
   reset is part of the repro bundle's journal (`race_reset`) and replays at the same tick.
-- **Not included.** No ghost or best-lap replay.
+- **Not included.** The server knows no ghost; the client's best-lap records and ghost are outside this protocol (see
+  "Best laps, ghosts and local records").
 
 ## Courses and race modes
 
@@ -116,6 +117,19 @@ tick): `race_finished` ("race finished: 4 laps", 0 laps possible), `finished` tr
 until the next reset. The lap in progress is dropped, and a gate crossing later than the deadline counts for nothing,
 even inside the same tick. `time_left_s` in the state counts down from the whole limit (shown from before the start) to
 0.
+
+## Best laps, ghosts and local records
+
+The client captures the session's fastest **clean** lap: a state whose `laps` count rises completed a lap; a lap with
+no collision event inside its window is clean; a dirty session best never blocks a slower clean lap. The track is the
+lap's poses in Godot's frame, decimated to at most 60 Hz. The records live in `user://records.json` (not the settings
+chain), keyed by the declared world, course and quad names (the unnamed course is `""`), with the best and last lap
+and the best lap's ghost. A translucent second quad replays the best lap on the lap clock — the drawn lap time, so it
+matches the video-delayed FPV pose — while the HUD's BEST is the record and its tail is the live delta to the nearest
+point on the ghost's line; the main menu shows the chosen key's best and last. Free flight has no clock, no capture
+and no ghost. A reset clears the session's clean best (the file keeps the record); `Load` and the server never know a
+ghost exists. The capture is exact to one state period; a collision event delayed by more than one state can still
+slip past the veto.
 
 ## Tilted gates
 

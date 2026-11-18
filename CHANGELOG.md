@@ -18,6 +18,15 @@ repository). The format follows Keep a Changelog.
 - **DVR recordings continue past 4 GiB** in OpenDML `RIFF/AVIX` segments with a `dmlh` total-frame field; the first
   segment stays AVI 1.0, the export reads every segment, and the size cap is 64 GiB (#186).
 
+### Best-lap ghost and local records
+#### Added
+- **The client captures the session's fastest clean lap** from the state stream (no collision in the lap window),
+  decimated to 60 Hz, and keeps the best and last lap per world, course and quad in `user://records.json`; only the
+  best keeps its track.
+- **A translucent ghost quad replays the best lap** on the lap clock (matching the video-delayed FPV pose), with a
+  live delta on the HUD, the record best as the HUD's BEST, and the chosen key's best/last in the main menu. Free
+  flight, resets and the server see no ghost; there is no protocol change.
+
 ### Pilot client
 #### Fixed
 - **The calibration wizard is centred** (it was anchored off the top-left corner, half off-screen, because its anchors

@@ -9,6 +9,9 @@ var failures := 0
 
 
 func _initialize() -> void:
+	# The e2e never reads or writes the developer's real records.
+	OS.set_environment("OFS_RECORDS", "user://e2e-records.json")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://e2e-records.json"))
 	_run()
 
 
@@ -416,9 +419,14 @@ func _run() -> void:
 	_check(course, "the circuit's course reaches the client")
 	await _wait_for(func(): return false, 0.3)
 	_check(app.hud.race_text() == "", "free flight hides the race line: '%s'" % app.hud.race_text())
+	_check(not app.ghost.visible, "free flight: no ghost")
 	app.settings["race_start"] = true
 	await _wait_for(func(): return false, 0.3)
 	_check(app.hud.race_text().begins_with("RACE"), "race mode shows it: '%s'" % app.hud.race_text())
+	app._records = {}
+	app._ghost_key = ""
+	await _wait_for(func(): return false, 0.2)
+	_check(not app.ghost.visible, "no record: no ghost")
 
 	# The stabilized start (#172): under this open-loop boot, a quad file that is its own stabilizer flies stabilized —
 	# Start asks the server for the stabilizer instead of being refused at Load (docs/scripted-flight.md).

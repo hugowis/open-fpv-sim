@@ -29,7 +29,8 @@ What is in it:
   fails safe on a real RX loss (M3c, `docs/research/collision.md` and `docs/research/elrs-link.md`).
 - A world can declare a race course: `[[gates]]` in the world file, with split and lap timing as events, a `race` block
   in the state and a lap line on the HUD (M8a, `docs/race-timing.md`; `worlds/flat.toml` has three gates). A world can
-  also name several courses over its gates, with a time-attack mode (`worlds/park.toml`: "Diamond" and "Hunt").
+  also name several courses over its gates, with a time-attack mode (`worlds/park.toml`: "Diamond" and "Hunt"). The
+  client keeps the fastest clean lap and a translucent best-lap ghost in `user://records.json`.
 - A Python script can fly a path: an opt-in angle-mode stabilizer for open-loop sessions (a test stand-in, not
   Betaflight) and a scripted pilot that flies a lap through the four gates of `worlds/circuit.toml` on it and on real
   Betaflight (M8b, `docs/scripted-flight.md`).

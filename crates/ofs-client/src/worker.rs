@@ -1,5 +1,6 @@
 //! The supervisor task: connects (starting the server when allowed), loads the quad, opens the event stream and
 //! the pilot link, and keeps flying until it is told to reload or quit.
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -17,8 +18,9 @@ use crate::error::{ClientError, ErrorKind};
 use crate::frames::{quat_to_godot, vec_to_godot};
 use crate::fpv::{FieldUniforms, FpvBuffer};
 use crate::interp::{Sample, StateBuffer};
+use crate::lap::{LapCapture, LapTrack, COLLISION_MEMORY};
 use crate::launch::{exited_during_startup, wants_auto_port, ServerProcess};
-use crate::model::{Command, Event, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update, World};
+use crate::model::{Command, Event, EventKind, OsdFrame, OverrunPolicy, Phase, Settings, Sticks, Telemetry, Update, World};
 
 /// The server frees a disconnected pilot's slot asynchronously, so a pilot that reconnects at once (a reload) can
 /// meet `pilot_busy` for a moment.
@@ -40,6 +42,11 @@ pub(crate) struct Shared {
     pub osd_version: AtomicU64,
     pub world: Mutex<Option<World>>,
     pub world_version: AtomicU64,
+    /// The newest clean lap capture nobody has taken (the app replaces it on a faster one).
+    pub lap: Mutex<Option<LapTrack>>,
+    /// Recent collision event times, for the clean-lap veto.
+    pub collisions: Mutex<VecDeque<f64>>,
+    pub lap_capture: Mutex<LapCapture>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -62,6 +69,9 @@ impl Shared {
     fn reset_state(&self) {
         lock(&self.buffer).clear();
         *lock(&self.telemetry) = None;
+        *lock(&self.lap) = None;
+        lock(&self.collisions).clear();
+        *lock(&self.lap_capture) = LapCapture::default();
         self.store_osd(None);
         self.store_world(None);
     }
@@ -92,6 +102,15 @@ impl Shared {
                 att: quat_to_godot(DQuat::from_xyzw(q.x, q.y, q.z, q.w)),
             };
             lock(&self.buffer).push(sample, arrival_s, state.running);
+            let world = lock(&self.world).as_ref().map_or_else(String::new, |w| w.name.clone());
+            let collisions: Vec<f64> = lock(&self.collisions).iter().copied().collect();
+            let track = {
+                let mut capture = lock(&self.lap_capture);
+                capture.ingest(&world, sample, &telemetry.race, &collisions)
+            };
+            if let Some(track) = track {
+                *lock(&self.lap) = Some(track);
+            }
         }
         let v = &telemetry.video;
         // A dropped field holds the previous one, but only a real drop of a transmitting signal: the server
@@ -179,7 +198,15 @@ async fn connect_or_launch(
 fn watch_events(mut stream: tonic::Streaming<pb::Event>, shared: Arc<Shared>) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Ok(Some(event)) = stream.message().await {
-            let _ = shared.updates.send(Update::Event(Event::from_pb(event)));
+            let event = Event::from_pb(event);
+            if event.kind == EventKind::Collision {
+                let mut collisions = lock(&shared.collisions);
+                collisions.push_back(event.time_s);
+                while collisions.len() > COLLISION_MEMORY {
+                    collisions.pop_front();
+                }
+            }
+            let _ = shared.updates.send(Update::Event(event));
         }
     })
 }

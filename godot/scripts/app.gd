@@ -8,6 +8,8 @@ const AppSettings = preload("res://scripts/settings.gd")
 const ControlsMenu = preload("res://ui/controls_menu.gd")
 const MainMenu = preload("res://ui/main_menu.gd")
 const FlightAudio = preload("res://drone/flight_audio.gd")
+const Records = preload("res://scripts/records.gd")
+const Ghost = preload("res://drone/ghost.gd")
 const CONTROLS_PATH := "user://controls.json"
 
 ## What to try, by error kind, shown under the error message.
@@ -55,6 +57,12 @@ var _fpv_render_time := -1.0
 var _world_version := -1
 ## The courses of the world `_process` last fetched, so Shift+N need not rebuild the whole world (a terrain's mesh).
 var _world_courses: Array = []
+var ghost = null
+var _records := {}
+var _records_path := Records.RECORDS_PATH
+var _world_name := ""
+var _ghost_key := ""
+var _race_laps := -1
 
 
 func _ready() -> void:
@@ -76,6 +84,16 @@ func _ready() -> void:
 	var overridden := AppSettings.overrides(AppSettings.read_env(), OS.get_cmdline_user_args())
 	main_menu.setup(settings, overridden)
 	drone.set_quad(settings["quad_path"])
+	ghost = Ghost.new()
+	ghost.name = "Ghost"
+	fpv_viewport.add_child(ghost)
+	ghost.set_quad(settings["quad_path"])
+	ghost.visible = false
+	var records_override := OS.get_environment("OFS_RECORDS")
+	if records_override != "":
+		_records_path = records_override
+	_records = Records.load_records(_records_path)
+	main_menu.set_records(_records)
 	main_menu.choice_changed.connect(_on_setting_changed)
 	main_menu.start_requested.connect(_on_menu_start)
 	main_menu.controls_requested.connect(func() -> void: main_menu.close(); controls_menu.open_from_menu())
@@ -121,9 +139,15 @@ func _start_session(choices := {}) -> void:
 	if session["open_loop"]:
 		session["stabilize"] = true
 	drone.set_quad(session["quad_path"])
+	if ghost != null:
+		ghost.set_quad(session["quad_path"])
+		ghost.visible = false
 	# A new session numbers its worlds from the start, and has no faults or recordings yet.
 	_world_version = -1
 	_world_courses = []
+	_world_name = ""
+	_ghost_key = ""
+	_race_laps = -1
 	_fpv_render_time = -1.0
 	_link_was_lost = false
 	radio_cut = false
@@ -146,6 +170,8 @@ func _show_menu() -> void:
 		_sync_dvr()
 	client.stop()
 	set_process(false)
+	if ghost != null:
+		ghost.visible = false
 	fpv_box.visible = false
 	hud.visible = false
 	main_menu.open()
@@ -241,10 +267,12 @@ func _process(delta: float) -> void:
 	elif client.has_pose():
 		drone.transform = client.get_pose()
 	var world_version: int = client.get_world_version()
-	if world_version != _world_version:
+	var world_changed := world_version != _world_version
+	if world_changed:
 		_world_version = world_version
 		var field: Dictionary = client.get_world()
 		_world_courses = field.get("courses", [])
+		_world_name = field.get("name", "")
 		world.build(field)
 		_pick_course(field)
 	var telemetry: Dictionary = client.get_telemetry()
@@ -257,6 +285,48 @@ func _process(delta: float) -> void:
 	world.set_next_gate(int(telemetry.get("race_next_gate", 0)) if racing else -1)
 	if telemetry.has("motor_rpm"):
 		drone.set_motors(telemetry["motor_rpm"], delta)
+	# Best-lap records and the ghost (#133). The capture is offered while race mode is on, even on the final
+	# (finished) lap; free flight drains and discards it.
+	var in_race: bool = settings["race_start"]
+	var course: String = telemetry.get("race_course", "")
+	var quad_name: String = client.get_quad_name()
+	if in_race and not world_changed:
+		var capture: Dictionary = client.take_lap_capture()
+		if not capture.is_empty():
+			if Records.offer_capture(_records, capture.get("world", _world_name), capture.get("course", course), capture.get("quad", quad_name), capture):
+				Records.save_records(_records, _records_path)
+				main_menu.set_records(_records)
+				hud.add_toast("New best lap %.1f s - the ghost races it" % float(capture.get("lap_s", 0.0)))
+				_ghost_key = ""
+	else:
+		client.take_lap_capture()
+	var laps: int = int(telemetry.get("race_laps", 0))
+	if in_race and not world_changed and laps > _race_laps and laps > 0:
+		Records.record_last(_records, _world_name, course, quad_name, float(telemetry.get("race_last_lap_s", 0.0)))
+		Records.save_records(_records, _records_path)
+		main_menu.set_records(_records)
+	_race_laps = laps
+	var record_best := Records.best_lap_s(_records, _world_name, course, quad_name)
+	if record_best > 0.0:
+		telemetry["race_best_lap_s"] = record_best
+	var race_delta := NAN
+	if ghost != null:
+		var key := "%s|%s|%s" % [_world_name, course, quad_name]
+		if key != _ghost_key:
+			_ghost_key = key
+			ghost.setup(Records.ghost_of(_records, _world_name, course, quad_name))
+		var ghost_visible: bool = in_race and racing and ghost.has_track()
+		ghost.visible = ghost_visible
+		if ghost_visible:
+			var lap_s: float = float(telemetry.get("race_lap_s", 0.0))
+			var drawn_lap_s := lap_s
+			if not chase_view and _fpv_render_time >= 0.0:
+				drawn_lap_s = maxf(lap_s - maxf(float(telemetry.get("time_s", lap_s)) - _fpv_render_time, 0.0), 0.0)
+			if telemetry.get("race_running", false):
+				ghost.transform = ghost.pose_at(drawn_lap_s)
+				race_delta = ghost.delta(drone.transform.origin, drawn_lap_s)
+			else:
+				ghost.transform = ghost.pose_at(0.0)
 	var detail: String = client.get_phase_detail()
 	if client.get_phase() == "failed" and TIPS.has(phase_kind):
 		detail += "\n" + TIPS[phase_kind]
@@ -265,7 +335,7 @@ func _process(delta: float) -> void:
 		"phase": client.get_phase(), "detail": detail, "telemetry": telemetry, "sticks": last_sticks,
 		"controls_status": last_sticks.get("status", ""), "configurator": client.get_configurator_address(),
 		"quad": client.get_quad_name(), "camera": "Chase" if chase_view else "FPV", "radio_cut": radio_cut,
-		"recording_inputs": inputs_recording,
+		"recording_inputs": inputs_recording, "race_delta": race_delta,
 	})
 
 
@@ -469,6 +539,10 @@ func _on_phase_changed(phase: String, detail: String, kind: String) -> void:
 		_link_was_lost = false
 		osd.set_frame({})
 		_fpv_render_time = -1.0
+		_race_laps = -1
+		_ghost_key = ""
+		if ghost != null:
+			ghost.visible = false
 	if phase == "failed":
 		hud.add_toast("Failed: %s" % detail.get_slice("\n", 0), "error")
 

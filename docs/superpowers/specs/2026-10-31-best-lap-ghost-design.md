@@ -106,3 +106,37 @@ and reset hiding the ghost. The e2e suites must pass unchanged (no records file 
 PR #169 (terrain, protocol 15 → 16) is open and unmerged: nothing here touches the wire or the world pipeline, so
 the two land in either order; the executor re-verifies `PROTOCOL_VERSION` (15 at `ofs-proto/src/lib.rs:12`) and
 rebases only for context. The B6 sweep (`b37aae5`) moved `worker.rs`'s `connect_or_launch`, not `ingest`.
+
+## Refresh 2026-11-18 (binding amendments)
+
+The design was written before `main` reached protocol 18 and before the current drift test data was in place. These
+amendments settle the two defects the implementation review found; the ten calls stand otherwise.
+
+1. **Call 2 — the fastest clean lap, not the session best.** The server's `best_lap_s` can be a dirty lap. The
+   capture keeps its own `best_clean_s`: on every completed lap (`race.laps` rose), when no collision time lies in
+   `[now - lap_s, now]`, the lap replaces the session's best clean lap when `best_clean_s` is absent or `lap_s` is
+   strictly smaller. A dirty session best never blocks a slower clean lap. A reset (`!race.running` with 0 laps,
+   `laps` below the previous value, or a course switch) clears `best_clean_s` and the pose window; a faster lap
+   lowers the server's `best_lap_s` legitimately, so that alone is not a reset.
+2. **Call 3 — a late collision event still vetoes.** The candidate is held for one further state before it is
+   returned, so a collision event that arrives after the completing state is seen in the next `ingest`'s collision
+   list. The residual (an event delayed by more than one state) is a known limit; the collision memory holds 8
+   times.
+3. **Call 7 — the ghost runs on the drawn lap time.** The drone is drawn at the video-delayed pose, so the ghost's
+   time is `race_lap_s - (telemetry.time_s - fpv.render_time_s)`, clamped to 0, not the newest `race_lap_s`. The
+   chase camera draws the same delayed drone, so it uses the same time. Before the clock runs the ghost sits at
+   the track's start; past its finish it parks at the end.
+4. **Call 8 — the delta uses the drawn time too.** `delta = drawn_lap_s - ghost_time_at_the_nearest_stored_pose`
+   to the drawn drone position; the same windowed search and `NAN` without a track.
+5. **Call 9 — the record is the HUD's BEST whenever it exists.** A record's best is the lap the ghost races;
+   the session's `best_lap_s` may be dirty. The HUD's BEST is the record best when a record exists for the
+   world/course/quad, otherwise the session best. The last lap is the session's last (a fact, not a judgement).
+6. **Call 10 — the app gates; Rust stays passive.** The Rust capture only buffers a running race. `app.gd` drains
+   `take_lap_capture()` and hides the ghost whenever `settings["race_start"]` is off or `racing` is false, so
+   free flight and the menu-less e2e see nothing new. The e2e clears the app's records store (or uses a test-only
+   records path) so a developer's `user://records.json` cannot make a ghost appear.
+7. **Call 5 — atomic records.** `records.json` is written to a temp path and renamed over the old file, so a crash
+   cannot truncate every record. A file that does not parse is still kept and the store starts empty.
+8. **Call 6 — the menu's Default course is the world's `default_course`**, which `[race] course` may set to a
+   course other than the first; only when it is empty does the first declared course (or the implicit course)
+   apply.

@@ -30,14 +30,29 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
   preview (its plan's Task 5).
 - world-rendering: the five moods in both cameras, the world reading under link breakup, the metre grid at 30+ m,
   the quality tiers differing and low holding the frame rate (its plan's Task 4).
-- best-lap-ghost: the ghost through the analog chain, the new-best toast firing once, **N** mid-lap parking the
-  ghost at the start (its plan's Manual QA).
+- best-lap-ghost: the full #133 pass below (the ghost in both cameras and the analog chain, the record/delta, the
+  new-best toast, **N** parking the ghost, a dirty lap not captured, free flight silent).
 - workbench: the screen's look and gamepad navigation, the `~` estimate at a glance, an assembly flying with
   Betaflight (its plan's Task 7).
 - tour: a clean `user://` first run, the ten steps end to end on a real controller, both replays (its plan's
   Task 6 and the spec's checked-by-eye list).
 - school: the progress numbers reading as teaching, the pylons against the circuit field, a demo flown end to
   end, a Betaflight arm on a real switch, the hover's difficulty (its plan's Task 10 and the spec's list).
+
+## The best-lap ghost and local records (#133) — before it merges
+
+- **Fly a stored record in a race** (e.g. `park`'s "Diamond"): the translucent ghost is visible in the chase camera
+  and, crossing it in the FPV view, through the analog chain (noise/breakup, never a clean overlay); the HUD's BEST
+  is the record and the tail is the live delta (`-0.8` ahead, `+1.2` behind).
+- **Beat the record cleanly**: the "New best lap … the ghost races it" toast fires once, the ghost becomes the new
+  lap at the next start, and the main menu's records line shows the new best/last after returning.
+- **Reset mid-lap (N)**: the ghost snaps to the start gate and waits; the delta disappears until the clock runs again.
+- **Crash a lap**: it is not captured; a later slower clean lap can still become the record (a dirty session best must
+  not block it).
+- **Free flight (race off)**: no ghost, no delta, no record; the file `user://records.json` keeps earlier sessions.
+- **Look at the ghost**: translucent white, no opaque blade or disc, props idling; in both cameras and the DVR.
+- **The menu's Default course**: a world whose `[race] course` names a non-first course shows the record under that
+  course (the mentor fixture `park` has "Diamond" and "Hunt").
 
 ## The Consequence-completion plan set — before it merges
 

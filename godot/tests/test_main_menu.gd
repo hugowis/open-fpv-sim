@@ -25,6 +25,8 @@ func _menu(overrides := {}, locks := {}) -> Array:
 		_remove(DIR)
 	_write(DIR + "/data/worlds/zz-course.toml", "name = \"Zz course\"\n[[gates]]\nname = \"G0\"\n")
 	_write(DIR + "/data/worlds/zz-field.toml", "name = \"Zz field\"\n")
+	_write(DIR + "/data/worlds/zz-two.toml", "name = \"Zz two courses\"\n[[gates]]\nname = \"G0\"\n[[gates]]\nname = \"G1\"\n[[courses]]\nname = \"Diamond\"\ngates = [\"G0\"]\n[[courses]]\nname = \"Hunt\"\ngates = [\"G0\", \"G1\"]\n[race]\ncourse = \"Hunt\"\n")
+	_write(DIR + "/data/worlds/zz-nocourse.toml", "name = \"Zz no course\"\n[[gates]]\nname = \"G0\"\n[[courses]]\nname = \"Diamond\"\ngates = [\"G0\"]\n[[courses]]\nname = \"Hunt\"\ngates = [\"G0\"]\n")
 	_write(DIR + "/data/quads/zz-a.toml", "name = \"Zz quad A\"\n")
 	_write(DIR + "/data/quads/zz-b.toml", "name = \"Zz quad B\"\n")
 	var settings := AppSettings.defaults()
@@ -159,4 +161,44 @@ func test_the_menu_previews_the_selected_quad_and_the_choice_still_emits() -> vo
 	menu.row("quad").changed.emit(DIR + "/data/quads/zz-b.toml")
 	eq(m[2].count(["quad_path", DIR + "/data/quads/zz-b.toml"]), 1, "the quad choice still emits once")
 	ok(menu.preview().model() != null, "the preview survives a quad change")
+	menu.free()
+
+
+func test_the_records_line_shows_the_best_and_last_for_the_chosen_key() -> void:
+	var m := await _menu({"world_path": DIR + "/data/worlds/zz-two.toml"})
+	var menu = m[0]
+	var store := {"version": 1, "worlds": {"Zz two courses": {"Hunt": {"Zz quad A": {"best_lap_s": 29.9, "last_lap_s": 31.2}}}}}
+	menu.set_records(store)
+	eq(menu.records_text(), "Best 29.9 s   Last 31.2 s", "the chosen world, default course and quad")
+	menu.row("quad").set_value(DIR + "/data/quads/zz-b.toml")
+	menu.row("quad").changed.emit(DIR + "/data/quads/zz-b.toml")
+	ok(not menu.row("records").visible, "another quad has no record")
+	menu.free()
+
+
+func test_the_default_course_is_the_race_default_else_the_first() -> void:
+	var m := await _menu({"world_path": DIR + "/data/worlds/zz-two.toml"})
+	var menu = m[0]
+	var store := {"version": 1, "worlds": {"Zz two courses": {
+		"Hunt": {"Zz quad A": {"best_lap_s": 29.9, "last_lap_s": 31.2}},
+		"Diamond": {"Zz quad A": {"best_lap_s": 40.0, "last_lap_s": 41.0}}}}}
+	menu.set_records(store)
+	eq(menu.records_text(), "Best 29.9 s   Last 31.2 s", "the [race] default (Hunt), not the first (Diamond)")
+	menu.free()
+	var m2 := await _menu({"world_path": DIR + "/data/worlds/zz-nocourse.toml"})
+	var menu2 = m2[0]
+	var store2 := {"version": 1, "worlds": {"Zz no course": {
+		"Diamond": {"Zz quad A": {"best_lap_s": 28.0, "last_lap_s": 30.0}},
+		"Hunt": {"Zz quad A": {"best_lap_s": 40.0, "last_lap_s": 41.0}}}}}
+	menu2.set_records(store2)
+	eq(menu2.records_text(), "Best 28.0 s   Last 30.0 s", "no [race] course: the first declared")
+	menu2.free()
+
+
+func test_a_world_without_courses_uses_the_empty_course_key() -> void:
+	var m := await _menu()
+	var menu = m[0]
+	var store := {"version": 1, "worlds": {"Zz field": {"": {"Zz quad A": {"best_lap_s": 27.0, "last_lap_s": 29.0}}}}}
+	menu.set_records(store)
+	eq(menu.records_text(), "Best 27.0 s   Last 29.0 s", "the implicit course key")
 	menu.free()

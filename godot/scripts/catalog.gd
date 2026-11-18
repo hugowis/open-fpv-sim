@@ -45,12 +45,13 @@ static func index_of(items: Array, path: String) -> int:
 	return 0
 
 
-## One file: its top-level `name = "..."` (else the file name), how many `[[gates]]` it declares and the names of its
-## `[[courses]]` in file order.
+## One file: its top-level `name = "..."` (else the file name), how many `[[gates]]` it declares, the names of its
+## `[[courses]]` in file order and the `[race] course` default (a name, empty when absent).
 static func entry(path: String) -> Dictionary:
 	var label := path.get_file().get_basename()
 	var gates := 0
 	var courses := []
+	var default_course := ""
 	var table := ""
 	for line in FileAccess.get_file_as_string(path).split("\n"):
 		var t := line.strip_edges()
@@ -66,7 +67,9 @@ static func entry(path: String) -> Dictionary:
 					label = named
 				else:
 					courses.append(named)
-	return {"path": path, "label": label, "gates": gates, "courses": courses}
+		elif table == "[race]" and t.contains("=") and t.split("=", true, 1)[0].strip_edges() == "course":
+			default_course = t.split("=", true, 1)[1].strip_edges().trim_prefix("\"").get_slice("\"", 0)
+	return {"path": path, "label": label, "gates": gates, "courses": courses, "default_course": default_course}
 
 
 ## The quad file's `[fc] kind` ("sitl", "open_loop", "open_loop_stabilized"; "" without a `[fc]` or when the file
