@@ -46,33 +46,83 @@ fn export_frames_with(avi: &Path, write: &mut dyn FnMut(&Path, &[u8]) -> std::io
     let mut made = false;
     let mut count = 0u64;
     let mut chunk_head = [0u8; 8];
+    let mut form = [0u8; 4];
     let result = (|| {
         while pos + 8 <= len {
             input.read_exact(&mut chunk_head).map_err(name)?;
             let size = u32::from_le_bytes(chunk_head[4..].try_into().unwrap()) as u64;
-            if &chunk_head[..4] == b"idx1" || pos + 8 + size > len {
-                break;
-            }
-            if &chunk_head[..4] == b"00dc" {
-                let mut jpeg = vec![0u8; size as usize];
-                input.read_exact(&mut jpeg).map_err(name)?;
-                if !made {
-                    std::fs::create_dir(&dir).map_err(|e| match e.kind() {
-                        std::io::ErrorKind::AlreadyExists => {
-                            format!("{} already exists: an export never overwrites another", dir.display())
+            match &chunk_head[..4] {
+                [b'R', b'I', b'F', b'F'] => {
+                    if pos + 12 > len {
+                        break;
+                    }
+                    input.read_exact(&mut form).map_err(name)?;
+                    if &form == b"AVI " || &form == b"AVIX" {
+                        pos += 12; // enter the segment; its frames follow
+                    } else {
+                        if size < 4 {
+                            break;
                         }
-                        _ => format!("{}: {e}", dir.display()),
-                    })?;
-                    made = true;
+                        input.seek_relative(size as i64 - 4).map_err(name)?;
+                        input.seek_relative((size & 1) as i64).map_err(name)?;
+                        pos += 8 + size + (size & 1);
+                    }
                 }
-                count += 1;
-                let path = dir.join(format!("frame_{count:06}.jpg"));
-                write(&path, &jpeg).map_err(|e| format!("{}: {e}", path.display()))?;
-            } else {
-                input.seek_relative(size as i64).map_err(name)?;
+                [b'L', b'I', b'S', b'T'] => {
+                    if pos + 12 > len {
+                        break;
+                    }
+                    input.read_exact(&mut form).map_err(name)?;
+                    if &form == b"movi" {
+                        pos += 12; // the frames start here
+                    } else {
+                        if size < 4 {
+                            break;
+                        }
+                        input.seek_relative(size as i64 - 4).map_err(name)?;
+                        input.seek_relative((size & 1) as i64).map_err(name)?;
+                        pos += 8 + size + (size & 1);
+                    }
+                }
+                [b'i', b'd', b'x', b'1'] => {
+                    // A segment's index; the next RIFF/AVIX follows it.
+                    if pos + 8 + size > len {
+                        break;
+                    }
+                    input.seek_relative(size as i64).map_err(name)?;
+                    input.seek_relative((size & 1) as i64).map_err(name)?;
+                    pos += 8 + size + (size & 1);
+                }
+                [b'0', b'0', b'd', b'c'] => {
+                    if pos + 8 + size > len {
+                        break;
+                    }
+                    let mut jpeg = vec![0u8; size as usize];
+                    input.read_exact(&mut jpeg).map_err(name)?;
+                    if !made {
+                        std::fs::create_dir(&dir).map_err(|e| match e.kind() {
+                            std::io::ErrorKind::AlreadyExists => {
+                                format!("{} already exists: an export never overwrites another", dir.display())
+                            }
+                            _ => format!("{}: {e}", dir.display()),
+                        })?;
+                        made = true;
+                    }
+                    count += 1;
+                    let path = dir.join(format!("frame_{count:06}.jpg"));
+                    write(&path, &jpeg).map_err(|e| format!("{}: {e}", path.display()))?;
+                    input.seek_relative((size & 1) as i64).map_err(name)?;
+                    pos += 8 + size + (size & 1);
+                }
+                _ => {
+                    if pos + 8 + size > len {
+                        break;
+                    }
+                    input.seek_relative(size as i64).map_err(name)?;
+                    input.seek_relative((size & 1) as i64).map_err(name)?; // chunks are padded to even sizes
+                    pos += 8 + size + (size & 1);
+                }
             }
-            input.seek_relative((size & 1) as i64).map_err(name)?; // chunks are padded to even sizes
-            pos += 8 + size + (size & 1);
         }
         if count == 0 {
             return Err(format!("{} holds no frames", avi.display()));
@@ -302,5 +352,22 @@ mod tests {
         assert!(err.contains("disk full"), "{err}");
         assert!(!dir.join("rec_frames").exists(), "the half-made directory is removed");
         assert!(avi.exists());
+    }
+
+    #[test]
+    fn a_multi_segment_recording_exports_every_frame() {
+        let dir = std::env::temp_dir().join(format!("ofs-dvr-export-multisegment-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let avi = dir.join("rec.avi");
+        let frames: Vec<Vec<u8>> = (0..7u8).map(|i| vec![i; 50]).collect();
+        crate::dvr::write_test_recording(&avi, &frames, 512);
+        let (out, count) = export_frames(&avi).unwrap();
+        assert_eq!(count, 7, "every segment's frames are exported");
+        for (i, frame) in frames.iter().enumerate() {
+            let path = out.join(format!("frame_{:06}.jpg", i + 1));
+            assert_eq!(&std::fs::read(path).unwrap(), frame, "frame {}", i + 1);
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

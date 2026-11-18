@@ -366,6 +366,21 @@ impl Drop for DvrWriter {
     }
 }
 
+/// A tiny multi-segment recording for the export tests.
+#[cfg(test)]
+pub(crate) fn write_test_recording(path: &std::path::Path, frames: &[Vec<u8>], segment_bytes: u64) -> DvrSummary {
+    let file = File::create_new(path).expect("the fixture file");
+    let header = Header { microsec_per_frame: 20_000, fps: 50, width: 4, height: 2 };
+    let (tx, rx) = sync_channel(64);
+    let truncated = std::sync::atomic::AtomicBool::new(false);
+    let handle = std::thread::spawn(move || writer_with_limit(file, header, rx, segment_bytes, MAX_DVR_BYTES, &truncated));
+    for frame in frames {
+        tx.send(frame.clone()).expect("the fixture frame");
+    }
+    drop(tx);
+    handle.join().expect("the fixture writer").expect("the fixture summary")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

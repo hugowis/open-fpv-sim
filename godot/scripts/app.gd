@@ -374,7 +374,7 @@ func _stop_dvr(chase: bool) -> void:
 		hud.add_toast("DVR failed: the writer stopped abnormally%s" % (" (the chase camera is not recorded)" if chase else ""), "error")
 		return
 	var saved := "%d frames saved" % summary.get("frames", 0)
-	var limit := " (stopped at the 4 GiB AVI limit)" if summary.get("truncated", false) else ""
+	var limit := " (recording stopped at the size limit)" if summary.get("truncated", false) else ""
 	if chase:
 		hud.add_toast("DVR stopped: the chase camera is not recorded (%s)%s%s" % [saved, _dvr_drop_note(summary), limit], "warn")
 	else:
@@ -388,7 +388,7 @@ func _stop_dvr(chase: bool) -> void:
 			hud.add_toast("DVR export failed: %s" % error, "warn")
 
 
-## Stops a recording whose writer hit the 4 GiB AVI limit; the toast in `_stop_dvr` says why.
+## Stops a recording whose writer hit the recording size limit; the toast in `_stop_dvr` says why.
 func _poll_dvr_limit() -> void:
 	if dvr.recording and dvr.truncated():
 		_stop_dvr(false)
