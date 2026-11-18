@@ -47,11 +47,25 @@ func _sticks(throttle: float, armed: bool) -> Dictionary:
 	return {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": throttle, "aux": [1.0 if armed else -1.0, 1.0, -1.0, -1.0], "status": ""}
 
 
+## How many cells of an OSD frame carry an HD system marker (`sys` = element + 1, 0 for text).
+func _sys_cells(frame: Dictionary) -> int:
+	var count := 0
+	for packed in frame.get("cells", PackedInt32Array()):
+		if ((packed >> 11) & 0x1F) != 0:
+			count += 1
+	return count
+
+
 func _run() -> void:
 	if not OS.has_environment("OFS_SITL_LAUNCH"):
 		print("SKIP: OFS_SITL_LAUNCH is not set, so there is no Betaflight SITL to fly")
 		quit(0)
 		return
+	var repo: String = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+	# The test's own choices, not the developer's user://ofs_client.cfg (open-loop, another worktree's quad or world).
+	OS.set_environment("OFS_OPEN_LOOP", "0")
+	OS.set_environment("OFS_QUAD", repo.path_join("quads").path_join("opendrone-5f-freestyle.toml"))
+	OS.set_environment("OFS_WORLD", repo.path_join("worlds").path_join("flat.toml"))
 	OS.set_environment("OFS_MENU", "off")
 	OS.set_environment("OFS_SERVER_ADDR", "127.0.0.1:%d" % _free_port())
 	OS.set_environment("OFS_DATA_DIR", OS.get_user_data_dir().path_join("e2e-betaflight-data"))
@@ -131,6 +145,23 @@ func _run() -> void:
 	app.sticks_override = _sticks(0.0, true)
 	var armed_again: bool = await _wait_for(func(): return app.client.get_telemetry().get("motors_spinning", false), 10.0)
 	_check(rearmed_ok and armed_again, "and it arms again")
+
+	# The shipped HD quad (#32): Esc ends the SD flight, Start flies the HD quad in the same process.
+	_press(app, KEY_ESCAPE)
+	app.settings["quad_path"] = repo.path_join("quads").path_join("opendrone-5f-hd.toml")
+	app.main_menu.open()
+	app.main_menu.row("start").pressed.emit()
+	var hd_flying: bool = await _wait_for(func(): return app.client.get_phase() == "flying", 90.0)
+	_check(hd_flying, "the HD quad starts: %s %s" % [app.client.get_phase(), app.client.get_phase_detail()])
+	var hd_grid: bool = await _wait_for(func():
+		var o: Dictionary = app.client.get_osd()
+		return bool(o.get("present", false)) and o.get("cols", 0) == 53 and o.get("rows", 0) == 20 and _sys_cells(o) >= 11, 30.0)
+	_check(hd_grid, "its OSD is a 53 x 20 grid with the eleven SYS markers")
+	var hd_frame: Dictionary = app.client.get_osd()
+	_check(_sys_cells(hd_frame) >= 11, "the eleven SYS markers are on it: %d" % _sys_cells(hd_frame))
+	var delay_text: String = app.osd.sys_text(4)
+	_check(delay_text.begins_with("DLY ") and not delay_text.ends_with("--"), "the delay value is live: %s" % delay_text)
+	_check(app.osd.sys_text(1) == "GVOLT --", "an unmodelled value is dashed: %s" % app.osd.sys_text(1))
 
 	app.queue_free()
 	await process_frame
