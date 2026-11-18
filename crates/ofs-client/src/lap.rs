@@ -72,16 +72,20 @@ impl LapCapture {
         }
 
         // A completed lap: the state's laps rose. The frame is the crossing, so its pose is not in the buffer yet.
+        // A lap longer than the session clock (or a non-finite one) is a bad state, not a record: it would otherwise
+        // become an unbeatable entry in the durable file.
         if race.laps > self.prev_laps && race.last_lap_s > 0.0 {
             let lap_s = race.last_lap_s;
-            let window_start = sample.sim_time_s - lap_s;
-            let clean = !collisions.iter().any(|&t| t >= window_start && t <= sample.sim_time_s);
-            let faster = self.best_clean_s.is_none_or(|best| lap_s < best);
-            if clean && faster {
-                if let Some(track) = self.track(world, race, lap_s, window_start) {
-                    let previous_best = self.best_clean_s;
-                    self.best_clean_s = Some(lap_s);
-                    self.pending = Some(Pending { track, end_s: sample.sim_time_s, previous_best });
+            if lap_s.is_finite() && lap_s <= sample.sim_time_s {
+                let window_start = sample.sim_time_s - lap_s;
+                let clean = !collisions.iter().any(|&t| t >= window_start && t <= sample.sim_time_s);
+                let faster = self.best_clean_s.is_none_or(|best| lap_s < best);
+                if clean && faster {
+                    if let Some(track) = self.track(world, race, lap_s, window_start) {
+                        let previous_best = self.best_clean_s;
+                        self.best_clean_s = Some(lap_s);
+                        self.pending = Some(Pending { track, end_s: sample.sim_time_s, previous_best });
+                    }
                 }
             }
         }
@@ -339,6 +343,17 @@ mod tests {
         capture.ingest(WORLD, state(10.0, 10.0), &race(1, true, 0.0, 10.0, 10.0), &[]);
         let track = capture.ingest(WORLD, state(10.0 + DT, 10.1), &race(1, true, DT, 10.0, 10.0), &[]).unwrap();
         assert_eq!(track.world, WORLD);
+    }
+
+    #[test]
+    fn a_non_finite_or_impossible_lap_is_ignored() {
+        for bad in [f64::NAN, f64::INFINITY, 1.0e9] {
+            let mut capture = LapCapture::default();
+            feed(&mut capture, 0.0, 10.0 - DT);
+            assert!(capture.ingest(WORLD, state(10.0, 10.0), &race(1, true, 0.0, bad, bad), &[]).is_none());
+            assert!(capture.ingest(WORLD, state(10.0 + DT, 10.1), &race(1, true, DT, bad, bad), &[]).is_none());
+            assert_eq!(capture.best_clean_s, None, "{bad}");
+        }
     }
 
     #[test]

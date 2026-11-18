@@ -11,7 +11,8 @@ var _times := PackedFloat32Array()
 var _positions := PackedFloat32Array()
 var _rotations := PackedFloat32Array()
 var _cursor := 0
-var _median_step := 1.0 / 60.0
+var _pose_cursor := 0
+var _step_s := 1.0 / 60.0
 
 
 func _ready() -> void:
@@ -32,14 +33,15 @@ func setup(track: Dictionary) -> void:
 	_positions = _packed(track.get("positions", []))
 	_rotations = _packed(track.get("rotations", []))
 	_cursor = 0
-	_median_step = 1.0 / 60.0
+	_pose_cursor = 0
+	_step_s = 1.0 / 60.0
 	if _times.size() < 2 or _positions.size() != _times.size() * 3 or _rotations.size() != _times.size() * 4:
 		_times = PackedFloat32Array()
 		_positions = PackedFloat32Array()
 		_rotations = PackedFloat32Array()
 		return
 	var span := maxf(_times[_times.size() - 1] - _times[0], 0.001)
-	_median_step = span / float(_times.size() - 1)
+	_step_s = span / float(_times.size() - 1)
 
 
 func has_track() -> bool:
@@ -51,9 +53,11 @@ func pose_at(lap_s: float) -> Transform3D:
 	if not has_track():
 		return Transform3D.IDENTITY
 	var t := clampf(lap_s, _times[0], _times[_times.size() - 1])
-	var i := 0
-	while i + 1 < _times.size() and _times[i + 1] < t:
-		i += 1
+	if _pose_cursor >= _times.size() - 1 or t < _times[_pose_cursor]:
+		_pose_cursor = 0
+	while _pose_cursor + 1 < _times.size() and _times[_pose_cursor + 1] < t:
+		_pose_cursor += 1
+	var i := _pose_cursor
 	var j := mini(i + 1, _times.size() - 1)
 	var span := _times[j] - _times[i]
 	var f := 0.0 if span <= 0.0 else (t - _times[i]) / span
@@ -66,9 +70,18 @@ func pose_at(lap_s: float) -> Transform3D:
 func delta(pilot: Vector3, lap_s: float) -> float:
 	if not has_track():
 		return NAN
-	var span := int(ceil(WINDOW_S / _median_step))
+	var span := int(ceil(WINDOW_S / _step_s))
 	var lo := maxi(_cursor - span, 0)
 	var hi := mini(_cursor + span, _times.size() - 1)
+	var best := _nearest(lo, hi, pilot)
+	# A parked cursor (a crash or a cut far along the line) must not hide the true nearest point: widen once.
+	if best == lo or best == hi:
+		best = _nearest(0, _times.size() - 1, pilot)
+	_cursor = best
+	return lap_s - _times[best]
+
+
+func _nearest(lo: int, hi: int, pilot: Vector3) -> int:
 	var best := lo
 	var best_distance := INF
 	for i in range(lo, hi + 1):
@@ -76,8 +89,7 @@ func delta(pilot: Vector3, lap_s: float) -> float:
 		if distance < best_distance:
 			best_distance = distance
 			best = i
-	_cursor = best
-	return lap_s - _times[best]
+	return best
 
 
 func _position(i: int) -> Vector3:

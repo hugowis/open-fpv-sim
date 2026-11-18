@@ -59,6 +59,7 @@ var _world_version := -1
 var _world_courses: Array = []
 var ghost = null
 var _records := {}
+var _records_path := Records.RECORDS_PATH
 var _world_name := ""
 var _ghost_key := ""
 var _race_laps := -1
@@ -88,7 +89,10 @@ func _ready() -> void:
 	fpv_viewport.add_child(ghost)
 	ghost.set_quad(settings["quad_path"])
 	ghost.visible = false
-	_records = Records.load_records()
+	var records_override := OS.get_environment("OFS_RECORDS")
+	if records_override != "":
+		_records_path = records_override
+	_records = Records.load_records(_records_path)
 	main_menu.set_records(_records)
 	main_menu.choice_changed.connect(_on_setting_changed)
 	main_menu.start_requested.connect(_on_menu_start)
@@ -263,7 +267,8 @@ func _process(delta: float) -> void:
 	elif client.has_pose():
 		drone.transform = client.get_pose()
 	var world_version: int = client.get_world_version()
-	if world_version != _world_version:
+	var world_changed := world_version != _world_version
+	if world_changed:
 		_world_version = world_version
 		var field: Dictionary = client.get_world()
 		_world_courses = field.get("courses", [])
@@ -285,20 +290,20 @@ func _process(delta: float) -> void:
 	var in_race: bool = settings["race_start"]
 	var course: String = telemetry.get("race_course", "")
 	var quad_name: String = client.get_quad_name()
-	if in_race:
+	if in_race and not world_changed:
 		var capture: Dictionary = client.take_lap_capture()
 		if not capture.is_empty():
 			if Records.offer_capture(_records, capture.get("world", _world_name), capture.get("course", course), capture.get("quad", quad_name), capture):
-				Records.save_records(_records)
+				Records.save_records(_records, _records_path)
 				main_menu.set_records(_records)
-				hud.add_toast("New best lap %.3f s - the ghost races it" % float(capture.get("lap_s", 0.0)))
+				hud.add_toast("New best lap %.1f s - the ghost races it" % float(capture.get("lap_s", 0.0)))
 				_ghost_key = ""
 	else:
 		client.take_lap_capture()
 	var laps: int = int(telemetry.get("race_laps", 0))
-	if in_race and laps > _race_laps and laps > 0:
+	if in_race and not world_changed and laps > _race_laps and laps > 0:
 		Records.record_last(_records, _world_name, course, quad_name, float(telemetry.get("race_last_lap_s", 0.0)))
-		Records.save_records(_records)
+		Records.save_records(_records, _records_path)
 		main_menu.set_records(_records)
 	_race_laps = laps
 	var record_best := Records.best_lap_s(_records, _world_name, course, quad_name)

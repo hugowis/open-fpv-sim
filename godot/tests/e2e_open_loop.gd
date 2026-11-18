@@ -9,6 +9,9 @@ var failures := 0
 
 
 func _initialize() -> void:
+	# The e2e never reads or writes the developer's real records.
+	OS.set_environment("OFS_RECORDS", "user://e2e-records.json")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://e2e-records.json"))
 	_run()
 
 

@@ -71,16 +71,38 @@ func test_an_empty_track_clears() -> void:
 	ghost.free()
 
 
+func _long_track() -> Dictionary:
+	var times := PackedFloat32Array()
+	var positions := PackedFloat32Array()
+	var rotations := PackedFloat32Array()
+	for i in 600:
+		times.append(i * 0.1)
+		positions.append_array(PackedFloat32Array([float(i), 0.0, 0.0]))
+		rotations.append_array(PackedFloat32Array([0.0, 0.0, 0.0, 1.0]))
+	return {"times": times, "positions": positions, "rotations": rotations}
+
+
+func test_delta_widens_to_the_true_nearest_when_the_cursor_is_parked() -> void:
+	var ghost = Ghost.new()
+	ghost.setup(_long_track())
+	near(ghost.delta(Vector3(400.0, 0.0, 0.0), 40.0), 0.0, "the nearest sample, not the window edge", 0.001)
+	ghost.free()
+
+
 func test_the_model_is_translucent() -> void:
 	var ghost = Ghost.new()
 	await add_to_tree(ghost)
 	ghost.setup(_track())
 	var meshes := ghost.find_children("*", "MeshInstance3D", true, false)
 	ok(not meshes.is_empty(), "the model has meshes")
+	var shared = null
 	for mesh in meshes:
 		var material = (mesh as MeshInstance3D).material_override
 		ok(material is StandardMaterial3D, "a material override")
 		if material is StandardMaterial3D:
+			if shared == null:
+				shared = material
+			ok(is_same(material, shared), "the same ghost material, discs included")
+			near(material.albedo_color.a, 0.35, "the ghost alpha", 0.001)
 			ok(material.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED, "alpha")
-			ok(material.albedo_color.a < 1.0, "translucent")
 	ghost.queue_free()
