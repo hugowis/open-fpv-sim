@@ -230,3 +230,16 @@ func test_the_battery_line_shows_betaflight_while_fresh_and_dashes_when_stale() 
 	hud.update_view(_view({"telemetry": _telemetry({"fc_telemetry_age_s": INF})}))
 	eq(hud.battery_text(), "-- V   -- A   --", "never arrived (open loop): dashes")
 	hud.queue_free()
+
+
+func test_the_delta_rides_the_lap_line() -> void:
+	var hud := await _hud()
+	var second := _telemetry({"race_present": true, "race_running": true, "race_gate_count": 5, "race_next_gate": 0, "race_laps": 1,
+		"race_lap_s": 75.3, "race_last_lap_s": 31.2, "race_best_lap_s": 29.9})
+	hud.update_view(_view({"telemetry": second, "race_delta": -0.84}))
+	eq(hud.race_text(), "LAP 2   NEXT START   1:15.3   LAST 31.2   BEST 29.9   -0.8", "ahead of the ghost")
+	hud.update_view(_view({"telemetry": second, "race_delta": 1.3}))
+	eq(hud.race_text(), "LAP 2   NEXT START   1:15.3   LAST 31.2   BEST 29.9   +1.3", "behind the ghost")
+	hud.update_view(_view({"telemetry": second}))
+	eq(hud.race_text(), "LAP 2   NEXT START   1:15.3   LAST 31.2   BEST 29.9", "no delta, no tail")
+	hud.queue_free()
