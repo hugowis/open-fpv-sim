@@ -12,9 +12,12 @@ const BLINK_HALF_PERIOD_S := 0.5
 ## default face (page 0) and the bold one (page 1), so a WARNING and a CRITICAL draw bold, in amber and in red.
 const WARNING_TINT := Color(1.0, 0.72, 0.1)
 const CRITICAL_TINT := Color(1.0, 0.25, 0.25)
+## The HD SYS markers, in `displayPortSystemElement_e` order; each draws its label and value at its cell.
+const SYS_LABELS := ["GVOLT", "VVTX", "BRATE", "DLY", "DIST", "LQ", "GDVR", "VDVR", "WARN", "VTEMP", "FAN"]
 
 var _canvas := Control.new()
 var _frame: Dictionary = {}
+var _environment: Dictionary = {}
 var _enabled := true
 var _blink_on := true
 var _blink_clock := 0.0
@@ -42,6 +45,36 @@ func set_frame(frame: Dictionary) -> void:
 func set_enabled(enabled: bool) -> void:
 	_enabled = enabled
 	_canvas.queue_redraw()
+
+
+## The values the SYS markers read: `{latency_ms, pilot: Vector3, position: Vector3, lq_pct: float, dvr: bool}`.
+## A key that is absent renders as `--`.
+func set_environment(values: Dictionary) -> void:
+	_environment = values
+	_canvas.queue_redraw()
+
+
+## The text of a SYS marker: its label and value, or `--` when the simulator has no model for it.
+func sys_text(sys: int) -> String:
+	var label: String = SYS_LABELS[sys - 1] if sys >= 1 and sys <= SYS_LABELS.size() else "SYS %d" % (sys - 1)
+	return "%s %s" % [label, _sys_value(sys)]
+
+
+func _sys_value(sys: int) -> String:
+	match sys:
+		4:
+			if _environment.has("latency_ms"):
+				return "%dms" % int(_environment["latency_ms"])
+		5:
+			if _environment.has("pilot") and _environment.has("position"):
+				return "%dm" % int((_environment["pilot"] as Vector3).distance_to(_environment["position"]))
+		6:
+			if _environment.has("lq_pct"):
+				return "%d%%" % int(round(float(_environment["lq_pct"])))
+		7:
+			if _environment.has("dvr"):
+				return "REC" if _environment["dvr"] else "OFF"
+	return "--"
 
 
 ## True when there is an OSD to see: enabled, a frame the simulator marks present, and a grid.
@@ -102,7 +135,7 @@ func drawn_cell_count() -> int:
 
 
 func _is_drawn(packed: int) -> bool:
-	if (packed & 0xFF) == 0x20:
+	if (packed & 0xFF) == 0x20 and ((packed >> 11) & 0x1F) == 0:
 		return false
 	return _blink_on or ((packed >> 10) & 1) == 0
 
@@ -121,5 +154,12 @@ func _draw_grid() -> void:
 		for col in cols:
 			var packed := cells[row * cols + col]
 			if _is_drawn(packed):
-				var page := (packed >> 8) & 0x3
-				_canvas.draw_texture_rect_region(FONT, Rect2(box.position + Vector2(col, row) * cell_size, cell_size), glyph_rect(page, packed & 0xFF), glyph_tint(page))
+				var pos := box.position + Vector2(col, row) * cell_size
+				var sys := (packed >> 11) & 0x1F
+				if sys != 0:
+					# No glyph art for the HD markers: the fallback font draws their label and value.
+					var font_size: int = maxi(1, int(cell_size.y * 0.62))
+					_canvas.draw_string(ThemeDB.fallback_font, pos + Vector2(0.0, cell_size.y * 0.72), sys_text(sys), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
+				else:
+					var page := (packed >> 8) & 0x3
+					_canvas.draw_texture_rect_region(FONT, Rect2(pos, cell_size), glyph_rect(page, packed & 0xFF), glyph_tint(page))

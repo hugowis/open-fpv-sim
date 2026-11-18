@@ -248,6 +248,7 @@ func _process(delta: float) -> void:
 	_poll_dvr_limit()
 	flight_audio.active = client.get_phase() == "flying"
 	flight_audio.pump()
+	var telemetry: Dictionary = client.get_telemetry()
 	if not chase_view:
 		var fpv: Dictionary = client.get_fpv_view()
 		if fpv.has("pose"):
@@ -257,6 +258,16 @@ func _process(delta: float) -> void:
 				"video_sparkles": fpv["video_sparkles"], "video_chroma": fpv["video_chroma"],
 				"video_sync": fpv["video_sync"],
 			}, delta)
+			var environment := {
+				"latency_ms": int(fpv.get("latency_ms", 0)),
+				"position": drone.transform.origin,
+				"lq_pct": float(telemetry.get("lq_pct", 0.0)),
+				"dvr": dvr.recording,
+			}
+			var pilot := world.get_node_or_null("Pilot") as Node3D
+			if pilot != null:
+				environment["pilot"] = pilot.global_position
+			osd.set_environment(environment)
 		var render_time: float = fpv.get("render_time_s", -1.0)
 		if render_time != _fpv_render_time:
 			_fpv_render_time = render_time
@@ -275,7 +286,6 @@ func _process(delta: float) -> void:
 		_world_name = field.get("name", "")
 		world.build(field)
 		_pick_course(field)
-	var telemetry: Dictionary = client.get_telemetry()
 	# Free flight flies a course as scenery: no lap clock, no gate highlight.
 	if not settings["race_start"] and telemetry.has("race_present"):
 		telemetry["race_present"] = false

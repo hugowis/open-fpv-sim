@@ -19,6 +19,13 @@ func _frame(overrides := {}) -> Dictionary:
 	return f
 
 
+## A 3x2 frame whose first cell is HD system element `sys` (1 = element 0); the other five are spaces.
+func _sys_frame(sys: int) -> Dictionary:
+	var cells := PackedInt32Array([0x20, 0x20, 0x20, 0x20, 0x20, 0x20])
+	cells[0] = 0x20 | (sys << 11)
+	return {"seq": 1, "time_s": 0.0, "present": true, "cols": 3, "rows": 2, "cells": cells}
+
+
 func test_the_font_atlas_has_the_expected_layout() -> void:
 	eq(Osd.FONT.get_size(), Vector2(192, 576), "two pages of 16 x 16 glyphs of 12 x 18 pixels")
 	eq(Osd.glyph_rect(0, 0), Rect2(0, 0, 12, 18), "glyph 0, page 0")
@@ -67,6 +74,49 @@ func test_blank_cells_are_not_drawn_and_blinking_cells_follow_the_blink_phase() 
 	osd.advance_blink(0.6)
 	ok(osd.blink_visible(), "and on again")
 	eq(osd.drawn_cell_count(), 3, "all three again")
+	osd.queue_free()
+
+
+func test_a_sys_cell_is_drawn_as_a_marker_not_text() -> void:
+	var osd := await _osd()
+	osd.set_frame(_sys_frame(1))
+	eq(osd.drawn_cell_count(), 1, "the cell's character is a space, but its SYS marker is drawn")
+	eq(osd.sys_text(1), "GVOLT --", "element 0 has no model yet")
+	osd.queue_free()
+
+
+func test_the_sys_values_come_from_the_environment() -> void:
+	var osd := await _osd()
+	osd.set_environment({"latency_ms": 42, "pilot": Vector3.ZERO, "position": Vector3(0.0, 0.0, 123.0), "lq_pct": 87.6, "dvr": true})
+	eq(osd.sys_text(4), "DLY 42ms", "element 3 is the video delay")
+	eq(osd.sys_text(5), "DIST 123m", "element 4 is the distance from the pilot")
+	eq(osd.sys_text(6), "LQ 88%", "element 5 is the radio link quality")
+	eq(osd.sys_text(7), "GDVR REC", "element 6 is the goggles' DVR")
+	osd.set_environment({"dvr": false})
+	eq(osd.sys_text(7), "GDVR OFF", "the DVR is off, not missing")
+	osd.queue_free()
+
+
+func test_the_unmodelled_sys_values_are_dashes() -> void:
+	var osd := await _osd()
+	osd.set_environment({})
+	for sys in range(1, 12):
+		ok(osd.sys_text(sys).ends_with("--"), "element %d has no model: %s" % [sys - 1, osd.sys_text(sys)])
+	osd.set_environment({"latency_ms": 40})
+	eq(osd.sys_text(4), "DLY 40ms", "a value present on its own renders")
+	ok(osd.sys_text(6).ends_with("--"), "and the others stay dashes")
+	osd.queue_free()
+
+
+func test_a_53_by_20_grid_draws_its_last_cell() -> void:
+	var osd := await _osd()
+	var cells := PackedInt32Array()
+	cells.resize(53 * 20)
+	cells.fill(0x20)
+	cells[19 * 53 + 52] = 0x20 | (11 << 11)
+	osd.set_frame({"seq": 1, "time_s": 0.0, "present": true, "cols": 53, "rows": 20, "cells": cells})
+	eq(osd.drawn_cell_count(), 1, "the bottom-right marker is inside the grid")
+	eq(osd.sys_text(11), "FAN --", "the last element")
 	osd.queue_free()
 
 
