@@ -6,6 +6,7 @@ extends CanvasLayer
 
 const AppSettings = preload("res://scripts/settings.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const Records = preload("res://scripts/records.gd")
 const CycleButton = preload("res://ui/cycle_button.gd")
 const QuadPreview = preload("res://ui/quad_preview.gd")
 
@@ -35,6 +36,8 @@ var _mode := CycleButton.new()
 var _course := CycleButton.new()
 var _controller := CycleButton.new()
 var _hint := Label.new()
+var _records_line := Label.new()
+var _store := {}
 
 
 func _ready() -> void:
@@ -63,8 +66,10 @@ func _ready() -> void:
 	box.add_child(title)
 	_start.text = "Start flying"
 	_start.pressed.connect(func() -> void: start_requested.emit())
-	for node in [_start, _world, _quad, _mode, _course, _controller, _controls_button, _settings_button, _quit]:
+	for node in [_start, _world, _quad, _mode, _course, _records_line, _controller, _controls_button, _settings_button, _quit]:
 		box.add_child(node)
+	_records_line.modulate = Color(1, 1, 1, 0.75)
+	_records_line.visible = false
 	_controls_button.text = "Controls"
 	_controls_button.pressed.connect(func() -> void: controls_requested.emit())
 	_settings_button.text = "Settings"
@@ -74,8 +79,10 @@ func _ready() -> void:
 	_world.changed.connect(_on_world)
 	_quad.changed.connect(func(path) -> void: choice_changed.emit("quad_path", path))
 	_quad.changed.connect(func(path) -> void: _preview.set_quad(path))
+	_quad.changed.connect(func(_path) -> void: _refresh_records())
 	_mode.changed.connect(func(race) -> void: choice_changed.emit("race_start", race))
 	_course.changed.connect(func(name) -> void: choice_changed.emit("course", name))
+	_course.changed.connect(func(_name) -> void: _refresh_records())
 	_controller.changed.connect(func(open_loop) -> void: choice_changed.emit("open_loop", open_loop))
 	_hint.modulate = Color(1, 1, 1, 0.6)
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -117,12 +124,43 @@ static func effective_open_loop(s: Dictionary) -> bool:
 
 ## The row for `name` ("world", "quad", "mode", "course", "controller", "start", "controls", "settings", "quit"), for tests.
 func row(name: String) -> Control:
-	return {"world": _world, "quad": _quad, "mode": _mode, "course": _course, "controller": _controller, "start": _start,
-		"controls": _controls_button, "settings": _settings_button, "quit": _quit}[name]
+	return {"world": _world, "quad": _quad, "mode": _mode, "course": _course, "records": _records_line,
+		"controller": _controller, "start": _start, "controls": _controls_button, "settings": _settings_button, "quit": _quit}[name]
 
 
 func hint() -> String:
 	return _hint.text
+
+
+## The records store (`records.gd`); the best/last line follows it and the chosen rows.
+func set_records(store: Dictionary) -> void:
+	_store = store
+	_refresh_records()
+
+
+func records_text() -> String:
+	return _records_line.text
+
+
+## "Best 29.9 s   Last 31.2 s" for the chosen world, course and quad; hidden without a record.
+func _refresh_records() -> void:
+	if settings.is_empty() or not is_node_ready() or _worlds.is_empty() or _quads.is_empty():
+		_records_line.visible = false
+		return
+	var world: Dictionary = _worlds[Catalog.index_of(_worlds, settings["world_path"])]
+	var quad: Dictionary = _quads[Catalog.index_of(_quads, settings["quad_path"])]
+	var course: String = settings["course"]
+	if course == "":
+		course = String(world.get("default_course", ""))
+		var names: Array = world.get("courses", [])
+		if course == "" and not names.is_empty():
+			course = String(names[0])
+	var item: Dictionary = Records.entry(_store, String(world.get("label", "")), course, String(quad.get("label", "")))
+	if item.is_empty():
+		_records_line.visible = false
+		return
+	_records_line.text = "Best %.1f s   Last %.1f s" % [float(item.get("best_lap_s", 0.0)), float(item.get("last_lap_s", 0.0))]
+	_records_line.visible = true
 
 
 ## The turning model of the selected quad, for tests (and the workbench, #128).
@@ -146,6 +184,7 @@ func _refresh() -> void:
 	_hint.text = "Betaflight needs a SITL launch command: set it in Settings. Open loop flies on the built-in stabilizer." if no_firmware else ""
 	_refresh_mode()
 	_refresh_course()
+	_refresh_records()
 
 
 func _fill(button: CycleButton, label: String, key: String, items: Array) -> void:
@@ -187,3 +226,4 @@ func _on_world(path: String) -> void:
 	choice_changed.emit("world_path", path)
 	_refresh_mode()
 	_refresh_course()
+	_refresh_records()

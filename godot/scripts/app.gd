@@ -89,6 +89,7 @@ func _ready() -> void:
 	ghost.set_quad(settings["quad_path"])
 	ghost.visible = false
 	_records = Records.load_records()
+	main_menu.set_records(_records)
 	main_menu.choice_changed.connect(_on_setting_changed)
 	main_menu.start_requested.connect(_on_menu_start)
 	main_menu.controls_requested.connect(func() -> void: main_menu.close(); controls_menu.open_from_menu())
@@ -289,6 +290,7 @@ func _process(delta: float) -> void:
 		if not capture.is_empty():
 			if Records.offer_capture(_records, capture.get("world", _world_name), capture.get("course", course), capture.get("quad", quad_name), capture):
 				Records.save_records(_records)
+				main_menu.set_records(_records)
 				hud.add_toast("New best lap %.3f s - the ghost races it" % float(capture.get("lap_s", 0.0)))
 				_ghost_key = ""
 	else:
@@ -297,6 +299,7 @@ func _process(delta: float) -> void:
 	if in_race and laps > _race_laps and laps > 0:
 		Records.record_last(_records, _world_name, course, quad_name, float(telemetry.get("race_last_lap_s", 0.0)))
 		Records.save_records(_records)
+		main_menu.set_records(_records)
 	_race_laps = laps
 	var record_best := Records.best_lap_s(_records, _world_name, course, quad_name)
 	if record_best > 0.0:
