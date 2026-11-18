@@ -22,6 +22,7 @@ func test_before_start_everything_is_inert() -> void:
 	eq(client.get_pose(), Transform3D.IDENTITY, "identity pose")
 	eq(client.get_telemetry(), {}, "no telemetry")
 	eq(client.get_configurator_address(), "", "no Configurator address")
+	eq(client.take_lap_capture(), {}, "no lap capture")
 	client.set_sticks(0.1, 0.2, 0.3, 0.4, PackedFloat32Array([1.0]))
 	client.pause()
 	client.reload()

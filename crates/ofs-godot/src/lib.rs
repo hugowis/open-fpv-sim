@@ -194,6 +194,27 @@ impl OfsClient {
         GString::from(self.client.as_ref().map(|c| c.quad_name()).unwrap_or_default().as_str())
     }
 
+    /// The newest clean lap capture, or `{}` when none is waiting. Takes it. The dictionary is
+    /// `world`, `course`, `quad`, `lap_s`, `times` (PackedFloat32Array), `positions` (xyz triplets) and
+    /// `rotations` (xyzw quadruplets); times are normalised to the first stored pose.
+    #[func]
+    fn take_lap_capture(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(client) = &self.client else { return d };
+        let Some(track) = client.take_lap_capture() else { return d };
+        let times: Vec<f32> = track.times.iter().map(|t| *t as f32).collect();
+        let positions: Vec<f32> = track.positions.iter().flatten().map(|v| *v as f32).collect();
+        let rotations: Vec<f32> = track.rotations.iter().flatten().map(|v| *v as f32).collect();
+        d.set("world", &GString::from(track.world.as_str()));
+        d.set("course", &GString::from(track.course.as_str()));
+        d.set("quad", &GString::from(client.quad_name().as_str()));
+        d.set("lap_s", track.lap_s);
+        d.set("times", &PackedFloat32Array::from(times.as_slice()));
+        d.set("positions", &PackedFloat32Array::from(positions.as_slice()));
+        d.set("rotations", &PackedFloat32Array::from(rotations.as_slice()));
+        d
+    }
+
     /// True once the first vehicle state has arrived.
     #[func]
     fn has_pose(&self) -> bool {
