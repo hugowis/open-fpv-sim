@@ -63,7 +63,8 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   a real renderer, and its first frame appears one render after the recording starts (black, then repeated, until
   then). H.264 export needs an ffmpeg with libx264 and an AAC encoder on `PATH`, and an export still running when
   the game quits is lost. The audio leads the picture by the goggles' latency (40 ms) and has no VTX buzzer (the sim
-  has no buzzer model).
+  has no buzzer model). A recording that passes 4 GiB continues in OpenDML `AVIX` segments; the first segment stays
+  AVI 1.0 and the export reads every segment.
 - Flight audio (#158, `docs/superpowers/specs/2026-10-31-flight-audio-design.md`), played live in the client:
   airspeed is ground speed (the simulation has no wind yet), a hard landing and an object hit sound the same
   (one thud), and the tone is the blade-pass fundamental plus 2x and 3x harmonics, which alias above about
