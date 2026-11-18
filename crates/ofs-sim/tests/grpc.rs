@@ -900,6 +900,54 @@ wavelength_m = 64.0
     assert!(t.heights.len() * 4 > 4 * 1024 * 1024, "the grid alone is past tonic's default limit");
 }
 
+fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_large_library_load_does_not_stall_other_calls() {
+    let root = std::env::temp_dir().join(format!("ofs-big-library-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    let quads = root.join("quads");
+    let library = root.join("library");
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    copy_tree(&repo.join("library"), &library);
+    std::fs::create_dir_all(&quads).unwrap();
+    std::fs::copy(repo.join("quads/opendrone-5f-freestyle.toml"), quads.join("opendrone-5f-freestyle.toml")).unwrap();
+    std::fs::copy(repo.join("quads/opendrone-5f-freestyle.betaflight.diff"), quads.join("opendrone-5f-freestyle.betaflight.diff")).unwrap();
+    // 20 000 files the quad does not reference: the repro bundle still snapshots the whole library.
+    let extra = library.join("zzz");
+    std::fs::create_dir_all(&extra).unwrap();
+    for i in 0..20_000 {
+        std::fs::write(extra.join(format!("{i}.toml")), b"# a library file the quad does not use\n").unwrap();
+    }
+    let quad = quads.join("opendrone-5f-freestyle.toml");
+    let mut c = start().await;
+    let mut loading = c.clone();
+    let started = std::time::Instant::now();
+    let load = tokio::spawn(async move {
+        loading.load(LoadRequest { quad_path: quad.to_string_lossy().into(), ..open_loop(Mode::Lockstep) }).await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    c.handshake(HandshakeRequest { protocol_version: PROTOCOL_VERSION }).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "Handshake waited {:?}: the repro bundle read ran on the runtime",
+        started.elapsed()
+    );
+    load.await.unwrap().unwrap();
+    std::fs::remove_dir_all(&root).ok();
+}
+
 #[tokio::test]
 async fn a_large_world_load_does_not_stall_other_calls() {
     let mut c = start_big_reply().await;

@@ -324,22 +324,32 @@ impl Sim for SimService {
         let keep_alive = req.keep_alive;
         let quad_stem = cfg.source_path.file_stem().map_or_else(|| "quad".into(), |s| s.to_string_lossy().into_owned());
         let logs_dir = self.logs_dir();
-        // What a repro bundle needs to run this session again. A SITL session's firmware directory depends on the
-        // slot it takes, which the build decides: it is filled in below.
-        let library_env = std::env::var("OFS_LIBRARY").ok();
-        let library_roots = ofs_config::library_roots(library_env.as_deref(), cfg.source_dir());
-        let mut repro = BundleSource::new(
-            &cfg,
-            (!req.world_path.is_empty()).then_some(&opts.world),
-            &library_roots,
-            req.seed,
-            req.open_loop_fc,
-            mode == RunMode::Realtime,
-            logs_dir.clone(),
-            None,
-        )
-        .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
-        .ok();
+        // What a repro bundle needs to run this session again. It reads the quad, diff, world, every mesh and the
+        // whole library, so it runs off the runtime like the config parse above. A SITL session's firmware directory
+        // depends on the slot it takes, which the build decides: it is filled in below.
+        let bundle_cfg = cfg.clone();
+        let bundle_world = opts.world.clone();
+        let has_world = !req.world_path.is_empty();
+        let (seed, open_loop_fc, realtime) = (req.seed, req.open_loop_fc, mode == RunMode::Realtime);
+        let bundle_logs = logs_dir.clone();
+        let mut repro = tokio::task::spawn_blocking(move || {
+            let library_env = std::env::var("OFS_LIBRARY").ok();
+            let library_roots = ofs_config::library_roots(library_env.as_deref(), bundle_cfg.source_dir());
+            BundleSource::new(
+                &bundle_cfg,
+                has_world.then_some(&bundle_world),
+                &library_roots,
+                seed,
+                open_loop_fc,
+                realtime,
+                bundle_logs,
+                None,
+            )
+            .map_err(|why| tracing::warn!("this session will write no repro bundle: {why}"))
+            .ok()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("the repro bundle read panicked: {e}")))?;
         if let Some(r) = repro.as_mut() {
             r.stabilize = req.stabilize;
         }
