@@ -115,8 +115,9 @@ amendments settle the two defects the implementation review found; the ten calls
 1. **Call 2 — the fastest clean lap, not the session best.** The server's `best_lap_s` can be a dirty lap. The
    capture keeps its own `best_clean_s`: on every completed lap (`race.laps` rose), when no collision time lies in
    `[now - lap_s, now]`, the lap replaces the session's best clean lap when `best_clean_s` is absent or `lap_s` is
-   strictly smaller. A dirty session best never blocks a slower clean lap. A reset (`!race.running`, `laps` below
-   the previous value, or a `best_lap_s` drop) clears `best_clean_s` and the pose window.
+   strictly smaller. A dirty session best never blocks a slower clean lap. A reset (`!race.running` with 0 laps,
+   `laps` below the previous value, or a course switch) clears `best_clean_s` and the pose window; a faster lap
+   lowers the server's `best_lap_s` legitimately, so that alone is not a reset.
 2. **Call 3 — a late collision event still vetoes.** The candidate is held for one further state before it is
    returned, so a collision event that arrives after the completing state is seen in the next `ingest`'s collision
    list. The residual (an event delayed by more than one state) is a known limit; the collision memory holds 8

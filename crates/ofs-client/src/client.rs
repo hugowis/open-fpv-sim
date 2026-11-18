@@ -1,4 +1,5 @@
 //! The client handle: a supervisor running on its own threads, polled without blocking from a game loop.
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
@@ -11,6 +12,7 @@ use crate::dvr_audio::AudioLog;
 use crate::error::{ClientError, ErrorKind};
 use crate::fpv::{self, FpvBuffer, FpvView};
 use crate::interp::{Pose, StateBuffer};
+use crate::lap::{LapCapture, LapTrack};
 use crate::model::{Command, EventKind, OsdFrame, Phase, Settings, Sticks, Telemetry, Update, World};
 use crate::worker::{lock, run, Shared};
 
@@ -69,6 +71,9 @@ impl Client {
             osd_version: AtomicU64::new(0),
             world: Mutex::new(None),
             world_version: AtomicU64::new(0),
+            lap: Mutex::new(None),
+            collisions: Mutex::new(VecDeque::new()),
+            lap_capture: Mutex::new(LapCapture::default()),
         });
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (finished_tx, finished_rx) = std_mpsc::channel();
@@ -202,6 +207,11 @@ impl Client {
     /// Counts world updates (and clears): a changed value means [`world`](Self::world) has something new to build.
     pub fn world_version(&self) -> u64 {
         self.shared.world_version.load(Ordering::Acquire)
+    }
+
+    /// The newest clean lap capture, if one is waiting; takes it.
+    pub fn take_lap_capture(&self) -> Option<LapTrack> {
+        lock(&self.shared.lap).take()
     }
 
     /// Starts a DVR recording of `feed` to `path` at the field rate with `width` × `height` pixels.

@@ -12,6 +12,7 @@ pub mod error;
 pub mod fpv;
 pub mod frames;
 pub mod interp;
+pub mod lap;
 pub mod launch;
 pub mod model;
 pub mod terrain_mesh;
