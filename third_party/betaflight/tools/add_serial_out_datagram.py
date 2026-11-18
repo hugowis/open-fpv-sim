@@ -6,8 +6,10 @@ captured into per-port buffers instead of waiting for a TCP client. When SITL re
     [servo_packet (16 bytes)][dropped: u16 LE][blocks: [uart index (0-based)][length u16 LE][bytes] ...]
 with at most EXT_SERIAL_MAX (512) bytes of blocks. Bytes that do not fit wait for the next reply; bytes that do
 not fit in the 4096-byte capture buffer are dropped and counted in `dropped`. UART1 (MSP, Configurator) is never
-captured. It also defines USE_OSD_SD for SITL: without it displayPortMspInit() falls through both of its SD/HD
-fallbacks and always leaves vcd_video_system at AUTO (a 13-row NTSC OSD) whatever the quad's diff sets. See docs/superpowers/specs/2026-10-08-m3a-osd-vtx-design.md.
+captured. It also defines USE_OSD_SD and USE_OSD_HD for SITL: without USE_OSD_SD displayPortMspInit() falls through both
+of its SD/HD fallbacks and always leaves vcd_video_system at AUTO (a 13-row NTSC OSD) whatever the quad's diff
+sets; USE_OSD_HD adds the HD SYS elements and the 53x20 canvas path while the SD quads keep their PAL setting. See
+docs/superpowers/specs/2026-10-08-m3a-osd-vtx-design.md and docs/research/hd-osd-spike.md.
 
 Usage (Linux or WSL), from the repository root, on a tree that has the CURRENT ofs-sitl.patch applied:
     bash scripts/build-sitl.sh                                   # applies the current patch to ~/ofs/betaflight
@@ -142,6 +144,6 @@ edit("src/platform/SIMULATOR/sitl.c", [(
 )])
 edit("src/platform/SIMULATOR/target/SITL/target.h", [(
     "#define USE_OSD\n#ifndef USE_MSP_DISPLAYPORT\n",
-    "#define USE_OSD\n#define USE_OSD_SD\n#ifndef USE_MSP_DISPLAYPORT\n",
+    "#define USE_OSD\n#define USE_OSD_SD\n#define USE_OSD_HD\n#ifndef USE_MSP_DISPLAYPORT\n",
 )])
 print("ok")
