@@ -107,5 +107,8 @@ Decision for Tasks 2-5: draw SYS cells through a small fallback-font path in `go
   the rest of the DisplayPort traffic.
 - Element ids are `displayPortSystemElement_e` (0 goggle voltage through 10 fan speed), which the plan maps to packed
   cell bits 11-15 as `id + 1`.
+- The client fills DLY from `FpvView.latency_ms` (the analog receiver's link budget; the design names that source, and
+  there is no digital-link delay model until #33) and DIST from the latest fetched pose to the world's pilot, not from
+  the video-delayed pose.
 - Subcommand 6 currently counts in `OsdDecoder.unknown_frames` (275 in the 6 s capture); that counter is the test hook
   for Task 2.

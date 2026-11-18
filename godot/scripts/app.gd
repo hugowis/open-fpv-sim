@@ -249,8 +249,9 @@ func _process(delta: float) -> void:
 	flight_audio.active = client.get_phase() == "flying"
 	flight_audio.pump()
 	var telemetry: Dictionary = client.get_telemetry()
+	var fpv := {}
 	if not chase_view:
-		var fpv: Dictionary = client.get_fpv_view()
+		fpv = client.get_fpv_view()
 		if fpv.has("pose"):
 			drone.transform = fpv["pose"]
 			video.update_view({
@@ -258,16 +259,6 @@ func _process(delta: float) -> void:
 				"video_sparkles": fpv["video_sparkles"], "video_chroma": fpv["video_chroma"],
 				"video_sync": fpv["video_sync"],
 			}, delta)
-			var environment := {
-				"latency_ms": int(fpv.get("latency_ms", 0)),
-				"position": drone.transform.origin,
-				"lq_pct": float(telemetry.get("lq_pct", 0.0)),
-				"dvr": dvr.recording,
-			}
-			var pilot := world.get_node_or_null("Pilot") as Node3D
-			if pilot != null:
-				environment["pilot"] = pilot.global_position
-			osd.set_environment(environment)
 		var render_time: float = fpv.get("render_time_s", -1.0)
 		if render_time != _fpv_render_time:
 			_fpv_render_time = render_time
@@ -286,6 +277,19 @@ func _process(delta: float) -> void:
 		_world_name = field.get("name", "")
 		world.build(field)
 		_pick_course(field)
+	# The SYS values follow the simulator: the latest state for the distance (not the video-delayed pose), the world's
+	# pilot once it is built, and the analog link's latency until a digital link model exists (#33).
+	var pilot := world.get_node_or_null("Pilot") as Node3D
+	if not chase_view and fpv.has("pose"):
+		var environment := {
+			"latency_ms": int(fpv.get("latency_ms", 0)),
+			"position": client.get_pose().origin if client.has_pose() else drone.transform.origin,
+			"lq_pct": float(telemetry.get("lq_pct", 0.0)),
+			"dvr": dvr.recording,
+		}
+		if pilot != null:
+			environment["pilot"] = pilot.global_position
+		osd.set_environment(environment)
 	# Free flight flies a course as scenery: no lap clock, no gate highlight.
 	if not settings["race_start"] and telemetry.has("race_present"):
 		telemetry["race_present"] = false

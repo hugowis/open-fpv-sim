@@ -161,6 +161,10 @@ func _run() -> void:
 	_check(_sys_cells(hd_frame) >= 11, "the eleven SYS markers are on it: %d" % _sys_cells(hd_frame))
 	var delay_text: String = app.osd.sys_text(4)
 	_check(delay_text.begins_with("DLY ") and not delay_text.ends_with("--"), "the delay value is live: %s" % delay_text)
+	var latency: int = int(app.client.get_fpv_view().get("latency_ms", 0))
+	_check(delay_text == "DLY %dms" % latency, "the delay is the link's latency (%d ms): %s" % [latency, delay_text])
+	var dist_text: String = app.osd.sys_text(5)
+	_check(dist_text.begins_with("DIST ") and not dist_text.ends_with("--"), "the distance value is live: %s" % dist_text)
 	_check(app.osd.sys_text(1) == "GVOLT --", "an unmodelled value is dashed: %s" % app.osd.sys_text(1))
 
 	app.queue_free()
