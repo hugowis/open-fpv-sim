@@ -6,7 +6,7 @@ use ofs_video::link::*;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 use ofs_core::mesh::{TriMesh, Triangle};
-use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, MeshObstacle, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, MeshObstacle, Multipath, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -30,7 +30,8 @@ fn open_field() -> LinkWorld {
     }
 }
 
-/// A VTX omni standing straight up on the quad (FRD -z is up); bounce and fading off: the bare link budget.
+/// A VTX omni standing straight up on the quad (FRD -z is up); bounce, object reflections and fading off: the bare
+/// link budget.
 fn bare(world: LinkWorld) -> LinkParams {
     LinkParams {
         world,
@@ -38,8 +39,14 @@ fn bare(world: LinkWorld) -> LinkParams {
         pit_power_mw: 0.1,
         fading: false,
         ground_bounce: false,
+        object_reflections: false,
         thresholds: ReceiverThresholds::default(),
     }
+}
+
+/// The multipath of the bare budget: the direct ray only.
+fn direct() -> Multipath {
+    Multipath { ground_bounce: false, object_reflections: false }
 }
 
 #[test]
@@ -182,18 +189,18 @@ fn emitter_world(offset_mhz: f64) -> LinkWorld {
 
 #[test]
 fn an_emitter_interferes_less_the_further_its_channel_is() {
-    let same = interference_dbm(&emitter_world(0.0), 5800.0, false)[0];
-    let next = interference_dbm(&emitter_world(37.0), 5800.0, false)[0];
-    let far = interference_dbm(&emitter_world(100.0), 5800.0, false)[0];
+    let same = interference_dbm(&emitter_world(0.0), 5800.0, direct())[0];
+    let next = interference_dbm(&emitter_world(37.0), 5800.0, direct())[0];
+    let far = interference_dbm(&emitter_world(100.0), 5800.0, direct())[0];
     close(same, 13.98 + 4.0 - fspl_db(150.0, 5800.0), 0.05, "same channel: its whole power");
     // 22.75 dB of rejection, plus 0.06 dB more path loss at the higher frequency.
     close(same - next, 22.75 + 20.0 * (5837.0f64 / 5800.0).log10(), 1e-3, "37 MHz away (the next Raceband channel)");
     close(same - far, 40.0 + 20.0 * (5900.0f64 / 5800.0).log10(), 1e-3, "far away");
-    close(interference_dbm(&open_field(), 5800.0, false)[0], NO_SIGNAL_DBM, 1e-9, "no emitters");
+    close(interference_dbm(&open_field(), 5800.0, direct())[0], NO_SIGNAL_DBM, 1e-9, "no emitters");
     let quad_snr = |world: LinkWorld| {
         let params = bare(world);
         let path = vtx_paths(&params, DVec3::new(300.0, 0.0, -1.7), DQuat::IDENTITY, 5800.0)[0];
-        snr_db(10.0 * 25f64.log10() + path.gain_db, -93.0, interference_dbm(&params.world, 5800.0, false)[0])
+        snr_db(10.0 * 25f64.log10() + path.gain_db, -93.0, interference_dbm(&params.world, 5800.0, direct())[0])
     };
     assert!(quad_snr(emitter_world(0.0)) < 0.0, "a same-channel emitter close to the pilot swamps a quad 300 m out");
     assert!(quad_snr(emitter_world(100.0)) > quad_snr(open_field()) - 1.0, "a far channel costs under a dB");
@@ -252,7 +259,7 @@ fn a_ridge_between_an_emitter_and_the_goggles_lowers_the_interference() {
     let hidden = LinkWorld { terrain: Some(terrain.clone()), ..world.clone() };
     let expected = terrain_loss_db(&terrain, world.emitters[0].position, world.pilot_position, wavelength_m(5800.0));
     assert!(expected > 20.0, "{expected}");
-    close(interference_dbm(&world, 5800.0, false)[0] - interference_dbm(&hidden, 5800.0, false)[0], expected, 1e-3, "the ridge hides the emitter (the -150 dBm floor adds a hair)");
+    close(interference_dbm(&world, 5800.0, direct())[0] - interference_dbm(&hidden, 5800.0, direct())[0], expected, 1e-3, "the ridge hides the emitter (the -150 dBm floor adds a hair)");
 }
 
 #[test]
@@ -264,7 +271,7 @@ fn a_clear_path_over_the_ridge_is_unchanged() {
     let mut world = emitter_world(0.0);
     world.emitters[0].position = DVec3::new(200.0, 0.0, -60.0);
     let ridged_world = LinkWorld { terrain: Some(ridge(10.0, 10.0)), ..world.clone() };
-    assert_eq!(interference_dbm(&world, 5800.0, false), interference_dbm(&ridged_world, 5800.0, false));
+    assert_eq!(interference_dbm(&world, 5800.0, direct()), interference_dbm(&ridged_world, 5800.0, direct()));
 }
 
 struct Rig {

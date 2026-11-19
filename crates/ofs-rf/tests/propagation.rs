@@ -15,6 +15,11 @@ fn omni(axis: DVec3, polarization: Polarization) -> Antenna {
     Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization, axis }
 }
 
+/// Multipath with only the ground bounce on or off (object reflections are off everywhere in this task).
+fn bounce(ground_bounce: bool) -> Multipath {
+    Multipath { ground_bounce, object_reflections: false }
+}
+
 #[test]
 fn free_space_path_loss_matches_the_formula() {
     close(fspl_db(100.0, 5800.0), 87.72, 0.01, "100 m at 5800 MHz");
@@ -159,8 +164,8 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
             let d = 100.0 + f64::from(i) * 0.5;
             let tx = Endpoint { position: DVec3::new(d, 0.0, -10.0), antenna: omni(DVec3::NEG_Z, polarization) };
             let rx = Endpoint { position: DVec3::new(0.0, 0.0, -1.7), antenna: omni(DVec3::NEG_Z, polarization) };
-            let with = path_gain(&tx, &rx, freq, &[], None, &[], true).gain_db;
-            let without = path_gain(&tx, &rx, freq, &[], None, &[], false).gain_db;
+            let with = path_gain(&tx, &rx, freq, &[], None, &[], bounce(true)).gain_db;
+            let without = path_gain(&tx, &rx, freq, &[], None, &[], bounce(false)).gain_db;
             gains.push(with - without);
         }
         let max = gains.iter().cloned().fold(f64::MIN, f64::max);
@@ -174,10 +179,38 @@ fn circular_antennas_reject_most_of_the_ground_bounce() {
 }
 
 #[test]
+fn the_ground_ray_takes_its_own_obstruction() {
+    // Both ends level at 10 m, so the two rays meet the ground midway at 50 m and are equal in the open: the bounce
+    // doubles the power. A 2 m box standing at 40 m is 2 m off the bounce leg's bend (a few Fresnel zones at 5.8 GHz
+    // over these angles) and 10 m below the direct line, so it bites the bounce alone.
+    let freq = 5800.0;
+    let omni = |p: DVec3| Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) };
+    let (tx, rx) = (omni(DVec3::new(0.0, 0.0, -10.0)), omni(DVec3::new(100.0, 0.0, -10.0)));
+    let both = bounce(true);
+    let clear_box = Obstacle { shape: Shape::Box { center: DVec3::new(40.0, 0.0, -2.0), half: DVec3::splat(1.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
+    let beside = Obstacle { shape: Shape::Box { center: DVec3::new(40.0, 60.0, -2.0), half: DVec3::splat(1.0), yaw_rad: 0.0 }.rooted(), ..clear_box.clone() };
+    let open = path_gain(&tx, &rx, freq, &[], None, &[], both);
+    assert!(open.gain_db > path_gain(&tx, &rx, freq, &[], None, &[], bounce(false)).gain_db + 3.0, "the bounce adds power in the open: {open:?}");
+    close(path_gain(&tx, &rx, freq, std::slice::from_ref(&beside), None, &[], both).gain_db, open.gain_db, 1e-9, "a box 60 m off to the side changes nothing");
+    let blocked = path_gain(&tx, &rx, freq, std::slice::from_ref(&clear_box), None, &[], both);
+    assert!(blocked.gain_db < open.gain_db - 3.0, "the box bites the bounce: {} vs {}", blocked.gain_db, open.gain_db);
+    assert!(blocked.obstruction_db == 0.0, "the direct line is clear: {:?}", blocked.obstruction_db);
+    close(path_gain(&tx, &rx, freq, std::slice::from_ref(&clear_box), None, &[], bounce(false)).gain_db, path_gain(&tx, &rx, freq, &[], None, &[], bounce(false)).gain_db, 1e-9, "the direct ray ignores it");
+    // Without a bounce a path is its direct ray: the obstruction term is the same subtraction, to the bit.
+    for obstacles in [&[][..], std::slice::from_ref(&clear_box)] {
+        let obstruction = obstruction_db(obstacles, None, &[], tx.position, rx.position, freq);
+        assert_eq!(
+            path_gain(&tx, &rx, freq, obstacles, None, &[], bounce(false)).gain_db,
+            unobstructed_gain_db(&tx, &rx, freq, false) - obstruction
+        );
+    }
+}
+
+#[test]
 fn the_direct_path_adds_gains_and_subtracts_the_path_loss() {
     let tx = Endpoint { position: DVec3::new(100.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
     let rx = Endpoint { position: DVec3::new(0.0, 0.0, -2.0), antenna: omni(DVec3::NEG_Z, Polarization::Rhcp) };
-    let p = path_gain(&tx, &rx, 5800.0, &[], None, &[], false);
+    let p = path_gain(&tx, &rx, 5800.0, &[], None, &[], bounce(false));
     close(p.gain_db, 2.0 + 2.0 - fspl_db(100.0, 5800.0), 1e-9, "two broadside omnis");
     assert_eq!(p.obstruction_db, 0.0);
 }
@@ -282,7 +315,7 @@ fn a_flat_terrain_changes_nothing_for_a_raised_ray() {
     assert_eq!(terrain_loss_db(&flat, a, b, wavelength_m(5800.0)), 0.0);
     let antenna = omni(DVec3::NEG_Z, Polarization::Rhcp);
     let (tx, rx) = (Endpoint { position: b, antenna }, Endpoint { position: a, antenna });
-    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&flat), &[], true), path_gain(&tx, &rx, 5800.0, &[], None, &[], true));
+    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&flat), &[], bounce(true)), path_gain(&tx, &rx, 5800.0, &[], None, &[], bounce(true)));
 }
 
 #[test]

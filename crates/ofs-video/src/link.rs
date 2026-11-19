@@ -12,8 +12,8 @@ use ofs_core::terrain::Terrain;
 use ofs_core::{names, Bus, Model, Signal, SimError, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
 use ofs_rf::propagation::{
-    adjacent_channel_rejection_db, mw_to_dbm, obstruction_db, power_sum_dbm, unobstructed_gain_db, wavelength_m, Antenna,
-    Endpoint, MeshObstacle, Obstacle, PathGain,
+    adjacent_channel_rejection_db, mw_to_dbm, path_gain, power_sum_dbm, wavelength_m, Antenna, Endpoint, MeshObstacle,
+    Multipath, Obstacle, PathGain,
 };
 use rand_chacha::ChaCha8Rng;
 
@@ -253,44 +253,47 @@ pub struct LinkParams {
     /// Fading and the ground bounce; tests that check the bare link budget turn them off.
     pub fading: bool,
     pub ground_bounce: bool,
+    /// Reflections off the objects of the world: off until the model grows them.
+    pub object_reflections: bool,
     /// What the receiver makes of the SNR (the world file's `[video]` table).
     pub thresholds: ReceiverThresholds,
+}
+
+impl LinkParams {
+    /// The multipath the model's paths take.
+    fn multipath(&self) -> Multipath {
+        Multipath { ground_bounce: self.ground_bounce, object_reflections: self.object_reflections }
+    }
 }
 
 /// The VTX signal's path to each receiver antenna, without fading: body shadow included.
 pub fn vtx_paths(params: &LinkParams, quad_pos: DVec3, att: DQuat, freq_mhz: f64) -> Vec<PathGain> {
     let tx = Endpoint { position: quad_pos, antenna: Antenna { axis: (att * params.vtx_antenna.axis).normalize(), ..params.vtx_antenna } };
     let shadow = body_shadow_db(att, quad_pos, params.world.pilot_position);
-    // Every goggle antenna is at the pilot: one obstruction for all of them.
-    let obstruction = obstruction_db(&params.world.obstacles, params.world.terrain.as_deref(), &params.world.meshes, quad_pos, params.world.pilot_position, freq_mhz);
+    let multipath = params.multipath();
     params
         .world
         .antennas
         .iter()
         .map(|a| {
             let rx = Endpoint { position: params.world.pilot_position, antenna: a.antenna };
-            let gain_db = unobstructed_gain_db(&tx, &rx, freq_mhz, params.ground_bounce) - obstruction - shadow;
-            PathGain { gain_db, obstruction_db: obstruction }
+            let path = path_gain(&tx, &rx, freq_mhz, &params.world.obstacles, params.world.terrain.as_deref(), &params.world.meshes, multipath);
+            PathGain { gain_db: path.gain_db - shadow, obstruction_db: path.obstruction_db }
         })
         .collect()
 }
 
 /// Interference at each receiver antenna for a receiver tuned to `freq_mhz`, in dBm.
-pub fn interference_dbm(world: &LinkWorld, freq_mhz: f64, ground_bounce: bool) -> Vec<f64> {
-    let obstructions: Vec<f64> = world
-        .emitters
-        .iter()
-        .map(|e| obstruction_db(&world.obstacles, world.terrain.as_deref(), &world.meshes, e.position, world.pilot_position, e.freq_mhz))
-        .collect();
+pub fn interference_dbm(world: &LinkWorld, freq_mhz: f64, multipath: Multipath) -> Vec<f64> {
     world
         .antennas
         .iter()
         .map(|a| {
             let rx = Endpoint { position: world.pilot_position, antenna: a.antenna };
-            let powers = world.emitters.iter().zip(&obstructions).map(|(e, obstruction)| {
+            let powers = world.emitters.iter().map(|e| {
                 let tx = Endpoint { position: e.position, antenna: e.antenna };
-                mw_to_dbm(e.power_mw) + unobstructed_gain_db(&tx, &rx, e.freq_mhz, ground_bounce) - obstruction
-                    - adjacent_channel_rejection_db(e.freq_mhz - freq_mhz)
+                let path = path_gain(&tx, &rx, e.freq_mhz, &world.obstacles, world.terrain.as_deref(), &world.meshes, multipath);
+                mw_to_dbm(e.power_mw) + path.gain_db - adjacent_channel_rejection_db(e.freq_mhz - freq_mhz)
             });
             power_sum_dbm(powers.chain([NO_SIGNAL_DBM]))
         })
@@ -390,7 +393,7 @@ impl VideoLink {
                 if let Some(e) = injected {
                     emitters.push(e);
                 }
-                let values = interference_dbm(&LinkWorld { emitters, ..self.params.world.clone() }, freq_mhz, self.params.ground_bounce);
+                let values = interference_dbm(&LinkWorld { emitters, ..self.params.world.clone() }, freq_mhz, self.params.multipath());
                 self.interference = Some((freq_mhz, injected, values.clone()));
                 values
             }

@@ -716,6 +716,7 @@ fn radio_chain(
         meshes: mesh_obstacles(meshes),
         fading: true,
         ground_bounce: true,
+        object_reflections: false,
     };
     let handset: Box<dyn Handset> = match r.handset {
         HandsetKind::Joystick => Box::new(JoystickHandset::new(front_end, bus)),
@@ -838,6 +839,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Te
         pit_power_mw: vtx.pit_power_mw,
         fading: true,
         ground_bounce: true,
+        object_reflections: false,
         thresholds: receiver_thresholds(&world.video),
     })
 }

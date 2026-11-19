@@ -297,9 +297,17 @@ fn ray_gain_db(tx: &Endpoint, tx_polarization: Polarization, rx: &Endpoint, out_
         - polarization_loss_db(&tx.antenna, tx_polarization, &rx.antenna, in_dir)
 }
 
+/// Paths that reflect back to the receiver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Multipath {
+    pub ground_bounce: bool,
+    pub object_reflections: bool,
+}
+
 /// The path from `tx` to `rx` at `freq_mhz`: the direct ray, plus (with `ground_bounce`) the ray reflected off the
-/// ground (coefficient -1, which reverses circular polarization), added with their phase difference; then the
-/// diffraction losses of the obstacles and the terrain, and the crossing losses of the meshes, on the direct ray.
+/// ground (coefficient -1, which reverses circular polarization), added with their phase difference. Each ray takes
+/// the diffraction losses of the obstacles and the crossing losses of the meshes on its own legs; the terrain's loss
+/// comes off the combined power once (a whole-path approximation).
 pub fn path_gain(
     tx: &Endpoint,
     rx: &Endpoint,
@@ -307,10 +315,52 @@ pub fn path_gain(
     obstacles: &[Obstacle],
     terrain: Option<&Terrain>,
     meshes: &[MeshObstacle],
-    ground_bounce: bool,
+    multipath: Multipath,
 ) -> PathGain {
-    let obstruction_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
-    PathGain { gain_db: unobstructed_gain_db(tx, rx, freq_mhz, ground_bounce) - obstruction_db, obstruction_db }
+    let direct_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
+    let terrain_db = terrain.map_or(0.0, |t| terrain_loss_db(t, tx.position, rx.position, wavelength_m(freq_mhz)));
+    let gain_db = two_ray_obstruction_db(tx, rx, freq_mhz, obstacles, meshes, multipath.ground_bounce) - terrain_db;
+    PathGain { gain_db, obstruction_db: direct_db }
+}
+
+/// Diffraction losses of the obstacles, plus crossing losses of the meshes, on the path from `a` to `b` at `freq_mhz`,
+/// in dB: [`obstruction_db`] without the terrain.
+fn object_mesh_obstruction_db(obstacles: &[Obstacle], meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, freq_mhz)).sum();
+    objects + meshes.iter().map(|m| mesh_loss_db(m, a, b, freq_mhz)).sum::<f64>()
+}
+
+/// The direct ray (at the full obstruction of its line) plus the ground ray (at its own legs' object and mesh losses),
+/// added with the phase difference. No terrain on either.
+fn two_ray_obstruction_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], meshes: &[MeshObstacle], ground_bounce: bool) -> f64 {
+    let direct_vec = rx.position - tx.position;
+    let direct_len = direct_vec.length();
+    let dir = unit(direct_vec);
+    let direct_db = ray_gain_db(tx, tx.antenna.polarization, rx, dir, dir, direct_len, freq_mhz)
+        - object_mesh_obstruction_db(obstacles, meshes, tx.position, rx.position, freq_mhz);
+    let Some(image) = ground_image(tx, rx, ground_bounce) else {
+        return direct_db;
+    };
+    let t = -image.z / (rx.position.z - image.z); // where the image-to-rx line crosses z = 0
+    let bounce = image.lerp(rx.position, t);
+    let reflected_vec = rx.position - image;
+    let reflected_len = reflected_vec.length();
+    // The bounce splitting off tx and arriving at rx; each leg's matches before the split to the bit.
+    let out_dir = unit(bounce - tx.position);
+    let in_dir = unit(rx.position - bounce);
+    let legs = object_mesh_obstruction_db(obstacles, meshes, tx.position, bounce, freq_mhz)
+        + object_mesh_obstruction_db(obstacles, meshes, bounce, rx.position, freq_mhz);
+    let reflected_db =
+        ray_gain_db(tx, tx.antenna.polarization.reflected(), rx, out_dir, in_dir, reflected_len, freq_mhz) - legs;
+    let (a, b) = (10f64.powf(direct_db / 20.0), 10f64.powf(reflected_db / 20.0));
+    let phase = 2.0 * std::f64::consts::PI * (reflected_len - direct_len) / wavelength_m(freq_mhz) + std::f64::consts::PI;
+    let power = a * a + b * b + 2.0 * a * b * phase.cos();
+    10.0 * power.max(1e-30).log10()
+}
+
+/// The image of `tx` below the ground (the ground ray's mirror source), for a bounce with both ends above it.
+fn ground_image(tx: &Endpoint, rx: &Endpoint, ground_bounce: bool) -> Option<DVec3> {
+    (ground_bounce && tx.position.z < 0.0 && rx.position.z < 0.0).then(|| DVec3::new(tx.position.x, tx.position.y, -tx.position.z))
 }
 
 /// The diffraction losses of the obstacles and the terrain, plus the crossing losses of the meshes, on the direct ray

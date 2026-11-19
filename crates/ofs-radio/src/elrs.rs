@@ -17,7 +17,9 @@ use ofs_core::rng::model_rng;
 use ofs_core::terrain::Terrain;
 use ofs_core::{names, Bus, Signal, StepCtx};
 use ofs_rf::fading::{body_shadow_db, Diversity, Fader, LOS_K_DB};
-use ofs_rf::propagation::{mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKind, Endpoint, MeshObstacle, Obstacle, Polarization};
+use ofs_rf::propagation::{
+    mw_to_dbm, path_gain, wavelength_m, Antenna, AntennaKind, Endpoint, MeshObstacle, Multipath, Obstacle, Polarization,
+};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
@@ -99,6 +101,8 @@ pub struct LinkParams {
     /// Fading and the ground bounce; tests that check the bare link budget turn them off.
     pub fading: bool,
     pub ground_bounce: bool,
+    /// Reflections off the world's objects: off until the model grows them.
+    pub object_reflections: bool,
 }
 
 impl LinkParams {
@@ -121,6 +125,7 @@ impl LinkParams {
             meshes: Vec::new(),
             fading: false,
             ground_bounce: false,
+            object_reflections: false,
         }
     }
 }
@@ -254,7 +259,7 @@ impl Link for ElrsLink {
                 &self.params.obstacles,
                 self.params.terrain.as_deref(),
                 &self.params.meshes,
-                self.params.ground_bounce,
+                Multipath { ground_bounce: self.params.ground_bounce, object_reflections: self.params.object_reflections },
             );
             let fade = if self.params.fading {
                 self.quad_faders[j].next(&mut self.rng, rho, LOS_K_DB - path.obstruction_db)
@@ -287,7 +292,7 @@ impl Link for ElrsLink {
                 &self.params.obstacles,
                 self.params.terrain.as_deref(),
                 &self.params.meshes,
-                self.params.ground_bounce,
+                Multipath { ground_bounce: self.params.ground_bounce, object_reflections: self.params.object_reflections },
             );
             let fade = if self.params.fading {
                 self.handset_faders[a].next(&mut self.rng, rho, LOS_K_DB - path.obstruction_db)
