@@ -187,7 +187,7 @@ Expected: FAIL, the field still expects `f64` / the state still uses the raw val
 
 - [ ] **Step 3: Implement**
 
-Change `ObjectSection` and `MaterialSection` to `RfLoss`; from `WorldConfig::validate` call `RfLossCurve::validate()` for a curve (and reject a negative `Db` scalar), naming the field. Keep `WorldMeshData.loss_db: Vec<f64>` for now, built with `db_at(5800.0)` in `load_meshes_with`, and keep `Obstacle.rf_loss_db: f64` by mapping `o.rf_loss_db.db_at(5800.0)` in `world_obstacles`; filter with `is_obstacle()`. In `session.rs` write `db_at(5800.0)`. Update the `ObjectSection` literals with `.into()`. This task is representation-only: the link still sees the 5.8 GHz scalar, so no value or digest moves.
+Change `ObjectSection` and `MaterialSection` to `RfLoss`; from `WorldConfig::validate` call `RfLossCurve::validate()` for a curve (and reject a negative `Db` scalar), naming the field. Keep `WorldMeshData.loss_db: Vec<f64>` for now, built with `db_at(5800.0)` in `load_meshes_with`, and keep `Obstacle.rf_loss_db: f64` by mapping `o.rf_loss_db.db_at(5800.0)` in `world_obstacles`; filter with `o.rf_loss_db.db_at(5800.0) > 0.0` — the old scalar predicate exactly; Task 3 threads the frequency and switches to `is_obstacle()`. In `session.rs` write `db_at(5800.0)`. Update the `ObjectSection` literals with `.into()`. This task is representation-only: the link still sees the 5.8 GHz scalar, so no value or digest moves.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
