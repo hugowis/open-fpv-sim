@@ -94,6 +94,10 @@ func test_the_sys_values_come_from_the_environment() -> void:
 	eq(osd.sys_text(7), "GDVR REC", "element 6 is the goggles' DVR")
 	osd.set_environment({"dvr": false})
 	eq(osd.sys_text(7), "GDVR OFF", "the DVR is off, not missing")
+	osd.set_environment({"lq_pct": 140.0})
+	eq(osd.sys_text(6), "LQ 100%", "an LQ above 100 is clamped")
+	osd.set_environment({"lq_pct": -5.0})
+	eq(osd.sys_text(6), "LQ 0%", "a negative LQ is clamped")
 	osd.queue_free()
 
 
