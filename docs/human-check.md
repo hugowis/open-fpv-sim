@@ -105,8 +105,8 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 ## The Chernobyl map (Stage B) — before it merges
 
 - **Fly `worlds/chernobyl.toml` in the Godot client**: pick "Chernobyl" in the main menu's World row (it works from any
-  directory), or start with `--world=chernobyl` (a bare name); a relative `--world=worlds/chernobyl.toml` needs the game
-  started from the repository root (`docs/chernobyl-map.md`, "Flying it"). The rendering of meshes has only been verified
+  directory), or start with `--world=chernobyl` (a bare name); a relative `--world=worlds/chernobyl.toml` resolves from
+  the repository root (`docs/chernobyl-map.md`, "Flying it"). The rendering of meshes has only been verified
   headless, never by eye. The pilot stands 150 m west of the door and the quad starts 100 m west; fly in through the door,
   look at the arch and the OSM surroundings from outside and inside, and feel the frame rate (1259 triangles, so it should
   hold). The shelter object and the stabilisation structure stand inside the arch; the turbine hall is east of it, with a

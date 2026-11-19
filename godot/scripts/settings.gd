@@ -106,6 +106,8 @@ static func resolve(config: Dictionary, env: Dictionary, args: PackedStringArray
 		if FLAG_NAMES.has(parts[0]):
 			var key: String = FLAG_NAMES[parts[0]]
 			s[key] = _coerce(s[key], parts[1] if parts.size() > 1 else "true")
+	s["quad_path"] = _absolute_file(s["quad_path"])
+	s["world_path"] = _absolute_file(s["world_path"])
 	if not s["dvr_export"] in DVR_EXPORTS:
 		push_warning("%s is not a DVR export setting; using none" % s["dvr_export"])
 		s["dvr_export"] = "none"
@@ -234,3 +236,13 @@ static func _absolute_data_dir(path: String) -> String:
 	if path.is_absolute_path():
 		return path
 	return ProjectSettings.globalize_path("res://").path_join(path).simplify_path()
+
+
+## A relative quad or world path is relative to the repository root, where `quads/` and `worlds/` live (the docs'
+## examples). With `--path godot` the project directory is the process's working directory, so the server would
+## otherwise resolve the path there. A bare world name (no separator and no `.toml`) stays a name: the server finds it
+## beside the quad file (`ofs_config::world::resolve`).
+static func _absolute_file(path: String) -> String:
+	if path.is_absolute_path() or not (path.contains("/") or path.contains("\\") or path.ends_with(".toml")):
+		return path
+	return repo_root().path_join(path).simplify_path()

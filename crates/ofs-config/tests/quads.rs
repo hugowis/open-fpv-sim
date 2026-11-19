@@ -43,14 +43,21 @@ fn the_hd_quad_uses_the_hd_canvas_and_the_others_stay_sd() {
     assert_eq!((hd_osd.cols, hd_osd.rows), (53, 20), "the pinned SITL's HD canvas");
     let diff = fs::read_to_string(Path::new(ROOT).join("quads/opendrone-5f-hd.betaflight.diff")).unwrap();
     assert!(diff.contains("set vcd_video_system = HD"), "the HD quad selects the HD video system");
-    for name in [
+    const SYS_NAMES: [&str; 11] = [
         "goggle_voltage", "vtx_voltage", "bitrate", "delay", "distance", "lq", "goggle_dvr", "vtx_dvr", "warnings",
         "vtx_temp", "fan_speed",
-    ] {
+    ];
+    for name in SYS_NAMES {
         assert!(diff.contains(&format!("set osd_sys_{name}_pos")), "the diff places {name}");
     }
-    // Profile 1 (2048) + col 40 (the XHD bit 1024 + 8): a column past 31 needs the extra bit.
-    assert!(diff.contains("set osd_sys_goggle_voltage_pos = 3080"), "column 40 is encoded with the XHD bit");
+    // Profile 1 (2048) + col 40 (the XHD bit 1024 + 8): a column past 31 needs the extra bit, on every marker.
+    for name in SYS_NAMES {
+        let prefix = format!("set osd_sys_{name}_pos = ");
+        let line = diff.lines().find(|l| l.starts_with(&prefix)).unwrap_or_else(|| panic!("the diff places {name}"));
+        let value: i64 = line[prefix.len()..].trim().parse().unwrap_or_else(|_| panic!("{name}'s position is a number: {line}"));
+        assert_ne!(value & 1024, 0, "{name} sits at column 40 and carries the XHD bit");
+        assert_eq!(value >> 11, 1, "{name} is placed on profile 1");
+    }
 
     for stem in ["opendrone-5f-freestyle", "opendrone-5r-race", "opendrone-3t-toothpick"] {
         let sd = load(stem);

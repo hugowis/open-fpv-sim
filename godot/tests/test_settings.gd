@@ -26,7 +26,18 @@ func test_later_sources_win() -> void:
 	eq(s["open_loop"], true, "the environment turns open loop on")
 	eq(s["seed"], 7, "the file's seed stays")
 	eq(s["state_rate_hz"], 120, "and its rate")
-	eq(s["quad_path"], "quads/other.toml", "the quad from the command line")
+	eq(s["quad_path"], AppSettings.repo_root().path_join("quads/other.toml"), "the quad from the command line, from the repository root")
+
+
+func test_a_relative_quad_or_world_path_is_from_the_repository_root() -> void:
+	var s := AppSettings.resolve({}, {}, PackedStringArray(["--quad=quads/other.toml", "--world=worlds/other.toml"]))
+	eq(s["quad_path"], AppSettings.repo_root().path_join("quads/other.toml"), "the quad from the repository root")
+	eq(s["world_path"], AppSettings.repo_root().path_join("worlds/other.toml"), "the world from the repository root")
+	var bare := AppSettings.resolve({}, {}, PackedStringArray(["--world=chernobyl"]))
+	eq(bare["world_path"], "chernobyl", "a bare world name stays a name for the server")
+	var absolute := ProjectSettings.globalize_path("res://project.godot")
+	var path := AppSettings.resolve({}, {}, PackedStringArray(["--world=" + absolute]))
+	eq(path["world_path"], absolute, "an absolute path stays")
 
 
 func test_flags_without_a_value_mean_true_and_junk_is_ignored() -> void:
@@ -76,12 +87,12 @@ func test_the_client_dictionary_forwards_a_derived_stabilize() -> void:
 
 func test_the_world_and_the_video_effects_come_from_every_source() -> void:
 	var s := AppSettings.resolve({"video_effects": false}, {"OFS_WORLD": "worlds/other.toml"}, PackedStringArray())
-	eq(s["world_path"], "worlds/other.toml", "OFS_WORLD")
+	eq(s["world_path"], AppSettings.repo_root().path_join("worlds/other.toml"), "OFS_WORLD")
 	eq(s["video_effects"], false, "the file turns the effects off")
 	var t := AppSettings.resolve({}, {}, PackedStringArray(["--world=w.toml", "--video-effects=no"]))
-	eq(t["world_path"], "w.toml", "--world")
+	eq(t["world_path"], AppSettings.repo_root().path_join("w.toml"), "--world")
 	eq(t["video_effects"], false, "--video-effects=no")
-	eq(AppSettings.to_client_dict(t)["world_path"], "w.toml", "the client gets the world")
+	eq(AppSettings.to_client_dict(t)["world_path"], AppSettings.repo_root().path_join("w.toml"), "the client gets the world")
 
 
 func test_the_aspect_setting_defaults_and_comes_from_the_env_and_the_command_line() -> void:

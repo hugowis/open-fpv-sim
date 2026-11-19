@@ -70,7 +70,7 @@ func _sys_value(sys: int) -> String:
 				return "%dm" % int((_environment["pilot"] as Vector3).distance_to(_environment["position"]))
 		6:
 			if _environment.has("lq_pct"):
-				return "%d%%" % int(round(float(_environment["lq_pct"])))
+				return "%d%%" % clampi(int(round(float(_environment["lq_pct"]))), 0, 100)
 		7:
 			if _environment.has("dvr"):
 				return "REC" if _environment["dvr"] else "OFF"

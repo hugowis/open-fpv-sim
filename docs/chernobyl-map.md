@@ -73,11 +73,12 @@ The easiest way is the game's main menu: it lists every `worlds/*.toml` of the c
 (`godot/scripts/catalog.gd`), so "Chernobyl" is in the World row and works from any directory. Other ways to name it:
 `--world=chernobyl` or `OFS_WORLD=chernobyl`, a bare name, which the server resolves to `worlds/chernobyl.toml` beside the
 quad file's directory (`ofs_config::world::resolve`, called at `crates/ofs-sim/src/server.rs:298`); that works because the
-game's default quad path is absolute. The client passes the string to the server unchanged (`godot/scripts/settings.gd`), so
-a relative path (`--world=worlds/chernobyl.toml`, `OFS_WORLD=worlds/chernobyl.toml`, or `world_path` in the settings) works
-only when the server starts in the repository root, as `godot --path godot` is started in the README; from anywhere else
-use the absolute path. See also `docs/dev-setup.md`, "The world file and the analog video link". From Python, run from the
-repository root (the quad path below is relative; or use absolute paths):
+game's default quad path is absolute. A relative path (`--world=worlds/chernobyl.toml`,
+`OFS_WORLD=worlds/chernobyl.toml`, or `world_path` in the settings) is resolved against the repository root before the
+client sends it (`godot/scripts/settings.gd`), so it works from any directory; a bare name is left for the server to
+resolve beside the quad file. See also `docs/dev-setup.md`, "The world file and the analog video link". From Python, a
+relative path is resolved against the Python process's working directory, so run from the repository root (the quad path
+below is relative; or use absolute paths):
 
 ```python
 sim.load("quads/opendrone-7lr-longrange.toml", world="chernobyl")   # a bare name: worlds/chernobyl.toml beside the quad's directory
