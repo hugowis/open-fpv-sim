@@ -39,6 +39,8 @@ fn the_demo_world_loads() {
     let near = |got: f64, want: f64| (got - want).abs() < 0.05;
     assert!(near(b.max.x, 45.0) && near(b.min.x, -40.0), "{b:?}");
     assert!(near(b.max.y, 40.0) && near(b.min.y, -40.0), "{b:?}");
-    // Materials the mesh uses and the world lists carry their loss; the rest lose 0 dB.
-    assert!(meshes[0].loss_db.iter().any(|r| r.db_at(5800.0) == 12.0) && meshes[0].loss_db.iter().any(|r| r.db_at(5800.0) == 18.0), "{:?}", meshes[0].loss_db);
+    // Materials the mesh uses and the world lists carry their loss; the rest lose 0 dB. The demo world writes scalars,
+    // so its losses are `RfLoss::Db` exactly: a curve that happened to read 12/18 at 5800 MHz would not pass this.
+    let losses: Vec<&ofs_rf::RfLoss> = meshes[0].loss_db.iter().filter(|r| matches!(r, ofs_rf::RfLoss::Db(db) if *db == 12.0 || *db == 18.0)).collect();
+    assert_eq!(losses.len(), 2, "{:?}", meshes[0].loss_db);
 }

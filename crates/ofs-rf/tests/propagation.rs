@@ -82,8 +82,61 @@ fn the_reflecting_object_does_not_block_its_own_ray() {
     let gain = |o: Obstacle, flag: bool| path_gain(&tx, &rx, 5800.0, std::slice::from_ref(&o), None, &[], Multipath { ground_bounce: false, object_reflections: flag }).gain_db;
     let wall = side_wall();
     let with = gain(wall.clone(), true);
-    let mirror = gain(Obstacle { rf_loss: 0.0.into(), ..wall }, true);
-    close(with, mirror, 1e-9, "the 25 dB wall makes the same ray as a 0 dB one");
+    // The open path, then the ray the wall's west face makes by hand (tx mirrored across it, through its own height
+    // and past its edge): the open power plus that ray. The wall's 25 dB knife edge, which would take the reflected
+    // ray off the direct line, never touches it. (A 0 dB wall reflects nothing: see a_zero_db_box_does_not_reflect.)
+    let open = path_gain(&tx, &rx, 5800.0, &[], None, &[], bounce(false)).gain_db;
+    let face = DVec3::new(5.0, 4.0, -1.7);
+    let (length, out_dir, in_dir) = (tx.position.distance(face) + face.distance(rx.position), unit(face - tx.position), unit(rx.position - face));
+    let ray = one_ray(&tx, &rx, Polarization::Linear, out_dir, in_dir, length, 5800.0) + WALL_REFLECTION_DB;
+    close(with, 10.0 * (10f64.powf(open / 10.0) + 10f64.powf(ray / 10.0)).log10(), 1e-9, "the ray, unblocked by its own wall");
+}
+
+#[test]
+fn a_wall_rooted_through_the_ground_reflects_off_its_real_height() {
+    // A world obstacle stands 3 m above the ground; `world_obstacles` roots it, adding 1000 m below (`ofs-sim`'s
+    // `a_simulators_rooted_wall_reflects` runs the same box through `world_obstacles`). The face test must keep the
+    // reflection point above the ground and on the wall's own top, not somewhere in the rooted extension.
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    let wall = [side_wall()];
+    let off = path_gain(&tx, &rx, 5800.0, &wall, None, &[], bounce(false));
+    let on = path_gain(&tx, &rx, 5800.0, &wall, None, &[], reflections());
+    assert!(on.gain_db > off.gain_db, "the rooted wall adds a ray: {} vs {}", on.gain_db, off.gain_db);
+    // The same box not rooted must make the same ray: the root below the ground is not a face.
+    let unrooted = [Obstacle { shape: Shape::Box { center: DVec3::new(5.5, 0.0, -1.5), half: DVec3::new(0.5, 5.0, 1.5), yaw_rad: 0.0 }, rf_loss: 25.0.into() }];
+    close(on.gain_db, path_gain(&tx, &rx, 5800.0, &unrooted, None, &[], reflections()).gain_db, 1e-9, "rooting does not move the face");
+    // The reflection point is on the wall's own face, at the ends' height (east 4.0; 1.7 m up, inside its 3 m): the ray off it, at
+    // WALL_REFLECTION_DB, adds its power to the direct ray's. Anything from the rooted extension would land elsewhere.
+    let face = DVec3::new(5.0, 4.0, -1.7);
+    let (length, out_dir, in_dir) = (tx.position.distance(face) + face.distance(rx.position), unit(face - tx.position), unit(rx.position - face));
+    let ray = one_ray(&tx, &rx, Polarization::Linear, out_dir, in_dir, length, 5800.0) + WALL_REFLECTION_DB;
+    close(on.gain_db, 10.0 * (10f64.powf(off.gain_db / 10.0) + 10f64.powf(ray / 10.0)).log10(), 1e-9, "the ray off the real face");
+    let Shape::Box { half, .. } = side_wall().shape else { panic!("a box") };
+    assert!(half.z > 499.0, "the fixture is rooted (it reaches 1000 m down), else the test proves nothing");
+    // Above its 3 m top there is no face to reflect off.
+    let high = (point(DVec3::new(0.0, 0.0, -5.0)), point(DVec3::new(0.0, 8.0, -5.0)));
+    assert_eq!(
+        path_gain(&high.0, &high.1, 5800.0, &wall, None, &[], reflections()).gain_db,
+        path_gain(&high.0, &high.1, 5800.0, &wall, None, &[], bounce(false)).gain_db,
+        "5 m up, over the 3 m wall"
+    );
+}
+
+#[test]
+fn a_zero_db_box_does_not_reflect() {
+    // `rf_loss_db` 0 is not an obstacle, but a caller may still pass it: it must not add a ray.
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    let clear = [Obstacle { rf_loss: 0.0.into(), ..side_wall() }];
+    let on = path_gain(&tx, &rx, 5800.0, &clear, None, &[], reflections());
+    assert_eq!(on.gain_db, path_gain(&tx, &rx, 5800.0, &clear, None, &[], bounce(false)).gain_db, "a 0 dB box reflects nothing");
+    // And it adds nothing to a real wall's ray either.
+    let both = [side_wall(), Obstacle { rf_loss: 0.0.into(), ..side_wall() }];
+    close(
+        path_gain(&tx, &rx, 5800.0, &both, None, &[], reflections()).gain_db,
+        path_gain(&tx, &rx, 5800.0, std::slice::from_ref(&side_wall()), None, &[], reflections()).gain_db,
+        1e-9,
+        "the 0 dB twin adds no ray",
+    );
 }
 
 #[test]
@@ -274,8 +327,8 @@ fn the_ground_ray_takes_its_own_obstruction() {
     // doubles the power. A 2 m box standing at 40 m is 2 m off the bounce leg's bend (a few Fresnel zones at 5.8 GHz
     // over these angles) and 10 m below the direct line, so it bites the bounce alone.
     let freq = 5800.0;
-    let omni = |p: DVec3| Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) };
-    let (tx, rx) = (omni(DVec3::new(0.0, 0.0, -10.0)), omni(DVec3::new(100.0, 0.0, -10.0)));
+    let linear = |p: DVec3| Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) };
+    let (tx, rx) = (linear(DVec3::new(0.0, 0.0, -10.0)), linear(DVec3::new(100.0, 0.0, -10.0)));
     let both = bounce(true);
     let clear_box = Obstacle { shape: Shape::Box { center: DVec3::new(40.0, 0.0, -2.0), half: DVec3::splat(1.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
     let beside = Obstacle { shape: Shape::Box { center: DVec3::new(40.0, 60.0, -2.0), half: DVec3::splat(1.0), yaw_rad: 0.0 }.rooted(), ..clear_box.clone() };
@@ -294,6 +347,92 @@ fn the_ground_ray_takes_its_own_obstruction() {
             unobstructed_gain_db(&tx, &rx, freq, false) - obstruction
         );
     }
+}
+
+#[test]
+fn a_box_on_the_direct_line_alone_leaves_the_bounce_alone() {
+    // The same rig as the_ground_ray_takes_its_own_obstruction, the box moved up onto the direct line only (z = -10,
+    // between the two ends, clear of the bounce which passes fifty metres above it): the direct ray takes all of it
+    // and the bounce is the open two-ray's.
+    let freq = 5800.0;
+    let linear = |p: DVec3| Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) };
+    let (tx, rx) = (linear(DVec3::new(0.0, 0.0, -10.0)), linear(DVec3::new(100.0, 0.0, -10.0)));
+    let open = path_gain(&tx, &rx, freq, &[], None, &[], bounce(true)).gain_db;
+    let box_in_line = Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::splat(1.0), yaw_rad: 0.0 }, rf_loss: 25.0.into() };
+    let hit = path_gain(&tx, &rx, freq, std::slice::from_ref(&box_in_line), None, &[], bounce(true));
+    assert!(hit.obstruction_db > 10.0, "the direct ray takes it: {:?}", hit);
+    // Each ray is taken by hand from the shared combiner (the same ends, the same phase), the direct ray less its own
+    // loss: the box touches no bounce term.
+    let bounce = DVec3::new(50.0, 0.0, 0.0);
+    let two_ray = combiner(&tx, &rx, freq, bounce, hit.obstruction_db, 0.0);
+    close(hit.gain_db, two_ray, 1e-9, "only the direct ray is cut");
+    let whole_path = combiner(&tx, &rx, freq, bounce, 0.0, 0.0) - hit.obstruction_db;
+    assert!(two_ray > whole_path + 1.0, "which is not a whole-path cut: {} vs {}", two_ray, whole_path);
+    assert!(two_ray < open - 1.0, "the direct ray still goes down: {} vs {open}", two_ray);
+}
+
+/// The gain of one ray from `out_dir` to `in_dir` off the tx antenna (the propagation model's):
+/// `[Antenna::gain_towards]` at both ends, the path loss and the polarization.
+fn one_ray(tx: &Endpoint, rx: &Endpoint, tx_polarization: Polarization, out_dir: DVec3, in_dir: DVec3, length_m: f64, freq: f64) -> f64 {
+    tx.antenna.gain_towards(out_dir) + rx.antenna.gain_towards(-in_dir) - fspl_db(length_m, freq)
+        - polarization_loss_db(&tx.antenna, tx_polarization, &rx.antenna, in_dir)
+}
+
+fn unit(v: DVec3) -> DVec3 {
+    v.try_normalize().unwrap_or(DVec3::X)
+}
+
+/// The two-ray combiner taken by hand over `tx`, the ground at `bounce` and `rx` (the same ends, so the same phase as
+/// the model's), each ray's amplitude `direct_loss_db` / `bounce_loss_db` down: the per-ray power a correct model gives.
+fn combiner(tx: &Endpoint, rx: &Endpoint, freq: f64, bounce: DVec3, direct_loss_db: f64, bounce_loss_db: f64) -> f64 {
+    let dir = unit(rx.position - tx.position);
+    let direct_len = tx.position.distance(rx.position);
+    let reflected_len = tx.position.distance(bounce) + bounce.distance(rx.position);
+    let amp = |db: f64| 10f64.powf(db / 20.0);
+    let (a, b) = (
+        amp(one_ray(tx, rx, tx.antenna.polarization, dir, dir, direct_len, freq) - direct_loss_db),
+        amp(one_ray(tx, rx, tx.antenna.polarization.reflected(), unit(bounce - tx.position), unit(rx.position - bounce), reflected_len, freq) - bounce_loss_db),
+    );
+    let phase = 2.0 * std::f64::consts::PI * (reflected_len - direct_len) / wavelength_m(freq) + std::f64::consts::PI;
+    10.0 * (a * a + b * b + 2.0 * a * b * phase.cos()).log10()
+}
+
+#[test]
+fn a_box_on_one_bounce_leg_costs_the_bounce_once() {
+    // A box standing at 84 m bites only the bounce leg from the bend (which is at 50 m) to rx, on that leg alone (the
+    // direct line is 10 m up, clear); the leg is passed once. The two-ray combiner is taken by hand with the bounce
+    // ray down by the leg's own knife edge once: taking it twice would take it off the combined power too.
+    let freq = 5800.0;
+    let linear = |p: DVec3| Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) };
+    let (tx, rx) = (linear(DVec3::new(0.0, 0.0, -10.0)), linear(DVec3::new(100.0, 0.0, -10.0)));
+    let box_on_leg = Obstacle { shape: Shape::Box { center: DVec3::new(84.2, 0.0, -3.1), half: DVec3::new(3.1, 3.1, 3.1), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
+    let bend = DVec3::new(50.0, 0.0, 0.0);
+    let leg_loss = obstruction_loss_db(&box_on_leg, bend, rx.position, freq);
+    assert!(leg_loss > 3.0 && leg_loss < 12.0, "the fixture's leg loss is a partial bite: {leg_loss}");
+    let open = path_gain(&tx, &rx, freq, &[], None, &[], bounce(true)).gain_db;
+    let hit = path_gain(&tx, &rx, freq, std::slice::from_ref(&box_on_leg), None, &[], bounce(true));
+    assert_eq!(hit.obstruction_db, 0.0, "the direct line is clear");
+    // The open two-ray with its bounce ray down by the leg's loss, and with it down twice: the model must be the first.
+    let two_ray = |bounce_loss_db: f64| combiner(&tx, &rx, freq, bend, 0.0, bounce_loss_db);
+    close(open, two_ray(0.0), 1e-9, "the open rig is the hand pair");
+    close(hit.gain_db, two_ray(leg_loss), 1e-9, "the bounce leg's loss comes off once");
+    assert!(hit.gain_db > two_ray(2.0 * leg_loss) + 0.5, "not twice: {} vs {}", hit.gain_db, two_ray(2.0 * leg_loss));
+}
+
+#[test]
+fn terrain_takes_one_whole_path_loss_with_or_without_the_bounce() {
+    // On the ridge fixture (a ray under the crest), the terrain's knife edge comes off the combined direct and bounced
+    // power once: the bounce off moves the gain by the two-ray ripple alone, and the ridge's loss is the same term
+    // whichever way the bounce is set.
+    let terrain = ridge(20, 10.0);
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -2.0)), point(DVec3::new(40.0, 0.0, -2.0)));
+    let loss = terrain_loss_db(&terrain, tx.position, rx.position, wavelength_m(5800.0));
+    assert!(loss > 5.0, "the ridge is in the way: {loss}");
+    let without = path_gain(&tx, &rx, 5800.0, &[], None, &[], bounce(false)).gain_db;
+    let with = path_gain(&tx, &rx, 5800.0, &[], None, &[], bounce(true)).gain_db;
+    let flat = |gain: f64| gain - loss;
+    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&terrain), &[], bounce(false)).gain_db, flat(without), "without the bounce: the direct ray less the ridge, once");
+    assert_eq!(path_gain(&tx, &rx, 5800.0, &[], Some(&terrain), &[], bounce(true)).gain_db, flat(with), "with it: the same whole-path term, once");
 }
 
 #[test]

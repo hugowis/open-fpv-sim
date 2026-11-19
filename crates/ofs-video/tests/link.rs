@@ -595,3 +595,23 @@ fn the_video_flag_lets_an_emitter_wall_reflect() {
     let without = interference_dbm(&world, 5800.0, direct)[0];
     assert!(with > without, "the emitter's own wall reflection adds power: {with} vs {without}");
 }
+
+#[test]
+fn the_video_flag_lets_an_emitter_wall_reflect_over_the_bounce_too() {
+    // The link's own settings: the ground bounce and the reflections together. The wall's ray adds its power on top
+    // of the bounced one.
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    world.emitters.push(Emitter {
+        position: DVec3::new(0.0, 0.0, -1.7),
+        freq_mhz: 5800.0,
+        power_mw: 25.0,
+        antenna: omni(DVec3::NEG_Z),
+    });
+    let both = Multipath { ground_bounce: true, object_reflections: true };
+    let bounce_only = Multipath { ground_bounce: true, object_reflections: false };
+    let with = interference_dbm(&world, 5800.0, both)[0];
+    let without = interference_dbm(&world, 5800.0, bounce_only)[0];
+    assert!(with > without, "the wall reflects over the bounce: {with} vs {without}");
+}

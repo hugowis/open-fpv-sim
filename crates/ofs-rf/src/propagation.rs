@@ -418,8 +418,9 @@ fn box_to_world(yaw_rad: f64, d: DVec3) -> DVec3 {
 
 /// The specular points of a box's vertical faces that reflect from `tx` to `rx`, in world space. Each face with a
 /// normal pointing at both ends is tried: `tx` is mirrored across its plane, and the image-to-`rx` line must cross the
-/// plane inside the face (the other horizontal half and `half.z`) and below the ground. The ray goes around the
-/// wall, never through it. Other shapes never reflect.
+/// plane inside the face (the other horizontal half and `half.z`) and above the ground. A box rooted on the ground
+/// (`Shape::rooted`) runs 1000 m below it, so the face's rectangle is cut at the ground and the wall reflects off the
+/// height it really stands at. The ray goes around the wall, never through it. Other shapes never reflect.
 fn face_crossings(tx: DVec3, rx: DVec3, shape: &Shape) -> Vec<DVec3> {
     let Shape::Box { center, half, yaw_rad } = *shape else { return Vec::new() };
     // The same frame as the box's signed distance: the world offset turned back onto its own axes.
@@ -445,7 +446,8 @@ fn face_crossings(tx: DVec3, rx: DVec3, shape: &Shape) -> Vec<DVec3> {
             // midpoint's foot on it.
             let t = if out_a == out_b { 0.5 } else { out_a / (out_a - out_b) };
             let q = image + (b - image) * t;
-            // The face's rectangle: the other horizontal axis, its height, and above the ground.
+            // The face's rectangle: the other horizontal axis, its height, and above the ground (a rooted box's
+            // `half.z` reaches far below it).
             let across = if axis.x == 0.0 { q.x } else { q.y };
             (across.abs() <= half_across && q.z.abs() <= half.z && center.z + q.z < 0.0).then(|| center + box_to_world(yaw_rad, q))
         })
@@ -454,12 +456,13 @@ fn face_crossings(tx: DVec3, rx: DVec3, shape: &Shape) -> Vec<DVec3> {
 
 /// The incoherent sum of the powers of the specular rays off the boxes' faces, in dB, or `None` when the flag is off
 /// or no face reflects. The reflecting object is left out of its own ray's obstruction; every other obstacle and
-/// mesh applies to both legs.
+/// mesh applies to both legs. An `rf_loss` of 0 is not an obstacle (it takes no signal): it never reflects.
 fn walls_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], meshes: &[MeshObstacle], object_reflections: bool) -> Option<f64> {
     if !object_reflections {
         return None;
     }
-    let points: Vec<(usize, DVec3)> = obstacles.iter().enumerate().flat_map(|(i, o)| face_crossings(tx.position, rx.position, &o.shape).into_iter().map(move |q| (i, q))).collect();
+    let points: Vec<(usize, DVec3)> =
+        obstacles.iter().enumerate().filter(|(_, o)| o.rf_loss.db_at(freq_mhz) > 0.0).flat_map(|(i, o)| face_crossings(tx.position, rx.position, &o.shape).into_iter().map(move |q| (i, q))).collect();
     if points.is_empty() {
         return None;
     }
