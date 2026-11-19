@@ -41,9 +41,9 @@ fn the_shipped_world_loads() {
     assert_eq!(w.receiver.antennas[1].aim_el(), 10.0);
     assert_eq!(w.objects.len(), 1 + 16 + 9 + 4, "pad, pylons, gates, buildings");
     let b = w.objects.iter().find(|o| o.name == "BuildingB").unwrap();
-    assert_eq!((b.shape, b.size_m, b.rf_loss_db), (Shape::Box, Some([10.0, 10.0, 22.0]), 30.0));
+    assert_eq!((b.shape, b.size_m, b.rf_loss_db.clone()), (Shape::Box, Some([10.0, 10.0, 22.0]), 30.0.into()));
     let pylon = w.objects.iter().find(|o| o.name == "Pylon1L").unwrap();
-    assert_eq!((pylon.shape, pylon.radius_m, pylon.height_m, pylon.rf_loss_db), (Shape::Cylinder, Some(0.15), Some(3.0), 0.0));
+    assert_eq!((pylon.shape, pylon.radius_m, pylon.height_m, pylon.rf_loss_db.clone()), (Shape::Cylinder, Some(0.15), Some(3.0), 0.0.into()));
     assert_eq!(w.emitters.len(), 1);
     assert_eq!((w.emitters[0].band.as_deref(), w.emitters[0].channel), (Some("R"), Some(2)));
     assert_eq!(w.emitters[0].polarization, Polarization::Rhcp);
@@ -119,7 +119,7 @@ fn the_park_world_loads() {
     let post = w.objects.iter().find(|o| o.name == "Gate0PostL").unwrap();
     assert_eq!(&post.center_ned_m[..2], &[10.75, 0.0], "Gate0 flies east: its posts separate along x");
     let hedge = w.objects.iter().find(|o| o.name == "Hedge").unwrap();
-    assert_eq!((hedge.shape, hedge.rf_loss_db), (Shape::Box, 6.0));
+    assert_eq!((hedge.shape, hedge.rf_loss_db.clone()), (Shape::Box, 6.0.into()));
     assert_eq!(w.emitters.len(), 1);
     assert_eq!(w.emitters[0].freq_mhz, Some(5806.0));
 }
@@ -148,7 +148,7 @@ fn the_meadow_world_loads() {
     let bar = w.objects.iter().find(|o| o.name == "Gate1Bar").unwrap();
     assert_eq!((bar.shape, bar.size_m, bar.yaw_deg), (Shape::Box, Some([8.3, 0.15, 0.15]), Some(135.0)), "the bar Gate1 was missing, yawed across the travel");
     let barn = w.objects.iter().find(|o| o.name == "Barn").unwrap();
-    assert_eq!((barn.shape, barn.size_m, barn.rf_loss_db), (Shape::Box, Some([10.0, 6.0, 6.0]), 25.0));
+    assert_eq!((barn.shape, barn.size_m, barn.rf_loss_db.clone()), (Shape::Box, Some([10.0, 6.0, 6.0]), 25.0.into()));
     assert_eq!(w.emitters.len(), 1);
     assert_eq!(w.emitters[0].freq_mhz, Some(5732.0));
 }
@@ -552,6 +552,47 @@ position_ned_m = [-3.0, 2.0, -1.2]
     )
     .unwrap_err();
     assert!(bare.to_string().contains("handset.antennas"), "{bare}");
+}
+
+#[test]
+fn rf_loss_db_takes_a_scalar_or_a_frequency_curve() {
+    // BuildingC is the last of the 30 objects.
+    let building_c = |w: &WorldConfig| w.objects.iter().find(|o| o.name == "BuildingC").unwrap().rf_loss_db.db_at(5800.0);
+    let with_loss = |loss: &str| world_text().replacen("rf_loss_db = 20.0", &format!("rf_loss_db = {loss}"), 1);
+    let scalar = written_world(&with_loss("25.0")).unwrap();
+    assert_eq!(building_c(&scalar), 25.0);
+    let curve = written_world(&with_loss("{ at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }")).unwrap();
+    assert_eq!(building_c(&curve), 25.0);
+}
+
+#[test]
+fn an_rf_loss_curve_is_validated_at_its_field() {
+    let with_loss = |loss: &str| world_text().replacen("rf_loss_db = 30.0", &format!("rf_loss_db = {loss}"), 1);
+    let invalid = [
+        "{ at_mhz = [5800.0], db = [25.0] }",
+        "{ at_mhz = [900.0, 5800.0], db = [25.0] }",
+        "{ at_mhz = [5800.0, 900.0], db = [12.0, 25.0] }",
+        "{ at_mhz = [900.0, 5800.0], db = [12.0, -25.0] }",
+        "-1.0",
+    ];
+    for loss in invalid {
+        let found = problems(&with_loss(loss));
+        assert!(found.iter().any(|p| p.starts_with("objects[27].rf_loss_db: ")), "{loss}: {found:#?}");
+    }
+}
+
+#[test]
+fn a_material_rf_loss_db_takes_a_curve() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = mesh_world(
+        dir.path(),
+        "[[meshes]]\nname = \"hall\"\nfile = \"a.glb\"\n[[materials]]\nname = \"glass\"\nrf_loss_db = { at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }\n[[materials]]\nname = \"wall\"\nrf_loss_db = 18.0\n",
+    );
+    let w = world::load(&path).unwrap();
+    assert_eq!(w.materials[0].rf_loss_db.db_at(5800.0), 25.0);
+    assert_eq!(w.load_meshes().unwrap()[0].loss_db, [18.0, 25.0], "the mesh carries the 5.8 GHz value");
+    assert_field(&mesh_problems("[[materials]]\nname = \"x\"\nrf_loss_db = { at_mhz = [900.0, 5800.0], db = [12.0, -25.0] }\n"), "materials[0].rf_loss_db");
+    assert_field(&mesh_problems("[[materials]]\nname = \"x\"\nrf_loss_db = -1.0\n"), "materials[0].rf_loss_db");
 }
 
 #[test]
@@ -1249,7 +1290,7 @@ fn a_changed_material_loss_is_not_stale() {
     let mut w = world::load(&path).unwrap();
     let before = w.load_meshes().unwrap()[0].loss_db.clone();
     assert!(!before.is_empty());
-    w.materials[0].rf_loss_db += 7.0;
+    w.materials[0].rf_loss_db = (w.materials[0].rf_loss_db.db_at(5800.0) + 7.0).into();
     let after = w.load_meshes().unwrap()[0].loss_db.clone();
     assert_ne!(after, before, "the loss of a material changed after load");
     let named = &w.materials[0].name;

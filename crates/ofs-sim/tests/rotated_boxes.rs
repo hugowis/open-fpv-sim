@@ -29,7 +29,7 @@ pub fn object_world() -> WorldConfig {
         height_m: None,
         yaw_deg: None,
         color: [0.6, 0.6, 0.6],
-        rf_loss_db: 25.0,
+        rf_loss_db: 25.0.into(),
     });
     w
 }

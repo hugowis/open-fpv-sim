@@ -12,6 +12,7 @@ toml.workspace = true
 thiserror.workspace = true
 glam.workspace = true
 gltf.workspace = true
+ofs-rf.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

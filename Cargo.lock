@@ -976,6 +976,7 @@ dependencies = [
  "glam 0.29.3",
  "gltf",
  "ofs-core",
+ "ofs-rf",
  "serde",
  "tempfile",
  "thiserror 1.0.69",
