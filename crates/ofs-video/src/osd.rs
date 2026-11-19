@@ -1,7 +1,8 @@
 //! Betaflight's OSD over MSP DisplayPort, decoded into a character grid.
 //!
 //! Betaflight redraws the screen as `clear`, many `write string`, then `draw`. Writes go to a back buffer; `draw`
-//! publishes it, so a half-drawn screen is never shown. See `displayport_msp.c` of the pinned Betaflight.
+//! publishes it, so a half-drawn screen is never shown. HD builds also send SYS markers (`[6, row, col, element]`):
+//! placeholders for values the goggles render, not characters. See `displayport_msp.c` of the pinned Betaflight.
 use std::sync::{Arc, Mutex};
 
 use ofs_core::rng::fnv1a64;
@@ -15,34 +16,42 @@ const SUB_RELEASE: u8 = 1;
 const SUB_CLEAR: u8 = 2;
 const SUB_WRITE: u8 = 3;
 const SUB_DRAW: u8 = 4;
+const SUB_SYS: u8 = 6;
 const ATTR_VERSION: u8 = 0x80;
 const ATTR_BLINK: u8 = 0x40;
 const ATTR_FONT: u8 = 0x03;
 /// The OSD counts as gone when no screen was drawn for this long (seconds of simulated time).
 pub const PRESENT_TIMEOUT_S: f64 = 1.0;
 
-/// One character cell: the font code, the font page and the blink flag.
+/// One character cell: the font code, the font page, the blink flag and the HD system element (`0` = none).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: u8,
     pub page: u8,
     pub blink: bool,
+    /// `displayPortSystemElement_e` + 1: 1..=11 for the HD SYS markers, 0 for a text cell.
+    pub sys: u8,
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Cell { ch: b' ', page: 0, blink: false }
+        Cell { ch: b' ', page: 0, blink: false, sys: 0 }
     }
 }
 
 impl Cell {
-    /// `ch | page << 8 | blink << 10`, the wire form used in the gRPC `OsdFrame`.
+    /// `ch | page << 8 | blink << 10 | sys << 11`, the wire form used in the gRPC `OsdFrame`.
     pub fn packed(self) -> u32 {
-        u32::from(self.ch) | (u32::from(self.page) << 8) | (u32::from(self.blink) << 10)
+        u32::from(self.ch) | (u32::from(self.page) << 8) | (u32::from(self.blink) << 10) | (u32::from(self.sys) << 11)
     }
 
     pub fn unpack(v: u32) -> Cell {
-        Cell { ch: (v & 0xFF) as u8, page: ((v >> 8) & 0x3) as u8, blink: (v >> 10) & 1 == 1 }
+        Cell {
+            ch: (v & 0xFF) as u8,
+            page: ((v >> 8) & 0x3) as u8,
+            blink: (v >> 10) & 1 == 1,
+            sys: ((v >> 11) & 0x1F) as u8,
+        }
     }
 }
 
@@ -155,6 +164,7 @@ impl OsdDecoder {
                 SUB_RELEASE => self.released = true,
                 SUB_CLEAR => self.back = OsdGrid::blank(self.back.cols, self.back.rows),
                 SUB_WRITE => self.write(&reply.payload),
+                SUB_SYS => self.write_sys(&reply.payload),
                 SUB_DRAW => {
                     if self.front != self.back {
                         self.front = self.back.clone();
@@ -175,8 +185,18 @@ impl OsdDecoder {
         }
         let (row, col, attr) = (usize::from(payload[1]), usize::from(payload[2]), payload[3]);
         for (i, ch) in payload[4..].iter().enumerate() {
-            self.back.set(row, col + i, Cell { ch: *ch, page: attr & ATTR_FONT, blink: attr & ATTR_BLINK != 0 });
+            self.back.set(row, col + i, Cell { ch: *ch, page: attr & ATTR_FONT, blink: attr & ATTR_BLINK != 0, sys: 0 });
         }
+    }
+
+    /// `[6, row, col, systemElement]`: an HD marker, rendered by the goggles, not a character.
+    fn write_sys(&mut self, payload: &[u8]) {
+        if payload.len() < 4 {
+            self.unknown_frames += 1;
+            return;
+        }
+        let (row, col) = (usize::from(payload[1]), usize::from(payload[2]));
+        self.back.set(row, col, Cell { sys: payload[3].saturating_add(1), ..Cell::default() });
     }
 
     pub fn frame(&self, now_s: f64) -> OsdFrame {

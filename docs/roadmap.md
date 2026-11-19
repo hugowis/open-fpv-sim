@@ -162,9 +162,11 @@ per-cell battery, the thermal model and the receiver thresholds as world data (M
 - Feed Betaflight SITL a measured magnetometer (#31 added the model and left the firmware on its fixed virtual compass): a reserved block in the state datagram like eRPM's, and a SITL patch for `virtualMagSet`, so noise, hard iron and the world's declination reach heading hold and GPS rescue. A datasheet magnetometer part and a `fault.mag.*` interference seam.
 
 ### Video and OSD
-- The full HD/digital OSD element set (#32): the `OSD_SYS_*` elements and the 50 × 18 canvas that Betaflight sends only
-  when built with `USE_OSD_HD`, which needs an HD SITL build, a decoder for the system-element sub-command and an HD font
-  with a verified licence. Warnings and criticals (font pages 2–3) are drawn as the bold glyphs in amber and red.
+- The HD/digital OSD element set (#32) is done: the `USE_OSD_HD` SITL build, the 53 × 20 canvas (the pinned build's
+  size, not the issue's 50 × 18), the `MSP_DP_SYS` decoder, the shipped `opendrone-5f-hd` quad, and the SYS cells drawn
+  with Godot's fallback font (delay, distance, LQ and goggle DVR live; goggle/VTX voltage, bitrate, VTX DVR, VTX
+  temperature and fan speed show `--`). Warnings and criticals (font pages 2–3) are drawn as the bold glyphs in amber
+  and red.
 - Digital video systems (parent spec §2).
 
 ### Sandbox and component library

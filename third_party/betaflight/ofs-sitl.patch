@@ -1128,7 +1128,7 @@ index 69d3250..a0f2bea 100644
  #undef USE_VTX_MSP
  #undef USE_CAMERA_CONTROL
  #undef USE_SERIAL_4WAY_BLHELI_BOOTLOADER
-@@ -171,6 +169,25 @@
+@@ -171,6 +169,26 @@
  #undef USE_I2C
  #undef USE_SPI
  
@@ -1141,6 +1141,7 @@ index 69d3250..a0f2bea 100644
 +#endif
 +#define USE_OSD
 +#define USE_OSD_SD
++#define USE_OSD_HD
 +#ifndef USE_MSP_DISPLAYPORT
 +#define USE_MSP_DISPLAYPORT
 +#endif

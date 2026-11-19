@@ -117,6 +117,19 @@ Each plan carries its list; fly it, eyeball it, feel the frame rate, then post i
 - **Check the credit**: the help screen (F1) and the README name OpenStreetMap and the ODbL.
 - Post the result to #163 when the PR closes, as the other items do.
 
+## The HD OSD (#32) — after the milestone
+
+- Fly the shipped HD quad (`opendrone-5f-hd`) with the real SITL: the goggles render the **53×20** canvas (not
+  30×16); the SYS markers (goggle/VTX voltage, bitrate, delay, distance, LQ, goggle DVR, VTX DVR, warnings, VTX
+  temperature, fan speed) sit at their placed cells; the delay/distance/LQ/goggle-DVR values follow the simulator;
+  the unmodelled ones show `--`.
+- An SD quad still shows its 30×16 OSD exactly as before, with the severity pages.
+- Judge the SYS labels and values at 53×20 by eye through the analog chain; if the fallback font is not enough, the
+  `digital.mcm` face is the follow-up (the licence note stays true).
+- The spike's live capture: `MSP_DP_SYS` (subcommand 6) arrives with the 53×20 grid and the expected positions; a
+  column at 32 or above carries Betaflight's extra X bit.
+- The analog chain still owns the picture: noise, breakup and the DVR are unchanged by the markers.
+
 ## Standing
 
 - #163 stays open until both waves' checks are in; this file points, #163 keeps.

@@ -1,0 +1,58 @@
+# Applied once, on first boot, with `betaflight_SITL.elf --config`.
+feature -GPS
+# CRSF receiver on UART2 (serial index 1): the simulated ExpressLRS receiver is wired there.
+feature RX_SERIAL
+serial 1 64 115200 57600 0 115200
+set serialrx_provider = CRSF
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+set motor_pwm_protocol = PWM
+set small_angle = 180
+
+# M3a video. Serial indexes are 0-based: UART3 = serial 2, UART4 = serial 3, UART5 = serial 4.
+# Battery as the ESC sensor (KISS frames on UART3): voltage, current and mAh come from the simulated battery.
+feature ESC_SENSOR
+serial 2 1024 115200 57600 0 115200
+set battery_meter = ESC
+set current_meter = ESC
+# Must match battery.cells in the quad file: Betaflight would otherwise guess the cell count from the first voltage it
+# sees, and a part-charged 6S pack reads as 5S (and never raises the low-battery warning).
+set force_battery_cell_count = 6
+# OSD over MSP DisplayPort on UART4 (MSP + VTX_MSP functions); the pinned SITL's 53x20 HD canvas.
+feature OSD
+serial 3 131073 115200 57600 0 115200
+set osd_displayport_device = MSP
+set vcd_video_system = HD
+set craft_name = OpenFPV
+# Element positions: 2048 (visible in OSD profile 1) + (row << 5) + column.
+set osd_craft_name_pos = 2058
+set osd_flymode_pos = 2081
+set osd_vtx_channel_pos = 2102
+set osd_disarmed_pos = 2315
+set osd_warnings_pos = 2377
+set osd_vbat_pos = 2497
+set osd_mah_drawn_pos = 2504
+set osd_current_pos = 2512
+set osd_tim_1_pos = 2529
+set osd_link_quality_pos = 2536
+set osd_altitude_pos = 2548
+# HD SYS markers (#32): profile 1 (2048) + col 40 (XHD bit 1024 + 8) + row << 5, rows 0-10, 53x20 canvas.
+set osd_sys_goggle_voltage_pos = 3080
+set osd_sys_vtx_voltage_pos = 3112
+set osd_sys_bitrate_pos = 3144
+set osd_sys_delay_pos = 3176
+set osd_sys_distance_pos = 3208
+set osd_sys_lq_pos = 3240
+set osd_sys_goggle_dvr_pos = 3272
+set osd_sys_vtx_dvr_pos = 3304
+set osd_sys_warnings_pos = 3336
+set osd_sys_vtx_temp_pos = 3368
+set osd_sys_fan_speed_pos = 3400
+# SmartAudio VTX on UART5. SITL has no vtxtable: Betaflight uses the factory bands and the power levels the VTX reports.
+serial 4 2048 115200 57600 0 115200
+set vtx_band = 5
+set vtx_channel = 1
+set vtx_power = 2
+# M4c Blackbox: SITL's VIRTUAL device writes LOGnnnnn.BFL into the quad's firmware directory each time it is armed;
+# the server copies a session's logs into <data_dir>/logs when the session ends.
+set blackbox_device = VIRTUAL

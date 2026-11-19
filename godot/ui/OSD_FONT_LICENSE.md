@@ -19,6 +19,11 @@ project is GPL-3.0-or-later; the atlas is a derivative of the font and stays und
 
 Betaflight sends character codes, not pictures; the symbols (battery, units, arrows) only look right with this font.
 
+The HD SYS markers (#32) add no glyph art: Betaflight sends `[6, row, col, element]` and the goggles render the values.
+`godot/ui/osd.gd` draws their labels and values with Godot's built-in fallback font (Noto Sans, SIL OFL 1.1, shipped with
+the engine), so this atlas and its licence are unchanged. The GPL-3.0 Configurator `digital.mcm` face is not used on this
+path.
+
 **Maintainer's ruling (2026-10-13):** accepted. The atlas stays under GPL-3.0 (not "or later") inside this
 GPL-3.0-or-later project; GPL-3.0 is compatible with GPL-3.0-or-later, so the combined work is distributed under
 GPL-3.0. Replacing the atlas with a font under GPL-3.0-or-later (or a more permissive licence) would lift that.

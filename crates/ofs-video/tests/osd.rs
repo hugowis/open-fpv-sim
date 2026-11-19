@@ -73,9 +73,50 @@ fn attributes_select_blink_and_the_font_page() {
     let mut d = OsdDecoder::new(30, 16);
     d.push(&screen(&[dp(2, &[]), write(0, 0, 0x41, "A"), dp(4, &[])]), 0.0);
     let cell = d.frame(0.0).grid.get(0, 0);
-    assert_eq!(cell, Cell { ch: b'A', page: 1, blink: true });
+    assert_eq!(cell, Cell { ch: b'A', page: 1, blink: true, sys: 0 });
     assert_eq!(Cell::unpack(cell.packed()), cell);
     assert_eq!(cell.packed(), u32::from(b'A') | 1 << 8 | 1 << 10);
+}
+
+#[test]
+fn a_sys_frame_marks_a_cell_and_keeps_the_grid_text_blank() {
+    let mut d = OsdDecoder::new(30, 16);
+    d.push(&screen(&[dp(2, &[]), dp(6, &[3, 7, 0]), dp(4, &[])]), 0.0);
+    let frame = d.frame(0.0);
+    let cell = frame.grid.get(3, 7);
+    assert_eq!(cell.sys, 1, "goggle voltage is element 0, stored as 1");
+    assert_eq!(frame.grid.text_rows()[3].trim(), "", "a sys cell is not text");
+    assert_eq!(Cell::unpack(cell.packed()), cell);
+}
+
+#[test]
+fn a_text_write_clears_a_sys_marker() {
+    let mut d = OsdDecoder::new(30, 16);
+    d.push(&screen(&[dp(2, &[]), dp(6, &[3, 7, 0]), write(3, 7, 0, "A"), dp(4, &[])]), 0.0);
+    let cell = d.frame(0.0).grid.get(3, 7);
+    assert_eq!((cell.ch, cell.sys), (b'A', 0));
+}
+
+#[test]
+fn sys_cells_outside_the_grid_are_clipped() {
+    let mut d = OsdDecoder::new(30, 16);
+    d.push(&screen(&[dp(2, &[]), dp(6, &[40, 99, 4]), dp(4, &[])]), 0.0);
+    assert!(d.frame(0.0).grid.cells.iter().all(|c| c.sys == 0));
+}
+
+#[test]
+fn a_short_sys_frame_is_counted_and_ignored() {
+    let mut d = OsdDecoder::new(30, 16);
+    d.push(&dp(6, &[1, 2]), 0.0);
+    assert_eq!(d.unknown_frames(), 1);
+    assert!(d.frame(0.0).grid.cells.iter().all(|c| c.sys == 0));
+}
+
+#[test]
+fn the_packed_cell_carries_the_sys_element_beside_page_and_blink() {
+    let cell = Cell { ch: b'A', page: 1, blink: true, sys: 11 };
+    assert_eq!(Cell::unpack(cell.packed()), cell);
+    assert_eq!(cell.packed(), u32::from(b'A') | 1 << 8 | 1 << 10 | 11 << 11);
 }
 
 #[test]
@@ -131,7 +172,9 @@ fn garbage_is_skipped_and_the_next_good_frame_still_draws() {
     *bad.last_mut().unwrap() ^= 0xFF;
     d.push(&bad, 0.0);
     d.push(&msp(101, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), 0.0); // MSP_STATUS-like reply
-    d.push(&dp(6, &[1, 2, 3]), 0.0); // system element
+    d.push(&dp(6, &[1, 2, 3]), 0.0); // element 3 = delay
+    d.push(&dp(4, &[]), 0.0);
+    assert_eq!(d.frame(0.0).grid.get(1, 2).sys, 4, "the system element is kept");
     d.push(&dp(77, &[]), 0.0); // unknown subcommand
     d.push(&write(1, 1, 0x80, "VERSION"), 0.0); // attribute version bit set: not a v1/v2 write
     d.push(&screen(&[dp(2, &[]), write(5, 5, 0, "OK"), dp(4, &[])]), 0.1);

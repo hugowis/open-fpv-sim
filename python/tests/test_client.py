@@ -311,10 +311,11 @@ def test_video_messages_convert():
 
 def test_the_osd_helpers_read_packed_cells():
     cells = tuple([0x20] * 6)
-    cells = cells[:1] + (ord("A") | 1 << 8 | 1 << 10,) + cells[2:]
+    cells = cells[:1] + (ord("A") | 1 << 8 | 1 << 10,) + (ord(" ") | 3 << 11,) + cells[3:]
     osd = ofs.Osd(seq=1, time_s=0.0, present=True, cols=3, rows=2, cells=cells)
     assert osd.char(0, 1) == ord("A")
     assert osd.blink(0, 1) and osd.page(0, 1) == 1
+    assert osd.sys(0, 1) == 0 and osd.sys(0, 2) == 3
     assert osd.rows_text() == [" A ", "   "]
     assert osd.text == " A \n   "
     assert ofs.Vtx(band=5).band_letter == "R" and ofs.Vtx(band=0).band_letter == ""

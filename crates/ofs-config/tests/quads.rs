@@ -36,6 +36,32 @@ fn every_library_part_is_listed_in_the_ledger() {
 }
 
 #[test]
+fn the_hd_quad_uses_the_hd_canvas_and_the_others_stay_sd() {
+    let load = |stem: &str| ofs_config::load(&Path::new(ROOT).join(format!("quads/{stem}.toml"))).unwrap();
+    let hd = load("opendrone-5f-hd");
+    let hd_osd = hd.osd.as_ref().expect("the HD quad has an OSD");
+    assert_eq!((hd_osd.cols, hd_osd.rows), (53, 20), "the pinned SITL's HD canvas");
+    let diff = fs::read_to_string(Path::new(ROOT).join("quads/opendrone-5f-hd.betaflight.diff")).unwrap();
+    assert!(diff.contains("set vcd_video_system = HD"), "the HD quad selects the HD video system");
+    for name in [
+        "goggle_voltage", "vtx_voltage", "bitrate", "delay", "distance", "lq", "goggle_dvr", "vtx_dvr", "warnings",
+        "vtx_temp", "fan_speed",
+    ] {
+        assert!(diff.contains(&format!("set osd_sys_{name}_pos")), "the diff places {name}");
+    }
+    // Profile 1 (2048) + col 40 (the XHD bit 1024 + 8): a column past 31 needs the extra bit.
+    assert!(diff.contains("set osd_sys_goggle_voltage_pos = 3080"), "column 40 is encoded with the XHD bit");
+
+    for stem in ["opendrone-5f-freestyle", "opendrone-5r-race", "opendrone-3t-toothpick"] {
+        let sd = load(stem);
+        let sd_osd = sd.osd.as_ref().expect("an SD quad has an OSD");
+        assert_eq!((sd_osd.cols, sd_osd.rows), (30, 16), "{stem} keeps the 30 x 16 PAL grid");
+        let sd_diff = fs::read_to_string(Path::new(ROOT).join(format!("quads/{stem}.betaflight.diff"))).unwrap();
+        assert!(sd_diff.contains("set vcd_video_system = PAL"), "{stem} keeps PAL");
+    }
+}
+
+#[test]
 fn the_new_quads_differ_in_the_ways_their_parts_explain() {
     let load = |stem: &str| ofs_config::load(&Path::new(ROOT).join(format!("quads/{stem}.toml"))).unwrap();
     let (t, r, l, f) = (load("opendrone-3t-toothpick"), load("opendrone-5r-race"), load("opendrone-7lr-longrange"), load("opendrone-5f-freestyle"));

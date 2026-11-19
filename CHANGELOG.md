@@ -6,6 +6,13 @@ repository). The format follows Keep a Changelog.
 ## Unreleased
 
 ### Simulator
+#### Added
+- **The HD/digital OSD (#32)**: the SITL build now defines `USE_OSD_HD`, so an HD quad renders Betaflight's 53 × 20
+  canvas (the pinned build's size, not the issue's 50 × 18) and the flight controller sends `MSP_DP_SYS` markers. The
+  decoder stores them in the existing packed cell at bits 11-15 (no protocol bump), and the shipped `opendrone-5f-hd`
+  quad sets the HD video system and the eleven `osd_sys_*` positions. Delay, distance, LQ and the goggle DVR follow the
+  simulator; goggle/VTX voltage, bitrate, VTX DVR, VTX temperature and fan speed show `--`.
+
 #### Fixed
 - **`Load` and `PlayInputs` no longer parse on the async runtime**: a large world or inputs file is read on a
   blocking thread, so another RPC is served while it parses (#185).
@@ -28,6 +35,11 @@ repository). The format follows Keep a Changelog.
   flight, resets and the server see no ghost; there is no protocol change.
 
 ### Pilot client
+#### Added
+- **The HD OSD system markers (#32)** draw their label and value at the FC-placed cell with Godot's fallback font: delay,
+  distance, LQ and the goggle DVR are live, and the unmodelled elements show `--`. The 53 × 20 grid draws without
+  clipping; the analog atlas and its licence are unchanged.
+
 #### Fixed
 - **The calibration wizard is centred** (it was anchored off the top-left corner, half off-screen, because its anchors
   were set after it entered the tree).

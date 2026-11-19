@@ -223,7 +223,7 @@ class Race:
 
 @dataclass(frozen=True)
 class Osd:
-    """Betaflight's OSD as a character grid. `cells` are row-major, each `char | page << 8 | blink << 10`."""
+    """Betaflight's OSD as a character grid. `cells` are row-major, each `char | page << 8 | blink << 10 | sys << 11`."""
     seq: int
     time_s: float
     present: bool
@@ -239,6 +239,10 @@ class Osd:
 
     def blink(self, row: int, col: int) -> bool:
         return bool((self.cells[row * self.cols + col] >> 10) & 1)
+
+    def sys(self, row: int, col: int) -> int:
+        """The HD system element + 1 (`displayPortSystemElement_e`), 0 for a text cell."""
+        return (self.cells[row * self.cols + col] >> 11) & 0x1F
 
     def rows_text(self) -> list:
         """The rows as text. Printable ASCII is shown as is; Betaflight's symbols (battery icon, units) as `?`."""

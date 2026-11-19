@@ -1040,10 +1040,10 @@ mod tests {
     fn the_osd_message_packs_cells_row_major() {
         use ofs_video::osd::{Cell, OsdFrame, OsdGrid};
         let mut grid = OsdGrid::blank(2, 2);
-        grid.cells[1] = Cell { ch: b'A', page: 1, blink: true };
+        grid.cells[1] = Cell { ch: b'A', page: 1, blink: true, sys: 5 };
         let msg = osd_frame_msg(&OsdFrame { seq: 7, time_s: 1.5, present: true, grid });
         assert_eq!((msg.seq, msg.cols, msg.rows, msg.present), (7, 2, 2, true));
-        assert_eq!(msg.cells, vec![0x20, u32::from(b'A') | 1 << 8 | 1 << 10, 0x20, 0x20]);
+        assert_eq!(msg.cells, vec![0x20, u32::from(b'A') | 1 << 8 | 1 << 10 | 5 << 11, 0x20, 0x20]);
     }
 
     /// An open-loop session that writes its repro bundles under `logs` and fails on its first step.
