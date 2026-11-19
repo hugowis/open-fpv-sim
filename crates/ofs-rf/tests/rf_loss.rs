@@ -1,4 +1,5 @@
 use ofs_rf::{RfLoss, RfLossCurve};
+use serde::Deserialize;
 
 fn close(a: f64, b: f64) { assert!((a - b).abs() < 1e-9, "{a} != {b}"); }
 
@@ -49,6 +50,13 @@ fn a_curve_validates_its_shape() {
         RfLossCurve { at_mhz: vec![0.0, 5800.0], db: vec![12.0, 25.0] },
         RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![-1.0, 25.0] },
     ] { assert!(bad.validate().is_err(), "{bad:?}"); }
+}
+
+#[test]
+fn a_negative_scalar_is_not_an_obstacle() {
+    let loss = RfLoss::Db(-5.0);
+    close(loss.max_db(), -5.0);
+    assert!(!loss.is_obstacle());
 }
 
 #[test]

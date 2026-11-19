@@ -46,10 +46,10 @@ impl RfLoss {
         }
     }
 
-    /// The largest listed loss in dB (0 for a scalar).
+    /// The largest loss in dB: the scalar itself, or the largest listed dB.
     pub fn max_db(&self) -> f64 {
         match self {
-            RfLoss::Db(db) => 0.0f64.max(*db),
+            RfLoss::Db(db) => *db,
             RfLoss::Curve(c) => c.db.iter().copied().fold(0.0, f64::max),
         }
     }
