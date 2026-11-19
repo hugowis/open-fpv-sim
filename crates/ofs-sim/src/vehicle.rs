@@ -756,9 +756,8 @@ pub fn world_obstacles(world: &WorldConfig, terrain: Option<&Terrain>) -> Vec<Ob
     world
         .objects
         .iter()
-        // Task 3 threads the frequency and switches this to is_obstacle().
-        .filter(|o| o.rf_loss_db.db_at(5800.0) > 0.0)
-        .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss_db: o.rf_loss_db.db_at(5800.0) })
+        .filter(|o| o.rf_loss_db.is_obstacle())
+        .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss: o.rf_loss_db.clone() })
         .collect()
 }
 
@@ -2364,8 +2363,8 @@ mod tests {
     #[test]
     fn a_world_without_terrain_roots_exactly_as_before() {
         let world = flat_world();
-        let expected: Vec<_> = world.objects.iter().filter(|o| o.rf_loss_db.is_obstacle()).map(|o| (object_shape(o).rooted(), o.rf_loss_db.db_at(5800.0))).collect();
-        let got: Vec<_> = world_obstacles(&world, None).into_iter().map(|o| (o.shape, o.rf_loss_db)).collect();
+        let expected: Vec<_> = world.objects.iter().filter(|o| o.rf_loss_db.is_obstacle()).map(|o| (object_shape(o).rooted(), o.rf_loss_db.clone())).collect();
+        let got: Vec<_> = world_obstacles(&world, None).into_iter().map(|o| (o.shape, o.rf_loss)).collect();
         assert_eq!(got.len(), 4);
         assert_eq!(got, expected);
     }

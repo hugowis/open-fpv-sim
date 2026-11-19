@@ -156,7 +156,7 @@ fn a_dipole_crossed_to_the_handset_loses_20_db() {
 fn behind_a_building_the_rssi_drops_by_its_capped_knife_edge_loss() {
     let mut blocked_params = LinkParams::ideal(500);
     let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(10.0, 10.0, 10.0), yaw_rad: 0.0 };
-    blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss_db: 25.0 }];
+    blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss: 25.0.into() }];
     let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     let (mut blocked, _, _telemetry_in, _fc) = rig(blocked_params, 1);
     set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));
@@ -612,7 +612,7 @@ fn a_mesh_wall_lowers_the_uplink_rssi() {
     let p = |e: f64, d: f64| DVec3::new(50.0, e, d);
     let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
     let mut walled_params = LinkParams::ideal(500);
-    walled_params.meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    walled_params.meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0.into()] }];
     let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     let (mut walled, _, _telemetry_in, _fc) = rig(walled_params, 1);
     set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));

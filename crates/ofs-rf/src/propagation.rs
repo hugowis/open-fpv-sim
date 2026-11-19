@@ -8,6 +8,8 @@ use ofs_core::mesh::TriMesh;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 
+use crate::RfLoss;
+
 pub const SPEED_OF_LIGHT_MPS: f64 = 299_792_458.0;
 /// Antenna patterns never fall more than this below their peak (real nulls are filled by reflections).
 pub const PATTERN_FLOOR_DB: f64 = 20.0;
@@ -149,11 +151,11 @@ pub fn fresnel_v(h: f64, d1: f64, d2: f64, wavelength_m: f64) -> f64 {
     h * (2.0 * (d1 + d2) / (wavelength_m * d1 * d2)).sqrt()
 }
 
-/// An object that weakens a signal passing through or near it, by up to `rf_loss_db`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An object that weakens a signal passing through or near it, by up to its `rf_loss` at the ray's frequency.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Obstacle {
     pub shape: Shape,
-    pub rf_loss_db: f64,
+    pub rf_loss: RfLoss,
 }
 
 /// Golden-section search steps: the bracket shrinks to 0.618^60 of the path, far below a millimetre.
@@ -181,16 +183,17 @@ pub fn deepest_point(shape: &Shape, a: DVec3, b: DVec3) -> f64 {
     golden_min(|t| shape.signed_distance(a.lerp(b, t)), 0.0, 1.0)
 }
 
-/// Diffraction loss of one obstacle on the path `a`..`b`, capped at the obstacle's `rf_loss_db`.
-pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m: f64) -> f64 {
-    if obstacle.rf_loss_db <= 0.0 {
+/// Diffraction loss of one obstacle on the path `a`..`b` at `freq_mhz`, capped at the obstacle's loss there.
+pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+    let cap = obstacle.rf_loss.db_at(freq_mhz);
+    if cap <= 0.0 {
         return 0.0;
     }
     let t = deepest_point(&obstacle.shape, a, b);
     let length = a.distance(b);
     let depth = -obstacle.shape.signed_distance(a.lerp(b, t));
-    let v = fresnel_v(depth, t * length, (1.0 - t) * length, wavelength_m);
-    knife_edge_loss_db(v).min(obstacle.rf_loss_db)
+    let v = fresnel_v(depth, t * length, (1.0 - t) * length, wavelength_m(freq_mhz));
+    knife_edge_loss_db(v).min(cap)
 }
 
 /// A triangle mesh in the way of a radio path: every surface the path crosses costs `loss_db[material]`.
@@ -198,7 +201,7 @@ pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m
 pub struct MeshObstacle {
     pub mesh: Arc<TriMesh>,
     /// The loss of one crossing per material index; a material past the end costs nothing.
-    pub loss_db: Vec<f64>,
+    pub loss_db: Vec<RfLoss>,
 }
 
 /// Two obstacles are equal when they share the same mesh (not a copy of it) and the same losses.
@@ -208,12 +211,13 @@ impl PartialEq for MeshObstacle {
     }
 }
 
-/// The loss of the mesh on the path `a`..`b`: the sum of `loss_db[material]` over every surface the path crosses.
-/// Known limits: frequency-independent, no diffraction around the mesh's edges and no reflection off it.
-pub fn mesh_loss_db(m: &MeshObstacle, a: DVec3, b: DVec3) -> f64 {
+/// The loss of the mesh on the path `a`..`b` at `freq_mhz`: the sum of `loss_db[material]` over every surface the
+/// path crosses.
+/// Known limits: no diffraction around the mesh's edges and no reflection off it.
+pub fn mesh_loss_db(m: &MeshObstacle, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let mut crossed = Vec::new();
     m.mesh.crossings(a, b, &mut crossed);
-    crossed.iter().map(|&i| m.loss_db.get(i as usize).copied().unwrap_or(0.0)).sum()
+    crossed.iter().map(|&i| m.loss_db.get(i as usize).map_or(0.0, |r| r.db_at(freq_mhz))).sum()
 }
 
 /// The most the terrain takes off a path, in dB (a ridge in the way, like a solid wall).
@@ -314,7 +318,7 @@ pub fn path_gain(
 /// antennas) share it.
 pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let lambda = wavelength_m(freq_mhz);
-    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum();
+    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, freq_mhz)).sum();
     let ground = match terrain {
         Some(t) => objects + terrain_loss_db(t, a, b, lambda),
         None => objects,
@@ -322,7 +326,7 @@ pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes:
     if meshes.is_empty() {
         ground
     } else {
-        ground + meshes.iter().map(|m| mesh_loss_db(m, a, b)).sum::<f64>()
+        ground + meshes.iter().map(|m| mesh_loss_db(m, a, b, freq_mhz)).sum::<f64>()
     }
 }
 

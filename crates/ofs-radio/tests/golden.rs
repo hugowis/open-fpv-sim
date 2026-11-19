@@ -225,7 +225,7 @@ fn scenarios() -> Vec<(&'static str, LinkParams, u32, u64, [f64; 3])> {
         };
         p.obstacles = vec![Obstacle {
             shape: shape.rooted(),
-            rf_loss_db: 25.0,
+            rf_loss: 25.0.into(),
         }];
         p
     };

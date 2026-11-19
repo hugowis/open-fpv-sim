@@ -40,5 +40,5 @@ fn the_demo_world_loads() {
     assert!(near(b.max.x, 45.0) && near(b.min.x, -40.0), "{b:?}");
     assert!(near(b.max.y, 40.0) && near(b.min.y, -40.0), "{b:?}");
     // Materials the mesh uses and the world lists carry their loss; the rest lose 0 dB.
-    assert!(meshes[0].loss_db.contains(&12.0) && meshes[0].loss_db.contains(&18.0), "{:?}", meshes[0].loss_db);
+    assert!(meshes[0].loss_db.iter().any(|r| r.db_at(5800.0) == 12.0) && meshes[0].loss_db.iter().any(|r| r.db_at(5800.0) == 18.0), "{:?}", meshes[0].loss_db);
 }

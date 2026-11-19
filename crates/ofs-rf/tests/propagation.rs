@@ -5,6 +5,7 @@ use ofs_core::mesh::{TriMesh, Triangle};
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 use ofs_rf::propagation::*;
+use ofs_rf::{RfLoss, RfLossCurve};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -101,24 +102,22 @@ fn a_shape_standing_on_the_ground_is_rooted_below_it_and_a_floating_one_is_not()
 
 #[test]
 fn a_building_on_the_path_costs_its_loss_and_a_clear_one_costs_nothing() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
-    let lambda = wavelength_m(5800.0);
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
     let (a, b) = (DVec3::new(0.0, 0.0, -2.0), DVec3::new(100.0, 0.0, -2.0));
-    close(obstruction_loss_db(&building, a, b, lambda), 25.0, 1e-9, "straight through: capped at rf_loss_db");
+    close(obstruction_loss_db(&building, a, b, 5800.0), 25.0, 1e-9, "straight through: capped at rf_loss_db");
     let beside = DVec3::new(100.0, 20.0, -2.0);
     let past = DVec3::new(0.0, 20.0, -2.0);
-    close(obstruction_loss_db(&building, past, beside, lambda), 0.0, 1e-9, "15 m clear of it");
-    let transparent = Obstacle { rf_loss_db: 0.0, ..building };
-    close(obstruction_loss_db(&transparent, a, b, lambda), 0.0, 1e-12, "a 0 dB object never blocks");
+    close(obstruction_loss_db(&building, past, beside, 5800.0), 0.0, 1e-9, "15 m clear of it");
+    let transparent = Obstacle { rf_loss: 0.0.into(), ..building };
+    close(obstruction_loss_db(&transparent, a, b, 5800.0), 0.0, 1e-12, "a 0 dB object never blocks");
 }
 
 #[test]
 fn the_loss_fades_in_over_a_few_metres_at_a_buildings_edge() {
     // The receiver is 100 m south of a 10 m wide building; the quad moves east behind it, 100 m north of it.
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 30.0 };
-    let lambda = wavelength_m(5800.0);
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss: 30.0.into() };
     let rx = DVec3::new(0.0, 0.0, -2.0);
-    let loss_at = |east: f64| obstruction_loss_db(&building, rx, DVec3::new(200.0, east, -2.0), lambda);
+    let loss_at = |east: f64| obstruction_loss_db(&building, rx, DVec3::new(200.0, east, -2.0), 5800.0);
     let losses: Vec<f64> = [30.0, 14.0, 10.0, 6.0, 0.0].iter().map(|e| loss_at(*e)).collect();
     assert!(losses[0] < 0.5, "well clear: {losses:?}");
     assert!(losses.windows(2).all(|w| w[1] >= w[0]), "rises steadily as the path goes in: {losses:?}");
@@ -128,10 +127,26 @@ fn the_loss_fades_in_over_a_few_metres_at_a_buildings_edge() {
 }
 
 #[test]
+fn a_material_curve_caps_the_loss_at_the_rays_frequency() {
+    let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted();
+    let (a, b) = (DVec3::new(0.0, 0.0, -2.0), DVec3::new(100.0, 0.0, -2.0));
+    // Behind its 10 m width the path is 5 m from the nearest side: an uncapped 25.7 dB, over both of the curve's caps.
+    let curve = RfLoss::Curve(RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![10.0, 25.0] });
+    let behind = Obstacle { shape, rf_loss: curve };
+    close(obstruction_db(std::slice::from_ref(&behind), None, &[], a, b, 900.0), 10.0, 1e-9, "900 MHz: the curve's low cap");
+    close(obstruction_db(std::slice::from_ref(&behind), None, &[], a, b, 5800.0), 25.0, 1e-9, "5800 MHz: the curve's high cap");
+    let scalar = Obstacle {
+        shape: Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(),
+        rf_loss: 30.0.into(),
+    };
+    close(obstruction_db(std::slice::from_ref(&scalar), None, &[], a, b, 900.0), 20.71, 0.01, "a scalar: its value at 900 MHz");
+    close(obstruction_db(std::slice::from_ref(&scalar), None, &[], a, b, 5800.0), 28.71, 0.01, "the same at 5800 MHz");}
+
+#[test]
 fn a_thin_object_on_a_long_path_is_still_found() {
     // A 0.5 m post exactly between two ends 4 km apart: a fixed sampling would step over it.
-    let post = Obstacle { shape: Shape::Box { center: DVec3::new(2000.0, 0.0, -5.0), half: DVec3::new(0.25, 0.25, 5.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 10.0 };
-    let loss = obstruction_loss_db(&post, DVec3::new(0.0, 0.0, -2.0), DVec3::new(4000.0, 0.0, -2.0), wavelength_m(5800.0));
+    let post = Obstacle { shape: Shape::Box { center: DVec3::new(2000.0, 0.0, -5.0), half: DVec3::new(0.25, 0.25, 5.0), yaw_rad: 0.0 }.rooted(), rf_loss: 10.0.into() };
+    let loss = obstruction_loss_db(&post, DVec3::new(0.0, 0.0, -2.0), DVec3::new(4000.0, 0.0, -2.0), 5800.0);
     assert!(loss > 5.0, "the post is in the way: {loss}");
 }
 
@@ -324,16 +339,16 @@ fn a_vertical_ray_over_the_ridge_is_finite() {
 
 #[test]
 fn obstruction_db_adds_terrain_to_the_objects() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
-    let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
+    let ridge = ridge(20, 10.0);
     let (a, b) = along_north(-2.0);
-    let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);
+    let objects = obstruction_db(std::slice::from_ref(&building), None, &[], a, b, 5800.0);
     assert!(objects > 1.0, "the building is in the way: {objects}");
-    let terrain = terrain_loss_db(&ridge, a, b, lambda);
+    let terrain = terrain_loss_db(&ridge, a, b, wavelength_m(5800.0));
     assert!(terrain > 1.0, "so is the ridge: {terrain}");
-    assert_eq!(obstruction_db(&[building], Some(&ridge), &[], a, b, 5800.0), objects + terrain);
-    assert_eq!(obstruction_db(&[building], None, &[], a, b, 5800.0), objects);
-    assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda), "the objects alone are the one building's loss");
+    assert_eq!(obstruction_db(std::slice::from_ref(&building), Some(&ridge), &[], a, b, 5800.0), objects + terrain);
+    assert_eq!(obstruction_db(std::slice::from_ref(&building), None, &[], a, b, 5800.0), objects);
+    assert_eq!(objects, obstruction_loss_db(&building, a, b, 5800.0), "the objects alone are the one building's loss");
 }
 
 #[test]
@@ -377,16 +392,16 @@ fn wall(north: f64, half: f64, material: u32) -> Triangle {
     Triangle { a: p(-half, -half), b: p(half, -half), c: p(0.0, half), material }
 }
 
-fn mesh_of(triangles: Vec<Triangle>, loss_db: Vec<f64>) -> MeshObstacle {
+fn mesh_of(triangles: Vec<Triangle>, loss_db: Vec<RfLoss>) -> MeshObstacle {
     MeshObstacle { mesh: Arc::new(TriMesh::new(triangles).unwrap()), loss_db }
 }
 
 #[test]
 fn a_path_crossing_two_walls_loses_the_sum() {
-    let m = mesh_of(vec![wall(10.0, 5.0, 0), wall(20.0, 5.0, 1)], vec![18.0, 40.0]);
-    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0)), 58.0, 1e-12, "both walls");
-    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(15.0, 0.0, -1.0)), 18.0, 1e-12, "the first only");
-    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 50.0, -1.0), DVec3::new(30.0, 50.0, -1.0)), 0.0, "past the walls' edge");
+    let m = mesh_of(vec![wall(10.0, 5.0, 0), wall(20.0, 5.0, 1)], vec![18.0.into(), 40.0.into()]);
+    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0), 5800.0), 58.0, 1e-12, "both walls");
+    close(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(15.0, 0.0, -1.0), 5800.0), 18.0, 1e-12, "the first only");
+    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 50.0, -1.0), DVec3::new(30.0, 50.0, -1.0), 5800.0), 0.0, "past the walls' edge");
     let (a, b) = (DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0));
     close(obstruction_db(&[], None, std::slice::from_ref(&m), a, b, 2400.0), 58.0, 1e-12, "obstruction_db carries it");
     close(obstruction_db(&[], None, &[m], a, b, 5800.0), 58.0, 1e-12, "at any frequency");
@@ -394,18 +409,18 @@ fn a_path_crossing_two_walls_loses_the_sum() {
 
 #[test]
 fn a_material_past_the_end_of_the_table_loses_nothing() {
-    let m = mesh_of(vec![wall(10.0, 5.0, 3)], vec![18.0]);
-    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0)), 0.0);
+    let m = mesh_of(vec![wall(10.0, 5.0, 3)], vec![18.0.into()]);
+    assert_eq!(mesh_loss_db(&m, DVec3::new(0.0, 0.0, -1.0), DVec3::new(30.0, 0.0, -1.0), 5800.0), 0.0);
 }
 
 #[test]
 fn no_meshes_changes_nothing() {
-    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss_db: 25.0 };
+    let building = Obstacle { shape: Shape::Box { center: DVec3::new(10.0, 0.0, -10.0), half: DVec3::new(2.0, 5.0, 10.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() };
     let (ridge, lambda) = (ridge(20, 10.0), wavelength_m(5800.0));
     let (a, b) = along_north(-2.0);
-    let objects = obstruction_db(&[building], None, &[], a, b, 5800.0);
-    assert_eq!(objects, obstruction_loss_db(&building, a, b, lambda));
-    assert_eq!(obstruction_db(&[building], Some(&ridge), &[], a, b, 5800.0), objects + terrain_loss_db(&ridge, a, b, lambda));
+    let objects = obstruction_db(std::slice::from_ref(&building), None, &[], a, b, 5800.0);
+    assert_eq!(objects, obstruction_loss_db(&building, a, b, 5800.0));
+    assert_eq!(obstruction_db(std::slice::from_ref(&building), Some(&ridge), &[], a, b, 5800.0), objects + terrain_loss_db(&ridge, a, b, lambda));
 }
 
 #[test]
@@ -416,10 +431,10 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
     // tell the two apart.
     let a = DVec3::new(-20.0, 1.5, -5.0);
     let b = DVec3::new(20.0, 1.5, -5.0);
-    let wall = |half: DVec3, yaw: f64| Obstacle { shape: Shape::Box { center: DVec3::new(0.0, 0.0, -5.0), half, yaw_rad: yaw }, rf_loss_db: 60.0 };
-    let unrotated = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), 0.0), a, b, 0.0517);
-    let yawed = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), std::f64::consts::FRAC_PI_2), a, b, 0.0517);
-    let swapped = obstruction_loss_db(&wall(DVec3::new(2.0, 0.5, 5.0), 0.0), a, b, 0.0517);
+    let wall = |half: DVec3, yaw: f64| Obstacle { shape: Shape::Box { center: DVec3::new(0.0, 0.0, -5.0), half, yaw_rad: yaw }, rf_loss: 60.0.into() };
+    let unrotated = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), 0.0), a, b, 5800.0);
+    let yawed = obstruction_loss_db(&wall(DVec3::new(0.5, 2.0, 5.0), std::f64::consts::FRAC_PI_2), a, b, 5800.0);
+    let swapped = obstruction_loss_db(&wall(DVec3::new(2.0, 0.5, 5.0), 0.0), a, b, 5800.0);
     assert!((unrotated - yawed).abs() > 1.0, "the rotated wall's bulk lies along the path, out of it");
     assert!((swapped - yawed).abs() < 1e-12, "yaw 90 degrees is the swapped-extents wall (convexity keeps the search exact)");
 }

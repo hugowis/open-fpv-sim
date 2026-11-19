@@ -141,7 +141,7 @@ pub struct WorldMeshData {
     pub path: PathBuf,
     pub digest: u64,
     pub mesh: Arc<TriMesh>,
-    pub loss_db: Vec<f64>,
+    pub loss_db: Vec<RfLoss>,
 }
 
 /// The rules of the race the gates make.
@@ -787,7 +787,7 @@ impl WorldConfig {
             }
         }
         for (data, names) in out.iter_mut().zip(&loaded_materials) {
-            data.loss_db = names.iter().map(|n| self.materials.iter().find(|m| &m.name == n).map_or(0.0, |m| m.rf_loss_db.db_at(5800.0))).collect();
+            data.loss_db = names.iter().map(|n| self.materials.iter().find(|m| &m.name == n).map_or(RfLoss::default(), |m| m.rf_loss_db.clone())).collect();
         }
         Ok(out)
     }

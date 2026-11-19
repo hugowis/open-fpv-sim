@@ -5,6 +5,12 @@ use std::path::Path;
 
 use ofs_config::world::{self, AntennaKind, Shape, WorldConfig};
 use ofs_config::{load, ConfigError, Polarization, TerrainSection, MAX_TERRAIN_SLOPE_DEG};
+use ofs_rf::{RfLoss, RfLossCurve};
+
+/// The losses of a mesh's materials, as `RfLoss` values at one frequency (for fixtures that do not vary with it).
+fn at(losses: &[f64]) -> Vec<RfLoss> {
+    losses.iter().map(|&db| db.into()).collect()
+}
 
 const WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../worlds/flat.toml");
 const QUAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../quads/opendrone-5f-freestyle.toml");
@@ -590,7 +596,7 @@ fn a_material_rf_loss_db_takes_a_curve() {
     );
     let w = world::load(&path).unwrap();
     assert_eq!(w.materials[0].rf_loss_db.db_at(5800.0), 25.0);
-    assert_eq!(w.load_meshes().unwrap()[0].loss_db, [18.0, 25.0], "the mesh carries the 5.8 GHz value");
+    assert_eq!(w.load_meshes().unwrap()[0].loss_db, [18.0.into(), RfLoss::Curve(RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![12.0, 25.0] })], "the mesh keeps both curves");
     assert_field(&mesh_problems("[[materials]]\nname = \"x\"\nrf_loss_db = { at_mhz = [900.0, 5800.0], db = [12.0, -25.0] }\n"), "materials[0].rf_loss_db");
     assert_field(&mesh_problems("[[materials]]\nname = \"x\"\nrf_loss_db = -1.0\n"), "materials[0].rf_loss_db");
 }
@@ -1088,8 +1094,8 @@ fn meshes_and_materials_parse() {
     assert_eq!(data[0].digest, ofs_core::rng::fnv1a64(&fs::read(dir.path().join("a.glb")).unwrap()));
     assert_eq!(data[0].mesh.len(), 4);
     // The loss follows the .glb's material order (wall, glass), not the world file's [[materials]] order.
-    assert_eq!(data[0].loss_db, [18.0, 2.0]);
-    assert_eq!(data[1].loss_db, [18.0]);
+    assert_eq!(data[0].loss_db, at(&[18.0, 2.0]));
+    assert_eq!(data[1].loss_db, at(&[18.0]));
 }
 
 #[test]
@@ -1097,14 +1103,14 @@ fn a_material_name_may_be_free_form() {
     let dir = tempfile::tempdir().unwrap();
     let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"c.glb\"\n[[materials]]\nname = \"Wall Concrete.001\"\nrf_loss_db = 17.5\n");
     fs::write(dir.path().join("c.glb"), glb(&["Paint", "Wall Concrete.001"])).unwrap();
-    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, [0.0, 17.5]);
+    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, at(&[0.0, 17.5]));
 }
 
 #[test]
 fn an_unlisted_material_loses_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = mesh_world(dir.path(), "[[meshes]]\nname = \"hall\"\nfile = \"a.glb\"\n[[materials]]\nname = \"glass\"\nrf_loss_db = 2.0\n");
-    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, [0.0, 2.0]);
+    assert_eq!(world::load(&path).unwrap().load_meshes().unwrap()[0].loss_db, at(&[0.0, 2.0]));
 }
 
 #[test]
@@ -1203,7 +1209,7 @@ fn the_hall_loads_with_its_doorway_open_and_window_glazed() {
     let w = world::load(&shipped_world("hall")).unwrap();
     assert_eq!(w.pilot.position_ned_m, [5.0, 0.0, -1.7]);
     let hall = &w.load_meshes().unwrap()[0];
-    assert_eq!(hall.loss_db, [18.0, 2.0], "concrete, glass");
+    assert_eq!(hall.loss_db, at(&[18.0, 2.0]), "concrete, glass");
     let materials_crossed = |a: [f64; 3], b: [f64; 3]| -> Vec<u32> {
         let mut m = Vec::new();
         hall.mesh.crossings(DVec3::from(a), DVec3::from(b), &mut m);
@@ -1222,7 +1228,7 @@ fn chernobyl_loads_and_the_pilot_sees_the_nsc_door() {
     let w = world::load(&shipped_world("chernobyl")).unwrap();
     assert_eq!((w.name.as_str(), w.pilot.position_ned_m), ("Chernobyl", [-53.946, -258.065, -1.7]));
     let nsc = &w.load_meshes().unwrap()[0];
-    assert_eq!(nsc.loss_db, [30.0, 40.0], "concrete buildings and the steel cladding");
+    assert_eq!(nsc.loss_db, at(&[30.0, 40.0]), "concrete buildings and the steel cladding");
     let mut m = Vec::new();
     nsc.mesh.crossings(DVec3::from(w.pilot.position_ned_m), DVec3::new(-53.946, -108.065, -20.0), &mut m);
     assert!(m.is_empty(), "the door is open");
@@ -1294,5 +1300,5 @@ fn a_changed_material_loss_is_not_stale() {
     let after = w.load_meshes().unwrap()[0].loss_db.clone();
     assert_ne!(after, before, "the loss of a material changed after load");
     let named = &w.materials[0].name;
-    assert!(after.iter().zip(&before).any(|(a, b)| (a - b - 7.0).abs() < 1e-9), "{named}: {before:?} -> {after:?}");
+    assert!(after.iter().zip(&before).any(|(a, b)| (a.db_at(5800.0) - b.db_at(5800.0) - 7.0).abs() < 1e-9), "{named}: {before:?} -> {after:?}");
 }

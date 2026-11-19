@@ -203,7 +203,7 @@ fn an_emitter_interferes_less_the_further_its_channel_is() {
 fn a_building_between_the_quad_and_the_pilot_costs_its_loss() {
     let mut world = open_field();
     let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
-    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
+    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss: 25.0.into() });
     let params = bare(world);
     let open = bare(open_field());
     let at = |p: &LinkParams, east: f64| vtx_paths(p, DVec3::new(200.0, east, -1.7), DQuat::IDENTITY, 5800.0)[0];
@@ -457,7 +457,7 @@ fn odd_positions_give_finite_values() {
     // simulator's per-step check stops on any non-finite signal, so the link must never produce one.
     let mut world = open_field();
     let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
-    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
+    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss: 25.0.into() });
     let mut rig = Rig::new(faded(world), 1);
     for pos in [DVec3::new(0.0, 0.0, -1.7), DVec3::new(100.0, 0.0, -5.0), DVec3::new(10.0, 0.0, 0.5), DVec3::new(1e5, 0.0, -10.0)] {
         rig.set_pose(pos);
@@ -526,7 +526,7 @@ fn the_injected_emitter_degrades_the_picture() {
 fn a_mesh_wall_lowers_the_snr_by_its_loss() {
     let p = |e: f64, d: f64| DVec3::new(100.0, e, d);
     let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
-    let meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    let meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0.into()] }];
     let (open, walled) = (bare(open_field()), bare(LinkWorld { meshes, ..open_field() }));
     close(snr_at(&open, 25.0, 200.0) - snr_at(&walled, 25.0, 200.0), 18.0, 1e-9, "behind the wall");
     let quad = DVec3::new(200.0, 0.0, -1.7);
