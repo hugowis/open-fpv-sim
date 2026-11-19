@@ -15,9 +15,99 @@ fn omni(axis: DVec3, polarization: Polarization) -> Antenna {
     Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization, axis }
 }
 
-/// Multipath with only the ground bounce on or off (object reflections are off everywhere in this task).
+/// Multipath with only the ground bounce on or off.
 fn bounce(ground_bounce: bool) -> Multipath {
     Multipath { ground_bounce, object_reflections: false }
+}
+
+/// Multipath with object reflections and no ground bounce.
+fn reflections() -> Multipath {
+    Multipath { ground_bounce: false, object_reflections: true }
+}
+
+/// The side-wall fixture: a 12 m long, 2 m thick, 3 m tall wall along north 5..6, standing on the ground, and the two
+/// ends 8 m apart at north 0, both west of its west face (north 5). NED: `DVec3` is (north, east, down).
+fn side_wall() -> Obstacle {
+    Obstacle { shape: Shape::Box { center: DVec3::new(5.5, 0.0, -1.5), half: DVec3::new(0.5, 5.0, 1.5), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() }
+}
+
+/// An endpoint with a linear omni pointing down (NED -z), at 1.7 m above the ground.
+fn point(p: DVec3) -> Endpoint {
+    Endpoint { position: p, antenna: omni(DVec3::NEG_Z, Polarization::Linear) }
+}
+
+#[test]
+fn a_side_wall_adds_a_reflected_ray() {
+    // tx and rx both west of the wall: the image (north 10) to rx crosses the west face (north 5) at east 4, inside
+    // the 10 m rectangle, so the ray goes around the wall.
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    let wall = [side_wall()];
+    let off = path_gain(&tx, &rx, 5800.0, &wall, None, &[], bounce(false));
+    let on = path_gain(&tx, &rx, 5800.0, &wall, None, &[], reflections());
+    assert!(on.gain_db > off.gain_db, "the wall adds a ray: {} vs {}", on.gain_db, off.gain_db);
+    close(on.obstruction_db, 0.0, 1e-9, "the direct path is clear");
+}
+
+#[test]
+fn a_wall_outside_the_specular_path_adds_nothing() {
+    // rx 20 m east: the image line crosses the west face at east 10, past the rectangle's edge: no ray.
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 20.0, -1.7)));
+    let wall = [side_wall()];
+    let off = path_gain(&tx, &rx, 5800.0, &wall, None, &[], bounce(false));
+    let on = path_gain(&tx, &rx, 5800.0, &wall, None, &[], reflections());
+    assert_eq!(on.gain_db, off.gain_db, "the specular point misses the face");
+}
+
+#[test]
+fn a_yawed_face_reflects_from_its_own_side() {
+    // The same wall turned 30 degrees: the ends on the side its face looks at see a reflection, and the ones behind
+    // it see none.
+    let yawed = |yaw_rad: f64| Obstacle { shape: Shape::Box { center: DVec3::new(5.5, 0.0, -1.5), half: DVec3::new(0.5, 20.0, 1.5), yaw_rad }.rooted(), rf_loss: 25.0.into() };
+    let wall = yawed(std::f64::consts::FRAC_PI_6);
+    let gain = |wall: &Obstacle, tx: Endpoint, rx: Endpoint| {
+        let w = std::slice::from_ref(wall);
+        (path_gain(&tx, &rx, 5800.0, w, None, &[], reflections()).gain_db, path_gain(&tx, &rx, 5800.0, w, None, &[], bounce(false)).gain_db)
+    };
+    let (front, front_off) = gain(&wall, point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    assert!(front > front_off, "from the face's own side it reflects: {front} vs {front_off}");
+    let (behind, behind_off) = gain(&wall, point(DVec3::new(40.0, 0.0, -1.7)), point(DVec3::new(40.0, 8.0, -1.7)));
+    assert_eq!(behind, behind_off, "from behind it there is no reflection");
+}
+
+#[test]
+fn the_reflecting_object_does_not_block_its_own_ray() {
+    // Only the wall: the reflected ray is the free-space one plus the wall's coefficient, never cut by the wall's own
+    // knife edge (its 25 dB would take the ray off the direct line).
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    let gain = |o: Obstacle, flag: bool| path_gain(&tx, &rx, 5800.0, std::slice::from_ref(&o), None, &[], Multipath { ground_bounce: false, object_reflections: flag }).gain_db;
+    let wall = side_wall();
+    let with = gain(wall.clone(), true);
+    let mirror = gain(Obstacle { rf_loss: 0.0.into(), ..wall }, true);
+    close(with, mirror, 1e-9, "the 25 dB wall makes the same ray as a 0 dB one");
+}
+
+#[test]
+fn a_cylinder_does_not_reflect() {
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -1.7)), point(DVec3::new(0.0, 8.0, -1.7)));
+    let cylinder = Obstacle { shape: Shape::Cylinder { center: DVec3::new(5.5, 0.0, -1.5), radius: 5.0, half_height: 1.5 }.rooted(), rf_loss: 25.0.into() };
+    let gain = |flag: bool| path_gain(&tx, &rx, 5800.0, std::slice::from_ref(&cylinder), None, &[], Multipath { ground_bounce: false, object_reflections: flag }).gain_db;
+    assert_eq!(gain(true), gain(false), "a cylinder does not reflect");
+}
+
+#[test]
+fn the_flag_off_reproduces_todays_gain() {
+    // A box in the path and the ground bounce, with the flag off: the gain is exactly Task 5's. That commit's own
+    // binary printed -83.890145977 (no bounce) and -80.261275533 (bounce) for these ends and this box; with no face
+    // of it able to reflect, the flag on must leave them untouched.
+    let (tx, rx) = (point(DVec3::new(0.0, 0.0, -2.0)), point(DVec3::new(100.0, 20.0, -2.0)));
+    let obstacles = [Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -2.0), half: DVec3::new(1.0, 2.0, 2.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() }];
+    for (ground_bounce, recorded) in [(false, -83.888893264), (true, -77.890838916)] {
+        let off = Multipath { ground_bounce, object_reflections: false };
+        close(path_gain(&tx, &rx, 5800.0, &obstacles, None, &[], off).gain_db, recorded, 1e-9, "Task 5's gain, to the bit");
+        let on = path_gain(&tx, &rx, 5800.0, &obstacles, None, &[], Multipath { ground_bounce, object_reflections: true });
+        close(on.gain_db, recorded, 1e-9, "the box beside the line has no face the path sees: the flag on changes nothing");
+        assert_eq!(on.obstruction_db, path_gain(&tx, &rx, 5800.0, &obstacles, None, &[], off).obstruction_db, "and never touches the reported obstruction");
+    }
 }
 
 #[test]
@@ -471,3 +561,5 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
     assert!((unrotated - yawed).abs() > 1.0, "the rotated wall's bulk lies along the path, out of it");
     assert!((swapped - yawed).abs() < 1e-12, "yaw 90 degrees is the swapped-extents wall (convexity keeps the search exact)");
 }
+
+

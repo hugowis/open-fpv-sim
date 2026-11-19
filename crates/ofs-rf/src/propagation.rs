@@ -19,6 +19,8 @@ pub const CROSS_POLARIZATION_DB: f64 = 20.0;
 pub const CIRCULAR_TO_LINEAR_DB: f64 = 3.0;
 /// Shortest distance used by the path loss and the Fresnel geometry (the far-field formulas fail closer in).
 pub const MIN_DISTANCE_M: f64 = 1.0;
+/// The loss of a specular reflection off an object's vertical face, in dB (estimated: no material model yet).
+pub const WALL_REFLECTION_DB: f64 = -6.0;
 
 pub fn wavelength_m(freq_mhz: f64) -> f64 {
     SPEED_OF_LIGHT_MPS / (freq_mhz * 1e6)
@@ -306,8 +308,9 @@ pub struct Multipath {
 
 /// The path from `tx` to `rx` at `freq_mhz`: the direct ray, plus (with `ground_bounce`) the ray reflected off the
 /// ground (coefficient -1, which reverses circular polarization), added with their phase difference. Each ray takes
-/// the diffraction losses of the obstacles and the crossing losses of the meshes on its own legs; the terrain's loss
-/// comes off the combined power once (a whole-path approximation).
+/// the diffraction losses of the obstacles and the crossing losses of the meshes on its own legs. With
+/// `object_reflections`, the specular rays off the box faces that see the path add their power incoherently. The
+/// terrain's loss comes off the combined power once (a whole-path approximation).
 pub fn path_gain(
     tx: &Endpoint,
     rx: &Endpoint,
@@ -319,8 +322,13 @@ pub fn path_gain(
 ) -> PathGain {
     let direct_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
     let terrain_db = terrain.map_or(0.0, |t| terrain_loss_db(t, tx.position, rx.position, wavelength_m(freq_mhz)));
-    let gain_db = two_ray_obstruction_db(tx, rx, freq_mhz, obstacles, meshes, ground_image(tx, rx, multipath.ground_bounce)) - terrain_db;
-    PathGain { gain_db, obstruction_db: direct_db }
+    let two_ray_db = two_ray_obstruction_db(tx, rx, freq_mhz, obstacles, meshes, ground_image(tx, rx, multipath.ground_bounce));
+    // The flag off is Task 5's arithmetic, bit for bit; with it on, the walls' powers add incoherently.
+    let gain_db = match walls_gain_db(tx, rx, freq_mhz, obstacles, meshes, multipath.object_reflections) {
+        None => two_ray_db,
+        Some(walls_db) => 10.0 * (10f64.powf(two_ray_db / 10.0) + 10f64.powf(walls_db / 10.0)).log10(),
+    };
+    PathGain { gain_db: gain_db - terrain_db, obstruction_db: direct_db }
 }
 
 /// Diffraction losses of the obstacles, plus crossing losses of the meshes, on the path from `a` to `b` at `freq_mhz`,
@@ -396,6 +404,84 @@ pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes:
 /// [`path_gain`] without the obstacles: the direct ray, plus the ground bounce.
 pub fn unobstructed_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, ground_bounce: bool) -> f64 {
     two_ray(tx, rx, freq_mhz, ground_image(tx, rx, ground_bounce), 0.0, 0.0)
+}
+
+/// The box's four vertical face axes in its own frame (north, south, east, west); the other horizontal half of a
+/// face is the half of the other axis.
+const FACE_AXES: [DVec3; 4] = [DVec3::X, DVec3::NEG_X, DVec3::Y, DVec3::NEG_Y];
+
+/// A box's own axes turned into the world (`shape::world_dir` for the horizontal pair).
+fn box_to_world(yaw_rad: f64, d: DVec3) -> DVec3 {
+    let (sin, cos) = yaw_rad.sin_cos();
+    DVec3::new(cos * d.x - sin * d.y, sin * d.x + cos * d.y, d.z)
+}
+
+/// The specular points of a box's vertical faces that reflect from `tx` to `rx`, in world space. Each face with a
+/// normal pointing at both ends is tried: `tx` is mirrored across its plane, and the image-to-`rx` line must cross the
+/// plane inside the face (the other horizontal half and `half.z`) and below the ground. The ray goes around the
+/// wall, never through it. Other shapes never reflect.
+fn face_crossings(tx: DVec3, rx: DVec3, shape: &Shape) -> Vec<DVec3> {
+    let Shape::Box { center, half, yaw_rad } = *shape else { return Vec::new() };
+    // The same frame as the box's signed distance: the world offset turned back onto its own axes.
+    let (sin, cos) = yaw_rad.sin_cos();
+    let to_box = |p: DVec3| {
+        let d = p - center;
+        DVec3::new(cos * d.x + sin * d.y, -sin * d.x + cos * d.y, d.z)
+    };
+    let (a, b) = (to_box(tx), to_box(rx));
+    FACE_AXES
+        .into_iter()
+        .filter_map(|axis| {
+            let (half_along, half_across) = if axis.x == 0.0 { (half.y, half.x) } else { (half.x, half.y) };
+            // Signed distance from the face's plane, outward positive: both ends must be outside, so it faces them.
+            let out = |p: DVec3| p.dot(axis) - half_along;
+            let (out_a, out_b) = (out(a), out(b));
+            if out_a <= 0.0 || out_b <= 0.0 {
+                return None;
+            }
+            // `tx` mirrored across the plane (to `out_a` inward), joined to `rx`: where that line meets the plane.
+            let image = a - axis * 2.0 * out_a;
+            // Equidistant ends: the image-to-`rx` line runs parallel to the plane, and the specular point is the
+            // midpoint's foot on it.
+            let t = if out_a == out_b { 0.5 } else { out_a / (out_a - out_b) };
+            let q = image + (b - image) * t;
+            // The face's rectangle: the other horizontal axis, its height, and above the ground.
+            let across = if axis.x == 0.0 { q.x } else { q.y };
+            (across.abs() <= half_across && q.z.abs() <= half.z && center.z + q.z < 0.0).then(|| center + box_to_world(yaw_rad, q))
+        })
+        .collect()
+}
+
+/// The incoherent sum of the powers of the specular rays off the boxes' faces, in dB, or `None` when the flag is off
+/// or no face reflects. The reflecting object is left out of its own ray's obstruction; every other obstacle and
+/// mesh applies to both legs.
+fn walls_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], meshes: &[MeshObstacle], object_reflections: bool) -> Option<f64> {
+    if !object_reflections {
+        return None;
+    }
+    let points: Vec<(usize, DVec3)> = obstacles.iter().enumerate().flat_map(|(i, o)| face_crossings(tx.position, rx.position, &o.shape).into_iter().map(move |q| (i, q))).collect();
+    if points.is_empty() {
+        return None;
+    }
+    let mut power = 0.0;
+    for (i, point) in points {
+        let legs = [(tx.position, point), (point, rx.position)];
+        let mut loss = 0.0;
+        for (j, o) in obstacles.iter().enumerate() {
+            if j != i {
+                loss += legs.iter().map(|&(from, to)| obstruction_loss_db(o, from, to, freq_mhz)).sum::<f64>();
+            }
+        }
+        for m in meshes {
+            loss += legs.iter().map(|&(from, to)| mesh_loss_db(m, from, to, freq_mhz)).sum::<f64>();
+        }
+        let out_dir = unit(point - tx.position);
+        let in_dir = unit(rx.position - point);
+        let length = tx.position.distance(point) + point.distance(rx.position);
+        let db = ray_gain_db(tx, tx.antenna.polarization.reflected(), rx, out_dir, in_dir, length, freq_mhz) + WALL_REFLECTION_DB - loss;
+        power += 10f64.powf(db / 10.0);
+    }
+    Some(10.0 * power.log10())
 }
 
 /// Receiver rejection of a transmitter `offset_mhz` away from the tuned channel (estimated for analog 5.8 GHz

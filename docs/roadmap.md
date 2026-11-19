@@ -55,8 +55,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   would be missing from the file): stop the recording first.
 
 ### Video (`docs/research/video-link.md`)
-- One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
-  ray is not obstructed separately; one body-shadow lobe of up to 8 dB.
+- One knife edge per object, losses of several objects added; reflections off the ground and (video only) one
+  incoherent specular ray off box vertical faces, with the reflected ground ray obstructed on its own legs; one
+  body-shadow lobe of up to 8 dB. #64.
 - Every video constant is an estimate; the receiver's thresholds are world data (`[video]`) but none is measured.
 - DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
   recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs

@@ -540,3 +540,38 @@ fn a_mesh_wall_lowers_the_snr_by_its_loss() {
     close(vtx_paths(&walled, quad, DQuat::IDENTITY, 5800.0)[0].obstruction_db, 18.0, 1e-9, "reported as obstruction");
     close(snr_at(&open, 25.0, 50.0) - snr_at(&walled, 25.0, 50.0), 0.0, 1e-9, "in front of it");
 }
+
+/// The bare budget with object reflections switched on.
+fn reflecting(world: LinkWorld) -> LinkParams {
+    LinkParams { object_reflections: true, ..bare(world) }
+}
+
+/// The RF fixture's side wall (north 5..6, 10 m along east, standing): the pilot just south of it, the quad west of
+/// it, both on its west face's side.
+fn side_wall() -> Obstacle {
+    Obstacle { shape: Shape::Box { center: DVec3::new(5.5, 0.0, -1.5), half: DVec3::new(0.5, 5.0, 1.5), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() }
+}
+
+#[test]
+fn the_video_flag_lets_a_wall_reflect() {
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    let walled = reflecting(world.clone());
+    let quad = DVec3::new(0.0, 0.0, -1.7);
+    let gain = |p: &LinkParams| vtx_paths(p, quad, DQuat::IDENTITY, 5800.0)[0].gain_db;
+    assert!(gain(&walled) > gain(&bare(world.clone())), "the wall's face adds a ray: {} vs {}", gain(&walled), gain(&bare(world.clone())));
+    assert_eq!(gain(&bare(world.clone())), gain(&bare(over_the_pilot())), "the radio's default stays off");
+    // A building between the quad and the pilot still costs its loss.
+    let mut blocked = world.clone();
+    blocked.obstacles.push(Obstacle { shape: Shape::Box { center: DVec3::new(0.0, 4.0, -2.0), half: DVec3::new(0.5, 1.0, 2.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() });
+    let through = vtx_paths(&reflecting(blocked), quad, DQuat::IDENTITY, 5800.0)[0];
+    let open_at = vtx_paths(&walled, quad, DQuat::IDENTITY, 5800.0)[0];
+    assert!(through.obstruction_db > 10.0, "the building's knife edge shows on the direct path: {through:?}");
+    assert!(through.gain_db < open_at.gain_db - 10.0, "and the building still bites: {} vs {}", through.gain_db, open_at.gain_db);
+}
+
+/// The open field with the pilot moved to the wall fixture's spot and no objects.
+fn over_the_pilot() -> LinkWorld {
+    LinkWorld { pilot_position: DVec3::new(0.0, 8.0, -1.7), ..open_field() }
+}

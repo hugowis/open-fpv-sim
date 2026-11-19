@@ -839,7 +839,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Te
         pit_power_mw: vtx.pit_power_mw,
         fading: true,
         ground_bounce: true,
-        object_reflections: false,
+        object_reflections: true,
         thresholds: receiver_thresholds(&world.video),
     })
 }
