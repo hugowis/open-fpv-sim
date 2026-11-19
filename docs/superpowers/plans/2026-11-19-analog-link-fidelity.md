@@ -63,6 +63,7 @@
 
 ```rust
 use ofs_rf::{RfLoss, RfLossCurve};
+use serde::Deserialize;
 
 fn close(a: f64, b: f64) { assert!((a - b).abs() < 1e-9, "{a} != {b}"); }
 
@@ -103,6 +104,14 @@ fn only_a_positive_curve_is_an_obstacle() {
 }
 
 #[test]
+fn a_negative_scalar_is_not_an_obstacle() {
+    let loss = RfLoss::Db(-5.0);
+    close(loss.max_db(), -5.0);
+    assert!(!loss.is_obstacle());
+}
+
+
+#[test]
 fn a_curve_validates_its_shape() {
     let ok = RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![12.0, 25.0] };
     assert!(ok.validate().is_ok());
@@ -117,11 +126,12 @@ fn a_curve_validates_its_shape() {
 
 #[test]
 fn serde_accepts_a_scalar_and_a_table() {
-    assert_eq!(toml::from_str::<RfLoss>("25.0").unwrap(), RfLoss::Db(25.0));
-    assert_eq!(
-        toml::from_str::<RfLoss>("{ at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }").unwrap(),
-        RfLoss::Curve(RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![12.0, 25.0] })
-    );
+    let scalar = RfLoss::deserialize(toml::de::ValueDeserializer::new("25.0")).unwrap();
+    assert_eq!(scalar, RfLoss::Db(25.0));
+    let table = RfLoss::deserialize(toml::de::ValueDeserializer::new(
+        "{ at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }",
+    )).unwrap();
+    assert_eq!(table, RfLoss::Curve(RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![12.0, 25.0] }));
 }
 ```
 
@@ -134,7 +144,7 @@ Expected: FAIL, `RfLoss` not found (or `toml` unresolved until the dev-dependenc
 
 - [ ] **Step 3: Implement `RfLoss`** in `crates/ofs-rf/src/rf_loss.rs`
 
-Interpolation: clamp below/above the points; with a single point return its dB; with both endpoint dB `> 0.0` interpolate `ln(db)` linearly in `ln(f)` (the power law); otherwise interpolate dB linearly in `ln(f)`. Validation requires at least two points, equal lengths, finite positive strictly increasing frequencies, finite non-negative dB. `max_db` is the largest listed dB (0.0 for `Db`). Derive `Deserialize` as shown; `Db(f64)` accepts a TOML float.
+Interpolation: clamp below/above the points; with a single point return its dB; with both endpoint dB `> 0.0` interpolate `ln(db)` linearly in `ln(f)` (the power law); otherwise interpolate dB linearly in `ln(f)`. Validation requires at least two points, equal lengths, finite positive strictly increasing frequencies, finite non-negative dB. `max_db` is the largest loss: the scalar for `Db`, the largest listed dB for a curve; `is_obstacle` is `max_db() > 0.0`. Derive `Deserialize` as shown; `Db(f64)` accepts a TOML float.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -166,7 +176,7 @@ git commit -m "feat(rf): a scalar or log-log RfLoss curve"
 
 - [ ] **Step 1: Write the failing tests**
 
-In `crates/ofs-config/tests/world.rs`: a world with `rf_loss_db = 25.0` loads and validates; a world with `rf_loss_db = { at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }` loads and validates; a table with one point, unequal lengths, descending frequencies or a negative dB fails validation with `rf_loss_db` in the message. Follow the file's existing `write(dir.path(), text)` helper and `world::load` pattern.
+In `crates/ofs-config/tests/world.rs`: a world with `rf_loss_db = 25.0` loads and validates; a world with `rf_loss_db = { at_mhz = [900.0, 5800.0], db = [12.0, 25.0] }` loads and validates; a table with one point, unequal lengths, descending frequencies or a negative dB fails validation with `rf_loss_db` in the message; a negative scalar `rf_loss_db = -1.0` fails the same way. Follow the file's existing `write(dir.path(), text)` helper and `world::load` pattern.
 
 In `crates/ofs-sim/src/session.rs`'s inline tests add: a curve object (`at_mhz = [900.0, 5800.0], db = [12.0, 25.0]`) reaches `pb::WorldObject.rf_loss_db` as `25.0`; the existing scalar world still reports its number.
 
@@ -177,7 +187,7 @@ Expected: FAIL, the field still expects `f64` / the state still uses the raw val
 
 - [ ] **Step 3: Implement**
 
-Change `ObjectSection` and `MaterialSection` to `RfLoss`; call `RfLossCurve::validate()` from `WorldConfig::validate` with the field name. Keep `WorldMeshData.loss_db: Vec<f64>` for now, built with `db_at(5800.0)` in `load_meshes_with`, and keep `Obstacle.rf_loss_db: f64` by mapping `o.rf_loss_db.db_at(5800.0)` in `world_obstacles`; filter with `is_obstacle()`. In `session.rs` write `db_at(5800.0)`. Update the `ObjectSection` literals with `.into()`. This task is representation-only: the link still sees the 5.8 GHz scalar, so no value or digest moves.
+Change `ObjectSection` and `MaterialSection` to `RfLoss`; from `WorldConfig::validate` call `RfLossCurve::validate()` for a curve (and reject a negative `Db` scalar), naming the field. Keep `WorldMeshData.loss_db: Vec<f64>` for now, built with `db_at(5800.0)` in `load_meshes_with`, and keep `Obstacle.rf_loss_db: f64` by mapping `o.rf_loss_db.db_at(5800.0)` in `world_obstacles`; filter with `is_obstacle()`. In `session.rs` write `db_at(5800.0)`. Update the `ObjectSection` literals with `.into()`. This task is representation-only: the link still sees the 5.8 GHz scalar, so no value or digest moves.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
