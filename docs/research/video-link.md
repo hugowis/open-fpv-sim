@@ -48,7 +48,8 @@ Notes:
   vertical face of a world object when both ends are on the face's outward side and its mirror image line crosses the
   face. It is incoherent (powers add), takes the face's -6 dB (estimated, no material model) and the circular hand
   reverses as off the ground, so an opposite-hand receiver takes it 20 dB down. Boxes only: cylinders, meshes and the
-  terrain never reflect, and the simulator turns it on for the video link alone.
+  terrain never reflect, and the simulator turns it on for the video link alone. The interference (emitter) paths use
+  the same reflection, not only the wanted VTX signal.
 
 ## Terrain
 

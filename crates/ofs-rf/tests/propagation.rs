@@ -96,9 +96,9 @@ fn a_cylinder_does_not_reflect() {
 
 #[test]
 fn the_flag_off_reproduces_todays_gain() {
-    // A box in the path and the ground bounce, with the flag off: the gain is exactly Task 5's. That commit's own
-    // binary printed -83.890145977 (no bounce) and -80.261275533 (bounce) for these ends and this box; with no face
-    // of it able to reflect, the flag on must leave them untouched.
+    // A box in the path and the ground bounce, with the flag off: the gain is exactly Task 5's. The recorded values
+    // are the head commit's own binary's output for these ends and this box; with no face of it able to reflect, the
+    // flag on must leave them untouched.
     let (tx, rx) = (point(DVec3::new(0.0, 0.0, -2.0)), point(DVec3::new(100.0, 20.0, -2.0)));
     let obstacles = [Obstacle { shape: Shape::Box { center: DVec3::new(50.0, 0.0, -2.0), half: DVec3::new(1.0, 2.0, 2.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() }];
     for (ground_bounce, recorded) in [(false, -83.888893264), (true, -77.890838916)] {
@@ -561,5 +561,3 @@ fn a_yawed_wall_obstructs_where_its_rotated_faces_are() {
     assert!((unrotated - yawed).abs() > 1.0, "the rotated wall's bulk lies along the path, out of it");
     assert!((swapped - yawed).abs() < 1e-12, "yaw 90 degrees is the swapped-extents wall (convexity keeps the search exact)");
 }
-
-

@@ -575,3 +575,23 @@ fn the_video_flag_lets_a_wall_reflect() {
 fn over_the_pilot() -> LinkWorld {
     LinkWorld { pilot_position: DVec3::new(0.0, 8.0, -1.7), ..open_field() }
 }
+
+#[test]
+fn the_video_flag_lets_an_emitter_wall_reflect() {
+    // An interfering VTX west of the same wall, the goggles on its west face's side too: the emitter's path takes the
+    // same reflection as the wanted one (it already takes the ground bounce).
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    world.emitters.push(Emitter {
+        position: DVec3::new(0.0, 0.0, -1.7),
+        freq_mhz: 5800.0,
+        power_mw: 25.0,
+        antenna: omni(DVec3::NEG_Z),
+    });
+    let reflected = Multipath { ground_bounce: false, object_reflections: true };
+    let direct = Multipath { ground_bounce: false, object_reflections: false };
+    let with = interference_dbm(&world, 5800.0, reflected)[0];
+    let without = interference_dbm(&world, 5800.0, direct)[0];
+    assert!(with > without, "the emitter's own wall reflection adds power: {with} vs {without}");
+}
