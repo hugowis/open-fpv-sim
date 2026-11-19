@@ -314,7 +314,8 @@ pub fn path_gain(
 }
 
 /// The diffraction losses of the obstacles and the terrain, plus the crossing losses of the meshes, on the direct ray
-/// from `a` to `b`, in dB. It depends on the two positions only, so receivers that share a position (the goggles'
+/// from `a` to `b` at `freq_mhz`, in dB. The objects, the terrain and the meshes all put their loss on at that frequency,
+/// so it depends on the two positions and the frequency: receivers that share a position and a frequency (the goggles'
 /// antennas) share it.
 pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let lambda = wavelength_m(freq_mhz);
