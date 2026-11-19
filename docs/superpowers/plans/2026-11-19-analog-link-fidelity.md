@@ -316,8 +316,9 @@ Direct amplitude from `ray_gain_db` minus `obstruction_db(tx, rx)`; ground ampli
 - [ ] **Step 4: Run the tests and trace the golden diff**
 
 Run: `cargo test -p ofs-rf -p ofs-video -p ofs-radio`
+Run: `cargo test -p ofs-sim --test flat_world_pin --test rotated_boxes`
 Run: `cargo test -p ofs-radio --test golden` and `cargo test -p ofs-sim --test radio_golden` (without writing).
-Expected: `ofs-rf`/`ofs-video` PASS. The golden runs fail with the changed scenario names. List them; only a scenario whose bounced path meets an obstacle may move (the `obstacle-*` cases); `two-antennas-fading` and a clear bounce must not. Investigate anything else before writing.
+Expected: the crate tests PASS; the pins are unchanged or, if the per-ray fix moves `rotated_boxes`, traced and named in the report (a pin is a digest like a golden). The golden runs fail with the changed scenario names: list them; only a scenario whose bounced path meets an obstacle may move (the `obstacle-*` cases); `two-antennas-fading` and a clear bounce must not. Investigate anything else before writing.
 Then on Windows: `OFS_GOLDEN_WRITE=1 cargo test -p ofs-radio --test golden --locked` and `OFS_GOLDEN_WRITE=1 cargo test -p ofs-sim --test radio_golden --locked`. Commit the Windows files. The PR records the macOS/Linux regeneration still owed (`macos-survey.yml` with `write_goldens`; Linux via WSL), and CI's golden jobs are expected to fail until those are committed.
 
 - [ ] **Step 5: Commit**
