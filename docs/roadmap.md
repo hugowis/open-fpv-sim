@@ -34,7 +34,7 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - A mesh costs a path the loss of every surface it crosses (`[[materials]]` `rf_loss_db`), the same at every frequency: no
   diffraction around its edges, no reflection and no thickness (one crossing, one loss).
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
-  a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
+  a measured 2.4 GHz pattern.
 - Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one
   ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model.
 - The `RadioLoss` fault acts on the uplink; `DownlinkLoss` cuts the downlink telemetry while leaving control untouched.

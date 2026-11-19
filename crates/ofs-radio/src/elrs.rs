@@ -149,6 +149,9 @@ pub struct ElrsLink {
     downlink: Vec<f64>,
     last_pos: Option<DVec3>,
     downlink_packets: u32,
+    /// The handset antenna the next packet transmits on, and the one the last packet used (round-robin).
+    tx_antenna: usize,
+    last_tx_antenna: usize,
 }
 
 impl ElrsLink {
@@ -194,7 +197,14 @@ impl ElrsLink {
             downlink: vec![NO_SIGNAL_RSSI_DBM; handset_antennas],
             last_pos: None,
             downlink_packets: 0,
+            tx_antenna: 0,
+            last_tx_antenna: 0,
         }
+    }
+
+    /// The handset antenna the last packet transmitted on.
+    pub fn current_tx_antenna(&self) -> usize {
+        self.last_tx_antenna
     }
 }
 
@@ -229,8 +239,9 @@ impl Link for ElrsLink {
         // fades (two normals per quad antenna), the uplink loss draw, the downlink fades, the downlink draw.
         let rho = (-moved / (wavelength_m(freq) * 0.5)).exp();
         let shadow = body_shadow_db(att, pos, self.params.handset_position);
-        // The handset transmits on its active antenna: invariant across the quad's antennas.
-        let tx_ant = self.params.handset_antennas[self.handset_diversity.active().min(self.params.handset_antennas.len() - 1)];
+        // The handset transmits on the next antenna of its round-robin schedule: invariant across the quad's antennas.
+        self.last_tx_antenna = self.tx_antenna;
+        let tx_ant = self.params.handset_antennas[self.tx_antenna];
         self.rssi.clear();
         self.rssi.resize(self.params.quad_antennas.len(), NO_SIGNAL_RSSI_DBM);
         let rssi = &mut self.rssi;
@@ -306,6 +317,7 @@ impl Link for ElrsLink {
         let downlink_lq = self.downlink_history.push(downlink_received);
         let link_up = lq > 0.0;
         let snr = rssi[active] - noise;
+        self.tx_antenna = (self.tx_antenna + 1) % self.params.handset_antennas.len();
 
         Delivery {
             channels: received.then_some(channels),
