@@ -2,3 +2,6 @@
 //! video link and the ELRS control link both build on them. No bus and no state below the fader level.
 pub mod fading;
 pub mod propagation;
+pub mod rf_loss;
+
+pub use rf_loss::{RfLoss, RfLossCurve};
