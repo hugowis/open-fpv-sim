@@ -53,7 +53,7 @@ impl Diversity {
         self.active
     }
 
-    /// The antenna in use (the handset transmits on the antenna it receives best).
+    /// The antenna in use.
     pub fn active(&self) -> usize {
         self.active
     }

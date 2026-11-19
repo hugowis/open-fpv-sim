@@ -716,6 +716,7 @@ fn radio_chain(
         meshes: mesh_obstacles(meshes),
         fading: true,
         ground_bounce: true,
+        object_reflections: false,
     };
     let handset: Box<dyn Handset> = match r.handset {
         HandsetKind::Joystick => Box::new(JoystickHandset::new(front_end, bus)),
@@ -756,8 +757,8 @@ pub fn world_obstacles(world: &WorldConfig, terrain: Option<&Terrain>) -> Vec<Ob
     world
         .objects
         .iter()
-        .filter(|o| o.rf_loss_db > 0.0)
-        .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss_db: o.rf_loss_db })
+        .filter(|o| o.rf_loss_db.is_obstacle())
+        .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss: o.rf_loss_db.clone() })
         .collect()
 }
 
@@ -838,6 +839,7 @@ pub fn link_params(vtx: &VtxSection, world: &WorldConfig, terrain: Option<Arc<Te
         pit_power_mw: vtx.pit_power_mw,
         fading: true,
         ground_bounce: true,
+        object_reflections: true,
         thresholds: receiver_thresholds(&world.video),
     })
 }
@@ -2300,7 +2302,7 @@ mod tests {
 
     /// A 10 m building with an RF loss whose bottom sits at `bottom_d` (NED down) over the footprint at `at`.
     fn building(at: (f64, f64), bottom_d: f64) -> world_cfg::ObjectSection {
-        let mut o = flat_world().objects.into_iter().find(|o| o.rf_loss_db > 0.0).unwrap();
+        let mut o = flat_world().objects.into_iter().find(|o| o.rf_loss_db.is_obstacle()).unwrap();
         o.shape = world_cfg::Shape::Box;
         o.size_m = Some([10.0, 10.0, 10.0]);
         o.center_ned_m = [at.0, at.1, bottom_d - 5.0];
@@ -2363,8 +2365,8 @@ mod tests {
     #[test]
     fn a_world_without_terrain_roots_exactly_as_before() {
         let world = flat_world();
-        let expected: Vec<_> = world.objects.iter().filter(|o| o.rf_loss_db > 0.0).map(|o| (object_shape(o).rooted(), o.rf_loss_db)).collect();
-        let got: Vec<_> = world_obstacles(&world, None).into_iter().map(|o| (o.shape, o.rf_loss_db)).collect();
+        let expected: Vec<_> = world.objects.iter().filter(|o| o.rf_loss_db.is_obstacle()).map(|o| (object_shape(o).rooted(), o.rf_loss_db.clone())).collect();
+        let got: Vec<_> = world_obstacles(&world, None).into_iter().map(|o| (o.shape, o.rf_loss)).collect();
         assert_eq!(got.len(), 4);
         assert_eq!(got, expected);
     }

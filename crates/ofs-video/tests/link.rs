@@ -6,7 +6,7 @@ use ofs_video::link::*;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 use ofs_core::mesh::{TriMesh, Triangle};
-use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, MeshObstacle, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
+use ofs_rf::propagation::{fspl_db, power_sum_dbm, terrain_loss_db, MeshObstacle, Multipath, wavelength_m, Antenna, AntennaKind, Obstacle, Polarization};
 
 fn close(actual: f64, expected: f64, eps: f64, what: &str) {
     assert!((actual - expected).abs() <= eps, "{what}: expected {expected} +- {eps}, got {actual}");
@@ -30,7 +30,8 @@ fn open_field() -> LinkWorld {
     }
 }
 
-/// A VTX omni standing straight up on the quad (FRD -z is up); bounce and fading off: the bare link budget.
+/// A VTX omni standing straight up on the quad (FRD -z is up); bounce, object reflections and fading off: the bare
+/// link budget.
 fn bare(world: LinkWorld) -> LinkParams {
     LinkParams {
         world,
@@ -38,8 +39,14 @@ fn bare(world: LinkWorld) -> LinkParams {
         pit_power_mw: 0.1,
         fading: false,
         ground_bounce: false,
+        object_reflections: false,
         thresholds: ReceiverThresholds::default(),
     }
+}
+
+/// The multipath of the bare budget: the direct ray only.
+fn direct() -> Multipath {
+    Multipath { ground_bounce: false, object_reflections: false }
 }
 
 #[test]
@@ -182,18 +189,18 @@ fn emitter_world(offset_mhz: f64) -> LinkWorld {
 
 #[test]
 fn an_emitter_interferes_less_the_further_its_channel_is() {
-    let same = interference_dbm(&emitter_world(0.0), 5800.0, false)[0];
-    let next = interference_dbm(&emitter_world(37.0), 5800.0, false)[0];
-    let far = interference_dbm(&emitter_world(100.0), 5800.0, false)[0];
+    let same = interference_dbm(&emitter_world(0.0), 5800.0, direct())[0];
+    let next = interference_dbm(&emitter_world(37.0), 5800.0, direct())[0];
+    let far = interference_dbm(&emitter_world(100.0), 5800.0, direct())[0];
     close(same, 13.98 + 4.0 - fspl_db(150.0, 5800.0), 0.05, "same channel: its whole power");
     // 22.75 dB of rejection, plus 0.06 dB more path loss at the higher frequency.
     close(same - next, 22.75 + 20.0 * (5837.0f64 / 5800.0).log10(), 1e-3, "37 MHz away (the next Raceband channel)");
     close(same - far, 40.0 + 20.0 * (5900.0f64 / 5800.0).log10(), 1e-3, "far away");
-    close(interference_dbm(&open_field(), 5800.0, false)[0], NO_SIGNAL_DBM, 1e-9, "no emitters");
+    close(interference_dbm(&open_field(), 5800.0, direct())[0], NO_SIGNAL_DBM, 1e-9, "no emitters");
     let quad_snr = |world: LinkWorld| {
         let params = bare(world);
         let path = vtx_paths(&params, DVec3::new(300.0, 0.0, -1.7), DQuat::IDENTITY, 5800.0)[0];
-        snr_db(10.0 * 25f64.log10() + path.gain_db, -93.0, interference_dbm(&params.world, 5800.0, false)[0])
+        snr_db(10.0 * 25f64.log10() + path.gain_db, -93.0, interference_dbm(&params.world, 5800.0, direct())[0])
     };
     assert!(quad_snr(emitter_world(0.0)) < 0.0, "a same-channel emitter close to the pilot swamps a quad 300 m out");
     assert!(quad_snr(emitter_world(100.0)) > quad_snr(open_field()) - 1.0, "a far channel costs under a dB");
@@ -203,7 +210,7 @@ fn an_emitter_interferes_less_the_further_its_channel_is() {
 fn a_building_between_the_quad_and_the_pilot_costs_its_loss() {
     let mut world = open_field();
     let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
-    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
+    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss: 25.0.into() });
     let params = bare(world);
     let open = bare(open_field());
     let at = |p: &LinkParams, east: f64| vtx_paths(p, DVec3::new(200.0, east, -1.7), DQuat::IDENTITY, 5800.0)[0];
@@ -252,7 +259,7 @@ fn a_ridge_between_an_emitter_and_the_goggles_lowers_the_interference() {
     let hidden = LinkWorld { terrain: Some(terrain.clone()), ..world.clone() };
     let expected = terrain_loss_db(&terrain, world.emitters[0].position, world.pilot_position, wavelength_m(5800.0));
     assert!(expected > 20.0, "{expected}");
-    close(interference_dbm(&world, 5800.0, false)[0] - interference_dbm(&hidden, 5800.0, false)[0], expected, 1e-3, "the ridge hides the emitter (the -150 dBm floor adds a hair)");
+    close(interference_dbm(&world, 5800.0, direct())[0] - interference_dbm(&hidden, 5800.0, direct())[0], expected, 1e-3, "the ridge hides the emitter (the -150 dBm floor adds a hair)");
 }
 
 #[test]
@@ -264,7 +271,7 @@ fn a_clear_path_over_the_ridge_is_unchanged() {
     let mut world = emitter_world(0.0);
     world.emitters[0].position = DVec3::new(200.0, 0.0, -60.0);
     let ridged_world = LinkWorld { terrain: Some(ridge(10.0, 10.0)), ..world.clone() };
-    assert_eq!(interference_dbm(&world, 5800.0, false), interference_dbm(&ridged_world, 5800.0, false));
+    assert_eq!(interference_dbm(&world, 5800.0, direct()), interference_dbm(&ridged_world, 5800.0, direct()));
 }
 
 struct Rig {
@@ -457,7 +464,7 @@ fn odd_positions_give_finite_values() {
     // simulator's per-step check stops on any non-finite signal, so the link must never produce one.
     let mut world = open_field();
     let building = Shape::Box { center: DVec3::new(100.0, 0.0, -10.0), half: DVec3::new(5.0, 5.0, 10.0), yaw_rad: 0.0 };
-    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss_db: 25.0 });
+    world.obstacles.push(Obstacle { shape: building.rooted(), rf_loss: 25.0.into() });
     let mut rig = Rig::new(faded(world), 1);
     for pos in [DVec3::new(0.0, 0.0, -1.7), DVec3::new(100.0, 0.0, -5.0), DVec3::new(10.0, 0.0, 0.5), DVec3::new(1e5, 0.0, -10.0)] {
         rig.set_pose(pos);
@@ -526,10 +533,85 @@ fn the_injected_emitter_degrades_the_picture() {
 fn a_mesh_wall_lowers_the_snr_by_its_loss() {
     let p = |e: f64, d: f64| DVec3::new(100.0, e, d);
     let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
-    let meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    let meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0.into()] }];
     let (open, walled) = (bare(open_field()), bare(LinkWorld { meshes, ..open_field() }));
     close(snr_at(&open, 25.0, 200.0) - snr_at(&walled, 25.0, 200.0), 18.0, 1e-9, "behind the wall");
     let quad = DVec3::new(200.0, 0.0, -1.7);
     close(vtx_paths(&walled, quad, DQuat::IDENTITY, 5800.0)[0].obstruction_db, 18.0, 1e-9, "reported as obstruction");
     close(snr_at(&open, 25.0, 50.0) - snr_at(&walled, 25.0, 50.0), 0.0, 1e-9, "in front of it");
+}
+
+/// The bare budget with object reflections switched on.
+fn reflecting(world: LinkWorld) -> LinkParams {
+    LinkParams { object_reflections: true, ..bare(world) }
+}
+
+/// The RF fixture's side wall (north 5..6, 10 m along east, standing): the pilot just south of it, the quad west of
+/// it, both on its west face's side.
+fn side_wall() -> Obstacle {
+    Obstacle { shape: Shape::Box { center: DVec3::new(5.5, 0.0, -1.5), half: DVec3::new(0.5, 5.0, 1.5), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() }
+}
+
+#[test]
+fn the_video_flag_lets_a_wall_reflect() {
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    let walled = reflecting(world.clone());
+    let quad = DVec3::new(0.0, 0.0, -1.7);
+    let gain = |p: &LinkParams| vtx_paths(p, quad, DQuat::IDENTITY, 5800.0)[0].gain_db;
+    assert!(gain(&walled) > gain(&bare(world.clone())), "the wall's face adds a ray: {} vs {}", gain(&walled), gain(&bare(world.clone())));
+    assert_eq!(gain(&bare(world.clone())), gain(&bare(over_the_pilot())), "the radio's default stays off");
+    // A building between the quad and the pilot still costs its loss.
+    let mut blocked = world.clone();
+    blocked.obstacles.push(Obstacle { shape: Shape::Box { center: DVec3::new(0.0, 4.0, -2.0), half: DVec3::new(0.5, 1.0, 2.0), yaw_rad: 0.0 }.rooted(), rf_loss: 25.0.into() });
+    let through = vtx_paths(&reflecting(blocked), quad, DQuat::IDENTITY, 5800.0)[0];
+    let open_at = vtx_paths(&walled, quad, DQuat::IDENTITY, 5800.0)[0];
+    assert!(through.obstruction_db > 10.0, "the building's knife edge shows on the direct path: {through:?}");
+    assert!(through.gain_db < open_at.gain_db - 10.0, "and the building still bites: {} vs {}", through.gain_db, open_at.gain_db);
+}
+
+/// The open field with the pilot moved to the wall fixture's spot and no objects.
+fn over_the_pilot() -> LinkWorld {
+    LinkWorld { pilot_position: DVec3::new(0.0, 8.0, -1.7), ..open_field() }
+}
+
+#[test]
+fn the_video_flag_lets_an_emitter_wall_reflect() {
+    // An interfering VTX west of the same wall, the goggles on its west face's side too: the emitter's path takes the
+    // same reflection as the wanted one (it already takes the ground bounce).
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    world.emitters.push(Emitter {
+        position: DVec3::new(0.0, 0.0, -1.7),
+        freq_mhz: 5800.0,
+        power_mw: 25.0,
+        antenna: omni(DVec3::NEG_Z),
+    });
+    let reflected = Multipath { ground_bounce: false, object_reflections: true };
+    let direct = Multipath { ground_bounce: false, object_reflections: false };
+    let with = interference_dbm(&world, 5800.0, reflected)[0];
+    let without = interference_dbm(&world, 5800.0, direct)[0];
+    assert!(with > without, "the emitter's own wall reflection adds power: {with} vs {without}");
+}
+
+#[test]
+fn the_video_flag_lets_an_emitter_wall_reflect_over_the_bounce_too() {
+    // The link's own settings: the ground bounce and the reflections together. The wall's ray adds its power on top
+    // of the bounced one.
+    let mut world = open_field();
+    world.pilot_position = DVec3::new(0.0, 8.0, -1.7);
+    world.obstacles.push(side_wall());
+    world.emitters.push(Emitter {
+        position: DVec3::new(0.0, 0.0, -1.7),
+        freq_mhz: 5800.0,
+        power_mw: 25.0,
+        antenna: omni(DVec3::NEG_Z),
+    });
+    let both = Multipath { ground_bounce: true, object_reflections: true };
+    let bounce_only = Multipath { ground_bounce: true, object_reflections: false };
+    let with = interference_dbm(&world, 5800.0, both)[0];
+    let without = interference_dbm(&world, 5800.0, bounce_only)[0];
+    assert!(with > without, "the wall reflects over the bounce: {with} vs {without}");
 }

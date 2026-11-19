@@ -257,7 +257,7 @@ pub(crate) fn world_msg(w: &WorldConfig, terrain: Option<&ofs_core::terrain::Ter
                 radius_m: o.radius_m.unwrap_or(0.0),
                 height_m: o.height_m.unwrap_or(0.0),
                 color: vec3_of(o.color),
-                rf_loss_db: o.rf_loss_db,
+                rf_loss_db: o.rf_loss_db.db_at(5800.0),
                 yaw_deg: o.yaw_deg.unwrap_or(0.0),
             })
             .collect(),
@@ -815,13 +815,27 @@ mod tests {
             height_m: None,
             yaw_deg: yaw,
             color: [0.2, 0.8, 0.35],
-            rf_loss_db: 0.0,
+            rf_loss_db: 0.0.into(),
         };
         let mut yawed = ofs_config::WorldConfig::open_field();
         yawed.objects = vec![object(Some(135.0)), object(None)];
         let msg = world_msg(&yawed, None, &[]);
         assert_eq!(msg.objects[0].yaw_deg, 135.0, "the wire carries the yaw");
         assert_eq!(msg.objects[1].yaw_deg, 0.0, "a box without one is axis-aligned");
+    }
+
+    #[test]
+    fn world_msg_carries_an_object_rf_loss_curve_at_the_video_band() {
+        let session = flat_session();
+        let world = world_msg(session.vehicle.world(), None, &[]);
+        let building = world.objects.iter().find(|o| o.name == "BuildingB").unwrap();
+        assert_eq!(building.rf_loss_db, 30.0, "a scalar world still reports its number");
+        let mut curved = session.vehicle.world().clone();
+        let b = curved.objects.iter_mut().find(|o| o.name == "BuildingB").unwrap();
+        b.rf_loss_db = ofs_rf::RfLoss::Curve(ofs_rf::RfLossCurve { at_mhz: vec![900.0, 5800.0], db: vec![12.0, 25.0] });
+        let world = world_msg(&curved, None, &[]);
+        let building = world.objects.iter().find(|o| o.name == "BuildingB").unwrap();
+        assert_eq!(building.rf_loss_db, 25.0, "a curve reaches the wire as its 5800 MHz value");
     }
 
     #[test]

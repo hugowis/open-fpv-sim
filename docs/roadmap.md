@@ -34,9 +34,10 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
 - A mesh costs a path the loss of every surface it crosses (`[[materials]]` `rf_loss_db`), the same at every frequency: no
   diffraction around its edges, no reflection and no thickness (one crossing, one loss).
 - One frequency (2440 MHz) stands for the whole hop sequence; the body shadow is the video link's smooth lobe, not
-  a measured 2.4 GHz pattern; the handset transmits on the antenna it receives best on.
+  a measured 2.4 GHz pattern.
 - Telemetry slots default to 1:4 of the downlink (`[radio] telemetry_slot_divisor`, 4) but are configurable; one
-  ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model.
+  ratio covers every band and packet rate, and the shared RC/telemetry UART has no contention model (#63: it needs none
+  at the default settings, `docs/research/uart-contention.md`).
 - The `RadioLoss` fault acts on the uplink; `DownlinkLoss` cuts the downlink telemetry while leaving control untouched.
 - Every constant is an estimate or a published figure; none is measured. The 900 MHz band's carrier, bandwidth,
   noise figure and downlink power are estimates (its sensitivities are ExpressLRS's published ones).
@@ -55,8 +56,9 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   would be missing from the file): stop the recording first.
 
 ### Video (`docs/research/video-link.md`)
-- One knife edge per object, losses of several objects added; reflections off the ground only, and the reflected
-  ray is not obstructed separately; one body-shadow lobe of up to 8 dB.
+- One knife edge per object, losses of several objects added; reflections off the ground and (video only) one
+  incoherent specular ray off box vertical faces, with the reflected ground ray obstructed on its own legs; one
+  body-shadow lobe of up to 8 dB. #64.
 - Every video constant is an estimate; the receiver's thresholds are world data (`[video]`) but none is measured.
 - DVR (`docs/dev-setup.md`): after a window resize or an aspect switch the frames are letterboxed to the size the
   recording started with, so the bars stay until it is restarted; the chase view still stops it. The clean feed needs
@@ -90,6 +92,10 @@ files (kept as history in `docs/superpowers/history/`); the v1 close-out's fixes
   this build is not, is sized at several days and not started (#105).
 - The motor protocol is PWM; Betaflight's RPM filter is fed by the simulator's eRPM block, not a DShot driver.
 - A session whose scheduler failed is poisoned by design; a new `Load` starts a fresh one.
+- The receiver UART is not modelled as a line (#63): one 26-byte RC frame takes 2.257 ms of a 2 ms slot at the diff's
+  115200 baud, but the load is the uplink's delivered frames — 13 120 B/s, 114 % of the wire without telemetry, 270 %
+  with every downlink packet carrying one — and a slot's traffic still fits SITL's 501 bytes a datagram, so the model
+  writes whole frames into a FIFO and a frame's line delay never drops it (`docs/research/uart-contention.md`).
 - A session that ends while the quad is armed disarms Betaflight first (restoring the link, stepping until the motors
   read disarmed, 3 simulated seconds at most), so its Blackbox log is finished; those steps are not journaled, but a
   running MCAP recording sees them.

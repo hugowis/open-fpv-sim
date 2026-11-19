@@ -30,7 +30,8 @@ each, named, so they can be replaced by measured values.
 | Polarization | same-hand circular 0 dB, opposite hands 20 dB, circular to linear 3 dB, linear to linear `-20 log10|cos Δ|` | cap 20 dB |
 | Body shadow | up to 8 dB when the pilot is ahead of and below the quad (the frame, stack and battery are between the VTX antenna and the goggles); the lobe is wide, so a level quad flying straight at the pilot already takes 6.75 dB of it | `BODY_SHADOW_DB` = 8 |
 | Obstruction | ITU-R P.526 single knife edge, `J(v) = 6.9 + 20 log10(√((v-0.1)²+1) + v - 0.1)` for v > -0.78, capped at the object's `rf_loss_db` | buildings 20-30 dB in `worlds/flat.toml` |
-| Ground bounce | two rays: the direct one and one reflected off the ground (coefficient -1), added with their phase difference | — |
+| Ground bounce | two rays: the direct one and one reflected off the ground (coefficient -1), added with their phase difference; each ray takes its own objects' and meshes' loss (the terrain's once, on the whole path) | — |
+| Object reflection | one specular ray per box vertical face that sees both ends (the ray goes around the wall, not through it), with the tx polarization reversed and `WALL_REFLECTION_DB`, added to the power incoherently and never blocked by its own wall; the other objects' and meshes' losses apply on both legs; video only (`object_reflections`) | `WALL_REFLECTION_DB` = -6 dB (estimated) |
 | Fading | Rician, an AR(1) complex Gaussian scatter correlated over λ/2 of quad movement | K = 10 dB with line of sight, minus the obstruction loss |
 
 Notes:
@@ -43,6 +44,12 @@ Notes:
   takes the reflected ray with the 20 dB cross-polarization loss: a ripple under 1.5 dB. With linear antennas the
   two rays are nearly equal and cancel into deep fades when flying low. This is why FPV uses circular antennas.
 - **Fading.** A hovering quad sees a steady signal (no movement, no change); fast flight flickers.
+- **Object reflection.** A wall beside the path bounces some of the signal around to the goggles: a second ray off a
+  vertical face of a world object when both ends are on the face's outward side and its mirror image line crosses the
+  face. It is incoherent (powers add), takes the face's -6 dB (estimated, no material model) and the circular hand
+  reverses as off the ground, so an opposite-hand receiver takes it 20 dB down. Boxes only: cylinders, meshes and the
+  terrain never reflect, and the simulator turns it on for the video link alone. The interference (emitter) paths use
+  the same reflection, not only the wanted VTX signal.
 
 ## Terrain
 
@@ -61,6 +68,8 @@ client draws a flat ground, so the picture can be lost behind a hill it does not
 Each emitter of the world file goes through the same propagation (without fading), then the receiver's
 adjacent-channel rejection by frequency offset: 0 dB on channel, 10 dB at 20 MHz, 25 dB at 40 MHz, 40 dB at 60 MHz
 and beyond, linear in between. The next Raceband channel (37 MHz away) is rejected by 22.75 dB.
+The bounce's own-leg obstruction costs twice the objects' and meshes' loss, so it only starts to bite where the bounce
+shows: weak-signal paths tens of metres long, where diffraction no longer fills it in.
 
 `SNR = P - 10 log10(10^(N/10) + Σ 10^(I/10))`, with the noise floor N = -93 dBm by default (thermal noise in about
 20 MHz plus an 8 dB noise figure).

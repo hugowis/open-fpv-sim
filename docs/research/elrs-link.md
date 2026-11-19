@@ -158,9 +158,10 @@ as `State.fc_telemetry` and the game's HUD battery line.
 
 Receiver diversity (one or two antennas in the quad file's `[[radio.antennas]]` and the world file's
 `[[handset.antennas]]`) changes antenna only when the other one is better by 2 dB
-(`ofs_rf::fading::Diversity`), so a fade has to persist to switch. The handset transmits on its *active* antenna —
-the one it receives best — and the quad answers on the antenna it receives best. Real dual-antenna handsets
-alternate per packet instead; this is a modelling simplification (see `docs/roadmap.md`).
+(`ofs_rf::fading::Diversity`), so a fade has to persist to switch. The quad answers on the antenna it receives best.
+The handset transmits round-robin: the first packet on its first antenna, the next on its second, and so on
+(`ElrsLink::current_tx_antenna`). Every shipped handset has one antenna, so this only shows in tests and
+world files with two.
 
 ## Link budget check
 

@@ -139,6 +139,37 @@ fn a_second_antenna_is_picked_when_it_is_clearly_better() {
 }
 
 #[test]
+fn the_handset_alternates_its_transmit_antenna() {
+    let mut p = LinkParams::ideal(500);
+    p.handset_antennas.push(Antenna { kind: AntennaKind::Omni, gain_dbi: 2.0, polarization: Polarization::Linear, axis: DVec3::X });
+    let mut bus = Bus::new();
+    let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+    bus.set(tx, 1.0);
+    let mut link = ElrsLink::new(p, 1, &mut bus);
+    let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+    bus.set(pos, DVec3::new(0.0, 0.0, -1.7));
+    let mut seen = Vec::new();
+    for k in 0..4u32 {
+        let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+        link.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+        seen.push(link.current_tx_antenna());
+    }
+    assert_eq!(seen, [0, 1, 0, 1], "two handset antennas alternate per packet");
+
+    let mut bus = Bus::new();
+    let tx = bus.signal::<f64>(names::RADIO_TX_ENABLED);
+    bus.set(tx, 1.0);
+    let mut one = ElrsLink::new(LinkParams::ideal(500), 1, &mut bus);
+    let pos = bus.signal::<DVec3>(names::BODY_POS_NED);
+    bus.set(pos, DVec3::new(0.0, 0.0, -1.7));
+    for k in 0..4u32 {
+        let ctx = StepCtx { tick: u64::from(k), time_s: f64::from(k) / 500.0, dt_s: 1.0 / 500.0 };
+        one.deliver(&ctx, &bus, &TxFrame { channels: [0; 16], transmitting: true });
+        assert_eq!(one.current_tx_antenna(), 0, "one antenna is always antenna 0");
+    }
+}
+
+#[test]
 fn a_dipole_crossed_to_the_handset_loses_20_db() {
     let (mut aligned, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     set_pos(&mut aligned, DVec3::new(0.0, 0.0, -1.7)); // level with the handset: a horizontal path
@@ -156,7 +187,7 @@ fn a_dipole_crossed_to_the_handset_loses_20_db() {
 fn behind_a_building_the_rssi_drops_by_its_capped_knife_edge_loss() {
     let mut blocked_params = LinkParams::ideal(500);
     let shape = Shape::Box { center: DVec3::new(50.0, 0.0, -10.0), half: DVec3::new(10.0, 10.0, 10.0), yaw_rad: 0.0 };
-    blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss_db: 25.0 }];
+    blocked_params.obstacles = vec![Obstacle { shape: shape.rooted(), rf_loss: 25.0.into() }];
     let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     let (mut blocked, _, _telemetry_in, _fc) = rig(blocked_params, 1);
     set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));
@@ -612,7 +643,7 @@ fn a_mesh_wall_lowers_the_uplink_rssi() {
     let p = |e: f64, d: f64| DVec3::new(50.0, e, d);
     let wall = Triangle { a: p(-20.0, -20.0), b: p(20.0, -20.0), c: p(0.0, 20.0), material: 0 };
     let mut walled_params = LinkParams::ideal(500);
-    walled_params.meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0] }];
+    walled_params.meshes = vec![MeshObstacle { mesh: Arc::new(TriMesh::new(vec![wall]).unwrap()), loss_db: vec![18.0.into()] }];
     let (mut open, _, _telemetry_in, _fc) = rig(LinkParams::ideal(500), 1);
     let (mut walled, _, _telemetry_in, _fc) = rig(walled_params, 1);
     set_pos(&mut open, DVec3::new(100.0, 0.0, -1.7));

@@ -8,6 +8,8 @@ use ofs_core::mesh::TriMesh;
 use ofs_core::shape::Shape;
 use ofs_core::terrain::Terrain;
 
+use crate::RfLoss;
+
 pub const SPEED_OF_LIGHT_MPS: f64 = 299_792_458.0;
 /// Antenna patterns never fall more than this below their peak (real nulls are filled by reflections).
 pub const PATTERN_FLOOR_DB: f64 = 20.0;
@@ -17,6 +19,8 @@ pub const CROSS_POLARIZATION_DB: f64 = 20.0;
 pub const CIRCULAR_TO_LINEAR_DB: f64 = 3.0;
 /// Shortest distance used by the path loss and the Fresnel geometry (the far-field formulas fail closer in).
 pub const MIN_DISTANCE_M: f64 = 1.0;
+/// The loss of a specular reflection off an object's vertical face, in dB (estimated: no material model yet).
+pub const WALL_REFLECTION_DB: f64 = -6.0;
 
 pub fn wavelength_m(freq_mhz: f64) -> f64 {
     SPEED_OF_LIGHT_MPS / (freq_mhz * 1e6)
@@ -149,11 +153,11 @@ pub fn fresnel_v(h: f64, d1: f64, d2: f64, wavelength_m: f64) -> f64 {
     h * (2.0 * (d1 + d2) / (wavelength_m * d1 * d2)).sqrt()
 }
 
-/// An object that weakens a signal passing through or near it, by up to `rf_loss_db`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An object that weakens a signal passing through or near it, by up to its `rf_loss` at the ray's frequency.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Obstacle {
     pub shape: Shape,
-    pub rf_loss_db: f64,
+    pub rf_loss: RfLoss,
 }
 
 /// Golden-section search steps: the bracket shrinks to 0.618^60 of the path, far below a millimetre.
@@ -181,16 +185,17 @@ pub fn deepest_point(shape: &Shape, a: DVec3, b: DVec3) -> f64 {
     golden_min(|t| shape.signed_distance(a.lerp(b, t)), 0.0, 1.0)
 }
 
-/// Diffraction loss of one obstacle on the path `a`..`b`, capped at the obstacle's `rf_loss_db`.
-pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m: f64) -> f64 {
-    if obstacle.rf_loss_db <= 0.0 {
+/// Diffraction loss of one obstacle on the path `a`..`b` at `freq_mhz`, capped at the obstacle's loss there.
+pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+    let cap = obstacle.rf_loss.db_at(freq_mhz);
+    if cap <= 0.0 {
         return 0.0;
     }
     let t = deepest_point(&obstacle.shape, a, b);
     let length = a.distance(b);
     let depth = -obstacle.shape.signed_distance(a.lerp(b, t));
-    let v = fresnel_v(depth, t * length, (1.0 - t) * length, wavelength_m);
-    knife_edge_loss_db(v).min(obstacle.rf_loss_db)
+    let v = fresnel_v(depth, t * length, (1.0 - t) * length, wavelength_m(freq_mhz));
+    knife_edge_loss_db(v).min(cap)
 }
 
 /// A triangle mesh in the way of a radio path: every surface the path crosses costs `loss_db[material]`.
@@ -198,7 +203,7 @@ pub fn obstruction_loss_db(obstacle: &Obstacle, a: DVec3, b: DVec3, wavelength_m
 pub struct MeshObstacle {
     pub mesh: Arc<TriMesh>,
     /// The loss of one crossing per material index; a material past the end costs nothing.
-    pub loss_db: Vec<f64>,
+    pub loss_db: Vec<RfLoss>,
 }
 
 /// Two obstacles are equal when they share the same mesh (not a copy of it) and the same losses.
@@ -208,12 +213,13 @@ impl PartialEq for MeshObstacle {
     }
 }
 
-/// The loss of the mesh on the path `a`..`b`: the sum of `loss_db[material]` over every surface the path crosses.
-/// Known limits: frequency-independent, no diffraction around the mesh's edges and no reflection off it.
-pub fn mesh_loss_db(m: &MeshObstacle, a: DVec3, b: DVec3) -> f64 {
+/// The loss of the mesh on the path `a`..`b` at `freq_mhz`: the sum of `loss_db[material]` over every surface the
+/// path crosses.
+/// Known limits: no diffraction around the mesh's edges and no reflection off it.
+pub fn mesh_loss_db(m: &MeshObstacle, a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let mut crossed = Vec::new();
     m.mesh.crossings(a, b, &mut crossed);
-    crossed.iter().map(|&i| m.loss_db.get(i as usize).copied().unwrap_or(0.0)).sum()
+    crossed.iter().map(|&i| m.loss_db.get(i as usize).map_or(0.0, |r| r.db_at(freq_mhz))).sum()
 }
 
 /// The most the terrain takes off a path, in dB (a ridge in the way, like a solid wall).
@@ -293,9 +299,18 @@ fn ray_gain_db(tx: &Endpoint, tx_polarization: Polarization, rx: &Endpoint, out_
         - polarization_loss_db(&tx.antenna, tx_polarization, &rx.antenna, in_dir)
 }
 
+/// Paths that reflect back to the receiver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Multipath {
+    pub ground_bounce: bool,
+    pub object_reflections: bool,
+}
+
 /// The path from `tx` to `rx` at `freq_mhz`: the direct ray, plus (with `ground_bounce`) the ray reflected off the
-/// ground (coefficient -1, which reverses circular polarization), added with their phase difference; then the
-/// diffraction losses of the obstacles and the terrain, and the crossing losses of the meshes, on the direct ray.
+/// ground (coefficient -1, which reverses circular polarization), added with their phase difference. Each ray takes
+/// the diffraction losses of the obstacles and the crossing losses of the meshes on its own legs. With
+/// `object_reflections`, the specular rays off the box faces that see the path add their power incoherently. The
+/// terrain's loss comes off the combined power once (a whole-path approximation).
 pub fn path_gain(
     tx: &Endpoint,
     rx: &Endpoint,
@@ -303,18 +318,78 @@ pub fn path_gain(
     obstacles: &[Obstacle],
     terrain: Option<&Terrain>,
     meshes: &[MeshObstacle],
-    ground_bounce: bool,
+    multipath: Multipath,
 ) -> PathGain {
-    let obstruction_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
-    PathGain { gain_db: unobstructed_gain_db(tx, rx, freq_mhz, ground_bounce) - obstruction_db, obstruction_db }
+    let direct_db = obstruction_db(obstacles, terrain, meshes, tx.position, rx.position, freq_mhz);
+    let terrain_db = terrain.map_or(0.0, |t| terrain_loss_db(t, tx.position, rx.position, wavelength_m(freq_mhz)));
+    let two_ray_db = two_ray_obstruction_db(tx, rx, freq_mhz, obstacles, meshes, ground_image(tx, rx, multipath.ground_bounce));
+    // The flag off is Task 5's arithmetic, bit for bit; with it on, the walls' powers add incoherently.
+    let gain_db = match walls_gain_db(tx, rx, freq_mhz, obstacles, meshes, multipath.object_reflections) {
+        None => two_ray_db,
+        Some(walls_db) => 10.0 * (10f64.powf(two_ray_db / 10.0) + 10f64.powf(walls_db / 10.0)).log10(),
+    };
+    PathGain { gain_db: gain_db - terrain_db, obstruction_db: direct_db }
+}
+
+/// Diffraction losses of the obstacles, plus crossing losses of the meshes, on the path from `a` to `b` at `freq_mhz`,
+/// in dB: [`obstruction_db`] without the terrain.
+fn object_mesh_obstruction_db(obstacles: &[Obstacle], meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
+    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, freq_mhz)).sum();
+    objects + meshes.iter().map(|m| mesh_loss_db(m, a, b, freq_mhz)).sum::<f64>()
+}
+
+/// The bounce point of a ground ray: where the image-to-`rx` line crosses the ground.
+fn bounce_point(image: DVec3, rx: &Endpoint) -> DVec3 {
+    image.lerp(rx.position, -image.z / (rx.position.z - image.z))
+}
+
+/// [`two_ray`] with the object and mesh losses of each ray: the full obstruction of the direct line, and the sum of
+/// both legs' losses on the bounced one. No terrain on either.
+fn two_ray_obstruction_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], meshes: &[MeshObstacle], image: Option<DVec3>) -> f64 {
+    let direct_db = object_mesh_obstruction_db(obstacles, meshes, tx.position, rx.position, freq_mhz);
+    let bounce_db = image.map_or(0.0, |image| {
+        let bounce = bounce_point(image, rx);
+        object_mesh_obstruction_db(obstacles, meshes, tx.position, bounce, freq_mhz) + object_mesh_obstruction_db(obstacles, meshes, bounce, rx.position, freq_mhz)
+    });
+    two_ray(tx, rx, freq_mhz, image, direct_db, bounce_db)
+}
+
+/// The image of `tx` below the ground (the ground ray's mirror source), for a bounce with both ends above it.
+fn ground_image(tx: &Endpoint, rx: &Endpoint, ground_bounce: bool) -> Option<DVec3> {
+    (ground_bounce && tx.position.z < 0.0 && rx.position.z < 0.0).then(|| DVec3::new(tx.position.x, tx.position.y, -tx.position.z))
+}
+
+/// The direct ray, less `direct_loss_db`, plus the ground ray's image (if [`ground_image`] gives one), less
+/// `bounce_loss_db`, added with their phase difference: the one two-ray combiner. Each loss comes off its ray's gain
+/// before they add.
+fn two_ray(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, image: Option<DVec3>, direct_loss_db: f64, bounce_loss_db: f64) -> f64 {
+    let lambda = wavelength_m(freq_mhz);
+    let direct_vec = rx.position - tx.position;
+    let direct_len = direct_vec.length();
+    let dir = unit(direct_vec);
+    let direct_db = ray_gain_db(tx, tx.antenna.polarization, rx, dir, dir, direct_len, freq_mhz) - direct_loss_db;
+    let Some(image) = image else {
+        return direct_db;
+    };
+    let reflected_vec = rx.position - image;
+    let reflected_len = reflected_vec.length();
+    let bounce = bounce_point(image, rx);
+    let out_dir = unit(bounce - tx.position);
+    let in_dir = unit(rx.position - bounce);
+    let reflected_db = ray_gain_db(tx, tx.antenna.polarization.reflected(), rx, out_dir, in_dir, reflected_len, freq_mhz) - bounce_loss_db;
+    let (a, b) = (10f64.powf(direct_db / 20.0), 10f64.powf(reflected_db / 20.0));
+    let phase = 2.0 * std::f64::consts::PI * (reflected_len - direct_len) / lambda + std::f64::consts::PI;
+    let power = a * a + b * b + 2.0 * a * b * phase.cos();
+    10.0 * power.max(1e-30).log10()
 }
 
 /// The diffraction losses of the obstacles and the terrain, plus the crossing losses of the meshes, on the direct ray
-/// from `a` to `b`, in dB. It depends on the two positions only, so receivers that share a position (the goggles'
+/// from `a` to `b` at `freq_mhz`, in dB. The objects, the terrain and the meshes all put their loss on at that frequency,
+/// so it depends on the two positions and the frequency: receivers that share a position and a frequency (the goggles'
 /// antennas) share it.
 pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes: &[MeshObstacle], a: DVec3, b: DVec3, freq_mhz: f64) -> f64 {
     let lambda = wavelength_m(freq_mhz);
-    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, lambda)).sum();
+    let objects: f64 = obstacles.iter().map(|o| obstruction_loss_db(o, a, b, freq_mhz)).sum();
     let ground = match terrain {
         Some(t) => objects + terrain_loss_db(t, a, b, lambda),
         None => objects,
@@ -322,34 +397,94 @@ pub fn obstruction_db(obstacles: &[Obstacle], terrain: Option<&Terrain>, meshes:
     if meshes.is_empty() {
         ground
     } else {
-        ground + meshes.iter().map(|m| mesh_loss_db(m, a, b)).sum::<f64>()
+        ground + meshes.iter().map(|m| mesh_loss_db(m, a, b, freq_mhz)).sum::<f64>()
     }
 }
 
 /// [`path_gain`] without the obstacles: the direct ray, plus the ground bounce.
 pub fn unobstructed_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, ground_bounce: bool) -> f64 {
-    let lambda = wavelength_m(freq_mhz);
-    let direct_vec = rx.position - tx.position;
-    let direct_len = direct_vec.length();
-    let dir = unit(direct_vec);
-    let direct_db = ray_gain_db(tx, tx.antenna.polarization, rx, dir, dir, direct_len, freq_mhz);
-    let mut gain_db = direct_db;
-    // Both ends above the ground (z < 0): the image of tx below the ground gives the reflected ray.
-    if ground_bounce && tx.position.z < 0.0 && rx.position.z < 0.0 {
-        let image = DVec3::new(tx.position.x, tx.position.y, -tx.position.z);
-        let reflected_vec = rx.position - image;
-        let reflected_len = reflected_vec.length();
-        let t = -image.z / (rx.position.z - image.z); // where the image-to-rx line crosses z = 0
-        let bounce = image.lerp(rx.position, t);
-        let out_dir = unit(bounce - tx.position);
-        let in_dir = unit(rx.position - bounce);
-        let reflected_db = ray_gain_db(tx, tx.antenna.polarization.reflected(), rx, out_dir, in_dir, reflected_len, freq_mhz);
-        let (a, b) = (10f64.powf(direct_db / 20.0), 10f64.powf(reflected_db / 20.0));
-        let phase = 2.0 * std::f64::consts::PI * (reflected_len - direct_len) / lambda + std::f64::consts::PI;
-        let power = a * a + b * b + 2.0 * a * b * phase.cos();
-        gain_db = 10.0 * power.max(1e-30).log10();
+    two_ray(tx, rx, freq_mhz, ground_image(tx, rx, ground_bounce), 0.0, 0.0)
+}
+
+/// The box's four vertical face axes in its own frame (north, south, east, west); the other horizontal half of a
+/// face is the half of the other axis.
+const FACE_AXES: [DVec3; 4] = [DVec3::X, DVec3::NEG_X, DVec3::Y, DVec3::NEG_Y];
+
+/// A box's own axes turned into the world (`shape::world_dir` for the horizontal pair).
+fn box_to_world(yaw_rad: f64, d: DVec3) -> DVec3 {
+    let (sin, cos) = yaw_rad.sin_cos();
+    DVec3::new(cos * d.x - sin * d.y, sin * d.x + cos * d.y, d.z)
+}
+
+/// The specular points of a box's vertical faces that reflect from `tx` to `rx`, in world space. Each face with a
+/// normal pointing at both ends is tried: `tx` is mirrored across its plane, and the image-to-`rx` line must cross the
+/// plane inside the face (the other horizontal half and `half.z`) and above the ground. A box rooted on the ground
+/// (`Shape::rooted`) runs 1000 m below it, so the face's rectangle is cut at the ground and the wall reflects off the
+/// height it really stands at. The ray goes around the wall, never through it. Other shapes never reflect.
+fn face_crossings(tx: DVec3, rx: DVec3, shape: &Shape) -> Vec<DVec3> {
+    let Shape::Box { center, half, yaw_rad } = *shape else { return Vec::new() };
+    // The same frame as the box's signed distance: the world offset turned back onto its own axes.
+    let (sin, cos) = yaw_rad.sin_cos();
+    let to_box = |p: DVec3| {
+        let d = p - center;
+        DVec3::new(cos * d.x + sin * d.y, -sin * d.x + cos * d.y, d.z)
+    };
+    let (a, b) = (to_box(tx), to_box(rx));
+    FACE_AXES
+        .into_iter()
+        .filter_map(|axis| {
+            let (half_along, half_across) = if axis.x == 0.0 { (half.y, half.x) } else { (half.x, half.y) };
+            // Signed distance from the face's plane, outward positive: both ends must be outside, so it faces them.
+            let out = |p: DVec3| p.dot(axis) - half_along;
+            let (out_a, out_b) = (out(a), out(b));
+            if out_a <= 0.0 || out_b <= 0.0 {
+                return None;
+            }
+            // `tx` mirrored across the plane (to `out_a` inward), joined to `rx`: where that line meets the plane.
+            let image = a - axis * 2.0 * out_a;
+            // Equidistant ends: the image-to-`rx` line runs parallel to the plane, and the specular point is the
+            // midpoint's foot on it.
+            let t = if out_a == out_b { 0.5 } else { out_a / (out_a - out_b) };
+            let q = image + (b - image) * t;
+            // The face's rectangle: the other horizontal axis, its height, and above the ground (a rooted box's
+            // `half.z` reaches far below it).
+            let across = if axis.x == 0.0 { q.x } else { q.y };
+            (across.abs() <= half_across && q.z.abs() <= half.z && center.z + q.z < 0.0).then(|| center + box_to_world(yaw_rad, q))
+        })
+        .collect()
+}
+
+/// The incoherent sum of the powers of the specular rays off the boxes' faces, in dB, or `None` when the flag is off
+/// or no face reflects. The reflecting object is left out of its own ray's obstruction; every other obstacle and
+/// mesh applies to both legs. An `rf_loss` of 0 is not an obstacle (it takes no signal): it never reflects.
+fn walls_gain_db(tx: &Endpoint, rx: &Endpoint, freq_mhz: f64, obstacles: &[Obstacle], meshes: &[MeshObstacle], object_reflections: bool) -> Option<f64> {
+    if !object_reflections {
+        return None;
     }
-    gain_db
+    let points: Vec<(usize, DVec3)> =
+        obstacles.iter().enumerate().filter(|(_, o)| o.rf_loss.db_at(freq_mhz) > 0.0).flat_map(|(i, o)| face_crossings(tx.position, rx.position, &o.shape).into_iter().map(move |q| (i, q))).collect();
+    if points.is_empty() {
+        return None;
+    }
+    let mut power = 0.0;
+    for (i, point) in points {
+        let legs = [(tx.position, point), (point, rx.position)];
+        let mut loss = 0.0;
+        for (j, o) in obstacles.iter().enumerate() {
+            if j != i {
+                loss += legs.iter().map(|&(from, to)| obstruction_loss_db(o, from, to, freq_mhz)).sum::<f64>();
+            }
+        }
+        for m in meshes {
+            loss += legs.iter().map(|&(from, to)| mesh_loss_db(m, from, to, freq_mhz)).sum::<f64>();
+        }
+        let out_dir = unit(point - tx.position);
+        let in_dir = unit(rx.position - point);
+        let length = tx.position.distance(point) + point.distance(rx.position);
+        let db = ray_gain_db(tx, tx.antenna.polarization.reflected(), rx, out_dir, in_dir, length, freq_mhz) + WALL_REFLECTION_DB - loss;
+        power += 10f64.powf(db / 10.0);
+    }
+    Some(10.0 * power.log10())
 }
 
 /// Receiver rejection of a transmitter `offset_mhz` away from the tuned channel (estimated for analog 5.8 GHz

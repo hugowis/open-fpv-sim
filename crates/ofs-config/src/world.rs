@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ofs_core::mesh::TriMesh;
+use ofs_rf::RfLoss;
 use serde::Deserialize;
 
 use crate::mesh::{load_glb_with, MAX_MESHES, MAX_MESH_TRIANGLES};
@@ -127,8 +128,9 @@ pub struct MeshSection {
 #[serde(deny_unknown_fields)]
 pub struct MaterialSection {
     pub name: String,
+    /// One loss at every frequency, or a curve.
     #[serde(default)]
-    pub rf_loss_db: f64,
+    pub rf_loss_db: RfLoss,
 }
 
 /// A loaded `[[meshes]]` entry. `loss_db[m]` is the loss of the mesh's material `m` (0 if `[[materials]]` omits it);
@@ -139,7 +141,7 @@ pub struct WorldMeshData {
     pub path: PathBuf,
     pub digest: u64,
     pub mesh: Arc<TriMesh>,
-    pub loss_db: Vec<f64>,
+    pub loss_db: Vec<RfLoss>,
 }
 
 /// The rules of the race the gates make.
@@ -428,9 +430,10 @@ pub struct ObjectSection {
     pub yaw_deg: Option<f64>,
     /// `[r, g, b]`, each 0 to 1.
     pub color: [f64; 3],
-    /// The loss when the object fully blocks the path; 0 (the default) lets the signal through.
+    /// The loss when the object fully blocks the path; 0 (the default) lets the signal through. A scalar, or a
+    /// `{ at_mhz, db }` curve.
     #[serde(default)]
-    pub rf_loss_db: f64,
+    pub rf_loss_db: RfLoss,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -628,7 +631,7 @@ impl WorldConfig {
             check_name(&mut c, &o.name, &field("name"), &mut names);
             c.check(finite(&o.center_ned_m), &field("center_ned_m"), "values must be finite");
             c.check(o.color.iter().all(|v| (0.0..=1.0).contains(v)), &field("color"), "each value must be in [0, 1]");
-            c.non_negative(o.rf_loss_db, &field("rf_loss_db"));
+            check_rf_loss(&mut c, &o.rf_loss_db, &field("rf_loss_db"));
             match o.shape {
                 Shape::Box => {
                     c.check(o.size_m.is_some_and(|s| s.iter().all(|v| v.is_finite() && *v > 0.0)), &field("size_m"), "a box needs size_m, every value > 0");
@@ -738,7 +741,7 @@ impl WorldConfig {
             let field = format!("materials[{i}].name");
             c.check(!m.name.is_empty(), &field, "must not be empty");
             c.check(names.insert(m.name.clone()), &field, format!("{:?} is used twice", m.name));
-            c.non_negative(m.rf_loss_db, &format!("materials[{i}].rf_loss_db"));
+            check_rf_loss(&mut c, &m.rf_loss_db, &format!("materials[{i}].rf_loss_db"));
         }
         c.0
     }
@@ -784,7 +787,7 @@ impl WorldConfig {
             }
         }
         for (data, names) in out.iter_mut().zip(&loaded_materials) {
-            data.loss_db = names.iter().map(|n| self.materials.iter().find(|m| &m.name == n).map_or(0.0, |m| m.rf_loss_db)).collect();
+            data.loss_db = names.iter().map(|n| self.materials.iter().find(|m| &m.name == n).map_or(RfLoss::default(), |m| m.rf_loss_db.clone())).collect();
         }
         Ok(out)
     }
@@ -834,6 +837,18 @@ impl WorldConfig {
 /// display only, for the message's degrees.
 fn within_slope_cap(slope: f64) -> bool {
     slope * slope <= 3.0
+}
+
+/// A loss must be finite and non-negative at every frequency; a curve is checked in full.
+fn check_rf_loss(c: &mut Checker, loss: &RfLoss, field: &str) {
+    match loss {
+        RfLoss::Db(db) => c.non_negative(*db, field),
+        RfLoss::Curve(curve) => {
+            if let Err(message) = curve.validate() {
+                c.check(false, field, message);
+            }
+        }
+    }
 }
 
 /// Names become signal names and dictionary keys: letters, digits, `_` and `-`, unique within their list.

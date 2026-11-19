@@ -976,6 +976,7 @@ dependencies = [
  "glam 0.29.3",
  "gltf",
  "ofs-core",
+ "ofs-rf",
  "serde",
  "tempfile",
  "thiserror 1.0.69",
@@ -1069,6 +1070,8 @@ dependencies = [
  "ofs-core",
  "rand_chacha 0.3.1",
  "rand_distr",
+ "serde",
+ "toml",
 ]
 
 [[package]]
