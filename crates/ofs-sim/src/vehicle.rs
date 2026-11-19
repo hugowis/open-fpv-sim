@@ -756,7 +756,8 @@ pub fn world_obstacles(world: &WorldConfig, terrain: Option<&Terrain>) -> Vec<Ob
     world
         .objects
         .iter()
-        .filter(|o| o.rf_loss_db.is_obstacle())
+        // Task 3 threads the frequency and switches this to is_obstacle().
+        .filter(|o| o.rf_loss_db.db_at(5800.0) > 0.0)
         .map(|o| Obstacle { shape: object_shape(o).rooted_on(terrain), rf_loss_db: o.rf_loss_db.db_at(5800.0) })
         .collect()
 }
